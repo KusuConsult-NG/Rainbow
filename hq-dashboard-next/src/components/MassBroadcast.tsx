@@ -112,7 +112,7 @@ export default function MassBroadcast() {
         <ShieldAlert size={22} color="var(--accent)" style={{ flexShrink: 0, marginTop: 2 }} />
         <div>
           <p style={{ fontSize: 13, fontWeight: 900, color: 'var(--accent)', marginBottom: 4 }}>STATEWIDE OVERRIDE — HIGH IMPACT</p>
-          <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.65)', lineHeight: 1.6 }}>
+          <p style={{ fontSize: 11, color: 'var(--text-primary)', lineHeight: 1.6 }}>
             This portal uses Termii CPaaS to push SMS to all registered citizen devices in the Plateau State database.
             This is a critical action. Only authorised by HQ Command. All broadcasts are permanently logged.
           </p>
@@ -259,7 +259,7 @@ export default function MassBroadcast() {
             <button
               key={i}
               onClick={() => setMessage(t)}
-              style={{ background: 'rgba(0,0,0,0.04)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', color: 'var(--text-muted)', fontSize: 12, textAlign: 'left', cursor: 'pointer', fontFamily: 'Inter,sans-serif', lineHeight: 1.6, transition: 'background 0.15s' }}
+              style={{ background: 'rgba(0,0,0,0.04)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', color: 'var(--text-primary)', fontSize: 12, textAlign: 'left', cursor: 'pointer', fontFamily: 'Inter,sans-serif', lineHeight: 1.6, transition: 'background 0.15s' }}
             >
               {t}
             </button>

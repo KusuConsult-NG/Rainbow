@@ -107,7 +107,7 @@ export default function AdminDirectory() {
 
   const s: React.CSSProperties = {
     width: '100%', padding: '12px 14px',
-    background: 'rgba(0,0,0,0.06)',
+    background: 'rgba(0,0,0,0.04)',
     border: '1px solid rgba(0,0,0,0.1)',
     borderRadius: 10, color: 'var(--text-primary)',
     fontFamily: 'Inter,sans-serif', fontSize: 13, fontWeight: 600, outline: 'none',

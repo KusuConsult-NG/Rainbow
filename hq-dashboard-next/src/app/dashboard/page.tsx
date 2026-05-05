@@ -523,7 +523,7 @@ const actBtn = (color: string, bg: string): React.CSSProperties => ({
 const overlaySelect: React.CSSProperties = {
   background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(12px)',
   border: '1px solid rgba(0,0,0,0.15)', borderRadius: 8, padding: '8px 12px',
-  color: '#ffffff', fontFamily: 'Inter,sans-serif', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+  color: 'var(--text-primary)', fontFamily: 'Inter,sans-serif', fontSize: 11, fontWeight: 700, cursor: 'pointer',
 };
 
 const fSel: React.CSSProperties = {
