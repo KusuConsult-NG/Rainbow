@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helpers ───────────────────────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+    function isHQ() {
+      return isAuth() && (
+        (request.auth.token.email != null && request.auth.token.email.matches('.*@operationrainbow\\.plateau\\.gov\\.ng')) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'HQ_OFFICER')
+      );
+    }
+    function isStaff() {
+      return isAuth() && (
+        (request.auth.token.email != null && request.auth.token.email.matches('.*@operationrainbow\\.plateau\\.gov\\.ng')) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['HQ_OFFICER','LGA_OFFICER','WARD_OFFICER','POLLING_UNIT_OFFICER', 'AGENT'])
+      );
+    }
+
+    // ─── Users ─────────────────────────────────────────────────────────────────
+    // PRD §6: Role validation at API level. Users may only read/write their own
+    // profile. HQ can read all and update any (for force-logout, role assignment).
+    match /users/{userId} {
+      allow read: if isAuth() && (request.auth.uid == userId || isStaff());
+      allow create: if isAuth();
+      allow update: if isAuth() && (request.auth.uid == userId || isHQ());
+      allow delete: if isHQ();
+
+      // PRD §5: Emergency contacts — strictly private per citizen
+      match /emergency_contacts/{contactId} {
+        allow read, write: if isAuth() && request.auth.uid == userId;
+      }
+    }
+
+    // ─── Alerts ────────────────────────────────────────────────────────────────
+    // PRD §14: Rate limiting note — Firestore rules cannot enforce rate limits;
+    // enforce via Cloud Functions App Check + backend validation.
+    // PRD §6.5: Alerts are immutable once closed — no deletes ever.
+    match /alerts/{alertId} {
+      allow create: if isAuth();
+      // Citizens can only read their own alerts. Staff sees all within their scope.
+      allow read: if isAuth() && (
+        resource.data.reportedBy == request.auth.uid || isStaff()
+      );
+      // Only staff can update status/assignment
+      allow update: if isStaff();
+      allow delete: if false; // PRD: immutable audit log
+    }
+
+    // ─── Tracking ──────────────────────────────────────────────────────────────
+    // PRD §8: Only authenticated apps can write; only staff can read.
+    match /tracking/{document=**} {
+      allow create: if isAuth();
+      allow read, update, delete: if isStaff();
+    }
+
+    // ─── Broadcasts ────────────────────────────────────────────────────────────
+    match /broadcasts/{document=**} {
+      allow read: if isAuth();
+      allow write: if isStaff();
+    }
+
+    // ─── System Configuration ──────────────────────────────────────────────────
+    // PRD §11 + §12: HQ controls escalation timing and notification rules.
+    match /system/{document=**} {
+      allow read: if isAuth();
+      allow write: if isHQ();
+    }
+
+    // PRD legacy path — keep for backwards compat
+    match /system_config/{document=**} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+
+    // ─── Audit Logs ────────────────────────────────────────────────────────────
+    // PRD §11: Every system action is recorded. No edits or deletes ever.
+    match /audit_logs/{document=**} {
+      allow create: if isAuth();
+      allow read: if isStaff();
+      allow update, delete: if false; // immutable
+    }
+  }
+}
