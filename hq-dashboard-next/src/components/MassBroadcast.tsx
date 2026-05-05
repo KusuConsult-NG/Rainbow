@@ -22,6 +22,7 @@ export default function MassBroadcast() {
   const [confirmed, setConfirmed] = useState(false);
   const [targetType, setTargetType] = useState<'ALL' | 'LGA' | 'WARD' | 'PU'>('ALL');
   const [targetValue, setTargetValue] = useState('');
+  const [broadcastMode, setBroadcastMode] = useState<'ALL_PUSH' | 'MANUAL_SMS'>('ALL_PUSH');
 
   // Plateau State Mock Geodata for Dropdowns
   const lgaOptions = ['Jos North', 'Jos South', 'Jos East', 'Mangu', 'Barkin Ladi', 'Bokkos', 'Wase', 'Langtang North'];
