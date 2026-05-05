@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
+
+:root {
+  --bg-primary: #121212;
+  --bg-surface: #1E1E1E;
+  --accent: #E53935;
+  --accent-hover: #D32F2F;
+  --text-main: #FFFFFF;
+  --text-muted: #B3B3B3;
+  --duress-bg: #4A0000;
+  --duress-border: #FF3333;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-main);
+  overflow: hidden;
+}
+
+.glass-panel {
+  background: rgba(30, 30, 30, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.flash-duress {
+  animation: pulse-border 1.5s infinite;
+}
+
+@keyframes pulse-border {
+  0% { border-color: rgba(255, 51, 51, 0.5); }
+  50% { border-color: rgba(255, 51, 51, 1); box-shadow: 0 0 20px rgba(255, 51, 51, 0.6); }
+  100% { border-color: rgba(255, 51, 51, 0.5); }
+}
+
+.leaflet-container {
+  font-family: 'Inter', sans-serif;
+  background: #0d0d0d !important;
+}
+
+.leaflet-control-zoom {
+  border: none !important;
+}
+
+.leaflet-control-zoom a {
+  background: rgba(30, 30, 30, 0.8) !important;
+  backdrop-filter: blur(8px);
+  color: white !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+}

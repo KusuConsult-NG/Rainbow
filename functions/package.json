@@ -1,0 +1,13 @@
+{
+  "name": "rainbow-functions",
+  "description": "Operation Rainbow Firebase Functions",
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^11.11.1",
+    "firebase-functions": "^4.3.1"
+  },
+  "private": true
+}

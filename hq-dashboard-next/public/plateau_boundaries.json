@@ -1,0 +1,43 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "lga": "Jos North",
+        "state": "Plateau"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [8.85, 9.95],
+            [8.95, 9.95],
+            [8.95, 9.85],
+            [8.85, 9.85],
+            [8.85, 9.95]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "lga": "Jos South",
+        "state": "Plateau"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [8.80, 9.85],
+            [8.95, 9.85],
+            [8.95, 9.70],
+            [8.80, 9.70],
+            [8.80, 9.85]
+          ]
+        ]
+      }
+    }
+  ]
+}
