@@ -11,10 +11,12 @@ const { getFunctions } = require("firebase-admin/functions");
 // Replaced the Cron Job with a distributed Task Queue to prevent 
 // execution timeouts during massive alert spikes.
 // ============================================================
-exports.escalateTask = functions.tasks.taskQueue({
-  retryConfig: { maxAttempts: 3 },
-  rateLimits: { maxConcurrentDispatches: 100 },
-}).onDispatch(async (data) => {
+// ============================================================
+// 1. DISTRIBUTED ESCALATION HANDLER (Task Queue)
+// Processes deferred escalation jumps to move incidents up the 
+// hierarchy automatically if they remain unresolved.
+// ============================================================
+exports.escalateTask = functions.tasks.taskQueue('escalateTask').onDispatch(async (data) => {
   const { alertId, targetTier } = data;
   console.log(`[TASK_ESCALATION] Evaluating ${alertId} for escalation to ${targetTier}`);
 
@@ -24,16 +26,12 @@ exports.escalateTask = functions.tasks.taskQueue({
   if (!alertSnap.exists) return;
   const alertData = alertSnap.data();
   
-  // If the alert is no longer ACTIVE/DURESS, abort escalation.
   if (alertData.status === "RESOLVED") {
     console.log(`[TASK_ESCALATION] Alert ${alertId} already resolved. Aborting.`);
     return;
   }
   
   const currentAssigned = alertData.assigned_to;
-  
-  // If the alert was already manually escalated beyond or to the target, abort.
-  // A simple way is to check if it's currently at the preceding tier.
   const tierOrder = { "POLLING_UNIT": 1, "WARD": 2, "LGA": 3, "HQ": 4 };
   if (tierOrder[currentAssigned] >= tierOrder[targetTier]) {
     console.log(`[TASK_ESCALATION] Alert ${alertId} is currently at ${currentAssigned}. Target was ${targetTier}. Aborting.`);
@@ -44,6 +42,7 @@ exports.escalateTask = functions.tasks.taskQueue({
 
   await alertRef.update({
     assigned_to: targetTier,
+    last_edited_by: "SYSTEM_AUTO_ESCALATION",
     escalated_at: admin.firestore.FieldValue.serverTimestamp()
   });
 
@@ -58,17 +57,14 @@ exports.escalateTask = functions.tasks.taskQueue({
 
   // Calculate the next tier and enqueue the next task
   let nextTier = null;
-  let waitMinutes = 2; // Default delay to next tier
-  
-  if (targetTier === "WARD") {
-    nextTier = "LGA";
-    waitMinutes = 3;
-  } else if (targetTier === "LGA") {
-    nextTier = "HQ";
-    waitMinutes = 5;
-  }
+  if (targetTier === "WARD") nextTier = "LGA";
+  else if (targetTier === "LGA") nextTier = "HQ";
 
   if (nextTier) {
+    const configSnap = await db.collection("system").doc("config").get();
+    const thresholds = configSnap.exists ? (configSnap.data().escalation_thresholds || {}) : {};
+    const waitMinutes = thresholds[targetTier] || (targetTier === "WARD" ? 5 : 10);
+
     const queue = getFunctions().taskQueue("escalateTask");
     await queue.enqueue({ alertId, targetTier: nextTier }, {
       scheduleDelaySeconds: waitMinutes * 60
@@ -78,66 +74,106 @@ exports.escalateTask = functions.tasks.taskQueue({
 });
 
 // ============================================================
-// 2. PUSH NOTIFICATION TRIGGER
-// Listens for new alerts and routes FCM push notifications to mapped staff natively.
+// 2. PUSH NOTIFICATION TRIGGER (MULTI-TIER)
+// Listens for new alerts and updates to route FCM push notifications 
+// to the relevant jurisdictional tier.
 // ============================================================
+const sendPushToTier = async (alertId, alertData) => {
+  const assignedLevel = alertData.assigned_to || "POLLING_UNIT";
+  const priority = alertData.priority || "HIGH";
+
+  console.log(`[PUSH] Dispatching notification for alert ${alertId} to ${assignedLevel}`);
+
+  let requiredRole = "POLLING_UNIT_OFFICER";
+  if (assignedLevel === "WARD") requiredRole = "WARD_OFFICER";
+  if (assignedLevel === "LGA") requiredRole = "LGA_OFFICER";
+  if (assignedLevel === "HQ") requiredRole = "HQ_OFFICER";
+
+  const staffSnapshot = await db.collection("users").where("role", "==", requiredRole).get();
+
+  if (staffSnapshot.empty) {
+    console.log(`[PUSH] No staff currently on-duty in tier: ${requiredRole}`);
+    return;
+  }
+
+  const tokens = [];
+  staffSnapshot.forEach(doc => {
+    const data = doc.data();
+    if (data.fcmToken) tokens.push(data.fcmToken);
+  });
+
+  if (tokens.length === 0) return;
+
+  const payload = {
+    notification: {
+      title: `🚨 ${priority} ALERT DETECTED`,
+      body: `Alert ${alertId} requires immediate attention at ${assignedLevel} tier!`,
+      sound: "default",
+    },
+    data: { alertId, click_action: "FLUTTER_NOTIFICATION_CLICK" }
+  };
+
+  try {
+    await admin.messaging().sendToDevice(tokens, payload);
+    console.log(`[ALERT_DELIVERED] Notification dispatched to ${tokens.length} ${requiredRole} officers.`);
+  } catch (err) {
+    console.error("[SYS_ERR] Failed to send push dispatch:", err);
+  }
+};
+
 exports.notifyStaffOnAlert = functions.firestore
   .document("alerts/{alertId}")
   .onCreate(async (snap, context) => {
-    const alertData = snap.data();
-    const assignedLevel = alertData.assigned_to || "POLLING_UNIT"; // POLLING_UNIT, WARD, LGA, HQ
-    const priority = alertData.priority || "HIGH";
+    return sendPushToTier(context.params.alertId, snap.data());
+});
 
-    console.log(`[PUSH] New ${priority} alert requiring dispatch to ${assignedLevel}`);
+exports.logAlertChanges = functions.firestore
+  .document("alerts/{alertId}")
+  .onUpdate(async (change, context) => {
+    const newData = change.after.data();
+    const oldData = change.before.data();
+    const alertId = context.params.alertId;
 
-    // Map the assigned_to string explicitly to the user's role field mapping
-    let requiredRole = "POLLING_UNIT_OFFICER";
-    if (assignedLevel === "WARD") requiredRole = "WARD_OFFICER";
-    if (assignedLevel === "LGA") requiredRole = "LGA_OFFICER";
-    if (assignedLevel === "HQ") requiredRole = "HQ_OFFICER";
+    const auditRef = db.collection("audit_logs");
+    const timestamp = admin.firestore.FieldValue.serverTimestamp();
 
-    // Fetch all users holding that specific Role who possess an FCM token
-    const staffSnapshot = await db.collection("users")
-      .where("role", "==", requiredRole)
-      .get();
-
-    if (staffSnapshot.empty) {
-      console.log(`[PUSH] No staff currently on-duty in tier: ${requiredRole}`);
-      return null;
+    // 1. Log Escalations (Assigned Tier Changed)
+    if (newData.assigned_to !== oldData.assigned_to) {
+      await auditRef.add({
+        action: "TIER_HANDOFF",
+        alert_id: alertId,
+        from_tier: oldData.assigned_to,
+        to_tier: newData.assigned_to,
+        actor: newData.last_edited_by || "AGENT_OR_SYSTEM",
+        timestamp
+      });
     }
 
-    const tokens = [];
-    staffSnapshot.forEach(doc => {
-      const data = doc.data();
-      if (data.fcmToken) {
-        tokens.push(data.fcmToken);
-      }
-    });
-
-    if (tokens.length === 0) {
-      console.log(`[PUSH] Staff found in tier ${requiredRole}, but no distinct FCM tokens active.`);
-      return null;
+    // 2. Log Acknowledgments (Responder Assigned)
+    if (newData.responder && !oldData.responder) {
+      await auditRef.add({
+        action: "AGENT_ACKNOWLEDGED",
+        alert_id: alertId,
+        actor: newData.responder,
+        timestamp
+      });
     }
 
-    const payload = {
-      notification: {
-        title: `🚨 ${priority} ALERT DETECTED`,
-        body: `A new ${alertData.type || "distress"} incident requires your immediate attention!`,
-        sound: "default",
-      },
-      data: {
-        alertId: context.params.alertId,
-        click_action: "FLUTTER_NOTIFICATION_CLICK"
-      }
-    };
-
-    try {
-      const response = await admin.messaging().sendToDevice(tokens, payload);
-      console.log(`[ALERT_DELIVERED] Notification dispatched to ${tokens.length} officers. Res:`, response);
-    } catch (err) {
-      console.error("[SYS_ERR] Failed to send push dispatch:", err);
+    // 3. Log Resolutions
+    if (newData.status === "RESOLVED" && oldData.status !== "RESOLVED") {
+      await auditRef.add({
+        action: "INCIDENT_RESOLVED",
+        alert_id: alertId,
+        actor: newData.resolved_by || newData.responder || "HQ_COMMAND",
+        timestamp
+      });
     }
 
+    // PUSH NOTIFICATION LOGIC (Existing)
+    if (newData.assigned_to !== oldData.assigned_to && newData.status !== "RESOLVED") {
+      console.log(`[ESCALATION_PUSH] Alert ${alertId} moved from ${oldData.assigned_to} to ${newData.assigned_to}`);
+      return sendPushToTier(alertId, newData);
+    }
     return null;
 });
 
@@ -148,9 +184,9 @@ exports.notifyStaffOnAlert = functions.firestore
 exports.createAlert = functions.https.onCall(async (data, context) => {
   console.log(`[ALERT_CREATED] Received createAlert payload: ${JSON.stringify(data)}`);
 
-  // if (context.app == undefined) {
-  //   throw new functions.https.HttpsError('failed-precondition', 'The function must be called from an App Check verified app.');
-  // }
+  if (context.app === undefined) {
+    throw new functions.https.HttpsError('failed-precondition', 'The function must be called from an App Check verified app.');
+  }
 
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
@@ -193,14 +229,53 @@ exports.createAlert = functions.https.onCall(async (data, context) => {
     // PRD: Geo-Mapping & Boundary Engine
     // Map GPS -> polling unit -> ward -> LGA
     const getJurisdiction = (latitude, longitude) => {
-      // Simulate Geo-Spatial DB lookup (Plateau State bounds mapping)
-      if (latitude > 9.9) return { lga: "Jos North", ward: "Tudun Wada", pu: "PU-001" };
-      if (latitude > 9.7) return { lga: "Jos South", ward: "Bukuru", pu: "PU-014" };
-      if (longitude > 9.0) return { lga: "Mangu", ward: "Mangu Halle", pu: "PU-042" };
-      return { lga: "Barkin Ladi", ward: "Gashish", pu: "PU-009" };
+      // Point-in-Polygon helper for production-grade spatial routing
+      const isPointInPolygon = (point, vs) => {
+        const x = point[0], y = point[1];
+        let inside = false;
+        for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+          const xi = vs[i][0], yi = vs[i][1];
+          const xj = vs[j][0], yj = vs[j][1];
+          const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      };
+
+      // Tactical Boundaries (Simplified for demonstration, should be loaded from plateau_boundaries.json in prod)
+      const boundaries = [
+        {
+          lga: "Jos North",
+          ward: "Tudun Wada",
+          pu: "PU-001",
+          coords: [[8.85, 9.95], [8.95, 9.95], [8.95, 9.85], [8.85, 9.85]]
+        },
+        {
+          lga: "Jos South",
+          ward: "Bukuru",
+          pu: "PU-014",
+          coords: [[8.80, 9.85], [8.95, 9.85], [8.95, 9.70], [8.80, 9.70]]
+        },
+        {
+          lga: "Mangu",
+          ward: "Mangu Halle",
+          pu: "PU-042",
+          coords: [[8.90, 9.60], [9.30, 9.60], [9.30, 9.20], [8.90, 9.20]]
+        }
+      ];
+
+      for (const boundary of boundaries) {
+        if (isPointInPolygon([longitude, latitude], boundary.coords)) {
+          return { lga: boundary.lga, ward: boundary.ward, pu: boundary.pu };
+        }
+      }
+
+      return { lga: "Statewide HQ", ward: "General Dispatch", pu: "HQ-000" };
     };
     
-    const geoMapped = getJurisdiction(finalLat, finalLng);
+    const geoMapped = (data.geo_lga && data.geo_ward && data.geo_pu)
+      ? { lga: data.geo_lga, ward: data.geo_ward, pu: data.geo_pu }
+      : getJurisdiction(finalLat, finalLng);
 
     const alertData = {
       type: type || "UNKNOWN",
@@ -222,14 +297,18 @@ exports.createAlert = functions.https.onCall(async (data, context) => {
     const docRef = await db.collection("alerts").add(alertData);
     console.log(`[ALERT_REGISTERED] Alert successfully inserted. ID: ${docRef.id}`);
 
+    // PRD: Dynamic Thresholds from System Config
+    const configSnap = await db.collection("system").doc("config").get();
+    const thresholds = configSnap.exists ? (configSnap.data().escalation_thresholds || {}) : { POLLING_UNIT: 2 };
+    const waitMinutes = thresholds.POLLING_UNIT || 2;
+
     // Dynamically enqueue the first Escalation Task
     try {
       const queue = getFunctions().taskQueue("escalateTask");
-      // PRD: Initial wait for Polling Unit is 2 minutes before jumping to WARD
       await queue.enqueue({ alertId: docRef.id, targetTier: "WARD" }, {
-        scheduleDelaySeconds: 2 * 60 
+        scheduleDelaySeconds: waitMinutes * 60 
       });
-      console.log(`[ESCALATE_QUEUED] Task queued for ${docRef.id} -> WARD in 2m`);
+      console.log(`[ESCALATE_QUEUED] Task queued for ${docRef.id} -> WARD in ${waitMinutes}m`);
     } catch (err) {
       console.error("[SYS_ERR] Failed to enqueue initial escalation task", err);
     }
@@ -267,17 +346,26 @@ exports.smsWebhook = functions.https.onRequest(async (req, res) => {
     }
 
     const reporterPhone = segments[1];
-    const latSegment = segments[2];
-    const lngSegment = segments[3];
+    const typeCode = segments[2];
+    const latSegment = segments[3];
+    const lngSegment = segments[4];
     
     const lat = parseFloat(latSegment.replace('LAT:', '')) || 9.9167;
     const lng = parseFloat(lngSegment.replace('LNG:', '')) || 8.8917;
+
+    // Reverse mapping for SMS types
+    const typeMap = {
+      'KD': 'Kidnap', 'FR': 'Fire', 'DA': 'Drug abuse', 'PB': 'Police brutality',
+      'FL': 'Flood', 'CC': 'Cyber crime', 'CA': 'Child abuse', 
+      'DV': 'Domestic violence', 'CR': 'Cattle rustling', 'CM': 'Community attack',
+      'OT': 'Other'
+    };
+    const alertType = typeMap[typeCode] || 'Unknown Incident';
 
     // PRD: Duplicate alert prevention
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60000);
     const duplicates = await db.collection("alerts")
       .where("reportedBy", "==", reporterPhone)
-      .where("status", "in", ["ACTIVE", "DURESS"])
       .get();
 
     let isDuplicate = false;
@@ -296,16 +384,36 @@ exports.smsWebhook = functions.https.onRequest(async (req, res) => {
     
     // PRD: Geo-Mapping & Boundary Engine
     const getJurisdiction = (latitude, longitude) => {
-      if (latitude > 9.9) return { lga: "Jos North", ward: "Tudun Wada", pu: "PU-001" };
-      if (latitude > 9.7) return { lga: "Jos South", ward: "Bukuru", pu: "PU-014" };
-      if (longitude > 9.0) return { lga: "Mangu", ward: "Mangu Halle", pu: "PU-042" };
-      return { lga: "Barkin Ladi", ward: "Gashish", pu: "PU-009" };
+      const isPointInPolygon = (point, vs) => {
+        const x = point[0], y = point[1];
+        let inside = false;
+        for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+          const xi = vs[i][0], yi = vs[i][1];
+          const xj = vs[j][0], yj = vs[j][1];
+          const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      };
+
+      const boundaries = [
+        { lga: "Jos North", ward: "Tudun Wada", pu: "PU-001", coords: [[8.85, 9.95], [8.95, 9.95], [8.95, 9.85], [8.85, 9.85]] },
+        { lga: "Jos South", ward: "Bukuru", pu: "PU-014", coords: [[8.80, 9.85], [8.95, 9.85], [8.95, 9.70], [8.80, 9.70]] },
+        { lga: "Mangu", ward: "Mangu Halle", pu: "PU-042", coords: [[8.90, 9.60], [9.30, 9.60], [9.30, 9.20], [8.90, 9.20]] }
+      ];
+
+      for (const boundary of boundaries) {
+        if (isPointInPolygon([longitude, latitude], boundary.coords)) {
+          return { lga: boundary.lga, ward: boundary.ward, pu: boundary.pu };
+        }
+      }
+      return { lga: "Statewide HQ", ward: "General Dispatch", pu: "HQ-000" };
     };
     const geoMapped = getJurisdiction(lat, lng);
 
     const docRef = await db.collection("alerts").add({
-      type: "OFFLINE DURESS",
-      description: "Auto-generated from Offline SMS Infrastructure",
+      type: alertType,
+      description: `[OFFLINE_SMS] ${alertType} reported via SMS gateway.`,
       lat: lat,
       lng: lng,
       geo_lga: geoMapped.lga,
@@ -318,7 +426,8 @@ exports.smsWebhook = functions.https.onRequest(async (req, res) => {
       assigned_to: "POLLING_UNIT", 
       reportedAt: admin.firestore.FieldValue.serverTimestamp(),
       isOffline: true,
-      rawSmsPayload: messageBody
+      rawSmsPayload: messageBody,
+      via: "SMS_GATEWAY"
     });
 
     console.log(`[SMS_GATEWAY] Successfully transcoded offline SMS to Polling Unit Escrow. ID: ${docRef.id}`);
@@ -368,45 +477,77 @@ exports.massBroadcast = functions.https.onCall(async (data, context) => {
       sentAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    // 2. Fetch all target users
-    let query = db.collection("users");
-    
-    // Dynamic Jurisdictional Routing
-    if (targetType === "LGA" && targetValue) {
-      query = query.where("lga", "==", targetValue);
-    } else if (targetType === "WARD" && targetValue) {
-      query = query.where("ward", "==", targetValue);
-    } else if (targetType === "PU" && targetValue) {
-      query = query.where("polling_unit", "==", targetValue);
-    }
+    // 2. Scalable FCM Topic Dispatch
+    let topic = "all_citizens";
+    if (targetType === "LGA" && targetValue) topic = `lga_${targetValue.toLowerCase().replace(/\s+/g, '_')}`;
+    if (targetType === "WARD" && targetValue) topic = `ward_${targetValue.toLowerCase().replace(/\s+/g, '_')}`;
+    if (targetType === "PU" && targetValue) topic = `pu_${targetValue.toLowerCase().replace(/\s+/g, '_')}`;
 
-    const usersSnap = await query.get();
+    const message = {
+      notification: { title, body },
+      data: { priority: priority || "NORMAL", type: "BROADCAST", targetType: targetType || "ALL" },
+      topic: topic
+    };
 
-    // 3. Extract FCM Tokens
-    const tokens = [];
-    usersSnap.forEach(doc => {
-      const user = doc.data();
-      if (user.fcmToken) tokens.push(user.fcmToken);
-    });
+    const response = await admin.messaging().send(message);
+    console.log(`[BROADCAST] Scalable message dispatched to topic: ${topic}. Response: ${response}`);
 
-    // 4. Send Firebase Cloud Messaging
-    if (tokens.length > 0) {
-      const message = {
-        notification: { title, body },
-        data: { priority: priority || "NORMAL", type: "BROADCAST" },
-        tokens: tokens,
-      };
-      const response = await admin.messaging().sendMulticast(message);
-      console.log(`[BROADCAST] Successfully sent ${response.successCount} messages. Failed: ${response.failureCount}`);
-    } else {
-      console.log(`[BROADCAST] No tokens found for target region: ${targetRegion || 'ALL'}. Logged broadcast only.`);
-    }
-
-    return { success: true, targetsReached: tokens.length };
+    return { success: true, topicUsed: topic };
   } catch (error) {
     console.error("[BROADCAST] Failed to send broadcast", error);
     throw new functions.https.HttpsError("internal", "Mass broadcast engine failed.");
   }
+});
+
+// PRD: High-Assurance Manual Escalation
+// Synchronizes manual intervention with the automated Task Queue
+exports.adminEscalateAlert = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Auth required.");
+  
+  const { alertId, targetTier } = data;
+  const alertRef = db.collection("alerts").doc(alertId);
+  const alertSnap = await alertRef.get();
+  if (!alertSnap.exists) throw new functions.https.HttpsError("not-found", "Alert not found.");
+  
+  const oldTier = alertSnap.data().assigned_to;
+  
+  await alertRef.update({
+    assigned_to: targetTier,
+    last_edited_by: context.auth.token.email || context.auth.uid,
+    escalated_at: admin.firestore.FieldValue.serverTimestamp()
+  });
+
+  // Schedule the NEXT jump if we are not yet at HQ
+  let nextTier = null;
+  if (targetTier === "WARD") nextTier = "LGA";
+  else if (targetTier === "LGA") nextTier = "HQ";
+
+  if (nextTier) {
+    const configSnap = await db.collection("system").doc("config").get();
+    const thresholds = configSnap.exists ? (configSnap.data().escalation_thresholds || {}) : {};
+    const waitMinutes = thresholds[targetTier] || (targetTier === "WARD" ? 5 : 10);
+
+    const queue = getFunctions().taskQueue("escalateTask");
+    await queue.enqueue({ alertId, targetTier: nextTier }, {
+      scheduleDelaySeconds: waitMinutes * 60
+    });
+  }
+
+  return { success: true };
+});
+
+exports.adminResolveAlert = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Auth required.");
+  const { alertId } = data;
+  
+  await db.collection("alerts").doc(alertId).update({
+    status: "RESOLVED",
+    resolved_by: context.auth.token.email || context.auth.uid,
+    last_edited_by: context.auth.token.email || context.auth.uid,
+    resolved_at: admin.firestore.FieldValue.serverTimestamp()
+  });
+
+  return { success: true };
 });
 
 exports.seedMockData = functions.https.onRequest(async (req, res) => {
@@ -434,4 +575,95 @@ exports.seedMockData = functions.https.onRequest(async (req, res) => {
   } catch (e) {
     res.status(500).send({ error: e.message });
   }
+});
+
+// ============================================================
+// 5. FAIL-SAFE WATCHDOG ENGINE
+// Runs every 5 minutes to detect "stale" alerts that may have missed 
+// their task-queue escalation trigger due to system brownouts.
+// ============================================================
+exports.escalationWatchdog = functions.pubsub.schedule('every 5 minutes').onRun(async (context) => {
+  console.log('[WATCHDOG] Commencing sweep for stale active incidents...');
+  
+  // PRD: Watchdog respects dynamic dashboard thresholds
+  const configSnap = await db.collection("system").doc("config").get();
+  const thresholds = configSnap.exists ? (configSnap.data().escalation_thresholds || {}) : { LGA: 10 };
+  
+  // Watchdog threshold is 2x the maximum configured timeout (safety margin)
+  const safetyBuffer = (thresholds.LGA || 10) * 2;
+  const staleThreshold = new Date(Date.now() - safetyBuffer * 60 * 1000);
+  
+  const staleAlerts = await db.collection("alerts")
+    .where("status", "in", ["ACTIVE", "DURESS"])
+    .where("reportedAt", "<=", admin.firestore.Timestamp.fromDate(staleThreshold))
+    .get();
+
+  if (staleAlerts.empty) {
+    console.log('[WATCHDOG] No stale incidents detected. Cleanup complete.');
+    return null;
+  }
+
+  console.log(`[WATCHDOG] Found ${staleAlerts.size} potential stale incidents. Evaluating triggers...`);
+  
+  const batch = db.batch();
+  const queue = getFunctions().taskQueue("escalateTask");
+
+  for (const doc of staleAlerts.docs) {
+    const data = doc.data();
+    
+    // If it's been 10+ mins and still at Polling Unit or Ward, it's definitely stale.
+    // Re-trigger the task queue to force movement.
+    if (data.assigned_to === "POLLING_UNIT" || data.assigned_to === "WARD") {
+      const nextTier = data.assigned_to === "POLLING_UNIT" ? "WARD" : "LGA";
+      
+      console.warn(`[WATCHDOG_RECOVERY] Recovering alert ${doc.id} (Stuck at ${data.assigned_to}). Jump to ${nextTier}.`);
+      
+      await queue.enqueue({ alertId: doc.id, targetTier: nextTier });
+      
+      const newAuditRef = db.collection("audit_logs").doc();
+      batch.set(newAuditRef, {
+        action: "WATCHDOG_RECOVERY",
+        alert_id: doc.id,
+        from_tier: data.assigned_to,
+        to_tier: nextTier,
+        minutes_elapsed: safetyBuffer,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        actor: "SYSTEM_WATCHDOG"
+      });
+    }
+  }
+
+  await batch.commit();
+  return null;
+});
+
+// End of file
+
+// ============================================================
+// 7. MIGRATION UTILITY
+// Retroactively maps legacy incidents to canonical jurisdictions.
+// ============================================================
+exports.migrateLegacyIncidents = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Auth required.");
+  
+  const snap = await db.collection("alerts")
+    .where("geo_lga", "==", "Statewide HQ") // Assuming this is the placeholder for unmapped
+    .get();
+
+  const batch = db.batch();
+  let count = 0;
+
+  snap.forEach(doc => {
+    const alert = doc.data();
+    if (alert.lat && alert.lng) {
+      // Use the internal jurisdiction mapping logic
+      // In a real scenario, this would import the high-fidelity GeoJSON
+      // For now, it resets them to re-trigger mapping logic if needed
+      batch.update(doc.ref, { _migration_pending: true });
+      count++;
+    }
+  });
+
+  await batch.commit();
+  return { success: true, migratedCount: count };
 });

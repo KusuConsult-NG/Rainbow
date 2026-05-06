@@ -1,8 +1,9 @@
 {
   "rules": {
     "tracking": {
-      ".read": "auth != null",
+      ".read": "auth.token.role === 'HQ_OFFICER' || auth.token.role === 'LGA_OFFICER' || auth.token.role === 'WARD_OFFICER'",
       "$uid": {
+        ".read": "auth.uid === $uid",
         ".write": "auth != null && $uid === auth.uid"
       }
     }

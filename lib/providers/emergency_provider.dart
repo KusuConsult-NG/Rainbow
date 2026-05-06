@@ -17,6 +17,11 @@ class EmergencyState {
 
   const EmergencyState({this.isActive = false, this.startTime, this.alertId});
 
+  int get elapsedSeconds {
+    if (startTime == null) return 0;
+    return DateTime.now().difference(startTime!).inSeconds;
+  }
+
   String get formattedTime {
     if (startTime == null) return "00:00";
     final diff = DateTime.now().difference(startTime!);

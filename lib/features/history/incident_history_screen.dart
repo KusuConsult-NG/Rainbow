@@ -15,18 +15,37 @@ class IncidentHistoryScreen extends ConsumerWidget {
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
-      backgroundColor: AppColors.surfaceContainerLowest,
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.primary,
+        backgroundColor: AppColors.background,
         elevation: 0,
+        centerTitle: false,
         title: Text(
-          'My Incident History',
-          style: GoogleFonts.inter(fontWeight: FontWeight.w800, color: Colors.white),
+          'MISSION LOGS',
+          style: GoogleFonts.outfit(
+            fontWeight: FontWeight.w900,
+            color: Colors.white,
+            letterSpacing: 2.0,
+            fontSize: 18,
+          ),
         ),
         iconTheme: const IconThemeData(color: Colors.white),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(color: Colors.white.withValues(alpha: 0.05), height: 1),
+        ),
       ),
       body: user == null
-          ? const Center(child: Text('Authentication required'))
+          ? Center(
+              child: Text(
+                'AUTHORIZATION REQUIRED',
+                style: GoogleFonts.outfit(
+                  color: AppColors.emergency,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.5,
+                ),
+              ),
+            )
           : StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('alerts')
@@ -35,27 +54,28 @@ class IncidentHistoryScreen extends ConsumerWidget {
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return const Center(child: CircularProgressIndicator(color: AppColors.primary));
                 }
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.history_toggle_off_rounded, size: 64, color: AppColors.outline.withAlpha(100)),
-                        const SizedBox(height: 16),
+                        Icon(Icons.history_toggle_off_rounded, size: 64, color: Colors.white.withValues(alpha: 0.02)),
+                        const SizedBox(height: 24),
                         Text(
-                          'No incidents reported yet.',
-                          style: GoogleFonts.inter(
-                            color: AppColors.onSurfaceVariant,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
+                          'NO ARCHIVED MISSIONS',
+                          style: GoogleFonts.outfit(
+                            color: Colors.white24,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.5,
                           ),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Stay safe. Your incident history will appear here.',
-                          style: GoogleFonts.inter(fontSize: 12, color: AppColors.outline),
+                          'Incident history will populate post-deployment.',
+                          style: GoogleFonts.outfit(fontSize: 11, color: Colors.white10, fontWeight: FontWeight.w600),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -66,7 +86,7 @@ class IncidentHistoryScreen extends ConsumerWidget {
                 final alerts = snapshot.data!.docs;
 
                 return ListView.builder(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                   itemCount: alerts.length,
                   itemBuilder: (context, index) {
                     final doc = alerts[index];
@@ -75,140 +95,131 @@ class IncidentHistoryScreen extends ConsumerWidget {
                     final status = alert['status'] ?? 'UNKNOWN';
                     final desc = alert['description'] ?? 'No description';
                     final priority = alert['priority'] ?? 'MEDIUM';
-                    final assignedTo = alert['assigned_to'] ?? '—';
                     final geoLga = alert['geo_lga'] as String?;
-                    final geoWard = alert['geo_ward'] as String?;
                     final attachments = (alert['attachments'] as List<dynamic>?) ?? [];
 
-                    String timeStr = '';
+                    String timeStr = '—';
                     if (alert['reportedAt'] != null) {
                       try {
                         final ts = (alert['reportedAt'] as Timestamp).toDate();
-                        timeStr = '${ts.day}/${ts.month}/${ts.year} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}';
+                        timeStr = '${ts.day}/${ts.month} ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}';
                       } catch (_) {}
                     }
 
                     final statusColor = status == 'RESOLVED'
-                        ? Colors.green
+                        ? AppColors.safe
                         : status == 'DURESS'
-                            ? AppColors.error
-                            : Colors.orange;
+                            ? AppColors.emergency
+                            : AppColors.primary;
+
+                    final isCritical = priority == 'CRITICAL';
 
                     return GestureDetector(
                       onTap: () => _showDetailSheet(context, alert, doc.id, attachments),
-                      child: Card(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          side: BorderSide(color: statusColor.withAlpha(40), width: 1),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      type,
-                                      style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 14),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: statusColor.withAlpha(20),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      status,
-                                      style: GoogleFonts.inter(color: statusColor, fontWeight: FontWeight.w800, fontSize: 10),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                desc,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.inter(fontSize: 13, color: AppColors.onSurfaceVariant),
-                              ),
-                              const SizedBox(height: 10),
-                              Row(
-                                children: [
-                                  const Icon(Icons.access_time_rounded, size: 13, color: AppColors.outline),
-                                  const SizedBox(width: 5),
-                                  Text(timeStr, style: GoogleFonts.inter(fontSize: 11, color: AppColors.outline, fontWeight: FontWeight.w600)),
-                                  const Spacer(),
-                                  // Priority badge
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: priority == 'CRITICAL'
-                                          ? AppColors.error.withAlpha(15)
-                                          : AppColors.surfaceContainerLow,
-                                      borderRadius: BorderRadius.circular(5),
-                                    ),
-                                    child: Text(
-                                      priority,
-                                      style: GoogleFonts.inter(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1,
-                                        color: priority == 'CRITICAL' ? AppColors.error : AppColors.outline,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (geoLga != null) ...[
-                                const SizedBox(height: 6),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.place_outlined, size: 13, color: AppColors.primary),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '$geoLga › $geoWard',
-                                      style: GoogleFonts.inter(fontSize: 10, color: AppColors.primary, fontWeight: FontWeight.w600),
-                                    ),
-                                    const Spacer(),
-                                    Text(
-                                      assignedTo.replaceAll('_', ' '),
-                                      style: GoogleFonts.inter(fontSize: 9, color: AppColors.outline, fontWeight: FontWeight.w700),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                              if (attachments.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.attach_file_rounded, size: 13, color: AppColors.secondary),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '${attachments.length} attachment${attachments.length > 1 ? 's' : ''}',
-                                      style: GoogleFonts.inter(fontSize: 10, color: AppColors.secondary, fontWeight: FontWeight.w600),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                              const SizedBox(height: 4),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: [
-                                  Text('Tap to view details', style: GoogleFonts.inter(fontSize: 10, color: AppColors.primary, fontWeight: FontWeight.w600)),
-                                  const SizedBox(width: 3),
-                                  const Icon(Icons.arrow_forward_ios_rounded, size: 10, color: AppColors.primary),
-                                ],
-                              ),
-                            ],
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.02),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                            color: isCritical 
+                                ? AppColors.emergency.withValues(alpha: 0.3) 
+                                : Colors.white.withValues(alpha: 0.05),
                           ),
+                          boxShadow: isCritical ? [
+                            BoxShadow(
+                              color: AppColors.emergency.withValues(alpha: 0.05),
+                              blurRadius: 15,
+                              spreadRadius: -5,
+                            )
+                          ] : [],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      if (isCritical) 
+                                        const Padding(
+                                          padding: EdgeInsets.only(right: 8),
+                                          child: Icon(Icons.warning_amber_rounded, color: AppColors.emergency, size: 16),
+                                        ),
+                                      Text(
+                                        type.toUpperCase(),
+                                        style: GoogleFonts.outfit(
+                                          fontWeight: FontWeight.w900,
+                                          fontSize: 15,
+                                          color: Colors.white,
+                                          letterSpacing: 0.5,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: statusColor.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+                                  ),
+                                  child: Text(
+                                    status,
+                                    style: GoogleFonts.outfit(
+                                      color: statusColor,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 10,
+                                      letterSpacing: 1.0,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            Text(
+                              desc,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.outfit(
+                                fontSize: 13,
+                                color: Colors.white54,
+                                height: 1.5,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            Row(
+                              children: [
+                                const Icon(Icons.schedule_rounded, size: 14, color: Colors.white12),
+                                const SizedBox(width: 6),
+                                Text(
+                                  timeStr,
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 11,
+                                    color: Colors.white24,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                                const Spacer(),
+                                if (geoLga != null)
+                                  Text(
+                                    geoLga.toUpperCase(),
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 10,
+                                      color: AppColors.primary.withValues(alpha: 0.4),
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
                     );
@@ -228,156 +239,187 @@ class IncidentHistoryScreen extends ConsumerWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.75,
+        initialChildSize: 0.8,
         maxChildSize: 0.95,
-        minChildSize: 0.4,
+        minChildSize: 0.5,
         builder: (_, scrollController) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          decoration: BoxDecoration(
+            color: AppColors.background,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+            border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
           ),
           child: Column(
             children: [
-              // Handle bar
               Container(
-                margin: const EdgeInsets.symmetric(vertical: 12),
+                margin: const EdgeInsets.symmetric(vertical: 16),
                 width: 40, height: 4,
-                decoration: BoxDecoration(color: AppColors.outline.withAlpha(80), borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
               Expanded(
                 child: ListView(
                   controller: scrollController,
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+                  padding: const EdgeInsets.fromLTRB(28, 8, 28, 40),
                   children: [
-                    // Header
                     Row(
                       children: [
                         Expanded(
                           child: Text(
-                            alert['type'] ?? 'EMERGENCY',
-                            style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 20),
+                            (alert['type'] ?? 'EMERGENCY').toUpperCase(),
+                            style: GoogleFonts.outfit(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 24,
+                              color: Colors.white,
+                              letterSpacing: 1.0,
+                            ),
                           ),
                         ),
                         _StatusChip(alert['status'] ?? 'UNKNOWN'),
                       ],
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     Text(
-                      'Report ID: ${alertId.substring(0, 8).toUpperCase()}',
-                      style: GoogleFonts.inter(fontSize: 10, color: AppColors.outline, fontWeight: FontWeight.w700, letterSpacing: 1),
+                      'ID: ${alertId.toUpperCase()}',
+                      style: GoogleFonts.outfit(
+                        fontSize: 10,
+                        color: Colors.white12,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 2.0,
+                      ),
                     ),
-                    const SizedBox(height: 20),
-                    const _DetailLabel('DESCRIPTION'),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 40),
+                    
+                    const _DetailLabel('OPERATIONAL NARRATIVE'),
+                    const SizedBox(height: 12),
                     Text(
                       alert['description'] ?? 'No description provided.',
-                      style: GoogleFonts.inter(fontSize: 14, height: 1.6, color: AppColors.onSurfaceVariant),
+                      style: GoogleFonts.outfit(
+                        fontSize: 15,
+                        height: 1.6,
+                        color: Colors.white70,
+                      ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 40),
 
-                    // Jurisdiction info
                     if (alert['geo_lga'] != null) ...[
-                      const _DetailLabel('JURISDICTION'),
-                      const SizedBox(height: 6),
-                      _InfoRow(Icons.location_city_outlined, '${alert['geo_lga']} › ${alert['geo_ward']} › ${alert['geo_pu']}'),
-                      const SizedBox(height: 16),
+                      const _DetailLabel('DEPLOYMENT SECTOR'),
+                      const SizedBox(height: 12),
+                      _InfoRow(Icons.map_rounded, '${alert['geo_lga']} › ${alert['geo_ward']}'),
+                      const SizedBox(height: 32),
                     ],
 
-                    const _DetailLabel('ESCALATION STATUS'),
-                    const SizedBox(height: 6),
-                    _InfoRow(Icons.account_tree_outlined, 'Assigned to: ${(alert['assigned_to'] ?? '—').replaceAll('_', ' ')}'),
-                    const SizedBox(height: 4),
-                    _InfoRow(Icons.flag_outlined, 'Priority: ${alert['priority'] ?? 'MEDIUM'}'),
-                    const SizedBox(height: 20),
+                    const _DetailLabel('MISSION TELEMETRY'),
+                    const SizedBox(height: 12),
+                    _InfoRow(Icons.radar_rounded, 'UNIT: ${(alert['assigned_to'] ?? 'UNASSIGNED').replaceAll('_', ' ')}'),
+                    const SizedBox(height: 8),
+                    _InfoRow(Icons.trending_up_rounded, 'PRIORITY: ${alert['priority'] ?? 'MEDIUM'}'),
+                    const SizedBox(height: 40),
 
-                    // Location actions
                     if (lat != null && lng != null) ...[
-                      const _DetailLabel('INCIDENT LOCATION'),
-                      const SizedBox(height: 10),
+                      const _DetailLabel('GEOSPATIAL BEACON'),
+                      const SizedBox(height: 12),
                       GestureDetector(
                         onTap: () async {
                           final url = Uri.parse('https://www.google.com/maps?q=$lat,$lng');
                           if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
                         },
                         child: Container(
-                          padding: const EdgeInsets.all(14),
+                          padding: const EdgeInsets.all(24),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1565C0).withAlpha(10),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFF1565C0).withAlpha(40)),
+                            color: AppColors.primary.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: AppColors.primary.withValues(alpha: 0.1)),
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.map_outlined, color: Color(0xFF1565C0), size: 20),
-                              const SizedBox(width: 10),
+                              const Icon(Icons.location_on_rounded, color: AppColors.primary, size: 24),
+                              const SizedBox(width: 16),
                               Text(
-                                'LAT: ${lat.toStringAsFixed(4)}  LON: ${lng.toStringAsFixed(4)}',
-                                style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 13, color: const Color(0xFF1565C0)),
+                                '${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}',
+                                style: GoogleFonts.outfit(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 14,
+                                  color: AppColors.primary,
+                                  letterSpacing: 1.0,
+                                ),
                               ),
                               const Spacer(),
-                              const Icon(Icons.open_in_new, size: 14, color: Color(0xFF1565C0)),
+                              const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.primary),
                             ],
                           ),
                         ),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 40),
                     ],
 
-                    // Attachments
                     if (attachments.isNotEmpty) ...[
-                      const _DetailLabel('ATTACHMENTS'),
-                      const SizedBox(height: 10),
+                      const _DetailLabel('INTEL ATTACHMENTS'),
+                      const SizedBox(height: 12),
                       ...attachments.map((url) => GestureDetector(
-                            onTap: () async {
-                              final uri = Uri.parse(url.toString());
-                              if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: AppColors.surfaceContainerLow,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.image_outlined, color: AppColors.secondary, size: 20),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      url.toString().split('/').last.split('?').first,
-                                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                        onTap: () async {
+                          final uri = Uri.parse(url.toString());
+                          if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        },
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.03),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.file_copy_rounded, color: Colors.white24, size: 20),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Text(
+                                  'INTEL_FILE_${attachments.indexOf(url) + 1}.DAT',
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white54,
+                                    letterSpacing: 0.5,
                                   ),
-                                  const Icon(Icons.open_in_new, size: 14, color: AppColors.outline),
-                                ],
+                                ),
                               ),
-                            ),
-                          )),
-                      const SizedBox(height: 16),
+                              const Icon(Icons.download_rounded, size: 18, color: Colors.white10),
+                            ],
+                          ),
+                        ),
+                      )),
+                      const SizedBox(height: 40),
                     ],
 
-                    // Copy report ID
-                    GestureDetector(
-                      onTap: () {
-                        Clipboard.setData(ClipboardData(text: alertId));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Report ID copied'), behavior: SnackBarBehavior.floating),
-                        );
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceContainerLow,
-                          borderRadius: BorderRadius.circular(12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: alertId));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('LOG ID COPIED', style: GoogleFonts.outfit(fontWeight: FontWeight.w900)),
+                              backgroundColor: AppColors.surfaceContainerHigh,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white.withValues(alpha: 0.05),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 20),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          elevation: 0,
                         ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.copy_outlined, size: 16, color: AppColors.outline),
-                            const SizedBox(width: 10),
-                            Text('Copy Report ID', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.outline)),
-                          ],
+                        child: Text(
+                          'COPY MISSION HASH',
+                          style: GoogleFonts.outfit(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 13,
+                            letterSpacing: 2.0,
+                          ),
                         ),
                       ),
                     ),
@@ -397,11 +439,22 @@ class _StatusChip extends StatelessWidget {
   const _StatusChip(this.status);
   @override
   Widget build(BuildContext context) {
-    final color = status == 'RESOLVED' ? Colors.green : status == 'DURESS' ? AppColors.error : Colors.orange;
+    final color = status == 'RESOLVED' 
+        ? AppColors.safe 
+        : status == 'DURESS' 
+            ? AppColors.emergency 
+            : AppColors.primary;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(color: color.withAlpha(20), borderRadius: BorderRadius.circular(8)),
-      child: Text(status, style: GoogleFonts.inter(color: color, fontWeight: FontWeight.w800, fontSize: 11)),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1), 
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        status, 
+        style: GoogleFonts.outfit(color: color, fontWeight: FontWeight.w900, fontSize: 10, letterSpacing: 1.0),
+      ),
     );
   }
 }
@@ -412,7 +465,7 @@ class _DetailLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
         label,
-        style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w800, color: AppColors.outline, letterSpacing: 2),
+        style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.white24, letterSpacing: 2.0),
       );
 }
 
@@ -423,9 +476,9 @@ class _InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
         children: [
-          Icon(icon, size: 15, color: AppColors.outline),
-          const SizedBox(width: 8),
-          Expanded(child: Text(text, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600))),
+          Icon(icon, size: 16, color: Colors.white24),
+          const SizedBox(width: 12),
+          Expanded(child: Text(text.toUpperCase(), style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white70, letterSpacing: 0.5))),
         ],
       );
 }

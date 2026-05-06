@@ -62,10 +62,10 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate }: 
         .then(data => {
           L.default.geoJSON(data, {
             style: {
-              color: '#1565C0',
+              color: '#af101a',
               weight: 2,
               opacity: 0.6,
-              fillColor: '#1565C0',
+              fillColor: '#af101a',
               fillOpacity: 0.05,
               dashArray: '5, 5'
             },
@@ -74,7 +74,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate }: 
                 layer.bindTooltip(`<b>${feature.properties.lga}</b>`, {
                   permanent: true,
                   direction: 'center',
-                  className: 'bg-transparent border-0 shadow-none text-blue-800 font-bold text-xs',
+                  className: 'bg-transparent border-0 shadow-none text-red-800 font-bold text-xs',
                   opacity: 0.7
                 });
               }
@@ -150,7 +150,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate }: 
             </button>
           </div>
           ${alert.lat && alert.lng ? `<a href="https://www.google.com/maps?q=${alert.lat},${alert.lng}" target="_blank"
-            style="display:block;margin-top:8px;font-size:10px;color:#1565C0;text-align:center">📍 Open in Google Maps</a>` : ''}
+            style="display:block;margin-top:8px;font-size:10px;color:#af101a;text-align:center">📍 Open in Google Maps</a>` : ''}
         </div>
       `);
       markersRef.current.push(marker);
@@ -170,7 +170,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate }: 
 
       const icon = L.divIcon({
         className: '',
-        html: `<div style="width:20px;height:20px;background:#1565C0;border-radius:50%;border:3px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;">
+        html: `<div style="width:20px;height:20px;background:#af101a;border-radius:50%;border:3px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;">
           <div style="width:6px;height:6px;background:white;border-radius:50%;"></div>
         </div>`,
         iconSize: [20, 20],
@@ -185,7 +185,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate }: 
       const marker = L.marker([agent.lat, agent.lng], { icon, zIndexOffset: 1000 }).addTo(map);
       marker.bindPopup(`
         <div style="font-family:Inter,sans-serif;padding:4px">
-          <strong style="color:#1565C0;font-size:12px;display:flex;align-items:center;gap:4px">
+          <strong style="color:#af101a;font-size:12px;display:flex;align-items:center;gap:4px">
             <span style="display:inline-block;width:6px;height:6px;background:#4CAF50;border-radius:50%"></span>
             FIELD AGENT
           </strong>

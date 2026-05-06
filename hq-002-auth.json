@@ -1,0 +1,10 @@
+{
+  "users": [
+    {
+      "localId": "hq-002-uid",
+      "email": "hq-002@operationrainbow.plateau.gov.ng",
+      "passwordHash": "hq-002",
+      "displayName": "HQ Command Officer 002"
+    }
+  ]
+}

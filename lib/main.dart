@@ -6,6 +6,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'services/background_tracking_service.dart';
 import 'services/alert_service.dart';
@@ -32,6 +34,10 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   
+  // PRD: High-Assurance Offline Resilience
+  FirebaseDatabase.instance.setPersistenceEnabled(true);
+  FirebaseFirestore.instance.settings = const Settings(persistenceEnabled: true);
+  
   Workmanager().initialize(callbackDispatcher);
   Workmanager().registerPeriodicTask(
     "1",
@@ -42,8 +48,14 @@ Future<void> main() async {
 
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  // Register the background tracking isolate
-  await BackgroundTrackingService().initializeService();
+  // Register the background tracking isolate (configure only — does NOT start the service).
+  // Tracking only activates when an SOS is triggered via BackgroundTrackingService().startTracking().
+  try {
+    await BackgroundTrackingService().initializeService();
+  } catch (e) {
+    debugPrint('⚠️ BackgroundTrackingService init failed: $e');
+  }
+
 
   // Flushes the offline emergency payload queue natively when network is restored
   Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {

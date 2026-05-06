@@ -52,12 +52,48 @@ class PushNotificationService {
     if (uid == null) return;
     
     try {
+      // 1. Save token and fetch profile
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
         'fcmToken': token,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+
+      if (!userDoc.exists) return;
+
+      final data = userDoc.data()!;
+      final String? role = data['role'];
+      final String? lga = data['lga'];
+      final String? ward = data['ward'];
+
+      FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+      if (role != null) {
+        // Global Role Topic
+        await messaging.subscribeToTopic('staff_${role.toLowerCase()}');
+        
+        // Broadcast Topics (Match backend massBroadcast)
+        await messaging.subscribeToTopic('all_citizens');
+
+        if (lga != null) {
+          final cleanLga = lga.toLowerCase().replaceAll(' ', '_');
+          await messaging.subscribeToTopic('lga_$cleanLga');
+          // For staff-specific LGA alerts
+          await messaging.subscribeToTopic('staff_lga_$cleanLga');
+        }
+
+        if (ward != null) {
+          final cleanWard = ward.toLowerCase().replaceAll(' ', '_');
+          await messaging.subscribeToTopic('ward_$cleanWard');
+          // For staff-specific Ward alerts
+          await messaging.subscribeToTopic('staff_ward_$cleanWard');
+        }
+      } else {
+        // Citizens subscribe to global broadcasts
+        await messaging.subscribeToTopic('all_citizens');
+      }
     } catch (e) {
-      debugPrint('[SYS_ERR] Failed to save FCM token: $e');
+      debugPrint('[SYS_ERR] Failed to sync jurisdictional communications: $e');
     }
   }
 }

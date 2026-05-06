@@ -21,81 +21,142 @@ class _ReportSubtypeScreenState extends State<ReportSubtypeScreen> {
   Widget build(BuildContext context) {
     final cat = widget.categoryInfo;
     return Scaffold(
-      appBar: const RainbowAppBar(title: 'REPORT INCIDENT', subtitle: 'STEP 2 OF 3 — SELECT TYPE', showBack: true),
+      backgroundColor: AppColors.background,
+      appBar: const RainbowAppBar(
+        title: 'REPORT PROTOCOL', 
+        subtitle: 'SELECT SPECIFIC INCIDENT TYPE', 
+        showBack: true
+      ),
       body: Column(
         children: [
           // Category banner
           Container(
-            margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-            padding: const EdgeInsets.all(16),
+            margin: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+            padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: cat.bg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: cat.color.withAlpha(80)),
+              color: cat.color.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: cat.color.withValues(alpha: 0.2)),
             ),
-            child: Row(children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: cat.color.withAlpha(30), borderRadius: BorderRadius.circular(12)),
-                child: Icon(cat.icon, color: cat.color, size: 24),
-              ),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('SELECTED CATEGORY', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700, color: cat.color, letterSpacing: 1.5)),
-                  Text(cat.label, style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 16, color: cat.color)),
-                ],
-              ),
-              const Spacer(),
-              GestureDetector(
-                onTap: () => context.pop(),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-                  child: Text('CHANGE', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w800, color: cat.color, letterSpacing: 1.0)),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: cat.color.withValues(alpha: 0.1), 
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: cat.color.withValues(alpha: 0.2)),
+                  ),
+                  child: Icon(cat.icon, color: cat.color, size: 24),
                 ),
-              ),
-            ]),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'TACTICAL CATEGORY', 
+                        style: GoogleFonts.outfit(
+                          fontSize: 9, 
+                          fontWeight: FontWeight.w900, 
+                          color: cat.color.withValues(alpha: 0.6), 
+                          letterSpacing: 1.5
+                        )
+                      ),
+                      Text(
+                        cat.label.toUpperCase(), 
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.w900, 
+                          fontSize: 18, 
+                          color: Colors.white, 
+                          letterSpacing: 0.5
+                        )
+                      ),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => context.pop(),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05), 
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                    ),
+                    child: Text(
+                      'CHANGE', 
+                      style: GoogleFonts.outfit(
+                        fontSize: 10, 
+                        fontWeight: FontWeight.w900, 
+                        color: Colors.white70, 
+                        letterSpacing: 1.0
+                      )
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
 
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
               children: [
-                Text('WHAT HAPPENED?', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.outline, letterSpacing: 2.0)),
-                const SizedBox(height: 12),
-                ...cat.subTypes.map((sub) => _SubTypeRow(
+                Text(
+                  'IDENTIFY INCIDENT TYPE', 
+                  style: GoogleFonts.outfit(
+                    fontSize: 10, 
+                    fontWeight: FontWeight.w900, 
+                    color: Colors.white24, 
+                    letterSpacing: 2.0
+                  )
+                ),
+                const SizedBox(height: 20),
+                ...cat.subTypes.map((sub) => _TacticalSubTypeRow(
                   label: sub,
                   color: cat.color,
-                  bg: cat.bg,
                   selected: _selected == sub,
                   onTap: () => setState(() => _selected = sub),
                 )),
-                const SizedBox(height: 80),
+                const SizedBox(height: 100),
               ],
             ),
           ),
         ],
       ),
       bottomNavigationBar: Container(
-        padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).padding.bottom + 16),
-        decoration: const BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Color(0x14000000), blurRadius: 20, offset: Offset(0, -5))]),
-        child: ElevatedButton(
-          onPressed: _selected == null ? null : () {
-            context.push(AppRoutes.reportDetails, extra: {
-              'category': cat,
-              'subType': _selected,
-            });
-          },
-          style: ElevatedButton.styleFrom(
-            minimumSize: const Size(double.infinity, 56),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            backgroundColor: _selected == null ? AppColors.surfaceContainerHigh : AppColors.primary,
-          ),
-          child: Text(
-            _selected == null ? 'SELECT A TYPE TO CONTINUE' : 'NEXT: ADD DETAILS',
-            style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.5, color: _selected == null ? AppColors.outline : Colors.white),
+        padding: EdgeInsets.fromLTRB(24, 20, 24, MediaQuery.of(context).padding.bottom + 20),
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
+        ),
+        child: SizedBox(
+          width: double.infinity,
+          height: 64,
+          child: ElevatedButton(
+            onPressed: _selected == null ? null : () {
+              context.push(AppRoutes.reportDetails, extra: {
+                'category': cat,
+                'subType': _selected,
+              });
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.black,
+              disabledBackgroundColor: Colors.white.withValues(alpha: 0.02),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              elevation: 0,
+            ),
+            child: Text(
+              _selected == null ? 'IDENTIFICATION REQUIRED' : 'INITIATE TACTICAL REPORT',
+              style: GoogleFonts.outfit(
+                fontWeight: FontWeight.w900, 
+                fontSize: 13, 
+                letterSpacing: 1.5, 
+                color: _selected == null ? Colors.white10 : Colors.black
+              ),
+            ),
           ),
         ),
       ),
@@ -103,42 +164,60 @@ class _ReportSubtypeScreenState extends State<ReportSubtypeScreen> {
   }
 }
 
-class _SubTypeRow extends StatelessWidget {
+class _TacticalSubTypeRow extends StatelessWidget {
   final String label;
-  final Color color, bg;
+  final Color color;
   final bool selected;
   final VoidCallback onTap;
-  const _SubTypeRow({required this.label, required this.color, required this.bg, required this.selected, required this.onTap});
+  const _TacticalSubTypeRow({required this.label, required this.color, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         decoration: BoxDecoration(
-          color: selected ? color.withAlpha(15) : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: selected ? color : AppColors.outlineVariant.withAlpha(100), width: selected ? 2 : 1),
-          boxShadow: [BoxShadow(color: Colors.black.withAlpha(selected ? 15 : 6), blurRadius: selected ? 12 : 8)],
+          color: selected ? color.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.02),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: selected ? color.withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.05), 
+            width: selected ? 2 : 1
+          ),
         ),
         child: Row(
           children: [
             AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              width: 22, height: 22,
+              duration: const Duration(milliseconds: 200),
+              width: 24, height: 24,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: selected ? color : Colors.transparent,
-                border: Border.all(color: selected ? color : AppColors.outline, width: 2),
+                border: Border.all(
+                  color: selected ? color : Colors.white24, 
+                  width: 2
+                ),
               ),
-              child: selected ? const Icon(Icons.check_rounded, color: Colors.white, size: 14) : null,
+              child: selected 
+                ? const Icon(Icons.check_rounded, color: Colors.black, size: 14) 
+                : null,
             ),
-            const SizedBox(width: 14),
-            Expanded(child: Text(label, style: GoogleFonts.inter(fontWeight: selected ? FontWeight.w800 : FontWeight.w500, fontSize: 15, color: selected ? color : AppColors.onSurface))),
-            if (selected) Icon(Icons.arrow_forward_ios_rounded, color: color, size: 14),
+            const SizedBox(width: 20),
+            Expanded(
+              child: Text(
+                label.toUpperCase(),
+                style: GoogleFonts.outfit(
+                  fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                  fontSize: 15,
+                  color: selected ? Colors.white : Colors.white54,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+            if (selected) 
+              Icon(Icons.radar_rounded, color: color, size: 18),
           ],
         ),
       ),

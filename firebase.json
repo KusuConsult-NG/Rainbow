@@ -7,7 +7,7 @@
     "indexes": "firestore.indexes.json"
   },
   "database": {
-    "rules": "\\n"
+    "rules": "database.rules.json"
   },
   "hosting": {
     "public": "hq-dashboard/dist",

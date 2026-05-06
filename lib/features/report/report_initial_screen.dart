@@ -9,99 +9,152 @@ class ReportInitialScreen extends StatelessWidget {
   const ReportInitialScreen({super.key});
 
   void _proceed(BuildContext context, String filter) {
-    HapticFeedback.lightImpact();
-    // We can pass the filter to the next screen using extra if needed,
-    // but for now we just transition to the category list as Step 2.
+    HapticFeedback.mediumImpact();
     context.push(AppRoutes.reportList);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Colors.black87),
-          onPressed: () => context.pop(),
-        ),
-      ),
-      body: SafeArea(
-        child: Padding(
-           padding: const EdgeInsets.symmetric(horizontal: 24),
-           child: Column(
-             crossAxisAlignment: CrossAxisAlignment.start,
-             children: [
-               const SizedBox(height: 16),
-               Text(
-                 "What's going on?",
-                 style: GoogleFonts.inter(
-                   fontSize: 32,
-                   fontWeight: FontWeight.w900,
-                   color: AppColors.onSurface,
-                   letterSpacing: -1.0,
-                 ),
-               ),
-               const SizedBox(height: 8),
-               Text(
-                 "Tell us briefly. We'll guide you through the rest.",
-                 style: GoogleFonts.inter(
-                   fontSize: 16,
-                   color: AppColors.onSurfaceVariant,
-                   fontWeight: FontWeight.w500,
-                 ),
-               ),
-               const SizedBox(height: 48),
+      backgroundColor: AppColors.background,
+      body: Stack(
+        children: [
+          // Background ambient glow
+          Positioned(
+            top: -100,
+            right: -100,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.primary.withValues(alpha: 0.05),
+              ),
+            ),
+          ),
+          
+          SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: IconButton(
+                    onPressed: () => context.pop(),
+                    icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.white.withValues(alpha: 0.05),
+                      padding: const EdgeInsets.all(12),
+                    ),
+                  ),
+                ),
+                
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 24),
+                        Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: AppColors.primary,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              'SITUATION REPORT',
+                              style: GoogleFonts.outfit(
+                                color: AppColors.primary,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 12,
+                                letterSpacing: 2,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          "What is the\nsituation?",
+                          style: GoogleFonts.outfit(
+                            fontSize: 40,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            height: 1.1,
+                            letterSpacing: -1.5,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          "Select the most accurate category to ensure rapid response deployment.",
+                          style: GoogleFonts.outfit(
+                            fontSize: 16,
+                            color: Colors.white54,
+                            fontWeight: FontWeight.w400,
+                            height: 1.5,
+                          ),
+                        ),
+                        const SizedBox(height: 48),
 
-               _IntentCard(
-                 title: 'Someone is in danger',
-                 icon: Icons.warning_rounded,
-                 color: const Color(0xFFD32F2F),
-                 bg: const Color(0xFFFFEBEE),
-                 onTap: () => _proceed(context, 'danger'),
-               ),
-               _IntentCard(
-                 title: "There's a crime",
-                 icon: Icons.local_police_rounded,
-                 color: const Color(0xFF1976D2),
-                 bg: const Color(0xFFE3F2FD),
-                 onTap: () => _proceed(context, 'crime'),
-               ),
-               _IntentCard(
-                 title: 'Something feels wrong',
-                 icon: Icons.visibility_rounded,
-                 color: const Color(0xFFF57F17),
-                 bg: const Color(0xFFFFF9C4),
-                 onTap: () => _proceed(context, 'suspicious'),
-               ),
-               _IntentCard(
-                 title: "It's an environmental issue",
-                 icon: Icons.water_damage_rounded,
-                 color: const Color(0xFF00796B),
-                 bg: const Color(0xFFE0F2F1),
-                 onTap: () => _proceed(context, 'environment'),
-               ),
-             ],
-           ),
-        ),
+                        _TacticalIntentCard(
+                          title: 'THREAT TO LIFE',
+                          subtitle: 'Immediate danger to persons',
+                          icon: Icons.warning_amber_rounded,
+                          accent: AppColors.emergency,
+                          onTap: () => _proceed(context, 'danger'),
+                        ),
+                        _TacticalIntentCard(
+                          title: "CRIMINAL ACTIVITY",
+                          subtitle: 'Ongoing or witnessed crime',
+                          icon: Icons.security_rounded,
+                          accent: Colors.blueAccent,
+                          onTap: () => _proceed(context, 'crime'),
+                        ),
+                        _TacticalIntentCard(
+                          title: 'SUSPICIOUS ACTIVITY',
+                          subtitle: 'Something feels wrong',
+                          icon: Icons.visibility_rounded,
+                          accent: Colors.amber,
+                          onTap: () => _proceed(context, 'suspicious'),
+                        ),
+                        _TacticalIntentCard(
+                          title: "CIVIL HAZARD",
+                          subtitle: 'Environmental or infrastructure risk',
+                          icon: Icons.alt_route_rounded,
+                          accent: Colors.tealAccent,
+                          onTap: () => _proceed(context, 'environment'),
+                        ),
+                        const SizedBox(height: 40),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _IntentCard extends StatelessWidget {
+class _TacticalIntentCard extends StatelessWidget {
   final String title;
+  final String subtitle;
   final IconData icon;
-  final Color color;
-  final Color bg;
+  final Color accent;
   final VoidCallback onTap;
 
-  const _IntentCard({
+  const _TacticalIntentCard({
     required this.title,
+    required this.subtitle,
     required this.icon,
-    required this.color,
-    required this.bg,
+    required this.accent,
     required this.onTap,
   });
 
@@ -110,29 +163,50 @@ class _IntentCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        margin: const EdgeInsets.only(bottom: 20),
+        padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: color.withAlpha(50), width: 1),
+          color: Colors.white.withValues(alpha: 0.03),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
         ),
         child: Row(
           children: [
-            Icon(icon, color: color, size: 28),
-            const SizedBox(width: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(icon, color: accent, size: 28),
+            ),
+            const SizedBox(width: 20),
             Expanded(
-              child: Text(
-                title,
-                style: GoogleFonts.inter(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: color.withAlpha(220),
-                  letterSpacing: -0.3,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.outfit(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.outfit(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white38,
+                    ),
+                  ),
+                ],
               ),
             ),
-            Icon(Icons.arrow_forward_rounded, color: color.withAlpha(100)),
+            const Icon(Icons.chevron_right_rounded, color: Colors.white24),
           ],
         ),
       ),
