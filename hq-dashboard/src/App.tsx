@@ -122,43 +122,49 @@ const NavItem = ({ icon, label, active = false, onClick }: { icon: React.ReactNo
   </div>
 )
 
-const Dashboard = ({ userRole }: { userRole: string }) => {
+const Dashboard = ({ user }: { user: User }) => {
   const [alerts, setAlerts] = useState<any[]>([]);
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [filterTier, setFilterTier] = useState<string>('ALL');
 
   useEffect(() => {
-    // Stream live data securely mapped to the user Role
-    let q;
-    
-    if (userRole === 'HQ_OFFICER') {
-      q = query(
-        collection(db, 'alerts'), 
-        where('status', 'in', ['ACTIVE', 'DURESS']),
-        limit(150)
-      );
-    } else {
-      let assignedTier = 'POLLING_UNIT';
-      if (userRole === 'WARD_OFFICER') assignedTier = 'WARD';
-      if (userRole === 'LGA_OFFICER') assignedTier = 'LGA';
+    const fetchProfileAndStream = async () => {
+      const docSnap = await getDoc(doc(db, 'users', user.uid));
+      const profile = docSnap.exists() ? docSnap.data() : { role: 'POLLING_UNIT_OFFICER' };
 
-      q = query(
-        collection(db, 'alerts'), 
-        where('status', 'in', ['ACTIVE', 'DURESS']),
-        where('assigned_to', '==', assignedTier),
-        limit(150)
-      );
-    }
+      let q;
+      const role = profile.role || 'POLLING_UNIT_OFFICER';
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setAlerts(data);
-    }, (error) => {
-      console.error("Firebase Streaming Error:", error);
-    });
+      if (role === 'HQ_OFFICER') {
+        q = query(
+          collection(db, 'alerts'), 
+          where('status', 'in', ['ACTIVE', 'DURESS']),
+          limit(150)
+        );
+      } else {
+        // Hierarchical location filter
+        const constraints = [where('status', 'in', ['ACTIVE', 'DURESS'])];
+        
+        if (role === 'LGA_OFFICER' && profile.geo_lga) {
+          constraints.push(where('geo_lga', '==', profile.geo_lga));
+        } else if (role === 'WARD_OFFICER' && profile.geo_ward) {
+          constraints.push(where('geo_ward', '==', profile.geo_ward));
+        } else if (role === 'POLLING_UNIT_OFFICER' && profile.geo_pu) {
+          constraints.push(where('geo_pu', '==', profile.geo_pu));
+        }
 
-    return () => unsubscribe();
-  }, [userRole]);
+        q = query(collection(db, 'alerts'), ...constraints, limit(150));
+      }
+
+      return onSnapshot(q, (snapshot) => {
+        setAlerts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+    };
+
+    let unsubscribe: any;
+    fetchProfileAndStream().then(unsub => unsubscribe = unsub);
+    return () => unsubscribe && unsubscribe();
+  }, [user]);
 
   const filteredAlerts = alerts.filter(a => {
     if (filterStatus !== 'ALL' && a.status !== filterStatus) return false;
@@ -295,24 +301,11 @@ const Dashboard = ({ userRole }: { userRole: string }) => {
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [userRole, setUserRole] = useState<string>('HQ_OFFICER');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
-      if (currentUser) {
-        try {
-          const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-          if (userDoc.exists()) {
-            setUserRole(userDoc.data().role || 'HQ_OFFICER');
-          } else {
-            setUserRole('POLLING_UNIT_OFFICER');
-          }
-        } catch (e) {
-          console.error("Failed to fetch user role", e);
-        }
-      }
       setLoading(false);
     });
     return () => unsub();
@@ -331,7 +324,7 @@ function App() {
               <Sidebar />
               <div style={{ flex: 1, position: 'relative', overflowY: 'auto' }}>
                 <Routes>
-                  <Route path="/" element={<Dashboard userRole={userRole} />} />
+                  <Route path="/" element={<Dashboard user={user!} />} />
                   <Route path="/admin" element={<AdminDirectory />} />
                   <Route path="/broadcast" element={<MassBroadcast />} />
                 </Routes>

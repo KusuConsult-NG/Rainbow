@@ -16,10 +16,8 @@ final userRoleProvider = FutureProvider<String>((ref) async {
         .doc(user.uid)
         .get();
     if (!doc.exists) return 'CITIZEN';
-    // Fix #7: safe cast — rules denial or missing field returns 'CITIZEN'
     return doc.data()?['role'] as String? ?? 'CITIZEN';
   } catch (_) {
-    // Firestore rules denied OR network error — degrade gracefully
     return 'CITIZEN';
   }
 });
@@ -41,26 +39,21 @@ class RainbowBottomNav extends ConsumerWidget {
     final role = roleAsync.value ?? 'CITIZEN';
 
     final items = _allItems.where((item) {
-      if (item.id == 1 && role != 'RESPONDENT') return false; // Hide Tracking for non-respondents
+      if (item.id == 1 && role != 'RESPONDENT') return false; 
       return true;
     }).toList();
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(13),
-            blurRadius: 30,
-            offset: const Offset(0, -8),
-          ),
-        ],
+        color: AppColors.background,
+        border: Border(
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.05), width: 1)
+        ),
       ),
       child: SafeArea(
         top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: items.map((item) => _buildNavItem(context, item)).toList(),
@@ -77,29 +70,30 @@ class RainbowBottomNav extends ConsumerWidget {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: isActive
-            ? BoxDecoration(
-                color: AppColors.primary.withAlpha(13),
-                borderRadius: BorderRadius.circular(16),
-              )
-            : null,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: isActive ? AppColors.primary.withValues(alpha: 0.05) : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isActive ? AppColors.primary.withValues(alpha: 0.1) : Colors.transparent
+          ),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               isActive ? item.activeIcon : item.icon,
-              color: isActive ? AppColors.primary : AppColors.outline,
-              size: 24,
+              color: isActive ? AppColors.primary : Colors.white24,
+              size: 22,
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               item.label,
-              style: GoogleFonts.inter(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                color: isActive ? AppColors.primary : AppColors.outline,
-                letterSpacing: 0.8,
+              style: GoogleFonts.outfit(
+                fontSize: 9,
+                fontWeight: isActive ? FontWeight.w900 : FontWeight.w800,
+                color: isActive ? AppColors.primary : Colors.white24,
+                letterSpacing: 1.5,
               ),
             ),
           ],

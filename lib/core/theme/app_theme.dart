@@ -96,6 +96,11 @@ class AppTheme {
           return AppColors.surfaceContainerHighest;
         }),
       ),
+      textSelectionTheme: TextSelectionThemeData(
+        cursorColor: AppColors.primary,
+        selectionColor: AppColors.primary.withValues(alpha: 0.3),
+        selectionHandleColor: AppColors.primary,
+      ),
     );
   }
 }

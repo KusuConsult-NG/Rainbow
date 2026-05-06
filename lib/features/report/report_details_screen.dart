@@ -15,6 +15,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import '../../services/alert_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/location_service.dart';
+import '../../core/constants/tactical_mapping.dart';
 
 class ReportDetailsScreen extends ConsumerStatefulWidget {
   final AlertCategoryInfo categoryInfo;
@@ -28,6 +29,12 @@ class ReportDetailsScreen extends ConsumerStatefulWidget {
 class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   final _narrativeCtrl = TextEditingController();
   bool _shareLocation = true;
+  bool _manualOverride = false;
+  
+  TacticalJurisdiction? _selectedLga;
+  TacticalWard? _selectedWard;
+  String? _selectedPu;
+
   bool _anonymous = false;
   bool _submitting = false;
   final List<File> _attachedFiles = [];
@@ -66,16 +73,14 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     final lng = userLoc?.longitude;
 
     if (isOffline && mounted) {
-      // Offline fallback: Execute resilient UI simulation, then submit via the service's SMS gateway
-      // without showing the snackbar, to maintain the tone of the offline overlay
       await showOfflineSending(context, message: 'Incident Report Data');
       ref.read(alertServiceProvider).submitAlert(
         type: '${widget.categoryInfo.label} - ${widget.subType}',
         description: desc,
         reportedBy: _anonymous ? 'anonymous' : userId,
         priority: widget.categoryInfo.priority,
-        latitude: lat,
-        longitude: lng,
+        latitude: _shareLocation ? lat : null,
+        longitude: _shareLocation ? lng : null,
       );
       if (mounted) context.go(AppRoutes.home);
       return;
@@ -86,9 +91,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       if (_attachedFiles.isNotEmpty) {
         for (var file in _attachedFiles) {
           final fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.path.split('/').last}';
-          final ref = FirebaseStorage.instance.ref().child('alerts/$userId/$fileName');
-          await ref.putFile(file);
-          final url = await ref.getDownloadURL();
+          final refStore = FirebaseStorage.instance.ref().child('alerts/$userId/$fileName');
+          await refStore.putFile(file);
+          final url = await refStore.getDownloadURL();
           uploadedUrls.add(url);
         }
       }
@@ -98,9 +103,12 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         description: desc,
         reportedBy: _anonymous ? 'anonymous' : userId,
         priority: widget.categoryInfo.priority,
-        latitude: lat,
-        longitude: lng,
+        latitude: _shareLocation ? lat : null,
+        longitude: _shareLocation ? lng : null,
         attachments: uploadedUrls,
+        geoLga: _manualOverride ? _selectedLga?.name : null,
+        geoWard: _manualOverride ? _selectedWard?.name : null,
+        geoPu: _manualOverride ? _selectedPu : null,
       );
     } catch (e) {
       debugPrint('[SYS_ERR] Report submission failed natively: $e');
@@ -109,11 +117,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(children: [
-            const Icon(Icons.check_circle_rounded, color: Colors.white),
-            const SizedBox(width: 10),
-            Text('Report submitted successfully', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+            const Icon(Icons.check_circle_rounded, color: Colors.black),
+            const SizedBox(width: 12),
+            Text('TRANSMISSION SUCCESSFUL', style: GoogleFonts.outfit(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.0)),
           ]),
-          backgroundColor: AppColors.tertiary,
+          backgroundColor: AppColors.primary,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
@@ -125,158 +133,301 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final cat = widget.categoryInfo;
+    final locAsync = ref.watch(userLocationStreamProvider);
+
     return Scaffold(
-      appBar: const RainbowAppBar(title: 'REPORT INCIDENT', subtitle: 'STEP 3 OF 3 — ADD DETAILS', showBack: true),
+      backgroundColor: const Color(0xFF0A0A0A),
+      appBar: const RainbowAppBar(title: 'INCIDENT DOSSIER', subtitle: 'COMPILE TACTICAL DATA', showBack: true),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         children: [
-          const SizedBox(height: 8),
           // Summary banner
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: cat.bg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border(left: BorderSide(color: cat.color, width: 5)),
+              color: const Color(0xFF1A1A1A),
+              borderRadius: BorderRadius.circular(20),
+              border: Border(left: BorderSide(color: cat.color, width: 6)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('REPORTING', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700, color: cat.color, letterSpacing: 1.5)),
-                Text(widget.subType, style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 18, color: cat.color)),
-                Text(cat.label, style: GoogleFonts.inter(fontSize: 12, color: cat.color.withAlpha(180))),
+                Text('TRANSMITTING REPORT FOR', style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w900, color: cat.color.withValues(alpha: 0.7), letterSpacing: 1.5)),
+                const SizedBox(height: 4),
+                Text(widget.subType.toUpperCase(), style: GoogleFonts.outfit(fontWeight: FontWeight.w900, fontSize: 20, color: Colors.white, letterSpacing: 1.0)),
+                Text(cat.label.toUpperCase(), style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white38, letterSpacing: 0.5)),
               ],
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
 
           // Narrative
-          const _SectionLabel('DESCRIBE WHAT HAPPENED'),
-          const SizedBox(height: 8),
+          const _SectionLabel('MISSION NARRATIVE'),
+          const SizedBox(height: 12),
           Container(
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), boxShadow: [BoxShadow(color: Colors.black.withAlpha(8), blurRadius: 10)]),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A1A),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white10),
+            ),
             child: TextField(
               controller: _narrativeCtrl,
               maxLines: 6,
               decoration: InputDecoration(
-                hintText: 'Describe the situation in as much detail as possible — who, what, where, when...',
-                hintStyle: GoogleFonts.inter(color: AppColors.outline, fontSize: 13),
+                hintText: 'Enter mission details, observations, and objective status...',
+                hintStyle: GoogleFonts.outfit(color: Colors.white24, fontSize: 13),
                 border: InputBorder.none,
-                contentPadding: const EdgeInsets.all(16),
+                contentPadding: const EdgeInsets.all(20),
               ),
-              style: GoogleFonts.inter(fontSize: 14, height: 1.5),
+              style: GoogleFonts.outfit(fontSize: 14, height: 1.6, color: Colors.white, fontWeight: FontWeight.w500),
               onChanged: (_) => setState(() {}),
             ),
           ),
           Align(
             alignment: Alignment.centerRight,
             child: Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text('${_narrativeCtrl.text.length} characters', style: GoogleFonts.inter(fontSize: 10, color: AppColors.outline)),
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('${_narrativeCtrl.text.length} CHARS / MISSION_LOG_SENSITIVE', style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white24, letterSpacing: 1.0)),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
 
           // Media attachment
-          const _SectionLabel('ATTACH EVIDENCE (OPTIONAL)'),
-          const SizedBox(height: 10),
+          const _SectionLabel('VISUAL TELEMETRY (OPTIONAL)'),
+          const SizedBox(height: 12),
           Row(children: [
-            _MediaBtn(icon: Icons.photo_camera_outlined, label: 'CAMERA', onTap: _takePhoto),
-            const SizedBox(width: 10),
-            _MediaBtn(icon: Icons.image_outlined, label: 'GALLERY', onTap: _pickImage),
+            _MediaBtn(icon: Icons.camera_alt_rounded, label: 'SCAN FIELD', onTap: _takePhoto),
+            const SizedBox(width: 12),
+            _MediaBtn(icon: Icons.photo_library_rounded, label: 'INTEL ARCHIVE', onTap: _pickImage),
           ]),
 
           // Attached files preview
           if (_attachedFiles.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             ..._attachedFiles.map((f) => Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(color: AppColors.surfaceContainerLow, borderRadius: BorderRadius.circular(10)),
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)),
               child: Row(children: [
-                const Icon(Icons.image_rounded, color: AppColors.secondary, size: 18),
-                const SizedBox(width: 10),
-                Expanded(child: Text(f.path.split('/').last, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+                Icon(Icons.description_rounded, color: AppColors.primary.withValues(alpha: 0.5), size: 18),
+                const SizedBox(width: 12),
+                Expanded(child: Text(f.path.split('/').last, style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white70), overflow: TextOverflow.ellipsis)),
                 GestureDetector(
                   onTap: () => setState(() => _attachedFiles.remove(f)),
-                  child: const Icon(Icons.close_rounded, color: AppColors.error, size: 16),
+                  child: const Icon(Icons.close_rounded, color: Colors.redAccent, size: 18),
                 ),
               ]),
             )),
           ],
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
 
           // Location
-          const _SectionLabel('LOCATION'),
-          const SizedBox(height: 8),
-          Consumer(builder: (context, ref, _) {
-            final locAsync = ref.watch(userLocationStreamProvider);
-            return Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border(left: BorderSide(color: _shareLocation ? AppColors.tertiary : AppColors.outline, width: 4)),
-                boxShadow: [BoxShadow(color: Colors.black.withAlpha(8), blurRadius: 10)],
-              ),
-              child: Row(children: [
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('AUTO-DETECTED', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.outline, letterSpacing: 1.5)),
-                  locAsync.when(
-                    data: (pos) => Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Current Device Location', style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 14)),
-                        Text('LAT: ${pos.latitude.toStringAsFixed(4)} N | LON: ${pos.longitude.toStringAsFixed(4)} E', style: GoogleFonts.inter(fontSize: 10, color: AppColors.onSurfaceVariant)),
-                      ],
-                    ),
-                    loading: () => Text('Acquiring GPS Signal...', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.primary)),
-                    error: (_, __) => Text('Location Unavailable', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.error)),
+          const _SectionLabel('GEOSPATIAL COORDINATES'),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A1A),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _shareLocation ? AppColors.primary.withValues(alpha: 0.3) : Colors.white10),
+            ),
+            child: Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('GPS TELEMETRY', style: GoogleFonts.outfit(fontSize: 9, fontWeight: FontWeight.w900, color: _shareLocation ? AppColors.primary : Colors.white24, letterSpacing: 1.5)),
+                const SizedBox(height: 4),
+                locAsync.when(
+                  data: (pos) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('ACTIVE BEACON SIGNAL', style: GoogleFonts.outfit(fontWeight: FontWeight.w900, fontSize: 14, color: Colors.white, letterSpacing: 0.5)),
+                      Text('${pos.latitude.toStringAsFixed(6)} N | ${pos.longitude.toStringAsFixed(6)} E', style: GoogleFonts.outfit(fontSize: 11, color: Colors.white38, letterSpacing: 1.0)),
+                    ],
                   ),
-                ])),
-                Switch(value: _shareLocation, onChanged: (v) => setState(() => _shareLocation = v)),
-              ]),
-            );
-          }),
-          const SizedBox(height: 20),
+                  loading: () => Text('ACQUIRING SIGNAL...', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w900, color: AppColors.primary)),
+                  error: (_, __) => Text('SIGNAL INTERRUPTED', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w900, color: Colors.redAccent)),
+                ),
+              ])),
+              Switch(
+                value: _shareLocation, 
+                onChanged: (v) => setState(() => _shareLocation = v),
+                activeThumbColor: AppColors.primary,
+                activeTrackColor: AppColors.primary.withValues(alpha: 0.2),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 24),
+
+          // Manual Override
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A1A),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _manualOverride ? AppColors.primary.withValues(alpha: 0.3) : Colors.white10),
+            ),
+            child: Column(
+              children: [
+                Row(children: [
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('JURISDICTION OVERRIDE', style: GoogleFonts.outfit(fontSize: 9, fontWeight: FontWeight.w900, color: _manualOverride ? AppColors.primary : Colors.white24, letterSpacing: 1.5)),
+                    const SizedBox(height: 4),
+                    Text('MANUAL LOCATION ENTRY', style: GoogleFonts.outfit(fontWeight: FontWeight.w900, fontSize: 14, color: Colors.white, letterSpacing: 0.5)),
+                    Text('USE IF GPS SIGNAL IS WEAK OR INACCURATE', style: GoogleFonts.outfit(fontSize: 10, color: Colors.white38, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                  ])),
+                  Switch(
+                    value: _manualOverride, 
+                    onChanged: (v) => setState(() => _manualOverride = v),
+                    activeThumbColor: AppColors.primary,
+                    activeTrackColor: AppColors.primary.withValues(alpha: 0.2),
+                  ),
+                ]),
+                if (_manualOverride) ...[
+                  const SizedBox(height: 20),
+                  const Divider(color: Colors.white10),
+                  const SizedBox(height: 20),
+                  
+                  // LGA Dropdown
+                  _DropdownSection(
+                    label: 'LOCAL GOVERNMENT AREA',
+                    value: _selectedLga?.name,
+                    items: plateauTacticalMap.map((lga) => lga.name).toList(),
+                    onChanged: (val) {
+                      setState(() {
+                        _selectedLga = plateauTacticalMap.firstWhere((lga) => lga.name == val);
+                        _selectedWard = null;
+                        _selectedPu = null;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Ward Dropdown
+                  _DropdownSection(
+                    label: 'WARD',
+                    value: _selectedWard?.name,
+                    items: _selectedLga?.wards.map((w) => w.name).toList() ?? [],
+                    onChanged: (val) {
+                      setState(() {
+                        _selectedWard = _selectedLga?.wards.firstWhere((w) => w.name == val);
+                        _selectedPu = null;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // PU Dropdown
+                  _DropdownSection(
+                    label: 'POLLING UNIT',
+                    value: _selectedPu,
+                    items: _selectedWard?.pollingUnits ?? [],
+                    onChanged: (val) => setState(() => _selectedPu = val),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
 
           // Anonymous toggle
           Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), boxShadow: [BoxShadow(color: Colors.black.withAlpha(8), blurRadius: 10)]),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A1A),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white10),
+            ),
             child: Row(children: [
-              const Icon(Icons.visibility_off_outlined, color: AppColors.secondary),
-              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.security_rounded, color: Colors.white70, size: 20),
+              ),
+              const SizedBox(width: 16),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Anonymous Report', style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 14)),
-                Text('Your name and phone will not be shared with responders.', style: GoogleFonts.inter(fontSize: 11, color: AppColors.onSurfaceVariant, height: 1.3)),
+                Text('STEALTH MODE', style: GoogleFonts.outfit(fontWeight: FontWeight.w900, fontSize: 14, color: Colors.white, letterSpacing: 0.5)),
+                Text('ENCRYPT SENDER IDENTITY ARCHIVE', style: GoogleFonts.outfit(fontSize: 10, color: Colors.white38, height: 1.3, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
               ])),
-              Switch(value: _anonymous, onChanged: (v) => setState(() => _anonymous = v)),
+              Switch(
+                value: _anonymous, 
+                onChanged: (v) => setState(() => _anonymous = v),
+                activeThumbColor: AppColors.primary,
+                activeTrackColor: AppColors.primary.withValues(alpha: 0.2),
+              ),
             ]),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 40),
 
           // Submit button
-          ElevatedButton(
-            onPressed: _submitting ? null : _submit,
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 60),
-              backgroundColor: AppColors.primary,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          SizedBox(
+            width: double.infinity,
+            height: 64,
+            child: ElevatedButton(
+              onPressed: _submitting ? null : _submit,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.black,
+                disabledBackgroundColor: Colors.white.withValues(alpha: 0.05),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 0,
+              ),
+              child: _submitting
+                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.black))
+                  : Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Text('INITIATE TRANSMISSION', style: GoogleFonts.outfit(fontWeight: FontWeight.w900, fontSize: 15, letterSpacing: 1.5)),
+                      const SizedBox(width: 12),
+                      const Icon(Icons.bolt_rounded, color: Colors.black, size: 20),
+                    ]),
             ),
-            child: _submitting
-                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Text('SUBMIT INCIDENT REPORT', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15, letterSpacing: 1.5)),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.send_rounded, color: Colors.white, size: 20),
-                  ]),
           ),
-          const SizedBox(height: 8),
-          Center(child: Text('ENCRYPTED VIA AES-256 · DELIVERED VIA TERMII SMS', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.outline, letterSpacing: 1.0))),
-          const SizedBox(height: 40),
+          const SizedBox(height: 16),
+          Center(child: Text('AES-256 ENCRYPTED TUNNEL · MISSION CRITICAL DATA', style: GoogleFonts.outfit(fontSize: 9, fontWeight: FontWeight.w900, color: Colors.white24, letterSpacing: 1.0))),
+          const SizedBox(height: 60),
         ],
       ),
+    );
+  }
+}
+
+class _DropdownSection extends StatelessWidget {
+  final String label;
+  final String? value;
+  final List<String> items;
+  final ValueChanged<String?> onChanged;
+
+  const _DropdownSection({required this.label, required this.value, required this.items, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(label, style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.white24, letterSpacing: 1.5)),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.03),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: value,
+              items: items.map((i) => DropdownMenuItem(
+                value: i,
+                child: Text(i, style: GoogleFonts.outfit(fontSize: 14, color: Colors.white, fontWeight: FontWeight.w600)),
+              )).toList(),
+              onChanged: onChanged,
+              dropdownColor: const Color(0xFF1A1A1A),
+              isExpanded: true,
+              hint: Text('SELECT...', style: GoogleFonts.outfit(fontSize: 13, color: Colors.white24)),
+              icon: const Icon(Icons.arrow_drop_down_rounded, color: AppColors.primary),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -285,7 +436,7 @@ class _SectionLabel extends StatelessWidget {
   final String label;
   const _SectionLabel(this.label);
   @override
-  Widget build(BuildContext context) => Text(label, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.outline, letterSpacing: 2.0));
+  Widget build(BuildContext context) => Text(label, style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.white24, letterSpacing: 2.0));
 }
 
 class _MediaBtn extends StatelessWidget {
@@ -296,12 +447,16 @@ class _MediaBtn extends StatelessWidget {
     child: GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 72,
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), boxShadow: [BoxShadow(color: Colors.black.withAlpha(8), blurRadius: 8)]),
+        height: 80,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1A1A),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white10),
+        ),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, color: AppColors.secondary, size: 24),
-          const SizedBox(height: 4),
-          Text(label, style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 1.0)),
+          Icon(icon, color: AppColors.primary, size: 24),
+          const SizedBox(height: 8),
+          Text(label, style: GoogleFonts.outfit(fontSize: 9, fontWeight: FontWeight.w900, color: Colors.white70, letterSpacing: 1.0)),
         ]),
       ),
     ),

@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 final alertServiceProvider = Provider<AlertService>((ref) {
   return AlertService();
@@ -29,6 +30,9 @@ class AlertService {
     bool isCritical = false,
     String priority = 'HIGH',
     List<String>? attachments,
+    String? geoLga,
+    String? geoWard,
+    String? geoPu,
   }) async {
     double finalLat = latitude ?? 9.9167; // Fallback Jos loc
     double finalLng = longitude ?? 8.8917;
@@ -36,13 +40,20 @@ class AlertService {
     try {
       final permStatus = await Permission.locationWhenInUse.status;
       if (permStatus.isGranted) {
-        final pos = await Geolocator.getLastKnownPosition();
-        if (pos != null) {
-          finalLat = pos.latitude;
-          finalLng = pos.longitude;
-        } else {
-           debugPrint('[SYS_WARN] AlertService: Last Known Position is null. Firing generic fallback.');
-        }
+        // Attempt fresh high-accuracy position with strict timeout to preserve "Instant" feel
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        ).timeout(const Duration(seconds: 3), onTimeout: () async {
+          debugPrint('[SYS_WARN] Fresh location timeout. Using last known.');
+          return await Geolocator.getLastKnownPosition() ?? Position(
+            latitude: finalLat, longitude: finalLng, 
+            timestamp: DateTime.now(), accuracy: 0, altitude: 0, 
+            heading: 0, speed: 0, speedAccuracy: 0, altitudeAccuracy: 0, headingAccuracy: 0,
+          );
+        });
+        
+        finalLat = pos.latitude;
+        finalLng = pos.longitude;
       } else {
          debugPrint('[SYS_WARN] AlertService: Location permissions not granted instantly. Falling back.');
       }
@@ -64,14 +75,27 @@ class AlertService {
       'status': 'ACTIVE',
       'priority': priority,
       'assigned_to': 'POLLING_UNIT', // Central to the PRD Escrow pipeline
+      'geo_lga': geoLga,
+      'geo_ward': geoWard,
+      'geo_pu': geoPu,
       'attachments': attachments ?? [],
     };
 
     if (isOffline) {
       debugPrint('[SYS_WARN] Device Offline. Executing SMS Gateway Fallback.');
+      
+      // Map labels to 2-character codes for SMS brevity
+      final typeCodes = {
+        'Kidnap': 'KD', 'Fire': 'FR', 'Drug abuse': 'DA', 'Police brutality': 'PB',
+        'Flood': 'FL', 'Cyber crime': 'CC', 'Child abuse': 'CA', 
+        'Domestic violence': 'DV', 'Cattle rustling': 'CR', 'Community attack': 'CM'
+      };
+      final typeCode = typeCodes[type] ?? 'OT'; // OT = Other
+      
+      final gatewayNumber = dotenv.env['SMS_GATEWAY_NUMBER'] ?? '0800RAINBOW';
       final epoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final payload = 'ALERT|$reportedBy|LAT:$finalLat|LNG:$finalLng|TIME:$epoch';
-      final smsUri = Uri(scheme: 'sms', path: '0800RAINBOW', queryParameters: {'body': payload});
+      final payload = 'ALERT|$reportedBy|$typeCode|LAT:$finalLat|LNG:$finalLng|TIME:$epoch';
+      final smsUri = Uri(scheme: 'sms', path: gatewayNumber, queryParameters: {'body': payload});
       
       try {
         if (await canLaunchUrl(smsUri)) {

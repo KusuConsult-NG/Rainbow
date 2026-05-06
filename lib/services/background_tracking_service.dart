@@ -4,7 +4,6 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -20,16 +19,17 @@ class BackgroundTrackingService {
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
-        autoStart: true, // MUST be true for boot receivers to fire correctly on Android
-        autoStartOnBoot: true, 
+        // autoStart must be FALSE — the OS cannot post foreground notifications
+        // before the notification channel is created. The service is started
+        // explicitly via startTracking() only when an SOS is triggered.
+        autoStart: false,
+        autoStartOnBoot: false,
         isForegroundMode: true,
         notificationChannelId: 'rainbow_tracking',
         initialNotificationTitle: 'OPERATION RAINBOW',
         initialNotificationContent: 'Active Emergency Tracking',
         foregroundServiceNotificationId: 888,
       ),
-      // iOS configuration typically requires heavy p-list configurations 
-      // but is provided here as a dummy block based on PRD scopes.
       iosConfiguration: IosConfiguration(
         autoStart: false,
         onForeground: onStart,
@@ -79,6 +79,7 @@ void onStart(ServiceInstance service) async {
   // Isolate requires its own Firebase initialization for background threads
   try {
     await Firebase.initializeApp();
+    FirebaseDatabase.instance.setPersistenceEnabled(true);
   } catch (e) {
     // Already initialized
   }
@@ -87,6 +88,9 @@ void onStart(ServiceInstance service) async {
   final prefs = await SharedPreferences.getInstance();
   String? currentAlertId = prefs.getString('activeTrackingAlertId');
   String? currentUserId = prefs.getString('activeTrackingUserId');
+
+  // Tracking state variables
+  int inactiveSeconds = 0;
 
   // If autoStart triggered on boot, but we have no active alert, kill the service
   if (currentAlertId == null) {
@@ -115,60 +119,76 @@ void onStart(ServiceInstance service) async {
     }
   });
 
-  // State variables for compression and timeout
-  double? lastLat;
-  double? lastLng;
-  int inactiveSeconds = 0;
+  // PRD §3: Real-Time Tracking — Event-driven stream for battery efficiency
+  final locationSettings = AndroidSettings(
+    accuracy: LocationAccuracy.high,
+    distanceFilter: 10, // 10 meters distance filter
+    intervalDuration: const Duration(seconds: 10), // 10s sync interval
+    foregroundNotificationConfig: const ForegroundNotificationConfig(
+      notificationText: "Tracking Active...",
+      notificationTitle: "OPERATION RAINBOW",
+      enableWakeLock: true,
+    ),
+  );
 
-  // PRD Constraint: Transmit every 10 seconds
-  Timer.periodic(const Duration(seconds: 10), (timer) async {
-    if (service is AndroidServiceInstance) {
-      if (await service.isForegroundService() && currentAlertId != null) {
+  StreamSubscription<Position>? positionStream;
+
+  void startPositionStream() {
+    positionStream?.cancel();
+    positionStream = Geolocator.getPositionStream(locationSettings: locationSettings).listen((pos) async {
+      if (currentAlertId == null) return;
+
+      // Reset inactivity and update last known
+      inactiveSeconds = 0;
+
+      final userId = currentUserId ?? 'UNKNOWN';
+      try {
+        final trackingRef = FirebaseDatabase.instance.ref('tracking/$userId');
+        final historyRef = FirebaseDatabase.instance.ref('tracking_history/$userId');
         
-        try {
-          final pos = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
-          
-          // PRD: Movement trail compression (avoid DB overload)
-          if (lastLat != null && lastLng != null) {
-            final distance = Geolocator.distanceBetween(lastLat!, lastLng!, pos.latitude, pos.longitude);
-            if (distance < 5.0) {
-               // User hasn't moved 5 meters. Skip DB write.
-               inactiveSeconds += 10;
-               
-               // PRD: Tracking timeout if inactive (30 minutes)
-               if (inactiveSeconds >= 1800) {
-                 debugPrint('[TRACKING_UPDATE] Tracking timed out due to inactivity.');
-                 service.stopSelf();
-               }
-               return;
-            }
-          }
+        final data = {
+          'alert_id': currentAlertId,
+          'user_id': userId,
+          'lat': pos.latitude,
+          'lng': pos.longitude,
+          'timestamp': ServerValue.timestamp,
+          'speed': pos.speed,
+          'accuracy': pos.accuracy,
+        };
 
-          // Reset inactivity and update last known
-          inactiveSeconds = 0;
-          lastLat = pos.latitude;
-          lastLng = pos.longitude;
+        // 1. Update Real-time "Last Known"
+        await trackingRef.set(data);
+        
+        // 2. Append to persistent breadcrumb trail (Tactical History)
+        await historyRef.push().set({
+          'lat': pos.latitude,
+          'lng': pos.longitude,
+          'timestamp': ServerValue.timestamp,
+          'alert_id': currentAlertId,
+        });
 
-          final userId = currentUserId ?? 'UNKNOWN';
-          // Use RTDB for high-frequency telemetry instead of Firestore
-          await FirebaseDatabase.instance.ref('tracking/$userId').set({
-            'alert_id': currentAlertId,
-            'user_id': userId,
-            'lat': pos.latitude,
-            'lng': pos.longitude,
-            'timestamp': ServerValue.timestamp,
-          });
-          debugPrint('[TRACKING_UPDATE] Telemetry synced for alert $currentAlertId locally.');
-
-          service.setForegroundNotificationInfo(
-            title: "OPERATION RAINBOW",
-            content: "Tracking Active...", // Do not show coords in generic notification for OpSec
-          );
-
-        } catch (e) {
-          debugPrint('[SYS_ERR] BackgroundTracking: Error retrieving or pushing coords - $e');
-        }
+        debugPrint('[TRACKING_UPDATE] Telemetry & History synced: $userId');
+      } catch (e) {
+        debugPrint('[SYS_ERR] BackgroundTracking: DB Sync failed - $e');
       }
+    });
+  }
+
+  // Initial trigger
+  startPositionStream();
+
+  // Watchdog Timer for Inactivity/Timeout
+  Timer.periodic(const Duration(seconds: 60), (timer) async {
+    inactiveSeconds += 60;
+    if (inactiveSeconds >= 1800) { // 30 minutes
+      debugPrint('[TRACKING_UPDATE] Tracking timed out due to 30m inactivity.');
+      service.stopSelf();
     }
   });
+
+  service.on('stopService').listen((event) {
+    positionStream?.cancel();
+    service.stopSelf();
+  });
+
 }

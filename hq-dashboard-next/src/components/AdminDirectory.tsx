@@ -4,6 +4,8 @@ import { collection, onSnapshot, query, orderBy, deleteDoc, doc, setDoc, updateD
 import { db } from '@/lib/firebase';
 import { Users, UserPlus, Trash2, Loader2, RefreshCw, LogOut } from 'lucide-react';
 
+import { plateauTacticalMap, TacticalJurisdiction, TacticalWard } from '@/lib/tactical_mapping';
+
 interface StaffRecord {
   id: string;
   email?: string;
@@ -11,6 +13,9 @@ interface StaffRecord {
   badgeId?: string;
   displayName?: string;
   createdAt?: string;
+  geo_lga?: string;
+  geo_ward?: string;
+  geo_pu?: string;
 }
 
 const ROLES = [
@@ -27,6 +32,11 @@ export default function AdminDirectory() {
   const [pin, setPin] = useState('');
   const [role, setRole] = useState('POLLING_UNIT_OFFICER');
   const [displayName, setDisplayName] = useState('');
+  
+  const [selectedLga, setSelectedLga] = useState<TacticalJurisdiction | null>(null);
+  const [selectedWard, setSelectedWard] = useState<TacticalWard | null>(null);
+  const [selectedPu, setSelectedPu] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState<'ok' | 'err'>('ok');
@@ -67,11 +77,15 @@ export default function AdminDirectory() {
         role,
         displayName: displayName || badgeId.toUpperCase(),
         createdAt: new Date().toISOString(),
+        geo_lga: selectedLga?.name || null,
+        geo_ward: selectedWard?.name || null,
+        geo_pu: selectedPu || null,
       });
 
       setMsg(`✓ BADGE SECURED: ${badgeId.toUpperCase()} · ${email}`);
       setMsgType('ok');
       setBadgeId(''); setPin(''); setDisplayName('');
+      setSelectedLga(null); setSelectedWard(null); setSelectedPu('');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Unknown error';
       setMsg(`ERROR: ${msg.includes('EMAIL_EXISTS') ? 'Badge ID already exists' : msg}`);
@@ -125,7 +139,7 @@ export default function AdminDirectory() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24 }}>
         {/* Provision Panel */}
         <div className="glass" style={{ borderRadius: 16, padding: 24, alignSelf: 'start' }}>
           <h3 style={{ fontSize: 13, fontWeight: 900, marginBottom: 22, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -146,16 +160,73 @@ export default function AdminDirectory() {
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: 1.2, marginBottom: 6 }}>ROLE</label>
-              <select value={role} onChange={e => setRole(e.target.value)} style={{ ...s, cursor: 'pointer' }}>
+              <select value={role} onChange={e => {
+                setRole(e.target.value);
+                setSelectedLga(null); setSelectedWard(null); setSelectedPu('');
+              }} style={{ ...s, cursor: 'pointer' }}>
                 {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
             </div>
+
+            {role !== 'HQ_OFFICER' && (
+              <>
+                <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: 12, border: '1px dashed var(--border)' }}>
+                  <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--accent)', letterSpacing: 1, marginBottom: 12 }}>JURISDICTIONAL BOUNDS</p>
+                  
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 6 }}>ASSIGNED LGA</label>
+                    <select 
+                      value={selectedLga?.id || ''} 
+                      onChange={e => {
+                        const lga = plateauTacticalMap.find(l => l.id === e.target.value);
+                        setSelectedLga(lga || null);
+                        setSelectedWard(null);
+                        setSelectedPu('');
+                      }} 
+                      style={s}
+                    >
+                      <option value="">Select LGA...</option>
+                      {plateauTacticalMap.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </select>
+                  </div>
+
+                  {(role === 'WARD_OFFICER' || role === 'POLLING_UNIT_OFFICER') && selectedLga && (
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 6 }}>ASSIGNED WARD</label>
+                      <select 
+                        value={selectedWard?.id || ''} 
+                        onChange={e => {
+                          const ward = selectedLga.wards.find(w => w.id === e.target.value);
+                          setSelectedWard(ward || null);
+                          setSelectedPu('');
+                        }} 
+                        style={s}
+                      >
+                        <option value="">Select Ward...</option>
+                        {selectedLga.wards.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+
+                  {role === 'POLLING_UNIT_OFFICER' && selectedWard && (
+                    <div>
+                      <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 6 }}>ASSIGNED POLLING UNIT</label>
+                      <select value={selectedPu} onChange={e => setSelectedPu(e.target.value)} style={s}>
+                        <option value="">Select Polling Unit...</option>
+                        {selectedWard.pollingUnits.map(pu => <option key={pu} value={pu}>{pu}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
             <div>
               <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: 1.2, marginBottom: 6 }}>SECURE PIN / PASSWORD</label>
               <input type="password" value={pin} onChange={e => setPin(e.target.value)} placeholder="Min 6 characters" style={{ ...s, letterSpacing: pin ? 6 : 0 }} />
             </div>
 
-            <button onClick={provision} disabled={loading || !badgeId || !pin}
+            <button onClick={provision} disabled={loading || !badgeId || !pin || (role !== 'HQ_OFFICER' && !selectedLga)}
               style={{ padding: '13px', background: loading ? 'rgba(0,0,0,0.1)' : 'var(--accent)', color: '#ffffff', border: 'none', borderRadius: 10, cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 900, fontSize: 12, letterSpacing: 1.5, fontFamily: 'Inter,sans-serif', marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
               {loading ? <><Loader2 size={14} className="spin" /> PROVISIONING...</> : 'GENERATE CREDENTIALS'}
             </button>
@@ -190,7 +261,7 @@ export default function AdminDirectory() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['NAME / BADGE', 'EMAIL', 'ROLE', 'CREATED', 'ACTIONS'].map(h => (
+                  {['NAME / BADGE', 'ROLE', 'JURISDICTION', 'CREATED', 'ACTIONS'].map(h => (
                     <th key={h} style={{ padding: '10px 8px', fontSize: 10, color: 'var(--text-muted)', fontWeight: 800, letterSpacing: 1, textAlign: h === 'ACTIONS' ? 'right' : 'left' }}>{h}</th>
                   ))}
                 </tr>
@@ -202,11 +273,18 @@ export default function AdminDirectory() {
                       <div style={{ fontWeight: 900, fontSize: 13 }}>{s.displayName || s.badgeId || s.id}</div>
                       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{s.badgeId}</div>
                     </td>
-                    <td style={{ padding: '14px 8px', fontSize: 11, color: 'var(--text-muted)' }}>{s.email || '—'}</td>
                     <td style={{ padding: '14px 8px' }}>
                       <span style={{ fontSize: 9, fontWeight: 800, padding: '4px 8px', borderRadius: 20, background: 'rgba(229,57,53,0.15)', color: 'var(--accent)' }}>
                         {s.role?.replace('_', ' ') || 'CITIZEN'}
                       </span>
+                    </td>
+                    <td style={{ padding: '14px 8px' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-primary)', fontWeight: 800 }}>{s.geo_lga || 'NATIONAL'}</div>
+                      {(s.geo_ward || s.geo_pu) && (
+                        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+                          {s.geo_ward}{s.geo_pu ? ` · ${s.geo_pu}` : ''}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '14px 8px', fontSize: 10, color: 'var(--text-muted)' }}>
                       {s.createdAt ? new Date(s.createdAt).toLocaleDateString('en-GB') : '—'}

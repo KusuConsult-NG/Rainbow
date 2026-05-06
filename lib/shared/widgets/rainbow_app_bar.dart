@@ -17,71 +17,82 @@ class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
   });
 
   @override
-  Size get preferredSize => const Size.fromHeight(72);
+  Size get preferredSize => const Size.fromHeight(80);
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFAF101A), Color(0xFFD32F2F)],
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        border: Border(
+          bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05), width: 1)
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Color(0x33AF101A),
-            blurRadius: 20,
-            offset: Offset(0, 8),
-          ),
-        ],
       ),
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
           child: Row(
             children: [
               if (showBack)
                 GestureDetector(
                   onTap: () => Navigator.of(context).pop(),
                   child: Container(
-                    width: 40,
-                    height: 40,
+                    width: 44,
+                    height: 44,
+                    margin: const EdgeInsets.only(right: 16),
                     decoration: BoxDecoration(
-                      color: AppColors.white.withAlpha(25),
-                      borderRadius: BorderRadius.circular(12),
+                      color: Colors.white.withValues(alpha: 0.02),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
                     ),
-                    child: const Icon(Icons.arrow_back_ios_new_rounded,
-                        color: AppColors.white, size: 18),
+                    child: const Icon(
+                      Icons.arrow_back_ios_new_rounded,
+                      color: Colors.white, 
+                      size: 16
+                    ),
                   ),
                 ),
-              if (showBack) const SizedBox(width: 12),
-              const Icon(Icons.shield_rounded,
-                  color: AppColors.white, size: 22),
-              const SizedBox(width: 10),
+              
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.1)),
+                ),
+                child: const Icon(
+                  Icons.radar_rounded,
+                  color: AppColors.primary, 
+                  size: 20
+                ),
+              ),
+              const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      title,
-                      style: GoogleFonts.inter(
-                        color: AppColors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                        letterSpacing: 0.5,
+                      title.toUpperCase(),
+                      style: GoogleFonts.outfit(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                        letterSpacing: 1.0,
                       ),
                     ),
                     if (subtitle != null)
-                      Text(
-                        subtitle!,
-                        style: GoogleFonts.inter(
-                          color: AppColors.white.withAlpha(178),
-                          fontWeight: FontWeight.w600,
-                          fontSize: 10,
-                          letterSpacing: 1.5,
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          subtitle!.toUpperCase(),
+                          style: GoogleFonts.outfit(
+                            color: Colors.white24,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 9,
+                            letterSpacing: 1.5,
+                          ),
                         ),
                       ),
                   ],

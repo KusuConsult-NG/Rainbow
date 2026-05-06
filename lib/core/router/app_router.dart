@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../features/splash/splash_screen.dart';
 import '../../features/auth/login_screen.dart';
-import '../../features/auth/agent_login_screen.dart';
 import '../../features/agent/agent_dashboard_screen.dart';
 import '../../features/onboarding/onboarding_permissions_screen.dart';
 import '../../features/onboarding/onboarding_profile_screen.dart';
@@ -21,9 +20,7 @@ import '../../core/constants/alert_categories.dart';
 class AppRoutes {
   AppRoutes._();
   static const String splash = '/splash';
-  static const String roleSelection = '/role-selection';
   static const String login = '/login';
-  static const String agentLogin = '/agent-login';
   static const String agentDashboard = '/agent-dashboard';
   static const String onboardingPermissions = '/onboarding/permissions';
   static const String onboardingProfile = '/onboarding/permissions/profile';
@@ -47,18 +44,10 @@ final GoRouter appRouter = GoRouter(
       path: AppRoutes.splash,
       pageBuilder: (c, s) => _fade(s, const SplashScreen()),
     ),
-    // ── Root entry point
+    // ── Unified Login
     GoRoute(
       path: AppRoutes.login,
       pageBuilder: (c, s) => _fade(s, const LoginScreen()),
-    ),
-    // Agent login
-    GoRoute(
-      path: AppRoutes.agentLogin,
-      pageBuilder: (c, s) {
-        final roleId = s.extra as String? ?? 'AGENT';
-        return _slide(s, AgentLoginScreen(roleId: roleId));
-      },
     ),
     // Agent dashboard is a root (PopScope guarded inside the screen)
     GoRoute(

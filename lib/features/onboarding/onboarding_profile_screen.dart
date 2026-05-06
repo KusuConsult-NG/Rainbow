@@ -23,6 +23,9 @@ class _OnboardingProfileScreenState extends ConsumerState<OnboardingProfileScree
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
+  final _geoLgaController = TextEditingController(text: 'Jos North');
+  final _geoWardController = TextEditingController(text: 'Tudun Wada');
+  final _geoPuController = TextEditingController(text: 'Unit 004');
   File? _avatarFile;
   bool _isUploading = false;
   
@@ -41,6 +44,9 @@ class _OnboardingProfileScreenState extends ConsumerState<OnboardingProfileScree
     _nameController.dispose();
     _phoneController.dispose();
     _addressController.dispose();
+    _geoLgaController.dispose();
+    _geoWardController.dispose();
+    _geoPuController.dispose();
     super.dispose();
   }
 
@@ -55,59 +61,137 @@ class _OnboardingProfileScreenState extends ConsumerState<OnboardingProfileScree
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               children: [
-                const SizedBox(height: 20),
-                Text('Your Profile', style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 28, letterSpacing: -0.8)),
-                const SizedBox(height: 4),
-                Text('This helps responders identify you quickly during emergencies.', style: GoogleFonts.inter(color: AppColors.onSurfaceVariant, fontSize: 13, height: 1.5)),
-                const SizedBox(height: 24),
+                const SizedBox(height: 32),
+                Text(
+                  'IDENTITY & LOCATION',
+                  style: GoogleFonts.outfit(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 28,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Map your identity to your local polling unit for rapid tactical response.',
+                  style: GoogleFonts.outfit(
+                    color: Colors.white38,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 40),
 
-                // Avatar picker
+                // Tactical Avatar Picker
                 Center(
                   child: GestureDetector(
                     onTap: _pickAvatar,
                     child: Stack(
                       children: [
                         Container(
-                          width: 100,
-                          height: 100,
+                          width: 120,
+                          height: 120,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: AppColors.surfaceContainerHigh,
-                            border: Border.all(color: AppColors.primary.withAlpha(80), width: 3),
-                            image: _avatarFile != null 
-                              ? DecorationImage(image: FileImage(_avatarFile!), fit: BoxFit.cover)
-                              : null,
+                            color: Colors.white.withValues(alpha: 0.02),
+                            border: Border.all(
+                              color: AppColors.primary.withValues(alpha: 0.2),
+                              width: 2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.primary.withValues(alpha: 0.05),
+                                blurRadius: 20,
+                                spreadRadius: 2,
+                              )
+                            ],
                           ),
-                          child: _avatarFile == null ? const Icon(Icons.person_rounded, size: 56, color: AppColors.outline) : null,
+                          child: ClipOval(
+                            child: _avatarFile != null 
+                              ? Image.file(_avatarFile!, fit: BoxFit.cover)
+                              : Center(
+                                  child: Icon(
+                                    Icons.person_rounded,
+                                    size: 64,
+                                    color: Colors.white.withValues(alpha: 0.1),
+                                  ),
+                                ),
+                          ),
                         ),
                         Positioned(
-                          bottom: 0, right: 0,
+                          bottom: 4,
+                          right: 4,
                           child: Container(
-                            width: 32, height: 32,
-                            decoration: const BoxDecoration(shape: BoxShape.circle, color: AppColors.primary),
-                            child: const Icon(Icons.camera_alt_rounded, size: 16, color: Colors.white),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: AppColors.background, width: 3),
+                            ),
+                            child: const Icon(Icons.camera_alt_rounded, size: 16, color: Colors.black),
                           ),
                         ),
                       ],
                     ),
                   ),
                 ),
+                const SizedBox(height: 48),
+
+                _TacticalField(
+                  label: 'FULL NAME',
+                  controller: _nameController,
+                  hint: 'Enter identification name',
+                  icon: Icons.badge_rounded,
+                ),
                 const SizedBox(height: 24),
 
-                const _FormLabel('Full Name'),
-                _TextField(controller: _nameController, hint: 'John Adamu', icon: Icons.person_outline_rounded),
-                const SizedBox(height: 16),
+                _TacticalField(
+                  label: 'PHONE NUMBER',
+                  controller: _phoneController,
+                  hint: '+234 000 000 0000',
+                  icon: Icons.phone_android_rounded,
+                  type: TextInputType.phone,
+                ),
+                const SizedBox(height: 24),
 
-                const _FormLabel('Phone Number'),
-                _TextField(controller: _phoneController, hint: '+234 800 000 0000', icon: Icons.phone_outlined, type: TextInputType.phone),
-                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _TacticalField(
+                        label: 'LGA',
+                        controller: _geoLgaController,
+                        hint: 'e.g. Jos North',
+                        icon: Icons.map_rounded,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _TacticalField(
+                        label: 'WARD',
+                        controller: _geoWardController,
+                        hint: 'e.g. Tudun Wada',
+                        icon: Icons.layers_rounded,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
 
-                const _FormLabel('Home Address'),
-                _TextField(controller: _addressController, hint: 'No. 12, Jos Street, Plateau State', icon: Icons.home_outlined),
-                const SizedBox(height: 16),
+                _TacticalField(
+                  label: 'POLLING UNIT',
+                  controller: _geoPuController,
+                  hint: 'Enter your polling unit name',
+                  icon: Icons.how_to_reg_rounded,
+                ),
+                const SizedBox(height: 24),
 
-
-                const SizedBox(height: 100),
+                _TacticalField(
+                  label: 'RESIDENTIAL ADDRESS',
+                  controller: _addressController,
+                  hint: 'Home tactical location',
+                  icon: Icons.location_city_rounded,
+                ),
+                
+                const SizedBox(height: 120),
               ],
             ),
           ),
@@ -121,7 +205,10 @@ class _OnboardingProfileScreenState extends ConsumerState<OnboardingProfileScree
           
           if (_nameController.text.trim().isEmpty) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Please enter your full name'), backgroundColor: Colors.red),
+              const SnackBar(
+                content: Text('IDENTIFICATION REQUIRED'),
+                backgroundColor: AppColors.emergency,
+              ),
             );
             return;
           }
@@ -145,6 +232,9 @@ class _OnboardingProfileScreenState extends ConsumerState<OnboardingProfileScree
                   ? (user.phoneNumber ?? '')
                   : _phoneController.text.trim(),
               'address': _addressController.text.trim(),
+              'geo_lga': _geoLgaController.text.trim(),
+              'geo_ward': _geoWardController.text.trim(),
+              'geo_pu': _geoPuController.text.trim(),
               if (avatarUrl != null) 'avatar': avatarUrl,
               'role': 'CITIZEN',
               'roleLabel': 'Citizen',
@@ -152,57 +242,82 @@ class _OnboardingProfileScreenState extends ConsumerState<OnboardingProfileScree
               'profileComplete': true,
             }, SetOptions(merge: true));
           } catch (e) {
-            debugPrint('[SYS_ERR] Profile save failed: $e');
-            if (mounted) {
-              // ignore: use_build_context_synchronously
+            if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Failed to save profile: $e'), backgroundColor: Colors.red),
+                SnackBar(
+                  content: Text('TRANSMISSION ERROR: $e'),
+                  backgroundColor: AppColors.emergency,
+                ),
               );
             }
           }
-          if (mounted) {
+          if (context.mounted) {
             setState(() => _isUploading = false);
-            // ignore: use_build_context_synchronously
             context.go(AppRoutes.onboardingContacts);
           }
         },
-        nextLabel: _isUploading ? 'SAVING PROFILE...' : 'NEXT: EMERGENCY CONTACTS',
+        nextLabel: _isUploading ? 'SYNCHRONIZING...' : 'ESTABLISH COMMS LINK',
       ),
     );
   }
 }
 
-class _FormLabel extends StatelessWidget {
+class _TacticalField extends StatelessWidget {
   final String label;
-  const _FormLabel(this.label);
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: Text(label, style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 12, color: AppColors.onSurfaceVariant, letterSpacing: 0.5)),
-  );
-}
-
-class _TextField extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
   final IconData icon;
   final TextInputType type;
-  const _TextField({required this.controller, required this.hint, required this.icon, this.type = TextInputType.text});
+
+  const _TacticalField({
+    required this.label,
+    required this.controller,
+    required this.hint,
+    required this.icon,
+    this.type = TextInputType.text,
+  });
 
   @override
-  Widget build(BuildContext context) => TextField(
-    controller: controller,
-    keyboardType: type,
-    style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 14),
-    decoration: InputDecoration(
-      hintText: hint,
-      hintStyle: GoogleFonts.inter(color: AppColors.outline, fontSize: 14),
-      prefixIcon: Icon(icon, color: AppColors.outline, size: 20),
-      filled: true,
-      fillColor: Colors.white,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.primary, width: 2)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    ),
-  );
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(
+            label,
+            style: GoogleFonts.outfit(
+              color: Colors.white24,
+              fontWeight: FontWeight.w900,
+              fontSize: 10,
+              letterSpacing: 2.0,
+            ),
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.02),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+          ),
+          child: TextField(
+            controller: controller,
+            keyboardType: type,
+            style: GoogleFonts.outfit(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 15,
+            ),
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: GoogleFonts.outfit(color: Colors.white12, fontSize: 14),
+              prefixIcon: Icon(icon, color: AppColors.primary.withValues(alpha: 0.4), size: 20),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }

@@ -9,7 +9,8 @@ plugins {
 android {
     namespace = "com.kusuconsult.rainbow"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // ndkVersion = flutter.ndkVersion
+    buildToolsVersion = "34.0.0"
 
     compileOptions {
         // Required for coreLibraryDesugaring and to fix D8 nest-class resolution errors

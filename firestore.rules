@@ -22,33 +22,57 @@ service cloud.firestore {
     }
 
     // ─── Users ─────────────────────────────────────────────────────────────────
-    // PRD §6: Role validation at API level. Users may only read/write their own
-    // profile. HQ can read all and update any (for force-logout, role assignment).
     match /users/{userId} {
       allow read: if isAuth() && (request.auth.uid == userId || isStaff());
       allow create: if isAuth();
       allow update: if isAuth() && (request.auth.uid == userId || isHQ());
       allow delete: if isHQ();
 
-      // PRD §5: Emergency contacts — strictly private per citizen
       match /emergency_contacts/{contactId} {
         allow read, write: if isAuth() && request.auth.uid == userId;
       }
     }
 
-    // ─── Alerts ────────────────────────────────────────────────────────────────
-    // PRD §14: Rate limiting note — Firestore rules cannot enforce rate limits;
-    // enforce via Cloud Functions App Check + backend validation.
-    // PRD §6.5: Alerts are immutable once closed — no deletes ever.
+    // ─── Alerts (RBAC & Jurisdictional Isolation) ──────────────────────────────
     match /alerts/{alertId} {
+      function getUser() {
+        return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      }
+
       allow create: if isAuth();
-      // Citizens can only read their own alerts. Staff sees all within their scope.
+      
       allow read: if isAuth() && (
-        resource.data.reportedBy == request.auth.uid || isStaff()
+        resource.data.reportedBy == request.auth.uid || 
+        isHQ() || 
+        (isStaff() && (
+          (getUser().role == 'LGA_OFFICER' && resource.data.geo_lga == getUser().lga) ||
+          (getUser().role == 'WARD_OFFICER' && resource.data.geo_ward == getUser().ward) ||
+          (getUser().role == 'POLLING_UNIT_OFFICER' && resource.data.geo_pu == getUser().pu)
+        ))
       );
-      // Only staff can update status/assignment
-      allow update: if isStaff();
-      allow delete: if false; // PRD: immutable audit log
+
+      // HQ Override: HQ can update any alert. 
+      // Tiered Officers: Can only update if alert is assigned to their tier AND in their location.
+      allow update: if isStaff() && (
+        isHQ() ||
+        (
+          getUser().role == 'LGA_OFFICER' && 
+          resource.data.assigned_to == 'LGA' && 
+          resource.data.geo_lga == getUser().lga
+        ) ||
+        (
+          getUser().role == 'WARD_OFFICER' && 
+          resource.data.assigned_to == 'WARD' && 
+          resource.data.geo_ward == getUser().ward
+        ) ||
+        (
+          getUser().role == 'POLLING_UNIT_OFFICER' && 
+          resource.data.assigned_to == 'POLLING_UNIT' && 
+          resource.data.geo_pu == getUser().pu
+        )
+      );
+
+      allow delete: if false; // Immutable audit trail
     }
 
     // ─── Tracking ──────────────────────────────────────────────────────────────

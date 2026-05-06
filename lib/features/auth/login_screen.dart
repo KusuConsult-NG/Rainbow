@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_colors.dart';
@@ -10,6 +9,7 @@ import '../../services/auth_service.dart';
 import '../../services/device_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -18,29 +18,41 @@ class LoginScreen extends ConsumerStatefulWidget {
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends ConsumerState<LoginScreen> with SingleTickerProviderStateMixin {
-  final _phoneController = TextEditingController();
-  final _otpController = TextEditingController();
-  bool _otpSent = false;
+class _LoginScreenState extends ConsumerState<LoginScreen>
+    with SingleTickerProviderStateMixin {
+  final _credentialController = TextEditingController();
+  final _secondaryController = TextEditingController();
+  
+  bool _secondarySent = false;
+  bool _isAgentFlow = false;
   bool _loading = false;
-  late AnimationController _shieldController;
+  bool _obscurePassword = true;
+  
+  late AnimationController _pulseController;
   StreamSubscription<User?>? _authSubscription;
 
   @override
   void initState() {
     super.initState();
-    _shieldController = AnimationController(
+    _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
     )..repeat(reverse: true);
 
-    // Listen for automatic sign-ins (Test Numbers / Android Auto-Retrieval)
     _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) async {
       if (user != null && mounted) {
         _authSubscription?.cancel();
         final prefs = await SharedPreferences.getInstance();
         final hasOnboarded = prefs.getBool('hasOnboarded') ?? false;
-        if (mounted) {
+        
+        // Let's check if they are an agent or a citizen by checking users collection
+        final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        if (!mounted) return;
+        
+        if (doc.exists && doc.data()?['role'] != null) {
+          final role = doc.data()!['role'] as String;
+          context.go(AppRoutes.agentDashboard, extra: role);
+        } else {
           context.go(hasOnboarded ? AppRoutes.home : AppRoutes.onboardingPermissions);
         }
       }
@@ -50,115 +62,109 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with SingleTickerProv
   @override
   void dispose() {
     _authSubscription?.cancel();
-    _phoneController.dispose();
-    _otpController.dispose();
-    _shieldController.dispose();
+    _credentialController.dispose();
+    _secondaryController.dispose();
+    _pulseController.dispose();
     super.dispose();
   }
 
-  void _processLogin() async {
-    final input = _phoneController.text.trim();
+  void _submitCredential() async {
+    final input = _credentialController.text.trim();
     if (input.isEmpty) return;
+    
+    // Check if phone or agent code (starts with + or contains only digits and spaces)
+    final isPhone = RegExp(r'^\+?[0-9\s]+$').hasMatch(input);
 
-    // Determine if it's an access code (contains letters) or a phone number.
-    final isAccessCode = input.contains(RegExp(r'[A-Za-z]'));
-
-    if (isAccessCode) {
-      _processAgentLogin(input);
+    if (isPhone) {
+      setState(() {
+        _loading = true;
+        _isAgentFlow = false;
+      });
+      await ref.read(authServiceProvider).verifyPhoneNumber(input);
+      final error = ref.read(authServiceProvider).lastAuthError;
+      if (mounted) {
+        setState(() => _loading = false);
+        if (error != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $error'), backgroundColor: AppColors.primary),
+          );
+        } else {
+          setState(() => _secondarySent = true);
+        }
+      }
     } else {
-      _sendOtp();
+      // Agent flow
+      setState(() {
+        _isAgentFlow = true;
+        _secondarySent = true;
+      });
     }
   }
 
-  void _processAgentLogin(String code) async {
+  void _verifySecondary() async {
+    if (_secondaryController.text.isEmpty) return;
     setState(() => _loading = true);
 
-    try {
-      final badgeId = code.toLowerCase();
-      // Since they only entered an access code, use it as the password as well,
-      // or use a unified fallback password pattern. For flexibility, we use the code.
-      // (This matches standard "Access Code" patterns for field devices)
-      final emailDomain = badgeId.contains('@') ? '' : '@operationrainbow.plateau.gov.ng';
-      final formattedEmail = '$badgeId$emailDomain';
-      
-      final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: formattedEmail,
-        password: badgeId, // Access Code serves as both ID and secure key.
-      );
-
-      if (cred.user != null) {
-        await DeviceService().registerDeviceSession(cred.user!.uid);
-        DeviceService().listenForForcedLogout(cred.user!.uid, () {
-          if (mounted) context.go(AppRoutes.login);
-        });
-      }
-
+    if (!_isAgentFlow) {
+      final success = await ref.read(authServiceProvider).verifyOTP('', _secondaryController.text.trim());
+      final error = ref.read(authServiceProvider).lastAuthError;
       if (mounted) {
         setState(() => _loading = false);
-        // Determine role from code pattern if needed, else default to Dashboard.
-        // Wait, standard agents go to agentDashboard. We'll pass 'AGENT' as roleId.
-        // The dashboard itself relies on Firestore user claims/roles.
-        context.go(AppRoutes.agentDashboard, extra: 'AGENT');
+        if (success) {
+          _authSubscription?.cancel();
+          final user = FirebaseAuth.instance.currentUser;
+          if (user != null) {
+            await DeviceService().registerDeviceSession(user.uid);
+            DeviceService().listenForForcedLogout(user.uid, () {
+              if (mounted) context.go(AppRoutes.login);
+            });
+          }
+          final prefs = await SharedPreferences.getInstance();
+          final hasOnboarded = prefs.getBool('hasOnboarded') ?? false;
+          if (!mounted) return;
+          context.go(hasOnboarded ? AppRoutes.home : AppRoutes.onboardingPermissions);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Verification failed: ${error ?? "Please retry"}'), backgroundColor: AppColors.primary),
+          );
+        }
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Invalid Access Code'),
-            backgroundColor: Colors.red,
-          ),
+    } else {
+      // Agent login
+      try {
+        final badgeId = _credentialController.text.trim().toLowerCase();
+        final cleanBadgeId = badgeId.startsWith('access-') ? badgeId.substring(7) : badgeId;
+        final pin = _secondaryController.text;
+        
+        final emailDomain = cleanBadgeId.contains('@') ? '' : '@operationrainbow.plateau.gov.ng';
+        final formattedEmail = '$cleanBadgeId$emailDomain';
+        
+        final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: formattedEmail,
+          password: pin,
         );
-      }
-    }
-  }
 
-  void _sendOtp() async {
-    if (_phoneController.text.length < 10) return;
-    setState(() => _loading = true);
-    
-    await ref.read(authServiceProvider).verifyPhoneNumber(_phoneController.text.trim());
-
-    final error = ref.read(authServiceProvider).lastAuthError;
-    if (mounted) {
-      setState(() { _loading = false; });
-      if (error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send OTP: $error'), backgroundColor: Colors.red),
-        );
-      } else {
-        setState(() { _otpSent = true; });
-      }
-    }
-  }
-
-  void _verifyOtp() async {
-    if (_otpController.text.length < 6) return;
-    setState(() => _loading = true);
-    
-    final success = await ref.read(authServiceProvider).verifyOTP('', _otpController.text.trim());
-    final error = ref.read(authServiceProvider).lastAuthError;
-    
-    if (mounted) {
-      setState(() => _loading = false);
-      if (success) {
-        _authSubscription?.cancel();
-        final user = FirebaseAuth.instance.currentUser;
-        if (user != null) {
-          // PRD §5 + §14: Device binding on citizen login
-          await DeviceService().registerDeviceSession(user.uid);
-          DeviceService().listenForForcedLogout(user.uid, () {
+        if (cred.user != null) {
+          await DeviceService().registerDeviceSession(cred.user!.uid);
+          DeviceService().listenForForcedLogout(cred.user!.uid, () {
             if (mounted) context.go(AppRoutes.login);
           });
+          
+          final doc = await FirebaseFirestore.instance.collection('users').doc(cred.user!.uid).get();
+          final role = doc.data()?['role'] ?? 'HQ_OFFICER';
+          
+          if (mounted) {
+            setState(() => _loading = false);
+            context.go(AppRoutes.agentDashboard, extra: role);
+          }
         }
-        final prefs = await SharedPreferences.getInstance();
-        final hasOnboarded = prefs.getBool('hasOnboarded') ?? false;
-        if (!mounted) return;
-        context.go(hasOnboarded ? AppRoutes.home : AppRoutes.onboardingPermissions);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Verification Failed: ${error ?? "Unknown Error"}'), duration: const Duration(seconds: 4)),
-        );
+      } catch (e) {
+        if (mounted) {
+          setState(() => _loading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Access denied.'), backgroundColor: Colors.red),
+          );
+        }
       }
     }
   }
@@ -167,97 +173,90 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with SingleTickerProv
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.primary,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
       body: SafeArea(
         child: Column(
           children: [
-            // Header visual
+            // ── Stealth header with branding ──────────────────────────
             Expanded(
-              flex: 2,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Positioned(
-                    top: 16,
-                    left: 16,
-                    child: IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      onPressed: () {
-                        if (context.canPop()) {
-                          context.pop();
-                        } else {
-                          // No longer falling back to roleSelection, just exit app
-                          SystemNavigator.pop();
-                        }
-                      },
-                    ),
-                  ),
-                  // Background glow
-                  AnimatedBuilder(
-                    animation: _shieldController,
-                    builder: (_, __) => Container(
-                      width: 280 + _shieldController.value * 30,
-                      height: 280 + _shieldController.value * 30,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white.withAlpha((_shieldController.value * 15).toInt()),
-                      ),
-                    ),
-                  ),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.shield_rounded, color: Colors.white, size: 100),
-                      const SizedBox(height: 16),
-                      Text(
-                        'OPERATION RAINBOW',
-                        style: GoogleFonts.inter(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedBuilder(
+                      animation: _pulseController,
+                      builder: (_, __) => Container(
+                        width: 90 + _pulseController.value * 10,
+                        height: 90 + _pulseController.value * 10,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withAlpha(
+                            (20 + _pulseController.value * 15).toInt(),
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.shield_rounded,
                           color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 22,
-                          letterSpacing: -0.5,
+                          size: 52,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'PLATEAU STATE EMERGENCY RESPONSE',
-                        style: GoogleFonts.inter(
-                          color: Colors.white60,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 10,
-                          letterSpacing: 2.0,
-                        ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'SECURE ACCESS',
+                      style: GoogleFonts.inter(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 20,
+                        letterSpacing: 2.0,
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'OPERATION RAINBOW',
+                      style: GoogleFonts.inter(
+                        color: Colors.white60,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                        letterSpacing: 2.5,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
 
-            // Login card
+            // ── White card at bottom ───────────────────────────────
             Container(
               decoration: const BoxDecoration(
-                color: AppColors.background,
+                color: Colors.white,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
               ),
-              padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+              padding: const EdgeInsets.fromLTRB(24, 32, 24, 48),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    _otpSent ? 'Enter OTP' : 'Sign In',
+                    _secondarySent ? (_isAgentFlow ? 'Authorization' : 'Verify Code') : 'Sign In',
                     style: GoogleFonts.inter(
                       fontWeight: FontWeight.w900,
                       fontSize: 28,
-                      letterSpacing: -0.8,
+                      color: Colors.black87,
+                      letterSpacing: -0.5,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
                   Text(
-                    _otpSent
-                        ? 'Enter the 6-digit code sent to ${_phoneController.text}'
+                    _secondarySent
+                        ? (_isAgentFlow ? 'Enter your secure PIN' : 'Enter the 6-digit code sent to your phone')
                         : 'Enter your registered phone number or assigned access code',
                     style: GoogleFonts.inter(
-                      color: AppColors.onSurfaceVariant,
+                      color: Colors.black45,
                       fontSize: 13,
                       height: 1.4,
                     ),
@@ -265,27 +264,39 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with SingleTickerProv
                   const SizedBox(height: 24),
 
                   AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    child: _otpSent
-                        ? _buildOtpField()
-                        : _buildUnifiedField(),
+                    duration: const Duration(milliseconds: 250),
+                    child: _secondarySent 
+                        ? (_isAgentFlow ? _buildPasswordField() : _buildOtpField()) 
+                        : _buildCredentialField(),
                   ),
+
                   const SizedBox(height: 20),
 
-                  // Action button
                   SizedBox(
                     width: double.infinity,
                     height: 58,
                     child: ElevatedButton(
-                      onPressed: _loading ? null : (_otpSent ? _verifyOtp : _processLogin),
+                      onPressed: _loading ? null : (_secondarySent ? _verifySecondary : _submitCredential),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: AppColors.primary.withAlpha(120),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        elevation: 0,
+                      ),
                       child: _loading
                           ? const SizedBox(
                               width: 22,
                               height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
                           : Text(
-                              _otpSent ? 'VERIFY & CONTINUE' : 'SECURE LOGIN',
+                              _secondarySent ? 'VERIFY' : 'SECURE LOGIN',
                               style: GoogleFonts.inter(
                                 fontWeight: FontWeight.w900,
                                 fontSize: 14,
@@ -295,35 +306,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with SingleTickerProv
                     ),
                   ),
 
-                  if (_otpSent) ...[
+                  if (_secondarySent) ...[
                     const SizedBox(height: 16),
                     Center(
-                      child: GestureDetector(
-                        onTap: () => setState(() => _otpSent = false),
+                      child: TextButton(
+                        onPressed: () => setState(() {
+                          _secondarySent = false;
+                          _secondaryController.clear();
+                        }),
                         child: Text(
-                          'Change number',
+                          'Change credential',
                           style: GoogleFonts.inter(
                             color: AppColors.primary,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w600,
                             fontSize: 13,
                           ),
                         ),
                       ),
                     ),
                   ],
-                  const SizedBox(height: 16),
 
-
-
-                  // Terms
+                  const SizedBox(height: 20),
                   Center(
                     child: Text(
                       'By continuing, you agree to Operation Rainbow\nTerms of Service & Privacy Policy',
                       textAlign: TextAlign.center,
                       style: GoogleFonts.inter(
-                        color: AppColors.outline,
+                        color: Colors.black26,
                         fontSize: 11,
-                        height: 1.5,
+                        height: 1.6,
                       ),
                     ),
                   ),
@@ -336,36 +347,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with SingleTickerProv
     );
   }
 
-  Widget _buildUnifiedField() {
+  Widget _buildCredentialField() {
     return TextField(
-      key: const ValueKey('phone_or_code'),
-      controller: _phoneController,
-      keyboardType: TextInputType.visiblePassword,
-      style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 18),
+      key: const ValueKey('credential'),
+      controller: _credentialController,
+      keyboardType: TextInputType.text,
+      style: GoogleFonts.inter(
+        fontWeight: FontWeight.w600,
+        fontSize: 16,
+        color: Colors.black87,
+      ),
       decoration: InputDecoration(
-        hintText: '+234 800... or ACCESS-CODE',
+        hintText: '+234 800... or ACCESS-...',
+        hintStyle: GoogleFonts.inter(color: Colors.black26, fontSize: 15),
         filled: true,
-        fillColor: AppColors.surfaceContainerLow,
-        prefixIcon: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.shield_rounded, color: AppColors.primary, size: 22),
-              const SizedBox(width: 8),
-              Container(width: 1, height: 24, color: AppColors.outlineVariant),
-              const SizedBox(width: 12),
-            ],
-          ),
-        ),
+        fillColor: const Color(0xFFF5F5F5),
+        prefixIcon: const Icon(Icons.shield_rounded, color: AppColors.primary, size: 22),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: AppColors.primary, width: 2),
         ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       ),
     );
   }
@@ -373,30 +379,77 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with SingleTickerProv
   Widget _buildOtpField() {
     return TextField(
       key: const ValueKey('otp'),
-      controller: _otpController,
+      controller: _secondaryController,
       keyboardType: TextInputType.number,
       maxLength: 6,
       textAlign: TextAlign.center,
       style: GoogleFonts.inter(
+        color: AppColors.primary,
         fontWeight: FontWeight.w900,
-        fontSize: 28,
-        letterSpacing: 12,
+        fontSize: 32,
+        letterSpacing: 10,
       ),
       decoration: InputDecoration(
         counterText: '',
-        hintText: '——————',
+        hintText: '• • • • • •',
+        hintStyle: GoogleFonts.inter(
+          color: Colors.black12,
+          fontSize: 28,
+          letterSpacing: 8,
+        ),
         filled: true,
-        fillColor: AppColors.surfaceContainerLow,
+        fillColor: const Color(0xFFF5F5F5),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: AppColors.primary, width: 2),
         ),
+        contentPadding: const EdgeInsets.symmetric(vertical: 20),
+      ),
+    );
+  }
+
+  Widget _buildPasswordField() {
+    return TextField(
+      key: const ValueKey('password'),
+      controller: _secondaryController,
+      keyboardType: TextInputType.text,
+      obscureText: _obscurePassword,
+      style: GoogleFonts.inter(
+        fontWeight: FontWeight.w600,
+        fontSize: 16,
+        color: Colors.black87,
+      ),
+      decoration: InputDecoration(
+        hintText: 'Enter PIN',
+        hintStyle: GoogleFonts.inter(color: Colors.black26, fontSize: 15),
+        filled: true,
+        fillColor: const Color(0xFFF5F5F5),
+        prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppColors.primary, size: 22),
+        suffixIcon: IconButton(
+          icon: Icon(
+            _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+            color: AppColors.primary,
+          ),
+          onPressed: () {
+            setState(() {
+              _obscurePassword = !_obscurePassword;
+            });
+          },
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.primary, width: 2),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       ),
     );
   }
 }
-

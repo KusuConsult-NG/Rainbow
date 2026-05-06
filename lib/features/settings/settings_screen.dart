@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/router/app_router.dart';
+import '../../shared/widgets/rainbow_app_bar.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -52,18 +53,75 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _deleteAccount() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showModalBottomSheet<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Delete Account', style: GoogleFonts.inter(fontWeight: FontWeight.w800)),
-        content: Text('This will permanently delete your account and all associated data. This cannot be undone.', style: GoogleFonts.inter()),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text('DELETE', style: GoogleFonts.inter(color: Colors.red, fontWeight: FontWeight.w800)),
-          ),
-        ],
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+          border: Border.all(color: Colors.red.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delete_forever_rounded, color: Colors.red, size: 32),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'TERMINATE ACCOUNT',
+              style: GoogleFonts.outfit(
+                color: Colors.white,
+                fontWeight: FontWeight.w900,
+                fontSize: 20,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'This action is irreversible. All mission data, tactical reports, and profile telemetry will be permanently purged from the mainframe.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.outfit(color: Colors.white54, fontSize: 14),
+            ),
+            const SizedBox(height: 32),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      side: const BorderSide(color: Colors.white10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: Text('CANCEL', style: GoogleFonts.outfit(color: Colors.white)),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      elevation: 0,
+                    ),
+                    child: Text('TERMINATE', style: GoogleFonts.outfit(fontWeight: FontWeight.w900)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -75,69 +133,110 @@ class _SettingsScreenState extends State<SettingsScreen> {
         await user.delete();
         final prefs = await SharedPreferences.getInstance();
         await prefs.clear();
-        if (mounted) context.go(AppRoutes.login);
+        if (!mounted) return;
+        context.go(AppRoutes.login);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete account: $e'), backgroundColor: Colors.red),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('TERMINATION FAILED: $e'), backgroundColor: Colors.red),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    final displayName = _profile['name'] as String? ?? user?.displayName ?? 'Anonymous Citizen';
-    final phone = _profile['phone'] as String? ?? user?.phoneNumber ?? '—';
+    final displayName = _profile['name'] as String? ?? user?.displayName ?? 'ANONYMOUS CITIZEN';
+    final phone = _profile['phone'] as String? ?? user?.phoneNumber ?? '---';
     final avatarUrl = _profile['avatar'] as String?;
 
     return Scaffold(
-      backgroundColor: AppColors.surfaceContainerLowest,
-      appBar: AppBar(
-        backgroundColor: AppColors.primary,
-        elevation: 0,
-        title: Text('Settings', style: GoogleFonts.inter(fontWeight: FontWeight.w800, color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
+      backgroundColor: AppColors.background,
+      appBar: const RainbowAppBar(
+        title: 'COMMAND SETTINGS',
+        subtitle: 'CONFIGURING TACTICAL PROFILE',
+        showBack: true,
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : ListView(
               padding: const EdgeInsets.all(24),
               children: [
-                // Profile card
+                // Profile Card
                 Container(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(18),
-                    boxShadow: [BoxShadow(color: Colors.black.withAlpha(8), blurRadius: 10)],
+                    color: Colors.white.withValues(alpha: 0.03),
+                    borderRadius: BorderRadius.circular(24),
+                    border: AppColors.glassBorder,
                   ),
                   child: Row(
                     children: [
-                      CircleAvatar(
-                        radius: 32,
-                        backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
-                        backgroundColor: AppColors.primary.withAlpha(20),
-                        child: avatarUrl == null
-                            ? Text(displayName.isNotEmpty ? displayName[0].toUpperCase() : 'C',
-                                style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w900, color: AppColors.primary))
-                            : null,
+                      Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: [AppColors.primary, AppColors.primary.withValues(alpha: 0.1)],
+                          ),
+                        ),
+                        child: CircleAvatar(
+                          radius: 36,
+                          backgroundColor: AppColors.background,
+                          backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                          child: avatarUrl == null
+                              ? Text(
+                                  displayName.isNotEmpty ? displayName[0].toUpperCase() : 'C',
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppColors.primary,
+                                  ),
+                                )
+                              : null,
+                        ),
                       ),
-                      const SizedBox(width: 16),
+                      const SizedBox(width: 20),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(displayName, style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 16)),
-                            const SizedBox(height: 2),
-                            Text(phone, style: GoogleFonts.inter(fontSize: 13, color: AppColors.onSurfaceVariant)),
+                            Text(
+                              displayName.toUpperCase(),
+                              style: GoogleFonts.outfit(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 18,
+                                color: Colors.white,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
                             const SizedBox(height: 4),
+                            Text(
+                              phone,
+                              style: GoogleFonts.outfit(
+                                fontSize: 13,
+                                color: Colors.white38,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(color: AppColors.primary.withAlpha(20), borderRadius: BorderRadius.circular(6)),
-                              child: Text('CITIZEN', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w800, color: AppColors.primary, letterSpacing: 1.5)),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+                              ),
+                              child: Text(
+                                'ACTIVE OPERATIVE',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.primary,
+                                  letterSpacing: 1.5,
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -145,14 +244,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 32),
 
-                Text('PREFERENCES', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.5, color: AppColors.outline)),
-                const SizedBox(height: 12),
-
-                _SettingsTile(
+                _buildSectionHeader('MISSION PREFERENCES'),
+                const SizedBox(height: 16),
+                _TacticalSwitchTile(
                   title: 'Push Notifications',
-                  subtitle: 'Receive alerts when your incident is updated',
+                  subtitle: 'Receive real-time mission updates',
                   icon: Icons.notifications_active_outlined,
                   value: _notificationsEnabled,
                   onChanged: (v) {
@@ -160,9 +258,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _saveBool('setting_notifications', v);
                   },
                 ),
-                _SettingsTile(
-                  title: 'Background GPS',
-                  subtitle: 'Required for live tracking during emergencies',
+                _TacticalSwitchTile(
+                  title: 'Geospatial Telemetry',
+                  subtitle: 'Enable background GPS for field tracking',
                   icon: Icons.location_on_outlined,
                   value: _locationBackground,
                   onChanged: (v) {
@@ -170,9 +268,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _saveBool('setting_location_bg', v);
                   },
                 ),
-                _SettingsTile(
-                  title: 'Anonymous Reports by Default',
-                  subtitle: 'Your identity will not be shared with responders',
+                _TacticalSwitchTile(
+                  title: 'Stealth Reporting',
+                  subtitle: 'Enable anonymous reporting by default',
                   icon: Icons.visibility_off_outlined,
                   value: _anonymousDefault,
                   onChanged: (v) {
@@ -181,75 +279,182 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 ),
 
-                const SizedBox(height: 28),
-                Text('ACCOUNT', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.5, color: AppColors.outline)),
-                const SizedBox(height: 12),
-
-                // Edit contacts shortcut
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.contacts_outlined, color: AppColors.primary),
-                  title: Text('Emergency Contacts', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-                  subtitle: Text('Manage trusted contacts', style: GoogleFonts.inter(fontSize: 12, color: AppColors.onSurfaceVariant)),
-                  trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
+                const SizedBox(height: 32),
+                _buildSectionHeader('OPERATIONAL DATA'),
+                const SizedBox(height: 16),
+                _TacticalActionTile(
+                  title: 'Emergency Contacts',
+                  subtitle: 'Manage your high-assurance circle',
+                  icon: Icons.contacts_outlined,
                   onTap: () => context.push(AppRoutes.onboardingContacts),
                 ),
+                _TacticalActionTile(
+                  title: 'Security Clearance',
+                  subtitle: 'Update mission access credentials',
+                  icon: Icons.lock_outline_rounded,
+                  onTap: () {},
+                ),
 
-                // Sign out
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.logout_rounded, color: AppColors.outline),
-                  title: Text('Sign Out', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 32),
+                _buildSectionHeader('DANGER ZONE'),
+                const SizedBox(height: 16),
+                _TacticalActionTile(
+                  title: 'Sign Out',
+                  subtitle: 'Terminate current session',
+                  icon: Icons.logout_rounded,
                   onTap: () async {
                     await FirebaseAuth.instance.signOut();
                     final prefs = await SharedPreferences.getInstance();
                     await prefs.setBool('hasOnboarded', false);
-                    // ignore: use_build_context_synchronously
-                    if (mounted) context.go(AppRoutes.login);
+                    if (context.mounted) context.go(AppRoutes.login);
                   },
                 ),
-
-                // Delete account
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.delete_outline, color: Colors.red),
-                  title: Text('Delete Account', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: Colors.red)),
-                  subtitle: Text('Permanently removes all your data', style: GoogleFonts.inter(fontSize: 12, color: Colors.red.withAlpha(160))),
+                _TacticalActionTile(
+                  title: 'Purge Account',
+                  subtitle: 'Permanently delete all tactical data',
+                  icon: Icons.delete_forever_rounded,
+                  isDestructive: true,
                   onTap: _deleteAccount,
                 ),
 
-                const SizedBox(height: 16),
+                const SizedBox(height: 48),
                 Center(
-                  child: Text(
-                    'OPERATION RAINBOW v1.0.0\nPLATEAU STATE EMERGENCY RESPONSE',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.inter(fontSize: 9, color: AppColors.outline, letterSpacing: 1.5, fontWeight: FontWeight.w700),
+                  child: Column(
+                    children: [
+                      Text(
+                        'OPERATION RAINBOW MODERNIZATION',
+                        style: GoogleFonts.outfit(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white24,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'ENCRYPTED NODE: PR0-8842-RAINBOW',
+                        style: GoogleFonts.outfit(
+                          fontSize: 9,
+                          color: Colors.white10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 48),
               ],
             ),
     );
   }
+
+  Widget _buildSectionHeader(String title) {
+    return Text(
+      title,
+      style: GoogleFonts.outfit(
+        fontSize: 11,
+        fontWeight: FontWeight.w900,
+        color: Colors.white24,
+        letterSpacing: 2.0,
+      ),
+    );
+  }
 }
 
-class _SettingsTile extends StatelessWidget {
+class _TacticalSwitchTile extends StatelessWidget {
   final String title;
   final String subtitle;
   final IconData icon;
   final bool value;
   final ValueChanged<bool> onChanged;
 
-  const _SettingsTile({required this.title, required this.subtitle, required this.icon, required this.value, required this.onChanged});
+  const _TacticalSwitchTile({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.value,
+    required this.onChanged,
+  });
 
   @override
-  Widget build(BuildContext context) => SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        title: Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15)),
-        subtitle: Text(subtitle, style: GoogleFonts.inter(fontSize: 12, color: AppColors.onSurfaceVariant)),
-        secondary: Icon(icon, color: AppColors.primary),
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.02),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+      ),
+      child: SwitchListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+        title: Text(
+          title,
+          style: GoogleFonts.outfit(
+            fontWeight: FontWeight.w700,
+            fontSize: 15,
+            color: Colors.white,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: GoogleFonts.outfit(fontSize: 12, color: Colors.white38),
+        ),
+        secondary: Icon(icon, color: AppColors.primary.withValues(alpha: 0.7), size: 22),
         activeThumbColor: AppColors.primary,
+        activeTrackColor: AppColors.primary.withValues(alpha: 0.1),
         value: value,
         onChanged: onChanged,
-      );
+      ),
+    );
+  }
+}
+
+class _TacticalActionTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool isDestructive;
+
+  const _TacticalActionTile({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.onTap,
+    this.isDestructive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.02),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+      ),
+      child: ListTile(
+        onTap: onTap,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+        leading: Icon(
+          icon,
+          color: isDestructive ? Colors.redAccent.withValues(alpha: 0.7) : Colors.white38,
+          size: 22,
+        ),
+        title: Text(
+          title,
+          style: GoogleFonts.outfit(
+            fontWeight: FontWeight.w700,
+            fontSize: 15,
+            color: isDestructive ? Colors.redAccent : Colors.white,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: GoogleFonts.outfit(fontSize: 12, color: Colors.white38),
+        ),
+        trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white10, size: 20),
+      ),
+    );
+  }
 }

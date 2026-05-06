@@ -10,6 +10,9 @@ interface StaffRecord {
   role?: string;
   name?: string;
   uid?: string;
+  geo_lga?: string;
+  geo_ward?: string;
+  geo_pu?: string;
   createdAt?: any;
 }
 
@@ -20,6 +23,11 @@ export const AdminDirectory = () => {
   const [msg, setMsg] = useState('');
   const [staff, setStaff] = useState<StaffRecord[]>([]);
   const [loadingStaff, setLoadingStaff] = useState(true);
+  
+  const [role, setRole] = useState('POLLING_UNIT_OFFICER');
+  const [geoLga, setGeoLga] = useState('Jos North');
+  const [geoWard, setGeoWard] = useState('Tudun Wada');
+  const [geoPu, setGeoPu] = useState('Unit 004');
 
   // Live Firestore stream of all provisioned staff
   useEffect(() => {
@@ -41,6 +49,7 @@ export const AdminDirectory = () => {
       const formattedEmail = `${badgeId.toLowerCase()}${emailDomain}`;
       const apiKey = import.meta.env.VITE_FIREBASE_API_KEY || '***REMOVED-SECRET***';
       
+      // 1. Create Auth Account
       const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -50,7 +59,23 @@ export const AdminDirectory = () => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error?.message || 'Provisioning Failed');
 
-      setMsg(`✓ BADGE SECURED: ${badgeId}`);
+      const uid = data.localId;
+
+      // 2. Create Firestore Profile
+      const { setDoc, doc, serverTimestamp } = await import('firebase/firestore');
+      await setDoc(doc(db, 'users', uid), {
+        badgeId,
+        email: formattedEmail,
+        role,
+        geo_lga: geoLga,
+        geo_ward: geoWard,
+        geo_pu: geoPu,
+        name: badgeId, // Default name to badge ID
+        createdAt: serverTimestamp(),
+        type: 'respondent'
+      });
+
+      setMsg(`✓ BADGE SECURED & MAPPED: ${badgeId}`);
       setBadgeId('');
       setPin('');
     } catch (err: any) {
@@ -99,6 +124,43 @@ export const AdminDirectory = () => {
             <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
               Login: {badgeId ? `${badgeId.toLowerCase()}@operationrainbow.plateau.gov.ng` : '—'}
             </p>
+          </div>
+
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '8px' }}>TACTICAL ROLE</label>
+            <select
+              value={role} onChange={e => setRole(e.target.value)}
+              style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.5)', color: 'white', fontFamily: 'Inter' }}
+            >
+              <option value="HQ_OFFICER">HQ STRATEGIC COMMAND</option>
+              <option value="LGA_OFFICER">LGA TACTICAL COMMAND</option>
+              <option value="WARD_OFFICER">WARD FIELD COMMAND</option>
+              <option value="POLLING_UNIT_OFFICER">POLLING UNIT RESPONDENT</option>
+            </select>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '20px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '8px' }}>LGA</label>
+              <input
+                value={geoLga} onChange={e => setGeoLga(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.5)', color: 'white', fontSize: '12px' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '8px' }}>WARD</label>
+              <input
+                value={geoWard} onChange={e => setGeoWard(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.5)', color: 'white', fontSize: '12px' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '8px' }}>PU</label>
+              <input
+                value={geoPu} onChange={e => setGeoPu(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.5)', color: 'white', fontSize: '12px' }}
+              />
+            </div>
           </div>
 
           <div style={{ marginBottom: '32px' }}>
@@ -154,6 +216,9 @@ export const AdminDirectory = () => {
                       <div style={{ fontWeight: 900, fontSize: '13px' }}>{s.name || s.id}</div>
                       <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
                         {s.email || `${s.id}@operationrainbow.plateau.gov.ng`}
+                      </div>
+                      <div style={{ fontSize: '9px', color: 'var(--accent)', marginTop: '4px', fontWeight: 700 }}>
+                        {s.geo_lga || 'UNMAPPED'} · {s.geo_ward || '—'} · {s.geo_pu || '—'}
                       </div>
                     </td>
                     <td style={{ padding: '14px 0', fontSize: '12px', color: 'var(--text-muted)' }}>{s.role || 'Citizen'}</td>

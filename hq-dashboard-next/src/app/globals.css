@@ -1,57 +1,129 @@
-/* Operation Rainbow HQ — Global CSS */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Outfit:wght@400;700;900&display=swap');
 
 :root {
-  --bg-primary: #f8f9fa;
-  --bg-secondary: #ffffff;
-  --bg-card: #ffffff;
-  --bg-card-hover: #f1f3f5;
-  --border: #e9ecef;
-  --accent: #E53935;
-  --accent-dim: rgba(229,57,53,0.1);
-  --warning: #F57F17;
-  --warning-dim: rgba(245,127,23,0.1);
-  --success: #4CAF50;
-  --success-dim: rgba(76,175,80,0.1);
-  --duress: #b71c1c;
-  --text-primary: #212529;
-  --text-muted: #6c757d;
-  --text-dim: #adb5bd;
+  --bg-primary: #0a0c10;
+  --bg-secondary: #12151c;
+  --bg-card: rgba(22, 27, 34, 0.7);
+  --accent: #af101a;
+  --accent-dim: rgba(175, 16, 26, 0.1);
+  --warning: #ffab40;
+  --warning-dim: rgba(255, 171, 64, 0.1);
+  --duress: #af101a;
+  --duress-dim: rgba(175, 16, 26, 0.15);
+  --success: #00e676;
+  --success-dim: rgba(0, 230, 118, 0.1);
+  --text-primary: #f0f6fc;
+  --text-muted: #8b949e;
+  --text-dim: #484f58;
+  --border: rgba(48, 54, 61, 0.8);
+  --glass: rgba(13, 17, 23, 0.7);
+  --glow: 0 0 15px rgba(175, 16, 26, 0.3);
 }
 
-html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--bg-primary); color: var(--text-primary); }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 4px; }
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, sans-serif;
+  overflow: hidden;
+}
 
-/* Glass panel */
+h1, h2, h3, .tactical-font {
+  font-family: 'Outfit', sans-serif;
+  letter-spacing: -0.02em;
+}
+
 .glass {
-  background: var(--bg-card);
+  background: var(--glass);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
   border: 1px solid var(--border);
-  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03);
 }
 
-/* Pulse animation */
-@keyframes pulse-ring {
-  0% { transform: scale(0.9); opacity: 1; }
-  100% { transform: scale(1.8); opacity: 0; }
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.pulse-ring::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+  background: rgba(22, 27, 34, 0.9);
+}
+
+.pulse {
+  animation: pulse-animation 2s infinite;
+}
+
+@keyframes pulse-animation {
+  0% { box-shadow: 0 0 0 0px rgba(175, 16, 26, 0.4); }
+  100% { box-shadow: 0 0 0 12px rgba(175, 16, 26, 0); }
+}
+
+.duress-pulse {
+  animation: duress-pulse-animation 1.5s infinite;
+}
+
+@keyframes duress-pulse-animation {
+  0% { background: rgba(175, 16, 26, 0.2); }
+  50% { background: rgba(175, 16, 26, 0.5); }
+  100% { background: rgba(175, 16, 26, 0.2); }
+}
+
+.fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* Leaflet Map Overrides */
+.leaflet-container {
+  background: #0b0e14 !important;
+}
+.leaflet-bar {
+  border: 1px solid var(--border) !important;
+  box-shadow: none !important;
+}
+.leaflet-bar a {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+/* Force Brand Red Focus/Selection */
+::selection {
   background: var(--accent);
-  animation: pulse-ring 1.5s ease-out infinite;
+  color: white;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
-.spin { animation: spin 1s linear infinite; }
+*:focus {
+  outline-color: var(--accent) !important;
+}
 
-/* Fade in */
-@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-.fade-in { animation: fadeIn 0.35s ease forwards; }
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px var(--accent-dim) !important;
+}

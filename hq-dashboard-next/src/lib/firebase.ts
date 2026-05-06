@@ -12,8 +12,11 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID!,
 };
 
+import { getFunctions } from 'firebase/functions';
+
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export { app };
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const rtdb = getDatabase(app);
+export const functions = getFunctions(app);
