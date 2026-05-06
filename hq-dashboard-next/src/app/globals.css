@@ -1,23 +1,23 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Outfit:wght@400;700;900&display=swap');
 
 :root {
-  --bg-primary: #0a0c10;
-  --bg-secondary: #12151c;
-  --bg-card: rgba(22, 27, 34, 0.7);
-  --accent: #af101a;
-  --accent-dim: rgba(175, 16, 26, 0.1);
-  --warning: #ffab40;
-  --warning-dim: rgba(255, 171, 64, 0.1);
-  --duress: #af101a;
-  --duress-dim: rgba(175, 16, 26, 0.15);
-  --success: #00e676;
-  --success-dim: rgba(0, 230, 118, 0.1);
-  --text-primary: #f0f6fc;
-  --text-muted: #8b949e;
-  --text-dim: #484f58;
-  --border: rgba(48, 54, 61, 0.8);
-  --glass: rgba(13, 17, 23, 0.7);
-  --glow: 0 0 15px rgba(175, 16, 26, 0.3);
+  --bg-primary: #0f172a;   /* Slightly lighter slate-900 */
+  --bg-secondary: #1e293b; /* Slate-800 for depth */
+  --bg-card: rgba(30, 41, 59, 0.8);
+  --accent: #ef4444;       /* More vibrant tactical red */
+  --accent-dim: rgba(239, 68, 68, 0.1);
+  --warning: #f59e0b;
+  --warning-dim: rgba(245, 158, 11, 0.1);
+  --duress: #dc2626;
+  --duress-dim: rgba(220, 38, 38, 0.15);
+  --success: #10b981;
+  --success-dim: rgba(16, 185, 129, 0.1);
+  --text-primary: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --border: rgba(51, 65, 85, 0.5);
+  --glass: rgba(15, 23, 42, 0.7);
+  --glow: 0 0 20px rgba(239, 68, 68, 0.2);
 }
 
 * {
