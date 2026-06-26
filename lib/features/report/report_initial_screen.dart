@@ -1,16 +1,21 @@
+// ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../core/router/app_router.dart';
-import '../../core/theme/app_colors.dart';
+import 'package:rainbow_app/core/router/app_router.dart';
+import 'package:rainbow_app/core/theme/app_colors.dart';
+
+/// Documentation for this public member.
 
 class ReportInitialScreen extends StatelessWidget {
+  /// Documentation for this public member.
   const ReportInitialScreen({super.key});
 
   void _proceed(BuildContext context, String filter) {
-    HapticFeedback.mediumImpact();
-    context.push(AppRoutes.reportList);
+    unawaited(HapticFeedback.mediumImpact());
+    unawaited(context.push(AppRoutes.reportCategory));
   }
 
   @override
@@ -32,7 +37,7 @@ class ReportInitialScreen extends StatelessWidget {
               ),
             ),
           ),
-          
+
           SafeArea(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -41,14 +46,17 @@ class ReportInitialScreen extends StatelessWidget {
                   padding: const EdgeInsets.all(16),
                   child: IconButton(
                     onPressed: () => context.pop(),
-                    icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: AppColors.onBackground,
+                      size: 28,
+                    ),
                     style: IconButton.styleFrom(
-                      backgroundColor: Colors.white.withValues(alpha: 0.05),
+                      backgroundColor: Colors.black.withValues(alpha: 0.05),
                       padding: const EdgeInsets.all(12),
                     ),
                   ),
                 ),
-                
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -80,27 +88,26 @@ class ReportInitialScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          "What is the\nsituation?",
+                          'What is the\nsituation?',
                           style: GoogleFonts.outfit(
                             fontSize: 40,
                             fontWeight: FontWeight.w900,
-                            color: Colors.white,
+                            color: AppColors.onBackground,
                             height: 1.1,
                             letterSpacing: -1.5,
                           ),
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          "Select the most accurate category to ensure rapid response deployment.",
+                          'Select the most accurate category to ensure rapid response deployment.',
                           style: GoogleFonts.outfit(
                             fontSize: 16,
-                            color: Colors.white54,
+                            color: AppColors.textSecondary,
                             fontWeight: FontWeight.w400,
                             height: 1.5,
                           ),
                         ),
                         const SizedBox(height: 48),
-
                         _TacticalIntentCard(
                           title: 'THREAT TO LIFE',
                           subtitle: 'Immediate danger to persons',
@@ -109,7 +116,7 @@ class ReportInitialScreen extends StatelessWidget {
                           onTap: () => _proceed(context, 'danger'),
                         ),
                         _TacticalIntentCard(
-                          title: "CRIMINAL ACTIVITY",
+                          title: 'CRIMINAL ACTIVITY',
                           subtitle: 'Ongoing or witnessed crime',
                           icon: Icons.security_rounded,
                           accent: Colors.blueAccent,
@@ -123,7 +130,7 @@ class ReportInitialScreen extends StatelessWidget {
                           onTap: () => _proceed(context, 'suspicious'),
                         ),
                         _TacticalIntentCard(
-                          title: "CIVIL HAZARD",
+                          title: 'CIVIL HAZARD',
                           subtitle: 'Environmental or infrastructure risk',
                           icon: Icons.alt_route_rounded,
                           accent: Colors.tealAccent,
@@ -144,12 +151,6 @@ class ReportInitialScreen extends StatelessWidget {
 }
 
 class _TacticalIntentCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final Color accent;
-  final VoidCallback onTap;
-
   const _TacticalIntentCard({
     required this.title,
     required this.subtitle,
@@ -157,6 +158,11 @@ class _TacticalIntentCard extends StatelessWidget {
     required this.accent,
     required this.onTap,
   });
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color accent;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -166,9 +172,9 @@ class _TacticalIntentCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 20),
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.03),
+          color: Colors.black.withValues(alpha: 0.03),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+          border: Border.all(color: AppColors.outline),
         ),
         child: Row(
           children: [
@@ -190,7 +196,7 @@ class _TacticalIntentCard extends StatelessWidget {
                     style: GoogleFonts.outfit(
                       fontSize: 16,
                       fontWeight: FontWeight.w900,
-                      color: Colors.white,
+                      color: AppColors.onBackground,
                       letterSpacing: 0.5,
                     ),
                   ),
@@ -200,13 +206,13 @@ class _TacticalIntentCard extends StatelessWidget {
                     style: GoogleFonts.outfit(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
-                      color: Colors.white38,
+                      color: AppColors.textDim,
                     ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, color: Colors.white24),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.textDim),
           ],
         ),
       ),

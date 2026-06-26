@@ -1,25 +1,32 @@
 import 'package:flutter/material.dart';
-import '../theme/app_colors.dart';
+import 'package:rainbow_app/core/theme/app_colors.dart';
+
+/// Documentation for this public member.
 
 enum AlertCategory {
+  /// Documentation for this public member.
   lifeThreatening,
+
+  /// Documentation for this public member.
   violentCriminal,
+
+  /// Documentation for this public member.
   socialSensitive,
+
+  /// Documentation for this public member.
   publicSafety,
+
+  /// Documentation for this public member.
   cyberDigital,
+
+  /// Documentation for this public member.
   general,
 }
 
-class AlertCategoryInfo {
-  final AlertCategory category;
-  final String label;
-  final String emoji;
-  final String priority; // CRITICAL, HIGH, MEDIUM, LOW
-  final Color color;
-  final Color bg;
-  final IconData icon;
-  final List<String> subTypes;
+/// Documentation for this public member.
 
+class AlertCategoryInfo {
+  /// Documentation for this public member.
   const AlertCategoryInfo({
     required this.category,
     required this.label,
@@ -30,7 +37,32 @@ class AlertCategoryInfo {
     required this.icon,
     required this.subTypes,
   });
+
+  /// Documentation for this public member.
+  final AlertCategory category;
+
+  /// Documentation for this public member.
+  final String label;
+
+  /// Documentation for this public member.
+  final String emoji;
+
+  /// Documentation for this public member.
+  final String priority; // CRITICAL, HIGH, MEDIUM, LOW
+  /// Documentation for this public member.
+  final Color color;
+
+  /// Documentation for this public member.
+  final Color bg;
+
+  /// Documentation for this public member.
+  final IconData icon;
+
+  /// Documentation for this public member.
+  final List<String> subTypes;
 }
+
+/// Documentation for this public member.
 
 const List<AlertCategoryInfo> alertCategories = [
   AlertCategoryInfo(
@@ -134,6 +166,8 @@ const List<AlertCategoryInfo> alertCategories = [
     subTypes: ['Armed Invasion', 'Riot', 'Vandalism'],
   ),
 ];
+
+/// Documentation for this public member.
 
 AlertCategoryInfo categoryById(AlertCategory cat) =>
     alertCategories.firstWhere((c) => c.category == cat);

@@ -6,18 +6,32 @@ service cloud.firestore {
     function isAuth() {
       return request.auth != null;
     }
+    
+    function userExists() {
+      return isAuth() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
     function isHQ() {
       return isAuth() && (
-        (request.auth.token.email != null && request.auth.token.email.matches('.*@operationrainbow\\.plateau\\.gov\\.ng')) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'HQ_OFFICER')
+        request.auth.token.role == 'HQ_OFFICER' || 
+        request.auth.token.role == 'HQ_COMMAND' ||
+        (userExists() && (
+          getUserData().role == 'HQ_OFFICER' ||
+          getUserData().role == 'HQ_COMMAND'
+        ))
       );
     }
+
     function isStaff() {
       return isAuth() && (
-        (request.auth.token.email != null && request.auth.token.email.matches('.*@operationrainbow\\.plateau\\.gov\\.ng')) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['HQ_OFFICER','LGA_OFFICER','WARD_OFFICER','POLLING_UNIT_OFFICER', 'AGENT'])
+        request.auth.token.role in ['HQ_OFFICER', 'HQ_COMMAND', 'LGA_COMMAND', 'LGA_OFFICER', 'WARD_COMMAND', 'WARD_OFFICER', 'UNIT_COMMAND', 'POLLING_OFFICER', 'POLLING_UNIT_OFFICER'] ||
+        (userExists() && (
+          getUserData().role in ['HQ_OFFICER', 'HQ_COMMAND', 'LGA_COMMAND', 'LGA_OFFICER', 'WARD_COMMAND', 'WARD_OFFICER', 'UNIT_COMMAND', 'POLLING_OFFICER', 'POLLING_UNIT_OFFICER']
+        ))
       );
     }
 
@@ -25,7 +39,10 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuth() && (request.auth.uid == userId || isStaff());
       allow create: if isAuth();
-      allow update: if isAuth() && (request.auth.uid == userId || isHQ());
+      allow update: if isAuth() && (
+        isHQ() ||
+        (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'geo_lgas', 'geo_wards', 'geo_pus']))
+      );
       allow delete: if isHQ();
 
       match /emergency_contacts/{contactId} {
@@ -35,78 +52,119 @@ service cloud.firestore {
 
     // ─── Alerts (RBAC & Jurisdictional Isolation) ──────────────────────────────
     match /alerts/{alertId} {
-      function getUser() {
-        return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      }
-
-      allow create: if isAuth();
-      
+      // MISSION INTEGRITY: Alerts should ideally be created via Cloud Functions.
+      // Resilient fallback allows direct client writes under strict validation if function fails.
+      allow create: if isAuth() && 
+        request.resource.data.reportedByUid == request.auth.uid &&
+        request.resource.data.status == 'OPEN' &&
+        request.resource.data.priority in ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] &&
+        request.resource.data.assigned_to == 'POLLING_UNIT'; 
       allow read: if isAuth() && (
         resource.data.reportedBy == request.auth.uid || 
+        resource.data.reportedByUid == request.auth.uid || 
         isHQ() || 
-        (isStaff() && (
-          (getUser().role == 'LGA_OFFICER' && resource.data.geo_lga == getUser().lga) ||
-          (getUser().role == 'WARD_OFFICER' && resource.data.geo_ward == getUser().ward) ||
-          (getUser().role == 'POLLING_UNIT_OFFICER' && resource.data.geo_pu == getUser().pu)
+        (isStaff() && userExists() && (
+          ((getUserData().role == 'LGA_COMMAND' || getUserData().role == 'LGA_OFFICER') && (
+            resource.data.geo_lga == getUserData().geo_lga || 
+            resource.data.geo_lga == getUserData().lga ||
+            ('geo_lgas' in getUserData() && resource.data.geo_lga in getUserData().geo_lgas) ||
+            ('lgas' in getUserData() && resource.data.geo_lga in getUserData().lgas)
+          )) ||
+          ((getUserData().role == 'WARD_COMMAND' || getUserData().role == 'WARD_OFFICER') && (
+            resource.data.geo_ward == getUserData().geo_ward || 
+            resource.data.geo_ward == getUserData().ward ||
+            ('geo_wards' in getUserData() && resource.data.geo_ward in getUserData().geo_wards) ||
+            ('wards' in getUserData() && resource.data.geo_ward in getUserData().wards)
+          )) ||
+          ((getUserData().role == 'UNIT_COMMAND' || getUserData().role == 'POLLING_OFFICER' || getUserData().role == 'POLLING_UNIT_OFFICER') && (
+            resource.data.geo_pu == getUserData().geo_pu || 
+            resource.data.geo_pu == getUserData().pu ||
+            ('geo_pus' in getUserData() && resource.data.geo_pu in getUserData().geo_pus) ||
+            ('pus' in getUserData() && resource.data.geo_pu in getUserData().pus)
+          ))
         ))
       );
 
-      // HQ Override: HQ can update any alert. 
-      // Tiered Officers: Can only update if alert is assigned to their tier AND in their location.
-      allow update: if isStaff() && (
+      allow update: if (isStaff() && userExists() && (
         isHQ() ||
-        (
-          getUser().role == 'LGA_OFFICER' && 
-          resource.data.assigned_to == 'LGA' && 
-          resource.data.geo_lga == getUser().lga
-        ) ||
-        (
-          getUser().role == 'WARD_OFFICER' && 
-          resource.data.assigned_to == 'WARD' && 
-          resource.data.geo_ward == getUser().ward
-        ) ||
-        (
-          getUser().role == 'POLLING_UNIT_OFFICER' && 
-          resource.data.assigned_to == 'POLLING_UNIT' && 
-          resource.data.geo_pu == getUser().pu
-        )
+        ((getUserData().role == 'LGA_COMMAND' || getUserData().role == 'LGA_OFFICER') && (
+          resource.data.geo_lga == getUserData().geo_lga || 
+          resource.data.geo_lga == getUserData().lga ||
+          ('geo_lgas' in getUserData() && resource.data.geo_lga in getUserData().geo_lgas) ||
+          ('lgas' in getUserData() && resource.data.geo_lga in getUserData().lgas)
+        )) ||
+        ((getUserData().role == 'WARD_COMMAND' || getUserData().role == 'WARD_OFFICER') && (
+          resource.data.geo_ward == getUserData().geo_ward || 
+          resource.data.geo_ward == getUserData().ward ||
+          ('geo_wards' in getUserData() && resource.data.geo_ward in getUserData().geo_wards) ||
+          ('wards' in getUserData() && resource.data.geo_ward in getUserData().wards)
+        )) ||
+        ((getUserData().role == 'UNIT_COMMAND' || getUserData().role == 'POLLING_OFFICER' || getUserData().role == 'POLLING_UNIT_OFFICER') && (
+          resource.data.geo_pu == getUserData().geo_pu || 
+          resource.data.geo_pu == getUserData().pu ||
+          ('geo_pus' in getUserData() && resource.data.geo_pu in getUserData().geo_pus) ||
+          ('pus' in getUserData() && resource.data.geo_pu in getUserData().pus)
+        ))
+      ) && (
+        // TIMELINE IMMUTABILITY SAFEGUARD: Enforce that existing timeline events cannot be modified or deleted
+        !('timeline' in request.resource.data) ||
+        !('timeline' in resource.data) ||
+        (request.resource.data.timeline.size() >= resource.data.timeline.size())
+      )) || (
+        // CITIZEN FEEDBACK GAP FIX
+        isAuth() && 
+        resource.data.reportedByUid == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['citizenFeedback', 'feedbackAt', 'feedbackUid'])
       );
 
       allow delete: if false; // Immutable audit trail
     }
 
-    // ─── Tracking ──────────────────────────────────────────────────────────────
-    // PRD §8: Only authenticated apps can write; only staff can read.
-    match /tracking/{document=**} {
-      allow create: if isAuth();
-      allow read, update, delete: if isStaff();
+    // ─── Tracking (Telemetry Engine) ──────────────────────────────────────────
+    match /tracking/{userId} {
+      allow read: if isStaff();
+      // PRD §8: Users can only transmit their own telemetry.
+      allow create, update: if isAuth() && request.auth.uid == userId;
+      
+      match /{document=**} {
+        allow read: if isStaff();
+        allow create, update: if isAuth() && request.auth.uid == userId;
+      }
     }
 
-    // ─── Broadcasts ────────────────────────────────────────────────────────────
-    match /broadcasts/{document=**} {
+    // ─── Broadcasts & Alerts ──────────────────────────────────────────────────
+    match /broadcasts/{alertId} {
       allow read: if isAuth();
-      allow write: if isStaff();
+      allow write: if isHQ();
+    }
+    
+    match /broadcast_alerts/{alertId} {
+      allow read: if isAuth();
+      allow write: if isHQ();
     }
 
+    match /system_alerts/{alertId} {
+      allow read: if isAuth();
+      allow write: if isHQ();
+    }
     // ─── System Configuration ──────────────────────────────────────────────────
-    // PRD §11 + §12: HQ controls escalation timing and notification rules.
     match /system/{document=**} {
       allow read: if isAuth();
       allow write: if isHQ();
     }
 
-    // PRD legacy path — keep for backwards compat
-    match /system_config/{document=**} {
-      allow read: if isAuth();
-      allow write: if false;
+    // ─── Audit Logs ────────────────────────────────────────────────────────────
+    match /audit_logs/{document=**} {
+      allow read: if isStaff();
+      allow write: if false; 
     }
 
-    // ─── Audit Logs ────────────────────────────────────────────────────────────
-    // PRD §11: Every system action is recorded. No edits or deletes ever.
-    match /audit_logs/{document=**} {
-      allow create: if isAuth();
-      allow read: if isStaff();
-      allow update, delete: if false; // immutable
+    // ─── App Uninstall Deactivation Governance ──────────────────────────────────
+    match /uninstall_requests/{userId} {
+      allow read: if isAuth() && (request.auth.uid == userId || isHQ());
+      allow create, update: if isAuth() && request.auth.uid == userId && request.resource.data.status == 'PENDING';
+      allow delete: if isHQ();
     }
   }
 }

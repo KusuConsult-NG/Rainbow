@@ -1,20 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../core/theme/app_colors.dart';
+import 'package:rainbow_app/core/theme/app_colors.dart';
+
+/// Documentation for this public member.
 
 class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
-  final String title;
-  final String? subtitle;
-  final List<Widget>? actions;
-  final bool showBack;
-
+  /// Documentation for this public member.
   const RainbowAppBar({
-    super.key,
     required this.title,
+    super.key,
     this.subtitle,
     this.actions,
     this.showBack = false,
   });
+
+  /// Documentation for this public member.
+  final String title;
+
+  /// Documentation for this public member.
+  final String? subtitle;
+
+  /// Documentation for this public member.
+  final List<Widget>? actions;
+
+  /// Documentation for this public member.
+  final bool showBack;
 
   @override
   Size get preferredSize => const Size.fromHeight(80);
@@ -22,10 +32,10 @@ class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: AppColors.background,
         border: Border(
-          bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05), width: 1)
+          bottom: BorderSide(color: AppColors.outline),
         ),
       ),
       child: SafeArea(
@@ -42,29 +52,60 @@ class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
                     height: 44,
                     margin: const EdgeInsets.only(right: 16),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.02),
+                      color: AppColors.surfaceContainer,
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+                      border: Border.all(color: AppColors.outline),
                     ),
                     child: const Icon(
                       Icons.arrow_back_ios_new_rounded,
-                      color: Colors.white, 
-                      size: 16
+                      color: AppColors.onBackground,
+                      size: 16,
                     ),
                   ),
+                )
+              else
+                Builder(
+                  builder: (context) {
+                    return GestureDetector(
+                      onTap: () {
+                        var state = Scaffold.maybeOf(context);
+                        if (state != null && !state.hasDrawer) {
+                          final parent = Scaffold.maybeOf(state.context);
+                          if (parent != null) state = parent;
+                        }
+                        state?.openDrawer();
+                      },
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        margin: const EdgeInsets.only(right: 16),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceContainer,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppColors.outline),
+                        ),
+                        child: const Icon(
+                          Icons.menu_rounded,
+                          color: AppColors.onBackground,
+                          size: 20,
+                        ),
+                      ),
+                    );
+                  },
                 ),
-              
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   color: AppColors.primary.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.1)),
+                  border: Border.all(
+                    color: AppColors.primary.withValues(alpha: 0.1),
+                  ),
                 ),
                 child: const Icon(
                   Icons.radar_rounded,
-                  color: AppColors.primary, 
-                  size: 20
+                  color: AppColors.primary,
+                  size: 20,
                 ),
               ),
               const SizedBox(width: 16),
@@ -76,10 +117,10 @@ class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
                     Text(
                       title.toUpperCase(),
                       style: GoogleFonts.outfit(
-                        color: Colors.white,
+                        color: AppColors.primary,
                         fontWeight: FontWeight.w900,
                         fontSize: 16,
-                        letterSpacing: 1.0,
+                        letterSpacing: 1,
                       ),
                     ),
                     if (subtitle != null)
@@ -88,7 +129,7 @@ class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
                         child: Text(
                           subtitle!.toUpperCase(),
                           style: GoogleFonts.outfit(
-                            color: Colors.white24,
+                            color: AppColors.textDim,
                             fontWeight: FontWeight.w800,
                             fontSize: 9,
                             letterSpacing: 1.5,

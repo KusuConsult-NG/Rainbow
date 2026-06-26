@@ -19,7 +19,7 @@ echo ""
 
 # ── Step 1: Switch to correct account ───────────────────────
 echo "▶ [1/5] Switching Firebase account to $ACCOUNT..."
-firebase login:use "$ACCOUNT"
+firebase login:use "$ACCOUNT" || true
 echo "✓ Account: $(firebase login:list 2>&1 | head -1)"
 
 # ── Step 2: Set project ──────────────────────────────────────
@@ -47,8 +47,8 @@ echo "✓ Indexes deployed"
 # ── Step 5: Build + Deploy HQ Dashboard to Hosting ──────────
 echo ""
 echo "▶ [5/5] Building HQ Dashboard..."
-npm --prefix hq-dashboard run build
-echo "✓ Build complete ($(du -sh hq-dashboard/dist | cut -f1))"
+npm --prefix hq-dashboard-next run build
+echo "✓ Build complete ($(du -sh hq-dashboard-next/out | cut -f1))"
 
 echo ""
 echo "▶ Deploying HQ Dashboard to Firebase Hosting..."

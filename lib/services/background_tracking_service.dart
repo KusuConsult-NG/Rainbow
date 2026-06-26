@@ -1,69 +1,122 @@
-
 import 'dart:async';
+// ignore_for_file: unreachable_from_main
+
+import 'package:battery_plus/battery_plus.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:rainbow_app/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Documentation for this public member.
+
 class BackgroundTrackingService {
-  static final BackgroundTrackingService _instance = BackgroundTrackingService._internal();
+  /// Documentation for this public member.
   factory BackgroundTrackingService() => _instance;
   BackgroundTrackingService._internal();
+  static final BackgroundTrackingService _instance =
+      BackgroundTrackingService._internal();
 
-  /// Call this when the app starts.
+  bool _isInitialized = false;
+
+  /// Configures the service isolate. Does not start the service.
   Future<void> initializeService() async {
-    final service = FlutterBackgroundService();
+    if (_isInitialized) return;
 
-    await service.configure(
-      androidConfiguration: AndroidConfiguration(
-        onStart: onStart,
-        // autoStart must be FALSE — the OS cannot post foreground notifications
-        // before the notification channel is created. The service is started
-        // explicitly via startTracking() only when an SOS is triggered.
-        autoStart: false,
-        autoStartOnBoot: false,
-        isForegroundMode: true,
-        notificationChannelId: 'rainbow_tracking',
-        initialNotificationTitle: 'OPERATION RAINBOW',
-        initialNotificationContent: 'Active Emergency Tracking',
-        foregroundServiceNotificationId: 888,
-      ),
-      iosConfiguration: IosConfiguration(
-        autoStart: false,
-        onForeground: onStart,
-        onBackground: onIosBackground,
-      ),
-    );
-  }
+    try {
+      final service = FlutterBackgroundService();
 
-  Future<void> startTracking(String alertId, String userId) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('activeTrackingAlertId', alertId);
-    await prefs.setString('activeTrackingUserId', userId);
-
-    final service = FlutterBackgroundService();
-    var isRunning = await service.isRunning();
-    if (!isRunning) {
-      await service.startService();
+      await service.configure(
+        androidConfiguration: AndroidConfiguration(
+          onStart: onStart,
+          autoStart: false,
+          isForegroundMode: true,
+          notificationChannelId: 'rainbow_tracking',
+          initialNotificationTitle: 'OPERATION RAINBOW',
+          initialNotificationContent: 'System Ready',
+          foregroundServiceNotificationId: 888,
+        ),
+        iosConfiguration: IosConfiguration(
+          autoStart: false,
+          onForeground: onStart,
+          onBackground: onIosBackground,
+        ),
+      );
+      _isInitialized = true;
+    } catch (e) {
+      debugPrint('[CRITICAL_BG_ERR] Service Initialization Failed: $e');
+      rethrow;
     }
-    // We send data to the isolate
-    service.invoke("setTrackingMetadata", {
-      "alertId": alertId,
-      "userId": userId,
-    });
   }
+
+  /// Starts persistent tracking for a responder.
+  Future<void> startResponderTracking(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('trackingMode', 'responder');
+      await prefs.setString('activeTrackingUserId', userId);
+
+      final service = FlutterBackgroundService();
+      if (!await service.isRunning()) await service.startService();
+
+      service.invoke('updateMode', {
+        'mode': 'responder',
+        'userId': userId,
+      });
+      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
+    } catch (e) {
+      debugPrint('[CRITICAL_BG_ERR] Responder Tracking Start Failed: $e');
+    }
+  }
+
+  /// Starts transient tracking for a citizen SOS event.
+  Future<void> startSosTracking(String alertId, String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('trackingMode', 'sos');
+      await prefs.setString('activeTrackingAlertId', alertId);
+      await prefs.setString('activeTrackingUserId', userId);
+
+      final service = FlutterBackgroundService();
+      if (!await service.isRunning()) await service.startService();
+
+      service.invoke('updateMode', {
+        'mode': 'sos',
+        'alertId': alertId,
+        'userId': userId,
+      });
+      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
+    } catch (e) {
+      debugPrint('[CRITICAL_BG_ERR] SOS Tracking Start Failed: $e');
+    }
+  }
+
+  /// Documentation for this public member.
 
   Future<void> stopTracking() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('trackingMode');
     await prefs.remove('activeTrackingAlertId');
     await prefs.remove('activeTrackingUserId');
+    await prefs.remove('responderStatus');
 
-    final service = FlutterBackgroundService();
-    service.invoke("stopService");
+    FlutterBackgroundService().invoke('stopService');
+  }
+
+  /// Documentation for this public member.
+
+  Future<void> updateStatus(String status) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('responderStatus', status);
+
+    FlutterBackgroundService().invoke('updateStatus', {'status': status});
   }
 }
+
+/// Documentation for this public member.
 
 @pragma('vm:entry-point')
 bool onIosBackground(ServiceInstance service) {
@@ -71,124 +124,204 @@ bool onIosBackground(ServiceInstance service) {
   return true;
 }
 
+/// Documentation for this public member.
+
 @pragma('vm:entry-point')
-void onStart(ServiceInstance service) async {
-  // Only available for flutter 3.0.0 and later
+Future<void> onStart(ServiceInstance service) async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Isolate requires its own Firebase initialization for background threads
+
+  final battery = Battery();
+  final connectivity = Connectivity();
+
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
     FirebaseDatabase.instance.setPersistenceEnabled(true);
-  } catch (e) {
-    // Already initialized
-  }
+    // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
+  } catch (_) {}
 
-  // Check if we booted natively or started normally
   final prefs = await SharedPreferences.getInstance();
-  String? currentAlertId = prefs.getString('activeTrackingAlertId');
-  String? currentUserId = prefs.getString('activeTrackingUserId');
+  var modeStr = prefs.getString('trackingMode');
+  var currentUserId = prefs.getString('activeTrackingUserId');
+  var currentAlertId = prefs.getString('activeTrackingAlertId');
+  String? currentStatus = prefs.getString('responderStatus') ??
+      (modeStr == 'sos' ? 'EMERGENCY' : 'PATROLLING');
 
-  // Tracking state variables
-  int inactiveSeconds = 0;
-
-  // If autoStart triggered on boot, but we have no active alert, kill the service
-  if (currentAlertId == null) {
-     service.stopSelf();
-     return;
-  }
+  Position? lastPosition;
 
   if (service is AndroidServiceInstance) {
-    service.on('setAsForeground').listen((event) {
-      service.setAsForegroundService();
-    });
-
-    service.on('setAsBackground').listen((event) {
-      service.setAsBackgroundService();
-    });
+    service
+        .on('setAsForeground')
+        .listen((_) => service.setAsForegroundService());
+    service
+        .on('setAsBackground')
+        .listen((_) => service.setAsBackgroundService());
   }
 
-  service.on('stopService').listen((event) {
-    service.stopSelf();
-  });
+  service.on('stopService').listen((_) => service.stopSelf());
 
-  service.on('setTrackingMetadata').listen((event) {
-    if (event != null) {
-      currentAlertId = event["alertId"] as String?;
-      currentUserId = event["userId"] as String?;
-    }
-  });
+// Note: updateMode and updateStatus listeners are registered below
+// after startTelemetry/startAdaptiveHeartbeat are defined,
+// so they can restart those engines on mode changes.
 
-  // PRD §3: Real-Time Tracking — Event-driven stream for battery efficiency
-  final locationSettings = AndroidSettings(
-    accuracy: LocationAccuracy.high,
-    distanceFilter: 10, // 10 meters distance filter
-    intervalDuration: const Duration(seconds: 10), // 10s sync interval
-    foregroundNotificationConfig: const ForegroundNotificationConfig(
-      notificationText: "Tracking Active...",
-      notificationTitle: "OPERATION RAINBOW",
-      enableWakeLock: true,
-    ),
-  );
+  // Plateau State Operational Bounds (Approximate)
+  const plateauLatMin = 8.38;
+  const plateauLatMax = 10.42;
+  const plateauLngMin = 8.38;
+  const plateauLngMax = 10.75;
 
   StreamSubscription<Position>? positionStream;
 
-  void startPositionStream() {
-    positionStream?.cancel();
-    positionStream = Geolocator.getPositionStream(locationSettings: locationSettings).listen((pos) async {
-      if (currentAlertId == null) return;
+  void startTelemetry() {
+    if (positionStream != null) {
+      unawaited(positionStream!.cancel());
+    }
 
-      // Reset inactivity and update last known
-      inactiveSeconds = 0;
+    // Dynamic settings based on mode
+    final interval = modeStr == 'sos'
+        ? const Duration(seconds: 5)
+        : const Duration(seconds: 15);
+    final distance = modeStr == 'sos' ? 0 : 10;
 
+    final dynamicSettings = AndroidSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: distance,
+      intervalDuration: interval,
+      foregroundNotificationConfig: ForegroundNotificationConfig(
+        notificationTitle: 'OPERATION RAINBOW',
+        notificationText: modeStr == 'sos'
+            ? 'EMERGENCY: LIVE TRANSMISSION'
+            : "RESPONDER: ${currentStatus ?? 'ONLINE'}",
+        enableWakeLock: true,
+      ),
+    );
+
+    positionStream =
+        Geolocator.getPositionStream(locationSettings: dynamicSettings)
+            .listen((pos) async {
       final userId = currentUserId ?? 'UNKNOWN';
+      if (userId == 'UNKNOWN') return;
+
+      if (lastPosition != null && modeStr != 'sos') {
+        final dist = Geolocator.distanceBetween(
+          lastPosition!.latitude,
+          lastPosition!.longitude,
+          pos.latitude,
+          pos.longitude,
+        );
+        if (dist < 5) return;
+      }
+      lastPosition = pos;
+
       try {
+        final batteryLevel = await battery.batteryLevel;
+        final conn = await connectivity.checkConnectivity();
+
+        final isWithinPlateau = pos.latitude >= plateauLatMin &&
+            pos.latitude <= plateauLatMax &&
+            pos.longitude >= plateauLngMin &&
+            pos.longitude <= plateauLngMax;
+
         final trackingRef = FirebaseDatabase.instance.ref('tracking/$userId');
-        final historyRef = FirebaseDatabase.instance.ref('tracking_history/$userId');
-        
-        final data = {
-          'alert_id': currentAlertId,
+
+        // 1. Current Position (State)
+        final payload = {
           'user_id': userId,
           'lat': pos.latitude,
           'lng': pos.longitude,
           'timestamp': ServerValue.timestamp,
-          'speed': pos.speed,
-          'accuracy': pos.accuracy,
+          'mode': modeStr,
+          if (modeStr == 'sos') 'alert_id': currentAlertId,
+          'status':
+              modeStr == 'sos' ? 'EMERGENCY' : (currentStatus ?? 'PATROLLING'),
+          'geo_integrity':
+              isWithinPlateau ? 'VERIFIED_PLATEAU' : 'OUT_OF_BOUNDS',
+          'telemetry': {
+            'battery': batteryLevel,
+            'network': conn.toString(),
+            'accuracy': pos.accuracy,
+            'speed': pos.speed,
+          },
         };
+        await trackingRef.update(payload);
 
-        // 1. Update Real-time "Last Known"
-        await trackingRef.set(data);
-        
-        // 2. Append to persistent breadcrumb trail (Tactical History)
-        await historyRef.push().set({
-          'lat': pos.latitude,
-          'lng': pos.longitude,
-          'timestamp': ServerValue.timestamp,
-          'alert_id': currentAlertId,
-        });
+        // 2. Mission Path History (For HQ Mapping)
+        if (modeStr == 'sos' || modeStr == 'responder') {
+          final historyRef = trackingRef.child('path').push();
+          await historyRef.set({
+            'lat': pos.latitude,
+            'lng': pos.longitude,
+            't': ServerValue.timestamp,
+          });
 
-        debugPrint('[TRACKING_UPDATE] Telemetry & History synced: $userId');
+          // Optional: Trim history to last 50 points to save RTDB bandwidth
+        }
+
+        if (service is AndroidServiceInstance) {
+          unawaited(
+            service.setForegroundNotificationInfo(
+              title: 'OPERATION RAINBOW',
+              content: modeStr == 'sos'
+                  ? 'SOS: ACTIVE TRANSMISSION'
+                  : "UNIT: ${currentStatus ?? 'ONLINE'}",
+            ),
+          );
+        }
+        // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
       } catch (e) {
-        debugPrint('[SYS_ERR] BackgroundTracking: DB Sync failed - $e');
+        debugPrint('[TELEMETRY_FAIL] $e');
       }
     });
   }
 
-  // Initial trigger
-  startPositionStream();
+  // PHASE 3: ADAPTIVE HEARTBEAT ENGINE
+  Timer? heartbeatTimer;
 
-  // Watchdog Timer for Inactivity/Timeout
-  Timer.periodic(const Duration(seconds: 60), (timer) async {
-    inactiveSeconds += 60;
-    if (inactiveSeconds >= 1800) { // 30 minutes
-      debugPrint('[TRACKING_UPDATE] Tracking timed out due to 30m inactivity.');
-      service.stopSelf();
+  void startAdaptiveHeartbeat() {
+    heartbeatTimer?.cancel();
+    heartbeatTimer = Timer.periodic(const Duration(seconds: 15), (timer) async {
+      final userId = currentUserId;
+      if (userId == null) return;
+
+      final bLevel = await battery.batteryLevel;
+
+      var targetInterval = 60;
+      if (modeStr == 'sos' || currentStatus == 'DURESS') {
+        targetInterval = 15;
+      } else if (bLevel < 15) {
+        targetInterval = 300;
+      } else if (currentStatus == 'IDLE') {
+        targetInterval = 120;
+      }
+
+      if (timer.tick % (targetInterval ~/ 15) == 0) {
+        final heartbeatRef =
+            FirebaseDatabase.instance.ref('tracking/$userId/heartbeat');
+        await heartbeatRef.set(ServerValue.timestamp);
+      }
+    });
+  }
+
+  service.on('updateMode').listen((event) {
+    if (event != null) {
+      modeStr = event['mode'] as String?;
+      currentUserId = event['userId'] as String?;
+      currentAlertId = event['alertId'] as String?;
+      // Re-initialize telemetry with new settings
+      startTelemetry();
+      startAdaptiveHeartbeat();
     }
   });
 
-  service.on('stopService').listen((event) {
-    positionStream?.cancel();
-    service.stopSelf();
+  service.on('updateStatus').listen((event) {
+    if (event != null) {
+      currentStatus = event['status'] as String?;
+      // Refresh heartbeat logic for priority changes
+      startAdaptiveHeartbeat();
+    }
   });
 
+  startTelemetry();
+  startAdaptiveHeartbeat();
 }

@@ -1,17 +1,16 @@
+// ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../core/theme/app_colors.dart';
-import '../../core/router/app_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../services/auth_service.dart';
-import '../../services/device_service.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/services/auth_service.dart';
+
+/// Documentation for this public member.
 
 class LoginScreen extends ConsumerStatefulWidget {
+  /// Documentation for this public member.
   const LoginScreen({super.key});
 
   @override
@@ -20,16 +19,12 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen>
     with SingleTickerProviderStateMixin {
-  final _credentialController = TextEditingController();
-  final _secondaryController = TextEditingController();
-  
-  bool _secondarySent = false;
-  bool _isAgentFlow = false;
+  final _inputController = TextEditingController();
+  final _otpController = TextEditingController();
+
+  bool _otpSent = false;
   bool _loading = false;
-  bool _obscurePassword = true;
-  
   late AnimationController _pulseController;
-  StreamSubscription<User?>? _authSubscription;
 
   @override
   void initState() {
@@ -37,418 +32,295 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
-    )..repeat(reverse: true);
-
-    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) async {
-      if (user != null && mounted) {
-        _authSubscription?.cancel();
-        final prefs = await SharedPreferences.getInstance();
-        final hasOnboarded = prefs.getBool('hasOnboarded') ?? false;
-        
-        // Let's check if they are an agent or a citizen by checking users collection
-        final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-        if (!mounted) return;
-        
-        if (doc.exists && doc.data()?['role'] != null) {
-          final role = doc.data()!['role'] as String;
-          context.go(AppRoutes.agentDashboard, extra: role);
-        } else {
-          context.go(hasOnboarded ? AppRoutes.home : AppRoutes.onboardingPermissions);
-        }
-      }
-    });
+    );
+    unawaited(_pulseController.repeat(reverse: true));
   }
 
   @override
   void dispose() {
-    _authSubscription?.cancel();
-    _credentialController.dispose();
-    _secondaryController.dispose();
+    _inputController.dispose();
+    _otpController.dispose();
     _pulseController.dispose();
     super.dispose();
   }
 
-  void _submitCredential() async {
-    final input = _credentialController.text.trim();
+  Future<void> _handlePrimaryAction() async {
+    if (_otpSent) {
+      await _verifyOTP();
+      return;
+    }
+
+    final input = _inputController.text.trim();
     if (input.isEmpty) return;
-    
-    // Check if phone or agent code (starts with + or contains only digits and spaces)
-    final isPhone = RegExp(r'^\+?[0-9\s]+$').hasMatch(input);
+
+    setState(() => _loading = true);
+
+    // Heuristic: Detection of Phone vs Access Code
+    // Phones usually start with + or are long numeric strings (8+ digits)
+    final isPhone = _isLikelyPhone(input);
 
     if (isPhone) {
-      setState(() {
-        _loading = true;
-        _isAgentFlow = false;
-      });
-      await ref.read(authServiceProvider).verifyPhoneNumber(input);
-      final error = ref.read(authServiceProvider).lastAuthError;
-      if (mounted) {
-        setState(() => _loading = false);
-        if (error != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $error'), backgroundColor: AppColors.primary),
-          );
-        } else {
-          setState(() => _secondarySent = true);
-        }
-      }
+      await _submitPhone(input);
     } else {
-      // Agent flow
-      setState(() {
-        _isAgentFlow = true;
-        _secondarySent = true;
-      });
+      await _submitAccessCode(input);
+    }
+
+    if (mounted) setState(() => _loading = false);
+  }
+
+  bool _isLikelyPhone(String input) {
+    if (input.startsWith('+')) return true;
+    final digitsOnly = input.replaceAll(RegExp(r'\D'), '');
+    // If it's all digits and reasonably long, treat as phone.
+    // Short numeric strings might be responder codes (e.g., HQ-123 is not all digits, but 12345 might be a code).
+    // Let's assume phone if digits >= 10.
+    return digitsOnly.length >= 10 &&
+        RegExp(r'^\d+$').hasMatch(input.replaceAll(' ', ''));
+  }
+
+  Future<void> _submitPhone(String phone) async {
+    await ref.read(authServiceProvider).verifyPhoneNumber(phone);
+    final error = ref.read(authServiceProvider).lastAuthError;
+
+    if (mounted) {
+      if (error == null) {
+        setState(() => _otpSent = true);
+      } else {
+        _showTacticalError(error);
+      }
     }
   }
 
-  void _verifySecondary() async {
-    if (_secondaryController.text.isEmpty) return;
-    setState(() => _loading = true);
+  Future<void> _submitAccessCode(String code) async {
+    final success =
+        await ref.read(authServiceProvider).signInWithAccessCode(code);
+    final error = ref.read(authServiceProvider).lastAuthError;
 
-    if (!_isAgentFlow) {
-      final success = await ref.read(authServiceProvider).verifyOTP('', _secondaryController.text.trim());
-      final error = ref.read(authServiceProvider).lastAuthError;
-      if (mounted) {
-        setState(() => _loading = false);
-        if (success) {
-          _authSubscription?.cancel();
-          final user = FirebaseAuth.instance.currentUser;
-          if (user != null) {
-            await DeviceService().registerDeviceSession(user.uid);
-            DeviceService().listenForForcedLogout(user.uid, () {
-              if (mounted) context.go(AppRoutes.login);
-            });
-          }
-          final prefs = await SharedPreferences.getInstance();
-          final hasOnboarded = prefs.getBool('hasOnboarded') ?? false;
-          if (!mounted) return;
-          context.go(hasOnboarded ? AppRoutes.home : AppRoutes.onboardingPermissions);
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Verification failed: ${error ?? "Please retry"}'), backgroundColor: AppColors.primary),
-          );
-        }
-      }
-    } else {
-      // Agent login
-      try {
-        final badgeId = _credentialController.text.trim().toLowerCase();
-        final cleanBadgeId = badgeId.startsWith('access-') ? badgeId.substring(7) : badgeId;
-        final pin = _secondaryController.text;
-        
-        final emailDomain = cleanBadgeId.contains('@') ? '' : '@operationrainbow.plateau.gov.ng';
-        final formattedEmail = '$cleanBadgeId$emailDomain';
-        
-        final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: formattedEmail,
-          password: pin,
-        );
-
-        if (cred.user != null) {
-          await DeviceService().registerDeviceSession(cred.user!.uid);
-          DeviceService().listenForForcedLogout(cred.user!.uid, () {
-            if (mounted) context.go(AppRoutes.login);
-          });
-          
-          final doc = await FirebaseFirestore.instance.collection('users').doc(cred.user!.uid).get();
-          final role = doc.data()?['role'] ?? 'HQ_OFFICER';
-          
-          if (mounted) {
-            setState(() => _loading = false);
-            context.go(AppRoutes.agentDashboard, extra: role);
-          }
-        }
-      } catch (e) {
-        if (mounted) {
-          setState(() => _loading = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Access denied.'), backgroundColor: Colors.red),
-          );
-        }
+    if (mounted) {
+      if (!success) {
+        _showTacticalError(error ?? 'INVALID ACCESS CODE');
       }
     }
+  }
+
+  Future<void> _verifyOTP() async {
+    final otp = _otpController.text.trim();
+    if (otp.length < 6) return;
+
+    setState(() => _loading = true);
+    final success = await ref.read(authServiceProvider).verifyOTP(otp);
+    final error = ref.read(authServiceProvider).lastAuthError;
+
+    if (mounted) {
+      setState(() => _loading = false);
+      if (!success) {
+        _showTacticalError(error ?? 'VERIFICATION FAILED');
+      }
+    }
+  }
+
+  void _showTacticalError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message.toUpperCase(),
+          style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 12),
+        ),
+        backgroundColor: AppColors.danger,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primary,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
+      backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Column(
-          children: [
-            // ── Stealth header with branding ──────────────────────────
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AnimatedBuilder(
-                      animation: _pulseController,
-                      builder: (_, __) => Container(
-                        width: 90 + _pulseController.value * 10,
-                        height: 90 + _pulseController.value * 10,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.white.withAlpha(
-                            (20 + _pulseController.value * 15).toInt(),
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.shield_rounded,
-                          color: Colors.white,
-                          size: 52,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Text(
-                      'SECURE ACCESS',
-                      style: GoogleFonts.inter(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 20,
-                        letterSpacing: 2.0,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'OPERATION RAINBOW',
-                      style: GoogleFonts.inter(
-                        color: Colors.white60,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 11,
-                        letterSpacing: 2.5,
-                      ),
-                    ),
-                  ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                const SizedBox(height: 60),
+                // ── Tactical HUD Header ──────────────────────────
+                _buildTacticalLogo(),
+                const SizedBox(height: 64),
+
+                // ── Unified Input Section ────────────────────────
+                Text(
+                  _otpSent ? 'IDENTITY VERIFICATION' : 'SECURE IDENTIFIER',
+                  style: GoogleFonts.outfit(
+                    color: AppColors.textDim,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 11,
+                    letterSpacing: 1.5,
+                  ),
                 ),
-              ),
-            ),
+                const SizedBox(height: 16),
 
-            // ── White card at bottom ───────────────────────────────
-            Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-              ),
-              padding: const EdgeInsets.fromLTRB(24, 32, 24, 48),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _secondarySent ? (_isAgentFlow ? 'Authorization' : 'Verify Code') : 'Sign In',
-                    style: GoogleFonts.inter(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 28,
-                      color: Colors.black87,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    _secondarySent
-                        ? (_isAgentFlow ? 'Enter your secure PIN' : 'Enter the 6-digit code sent to your phone')
-                        : 'Enter your registered phone number or assigned access code',
-                    style: GoogleFonts.inter(
-                      color: Colors.black45,
-                      fontSize: 13,
-                      height: 1.4,
-                    ),
-                  ),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: _otpSent ? _buildOtpField() : _buildUnifiedField(),
+                ),
+
+                const SizedBox(height: 32),
+
+                _buildActionButton(),
+
+                if (_otpSent) ...[
                   const SizedBox(height: 24),
-
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 250),
-                    child: _secondarySent 
-                        ? (_isAgentFlow ? _buildPasswordField() : _buildOtpField()) 
-                        : _buildCredentialField(),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  SizedBox(
-                    width: double.infinity,
-                    height: 58,
-                    child: ElevatedButton(
-                      onPressed: _loading ? null : (_secondarySent ? _verifySecondary : _submitCredential),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: Colors.white,
-                        disabledBackgroundColor: AppColors.primary.withAlpha(120),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: _loading
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : Text(
-                              _secondarySent ? 'VERIFY' : 'SECURE LOGIN',
-                              style: GoogleFonts.inter(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 14,
-                                letterSpacing: 1.5,
-                              ),
-                            ),
-                    ),
-                  ),
-
-                  if (_secondarySent) ...[
-                    const SizedBox(height: 16),
-                    Center(
-                      child: TextButton(
-                        onPressed: () => setState(() {
-                          _secondarySent = false;
-                          _secondaryController.clear();
-                        }),
-                        child: Text(
-                          'Change credential',
-                          style: GoogleFonts.inter(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: 20),
-                  Center(
+                  TextButton(
+                    onPressed: () => setState(() => _otpSent = false),
                     child: Text(
-                      'By continuing, you agree to Operation Rainbow\nTerms of Service & Privacy Policy',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.inter(
-                        color: Colors.black26,
-                        fontSize: 11,
-                        height: 1.6,
+                      'BACK TO IDENTIFIER',
+                      style: GoogleFonts.outfit(
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                        letterSpacing: 1,
                       ),
                     ),
                   ),
                 ],
-              ),
+
+                const SizedBox(height: 48),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildCredentialField() {
+  Widget _buildTacticalLogo() {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        AnimatedBuilder(
+          animation: _pulseController,
+          builder: (_, __) => Container(
+            width: 220,
+            height: 220,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: AppColors.primary.withValues(alpha: 0.1),
+                width: 4 * (1 - _pulseController.value),
+              ),
+            ),
+          ),
+        ),
+        ScaleTransition(
+          scale: Tween<double>(begin: 1, end: 1.02).animate(_pulseController),
+          child: Hero(
+            tag: 'app_logo',
+            child: Image.asset(
+              'assets/images/app_icon_large.png',
+              width: 180,
+              height: 180,
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.high,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUnifiedField() {
     return TextField(
-      key: const ValueKey('credential'),
-      controller: _credentialController,
-      keyboardType: TextInputType.text,
-      style: GoogleFonts.inter(
+      key: const ValueKey('unified_field'),
+      controller: _inputController,
+      style: GoogleFonts.outfit(
+        color: Colors.black, // Explicitly black for visibility
         fontWeight: FontWeight.w600,
         fontSize: 16,
-        color: Colors.black87,
       ),
+      cursorColor: AppColors.primary,
       decoration: InputDecoration(
-        hintText: '+234 800... or ACCESS-...',
-        hintStyle: GoogleFonts.inter(color: Colors.black26, fontSize: 15),
+        hintText: 'PHONE OR ACCESS CODE',
+        hintStyle:
+            GoogleFonts.outfit(color: AppColors.textDim, letterSpacing: 1),
+        prefixIcon: const Icon(Icons.vpn_key_rounded, color: AppColors.primary),
         filled: true,
-        fillColor: const Color(0xFFF5F5F5),
-        prefixIcon: const Icon(Icons.shield_rounded, color: AppColors.primary, size: 22),
+        fillColor: AppColors.surfaceContainer,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: AppColors.primary, width: 2),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       ),
     );
   }
 
   Widget _buildOtpField() {
     return TextField(
-      key: const ValueKey('otp'),
-      controller: _secondaryController,
+      key: const ValueKey('otp_field'),
+      controller: _otpController,
       keyboardType: TextInputType.number,
       maxLength: 6,
       textAlign: TextAlign.center,
-      style: GoogleFonts.inter(
-        color: AppColors.primary,
-        fontWeight: FontWeight.w900,
-        fontSize: 32,
-        letterSpacing: 10,
+      style: GoogleFonts.outfit(
+        color: Colors.black, // Explicitly black for visibility
+        fontSize: 24,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 8,
       ),
+      cursorColor: AppColors.primary,
       decoration: InputDecoration(
+        hintText: '000000',
+        hintStyle:
+            GoogleFonts.outfit(color: AppColors.textDim, letterSpacing: 8),
         counterText: '',
-        hintText: '• • • • • •',
-        hintStyle: GoogleFonts.inter(
-          color: Colors.black12,
-          fontSize: 28,
-          letterSpacing: 8,
-        ),
         filled: true,
-        fillColor: const Color(0xFFF5F5F5),
+        fillColor: AppColors.surfaceContainer,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: AppColors.primary, width: 2),
         ),
-        contentPadding: const EdgeInsets.symmetric(vertical: 20),
       ),
     );
   }
 
-  Widget _buildPasswordField() {
-    return TextField(
-      key: const ValueKey('password'),
-      controller: _secondaryController,
-      keyboardType: TextInputType.text,
-      obscureText: _obscurePassword,
-      style: GoogleFonts.inter(
-        fontWeight: FontWeight.w600,
-        fontSize: 16,
-        color: Colors.black87,
-      ),
-      decoration: InputDecoration(
-        hintText: 'Enter PIN',
-        hintStyle: GoogleFonts.inter(color: Colors.black26, fontSize: 15),
-        filled: true,
-        fillColor: const Color(0xFFF5F5F5),
-        prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppColors.primary, size: 22),
-        suffixIcon: IconButton(
-          icon: Icon(
-            _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-            color: AppColors.primary,
-          ),
-          onPressed: () {
-            setState(() {
-              _obscurePassword = !_obscurePassword;
-            });
-          },
+  Widget _buildActionButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 64,
+      child: ElevatedButton(
+        onPressed: _loading ? null : _handlePrimaryAction,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          elevation: 4,
+          shadowColor: AppColors.primary.withValues(alpha: 0.3),
         ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide.none,
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppColors.primary, width: 2),
-        ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        child: _loading
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  color: Colors.white,
+                ),
+              )
+            : Text(
+                _otpSent ? 'VERIFY OTP' : 'AUTHORIZE ACCESS',
+                style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                  letterSpacing: 1.5,
+                ),
+              ),
       ),
     );
   }

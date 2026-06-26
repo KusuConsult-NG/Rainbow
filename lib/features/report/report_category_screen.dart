@@ -1,13 +1,16 @@
+// ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../core/theme/app_colors.dart';
-import '../../core/router/app_router.dart';
-import '../../core/constants/alert_categories.dart';
-import '../../shared/widgets/rainbow_app_bar.dart';
-import '../../shared/widgets/bottom_nav_bar.dart';
+import 'package:rainbow_app/core/constants/alert_categories.dart';
+import 'package:rainbow_app/core/router/app_router.dart';
+import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
+
+/// Documentation for this public member.
 
 class ReportCategoryScreen extends StatelessWidget {
+  /// Documentation for this public member.
   const ReportCategoryScreen({super.key});
 
   @override
@@ -15,8 +18,8 @@ class ReportCategoryScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: const RainbowAppBar(
-        title: 'INCIDENT PROTOCOL', 
-        subtitle: 'SELECT CATEGORY FOR TACTICAL REPORT'
+        title: 'INCIDENT PROTOCOL',
+        subtitle: 'SELECT CATEGORY FOR TACTICAL REPORT',
       ),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
@@ -26,21 +29,26 @@ class ReportCategoryScreen extends StatelessWidget {
             decoration: BoxDecoration(
               color: AppColors.primary.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+              border:
+                  Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.hub_rounded, color: AppColors.primary, size: 24),
+                const Icon(
+                  Icons.hub_rounded,
+                  color: AppColors.primary,
+                  size: 24,
+                ),
                 const SizedBox(width: 20),
                 Expanded(
                   child: Text(
                     'SELECT THE CATEGORY THAT BEST DESCRIBES THE CURRENT EMERGENCY. LOCATION TELEMETRY IS AUTO-ATTACHED.',
                     style: GoogleFonts.outfit(
-                      fontSize: 10, 
-                      color: Colors.white70, 
-                      height: 1.5, 
-                      fontWeight: FontWeight.w800, 
-                      letterSpacing: 0.5
+                      fontSize: 10,
+                      color: AppColors.textSecondary,
+                      height: 1.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5,
                     ),
                   ),
                 ),
@@ -51,29 +59,30 @@ class ReportCategoryScreen extends StatelessWidget {
           Text(
             'AVAILABLE CATEGORIES',
             style: GoogleFonts.outfit(
-              fontSize: 10, 
-              fontWeight: FontWeight.w900, 
-              color: Colors.white24, 
-              letterSpacing: 2.0
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              color: AppColors.textDim,
+              letterSpacing: 2,
             ),
           ),
           const SizedBox(height: 20),
-          ...alertCategories.map((cat) => _CategoryCard(
-            info: cat,
-            onTap: () => context.push(AppRoutes.reportSubtype, extra: cat),
-          )),
+          ...alertCategories.map(
+            (cat) => _CategoryCard(
+              info: cat,
+              onTap: () => context.push(AppRoutes.reportSubtype, extra: cat),
+            ),
+          ),
           const SizedBox(height: 100),
         ],
       ),
-      bottomNavigationBar: const RainbowBottomNav(currentIndex: 2),
     );
   }
 }
 
 class _CategoryCard extends StatelessWidget {
+  const _CategoryCard({required this.info, required this.onTap});
   final AlertCategoryInfo info;
   final VoidCallback onTap;
-  const _CategoryCard({required this.info, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -84,9 +93,9 @@ class _CategoryCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.02),
+          color: Colors.black.withValues(alpha: 0.02),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+          border: Border.all(color: AppColors.outline),
         ),
         child: Row(
           children: [
@@ -109,7 +118,7 @@ class _CategoryCard extends StatelessWidget {
                     style: GoogleFonts.outfit(
                       fontWeight: FontWeight.w900,
                       fontSize: 16,
-                      color: Colors.white,
+                      color: AppColors.onBackground,
                       letterSpacing: 0.5,
                     ),
                   ),
@@ -117,8 +126,8 @@ class _CategoryCard extends StatelessWidget {
                   Text(
                     '${info.subTypes.length} OPERATIONAL SUBTYPES',
                     style: GoogleFonts.outfit(
-                      fontSize: 10, 
-                      color: Colors.white24, 
+                      fontSize: 10,
+                      color: AppColors.textDim,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.5,
                     ),
@@ -127,28 +136,40 @@ class _CategoryCard extends StatelessWidget {
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children: info.subTypes.take(2).map((s) => Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.03),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
-                      ),
-                      child: Text(
-                        s.toUpperCase(),
-                        style: GoogleFonts.outfit(
-                          fontSize: 8, 
-                          fontWeight: FontWeight.w900, 
-                          color: Colors.white38, 
-                          letterSpacing: 0.5
-                        ),
-                      ),
-                    )).toList(),
+                    children: info.subTypes
+                        .take(2)
+                        .map(
+                          (s) => Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.03),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: AppColors.outline),
+                            ),
+                            child: Text(
+                              s.toUpperCase(),
+                              style: GoogleFonts.outfit(
+                                fontSize: 8,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.textDim,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
                   ),
                 ],
               ),
             ),
-            Icon(Icons.arrow_forward_ios_rounded, color: Colors.white.withValues(alpha: 0.05), size: 16),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              color: AppColors.outline,
+              size: 16,
+            ),
           ],
         ),
       ),

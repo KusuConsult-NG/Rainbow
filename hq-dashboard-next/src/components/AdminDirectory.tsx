@@ -19,10 +19,10 @@ interface StaffRecord {
 }
 
 const ROLES = [
-  { value: 'HQ_OFFICER', label: 'HQ Officer' },
-  { value: 'LGA_OFFICER', label: 'LGA Officer' },
-  { value: 'WARD_OFFICER', label: 'Ward Officer' },
-  { value: 'POLLING_UNIT_OFFICER', label: 'Polling Unit Officer' },
+  { value: 'HQ_OFFICER', label: 'Tactical HQ (Statewide)' },
+  { value: 'LGA_COMMAND', label: 'LGA Command' },
+  { value: 'WARD_COMMAND', label: 'Ward Command' },
+  { value: 'UNIT_COMMAND', label: 'Unit Command (PU)' },
 ];
 
 const API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY!;
@@ -30,7 +30,7 @@ const API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY!;
 export default function AdminDirectory() {
   const [badgeId, setBadgeId] = useState('');
   const [pin, setPin] = useState('');
-  const [role, setRole] = useState('POLLING_UNIT_OFFICER');
+  const [role, setRole] = useState('UNIT_COMMAND');
   const [displayName, setDisplayName] = useState('');
   
   const [selectedLga, setSelectedLga] = useState<TacticalJurisdiction | null>(null);
@@ -77,9 +77,15 @@ export default function AdminDirectory() {
         role,
         displayName: displayName || badgeId.toUpperCase(),
         createdAt: new Date().toISOString(),
-        geo_lga: selectedLga?.name || null,
-        geo_ward: selectedWard?.name || null,
-        geo_pu: selectedPu || null,
+        geo_lgas: selectedLga ? [selectedLga.name] : ['ALL'],
+        geo_wards: selectedWard ? [selectedWard.name] : ['ALL'],
+        geo_pus: selectedPu ? [selectedPu] : ['ALL'],
+        geo_lga: selectedLga?.name || 'STATEWIDE', // Legacy
+        geo_ward: selectedWard?.name || 'STATEWIDE',
+        geo_pu: selectedPu || 'STATEWIDE',
+        isStaff: true,
+        active: true,
+        profileComplete: true,
       });
 
       setMsg(`✓ BADGE SECURED: ${badgeId.toUpperCase()} · ${email}`);
@@ -119,19 +125,11 @@ export default function AdminDirectory() {
 
   const filtered = roleFilter === 'ALL' ? staff : staff.filter(s => s.role === roleFilter);
 
-  const s: React.CSSProperties = {
-    width: '100%', padding: '12px 14px',
-    background: 'rgba(0,0,0,0.04)',
-    border: '1px solid rgba(0,0,0,0.1)',
-    borderRadius: 10, color: 'var(--text-primary)',
-    fontFamily: 'Inter,sans-serif', fontSize: 13, fontWeight: 600, outline: 'none',
-  };
-
   return (
     <div style={{ padding: '8px 0', maxWidth: 1200 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 32 }}>
-        <div style={{ padding: 12, background: 'rgba(229,57,53,0.15)', borderRadius: 12 }}>
-          <Users size={28} color="var(--accent)" />
+        <div style={{ padding: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 12 }}>
+          <Users size={28} color="var(--text-secondary)" />
         </div>
         <div>
           <h2 style={{ fontSize: 22, fontWeight: 900 }}>ADMIN DIRECTORY</h2>
@@ -141,37 +139,37 @@ export default function AdminDirectory() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24 }}>
         {/* Provision Panel */}
-        <div className="glass" style={{ borderRadius: 16, padding: 24, alignSelf: 'start' }}>
+        <div className="tactical-panel glass" style={{ padding: 24, alignSelf: 'start' }}>
           <h3 style={{ fontSize: 13, fontWeight: 900, marginBottom: 22, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <UserPlus size={15} color="var(--accent)" /> PROVISION NEW BADGE
+            <UserPlus size={15} color="var(--primary)" /> PROVISION NEW BADGE
           </h3>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
               <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: 1.2, marginBottom: 6 }}>BADGE IDENTIFIER</label>
-              <input value={badgeId} onChange={e => setBadgeId(e.target.value)} placeholder="e.g. WD-045" style={s} />
+              <input value={badgeId} onChange={e => setBadgeId(e.target.value)} placeholder="e.g. WD-045" className="input-tactical" style={{ width: '100%' }} />
               <p style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 4 }}>
                 Login email: {badgeId ? `${badgeId.toLowerCase()}@operationrainbow.plateau.gov.ng` : '—'}
               </p>
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: 1.2, marginBottom: 6 }}>DISPLAY NAME</label>
-              <input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="e.g. Sgt. Musa Ibrahim" style={s} />
+              <input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="e.g. Sgt. Musa Ibrahim" className="input-tactical" style={{ width: '100%' }} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: 1.2, marginBottom: 6 }}>ROLE</label>
               <select value={role} onChange={e => {
                 setRole(e.target.value);
                 setSelectedLga(null); setSelectedWard(null); setSelectedPu('');
-              }} style={{ ...s, cursor: 'pointer' }}>
+              }} className="input-tactical" style={{ width: '100%', cursor: 'pointer' }}>
                 {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
             </div>
 
             {role !== 'HQ_OFFICER' && (
               <>
-                <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: 12, border: '1px dashed var(--border)' }}>
-                  <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--accent)', letterSpacing: 1, marginBottom: 12 }}>JURISDICTIONAL BOUNDS</p>
+                <div style={{ padding: '12px', background: 'var(--input-bg)', borderRadius: 12, border: '1px dashed var(--border)' }}>
+                  <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1, marginBottom: 12 }}>JURISDICTIONAL BOUNDS</p>
                   
                   <div style={{ marginBottom: 12 }}>
                     <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 6 }}>ASSIGNED LGA</label>
@@ -183,14 +181,15 @@ export default function AdminDirectory() {
                         setSelectedWard(null);
                         setSelectedPu('');
                       }} 
-                      style={s}
+                      className="input-tactical"
+                      style={{ width: '100%' }}
                     >
                       <option value="">Select LGA...</option>
                       {plateauTacticalMap.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                     </select>
                   </div>
 
-                  {(role === 'WARD_OFFICER' || role === 'POLLING_UNIT_OFFICER') && selectedLga && (
+                  {(role === 'WARD_OFFICER' || role === 'POLLING_UNIT_OFFICER' || role === 'WARD_COMMAND' || role === 'UNIT_COMMAND') && selectedLga && (
                     <div style={{ marginBottom: 12 }}>
                       <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 6 }}>ASSIGNED WARD</label>
                       <select 
@@ -200,7 +199,8 @@ export default function AdminDirectory() {
                           setSelectedWard(ward || null);
                           setSelectedPu('');
                         }} 
-                        style={s}
+                        className="input-tactical"
+                        style={{ width: '100%' }}
                       >
                         <option value="">Select Ward...</option>
                         {selectedLga.wards.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
@@ -208,10 +208,10 @@ export default function AdminDirectory() {
                     </div>
                   )}
 
-                  {role === 'POLLING_UNIT_OFFICER' && selectedWard && (
+                  {(role === 'POLLING_UNIT_OFFICER' || role === 'UNIT_COMMAND') && selectedWard && (
                     <div>
                       <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 6 }}>ASSIGNED POLLING UNIT</label>
-                      <select value={selectedPu} onChange={e => setSelectedPu(e.target.value)} style={s}>
+                      <select value={selectedPu} onChange={e => setSelectedPu(e.target.value)} className="input-tactical" style={{ width: '100%' }}>
                         <option value="">Select Polling Unit...</option>
                         {selectedWard.pollingUnits.map(pu => <option key={pu} value={pu}>{pu}</option>)}
                       </select>
@@ -223,29 +223,37 @@ export default function AdminDirectory() {
 
             <div>
               <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: 1.2, marginBottom: 6 }}>SECURE PIN / PASSWORD</label>
-              <input type="password" value={pin} onChange={e => setPin(e.target.value)} placeholder="Min 6 characters" style={{ ...s, letterSpacing: pin ? 6 : 0 }} />
+              <input type="password" value={pin} onChange={e => setPin(e.target.value)} placeholder="Min 6 characters" className="input-tactical" style={{ width: '100%', letterSpacing: pin ? 6 : 0 }} />
             </div>
 
             <button onClick={provision} disabled={loading || !badgeId || !pin || (role !== 'HQ_OFFICER' && !selectedLga)}
-              style={{ padding: '13px', background: loading ? 'rgba(0,0,0,0.1)' : 'var(--accent)', color: '#ffffff', border: 'none', borderRadius: 10, cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 900, fontSize: 12, letterSpacing: 1.5, fontFamily: 'Inter,sans-serif', marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              className="btn-tactical btn-primary"
+              style={{
+                padding: '13px',
+                width: '100%',
+                opacity: loading ? 0.6 : 1,
+                cursor: loading ? 'not-allowed' : 'pointer'
+              }}
+            >
               {loading ? <><Loader2 size={14} className="spin" /> PROVISIONING...</> : 'GENERATE CREDENTIALS'}
             </button>
 
             {msg && (
-              <p style={{ fontSize: 11, fontWeight: 800, color: msgType === 'ok' ? 'var(--success)' : 'var(--accent)', textAlign: 'center', lineHeight: 1.4 }}>{msg}</p>
+              <p style={{ fontSize: 11, fontWeight: 800, color: msgType === 'ok' ? 'var(--success)' : 'var(--duress)', textAlign: 'center', lineHeight: 1.4 }}>{msg}</p>
             )}
           </div>
         </div>
 
         {/* Staff Table */}
-        <div className="glass" style={{ borderRadius: 16, padding: 24 }}>
+        <div className="tactical-panel glass" style={{ padding: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 20, gap: 12 }}>
             <h3 style={{ fontSize: 13, fontWeight: 900, flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
               ACTIVE PERSONNEL
               {staffLoading && <RefreshCw size={13} className="spin" color="var(--text-muted)" />}
             </h3>
             <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}
-              style={{ background: 'rgba(0,0,0,0.06)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text-primary)', fontFamily: 'Inter,sans-serif', fontSize: 11, fontWeight: 700 }}>
+              className="input-tactical"
+              style={{ padding: '6px 10px', fontSize: 11, fontWeight: 700, width: 'auto' }}>
               <option value="ALL">ALL ROLES</option>
               {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
@@ -268,13 +276,13 @@ export default function AdminDirectory() {
               </thead>
               <tbody>
                 {filtered.map(s => (
-                  <tr key={s.id} style={{ borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
+                  <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
                     <td style={{ padding: '14px 8px' }}>
                       <div style={{ fontWeight: 900, fontSize: 13 }}>{s.displayName || s.badgeId || s.id}</div>
                       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{s.badgeId}</div>
                     </td>
                     <td style={{ padding: '14px 8px' }}>
-                      <span style={{ fontSize: 9, fontWeight: 800, padding: '4px 8px', borderRadius: 20, background: 'rgba(229,57,53,0.15)', color: 'var(--accent)' }}>
+                      <span style={{ fontSize: 9, fontWeight: 800, padding: '4px 8px', borderRadius: 20, background: 'var(--primary-dim)', color: 'var(--primary)' }}>
                         {s.role?.replace('_', ' ') || 'CITIZEN'}
                       </span>
                     </td>
@@ -292,12 +300,12 @@ export default function AdminDirectory() {
                     <td style={{ padding: '14px 8px', textAlign: 'right', display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
                        <button onClick={() => handleForceLogout(s.id, s.displayName || s.id)}
                          title="Force Logout from all devices"
-                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#F57F17', padding: 4 }}>
+                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--warning)', padding: 4 }}>
                          <LogOut size={14} />
                        </button>
                        <button onClick={() => handleDelete(s.id, s.displayName || s.id)}
                          title="Remove from platform"
-                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 4 }}>
+                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--duress)', padding: 4 }}>
                          <Trash2 size={15} />
                        </button>
                      </td>
