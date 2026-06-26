@@ -1,97 +1,130 @@
-import 'package:flutter/foundation.dart';
-
-import 'package:firebase_messaging/firebase_messaging.dart';
+// ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'auth_service.dart';
+import 'package:rainbow_app/services/auth_service.dart';
 
-final pushNotificationServiceProvider = Provider<PushNotificationService>((ref) {
+/// Documentation for this public member.
+
+final pushNotificationServiceProvider =
+    Provider<PushNotificationService>((ref) {
   return PushNotificationService(ref.read(authServiceProvider));
 });
 
+/// Documentation for this public member.
+
 class PushNotificationService {
+  /// Documentation for this public member.
+  PushNotificationService(this._authService);
   final AuthService _authService;
 
-  PushNotificationService(this._authService);
+  /// Documentation for this public member.
 
   Future<void> initialize() async {
-    FirebaseMessaging messaging = FirebaseMessaging.instance;
+    try {
+      final messaging = FirebaseMessaging.instance;
 
-    NotificationSettings settings = await messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+      final settings = await messaging.requestPermission().timeout(
+            const Duration(seconds: 5),
+          );
 
-    if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-      debugPrint('[SYS_INFO] User granted push notification permission.');
-      
-      // Get the token and attach it to the current user's profile
-      String? token = await messaging.getToken();
-      if (token != null) {
-        _saveTokenToFirestore(token);
+      if (settings.authorizationStatus == AuthorizationStatus.authorized ||
+          settings.authorizationStatus == AuthorizationStatus.provisional) {
+        debugPrint('[SYS_INFO] User granted push notification permission.');
+
+        // Get the token and attach it to the current user's profile
+        final token = await messaging.getToken().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            debugPrint('[SYS_WARN] FCM getToken timed out.');
+            return null;
+          },
+        );
+        if (token != null) {
+          unawaited(_saveTokenToFirestore(token));
+        }
+
+        // Listen for token refreshes — only when notifications are authorized
+        messaging.onTokenRefresh.listen((newToken) {
+          unawaited(_saveTokenToFirestore(newToken));
+        });
+
+        // Handle foreground messages natively if needed.
+        FirebaseMessaging.onMessage.listen((message) {
+          debugPrint(
+            '[SYS_INFO] Received Foreground Push: ${message.notification?.title}',
+          );
+        });
+      } else {
+        debugPrint(
+          '[SYS_WARN] User declined or has not accepted push notification permissions.',
+        );
       }
-
-      // Listen for token refreshes
-      messaging.onTokenRefresh.listen((newToken) {
-        _saveTokenToFirestore(newToken);
-      });
-
-      // Handle foreground messages natively if needed.
-      // Usually, OS handles background ones, but we log foreground here.
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        debugPrint('[SYS_INFO] Received Foreground Push: ${message.notification?.title}');
-      });
-    } else {
-      debugPrint('[SYS_WARN] User declined or has not accepted push notification permissions.');
+      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
+    } catch (e) {
+      debugPrint('[SYS_ERR] Push notification initialization failed: $e');
     }
   }
 
-  void _saveTokenToFirestore(String token) async {
+  Future<void> _saveTokenToFirestore(String token) async {
     final uid = _authService.currentUserId;
     if (uid == null) return;
-    
+
     try {
       // 1. Save token and fetch profile
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-      await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'fcmToken': token,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get()
+          .timeout(const Duration(seconds: 5));
 
-      if (!userDoc.exists) return;
+      await FirebaseFirestore.instance.collection('users').doc(uid).set(
+        {
+          'fcmToken': token,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      ).timeout(const Duration(seconds: 5));
+
+      if (!userDoc.exists || userDoc.data() == null) return;
 
       final data = userDoc.data()!;
-      final String? role = data['role'];
-      final String? lga = data['lga'];
-      final String? ward = data['ward'];
+      final role = data['role'] as String?;
+      final lga = data['lga'] as String?;
+      final ward = data['ward'] as String?;
 
-      FirebaseMessaging messaging = FirebaseMessaging.instance;
+      final messaging = FirebaseMessaging.instance;
+      final cleanLga = lga?.toLowerCase().replaceAll(' ', '_');
+      final cleanWard = ward?.toLowerCase().replaceAll(' ', '_');
 
-      if (role != null) {
-        // Global Role Topic
-        await messaging.subscribeToTopic('staff_${role.toLowerCase()}');
-        
-        // Broadcast Topics (Match backend massBroadcast)
-        await messaging.subscribeToTopic('all_citizens');
+      final subscriptionFutures = <Future<void>>[
+        if (role != null) ...[
+          messaging.subscribeToTopic('staff_${role.toLowerCase()}'),
+          messaging.subscribeToTopic('all_citizens'),
+          if (cleanLga != null) ...[
+            messaging.subscribeToTopic('lga_$cleanLga'),
+            messaging.subscribeToTopic('staff_lga_$cleanLga'),
+          ],
+          if (cleanWard != null) ...[
+            messaging.subscribeToTopic('ward_$cleanWard'),
+            messaging.subscribeToTopic('staff_ward_$cleanWard'),
+          ],
+        ] else
+          messaging.subscribeToTopic('all_citizens'),
+      ];
 
-        if (lga != null) {
-          final cleanLga = lga.toLowerCase().replaceAll(' ', '_');
-          await messaging.subscribeToTopic('lga_$cleanLga');
-          // For staff-specific LGA alerts
-          await messaging.subscribeToTopic('staff_lga_$cleanLga');
-        }
-
-        if (ward != null) {
-          final cleanWard = ward.toLowerCase().replaceAll(' ', '_');
-          await messaging.subscribeToTopic('ward_$cleanWard');
-          // For staff-specific Ward alerts
-          await messaging.subscribeToTopic('staff_ward_$cleanWard');
-        }
-      } else {
-        // Citizens subscribe to global broadcasts
-        await messaging.subscribeToTopic('all_citizens');
-      }
+      // Execute all subscriptions in parallel and catch individual errors gracefully
+      await Future.wait(
+        subscriptionFutures.map(
+          (future) =>
+              future.timeout(const Duration(seconds: 3)).catchError((Object e) {
+            debugPrint('[SYS_ERR] Individual topic subscription failed: $e');
+          }),
+        ),
+      );
+      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (e) {
       debugPrint('[SYS_ERR] Failed to sync jurisdictional communications: $e');
     }

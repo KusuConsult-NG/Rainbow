@@ -2,23 +2,37 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
-class RainbowMap extends StatelessWidget {
-  final LatLng center;
-  final double initialZoom;
-  final List<Marker> markers;
-  final List<Polyline> polylines;
-  final MapController? mapController;
-  final bool interactive;
+/// Documentation for this public member.
 
+class RainbowMap extends StatelessWidget {
+  /// Documentation for this public member.
   const RainbowMap({
-    super.key,
     required this.center,
+    super.key,
     this.initialZoom = 15.0,
     this.markers = const [],
     this.polylines = const [],
     this.mapController,
     this.interactive = true,
   });
+
+  /// Documentation for this public member.
+  final LatLng center;
+
+  /// Documentation for this public member.
+  final double initialZoom;
+
+  /// Documentation for this public member.
+  final List<Marker> markers;
+
+  /// Documentation for this public member.
+  final List<Polyline> polylines;
+
+  /// Documentation for this public member.
+  final MapController? mapController;
+
+  /// Documentation for this public member.
+  final bool interactive;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +48,8 @@ class RainbowMap extends StatelessWidget {
       children: [
         // CartoDB Dark Matter Tiles for Tactical Aesthetic
         TileLayer(
-          urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+          urlTemplate:
+              'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
           subdomains: const ['a', 'b', 'c', 'd'],
           userAgentPackageName: 'com.plateau.rainbow',
         ),

@@ -1,21 +1,70 @@
 import { useState } from 'react';
 import { Target, ShieldAlert, Send } from 'lucide-react';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from './firebase';
 
 const TERMII_API_KEY = import.meta.env.VITE_TERMII_API_KEY || '';
-const TERMII_SENDER_ID = import.meta.env.VITE_TERMII_SENDER_ID || 'RainbowHQ';
+const TERMII_SENDER_ID = import.meta.env.VITE_TERMII_SENDER_ID || 'N-Alert';
 
 export const MassBroadcast = () => {
   const [message, setMessage] = useState('');
+  const [targetType, setTargetType] = useState<'MANUAL' | 'STATEWIDE' | 'WARD'>('MANUAL');
+  const [targetSiecWard, setTargetSiecWard] = useState('');
   const [recipients, setRecipients] = useState('');
-  const [status, setStatus] = useState<null | 'sending' | 'success' | 'error'>(null);
+  const [status, setStatus] = useState<null | 'fetching' | 'sending' | 'success' | 'error'>(null);
   const [errorMsg, setErrorMsg] = useState('');
 
   const handleBroadcast = async () => {
-    if (!message || !recipients.trim()) return;
-    setStatus('sending');
+    if (!message) return;
+    if (targetType === 'MANUAL' && !recipients.trim()) return;
+    
+    setStatus('fetching');
     setErrorMsg('');
 
-    const phones = recipients.split(',').map(p => p.trim()).filter(Boolean);
+    let phones: string[] = [];
+
+    if (targetType === 'MANUAL') {
+      phones = recipients.split(',').map(p => p.trim()).filter(Boolean);
+    } else {
+      try {
+        let q;
+        if (targetType === 'STATEWIDE') {
+          q = query(collection(db, 'users'));
+        } else if (targetType === 'WARD' && targetSiecWard.trim()) {
+          q = query(collection(db, 'users'), where('geo_siec_ward', '==', targetSiecWard.trim()));
+        } else {
+          setErrorMsg('Please specify a SIEC Ward ID');
+          setStatus(null);
+          return;
+        }
+
+        const snap = await getDocs(q);
+        snap.forEach(doc => {
+          const data = doc.data();
+          if (data.phone) {
+            phones.push(data.phone);
+          } else if (data.phoneNumber) {
+            phones.push(data.phoneNumber);
+          }
+        });
+
+        phones = Array.from(new Set(phones));
+
+        if (phones.length === 0) {
+          setErrorMsg('No citizens found for this target area.');
+          setStatus(null);
+          return;
+        }
+      } catch (err) {
+        console.error(err);
+        setErrorMsg('Failed to query citizen database.');
+        setStatus(null);
+        return;
+      }
+    }
+
+    setStatus('sending');
+
     let allSuccess = true;
 
     for (const phone of phones) {
@@ -29,7 +78,7 @@ export const MassBroadcast = () => {
             sms: message,
             type: 'plain',
             api_key: TERMII_API_KEY,
-            channel: 'generic',
+            channel: 'dnd',
           }),
         });
         if (!res.ok) allSuccess = false;
@@ -41,9 +90,10 @@ export const MassBroadcast = () => {
     setStatus(allSuccess ? 'success' : 'error');
     if (allSuccess) {
       setMessage('');
+      if (targetType === 'MANUAL') setRecipients('');
       setTimeout(() => setStatus(null), 3000);
     } else {
-      setErrorMsg('One or more messages failed. Check Termii API key and recipient numbers.');
+      setErrorMsg(`One or more messages failed. Processed ${phones.length} numbers.`);
     }
   };
 
@@ -71,16 +121,52 @@ export const MassBroadcast = () => {
           </div>
         </div>
 
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: 'var(--text-muted)', marginBottom: '8px', letterSpacing: '1px' }}>RECIPIENT PHONE NUMBERS</label>
-          <input
-            value={recipients}
-            onChange={e => setRecipients(e.target.value)}
-            placeholder="+2348034567890, +2347081234567, ..."
-            style={{ width: '100%', padding: '14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.5)', color: 'white', fontFamily: 'Inter', fontSize: '13px' }}
-          />
-          <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>Comma-separated international format. Loaded from Firestore citizen registry in production.</p>
+        <div style={{ marginBottom: '24px' }}>
+          <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: 'var(--text-muted)', marginBottom: '8px', letterSpacing: '1px' }}>TARGETING MODE</label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {['MANUAL', 'STATEWIDE', 'WARD'].map((type) => (
+              <button 
+                key={type}
+                onClick={() => setTargetType(type as any)}
+                style={{ 
+                  flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid', 
+                  borderColor: targetType === type ? 'var(--accent)' : 'rgba(255,255,255,0.1)',
+                  background: targetType === type ? 'rgba(229, 57, 53, 0.1)' : 'rgba(0,0,0,0.5)',
+                  color: targetType === type ? 'white' : 'var(--text-muted)',
+                  fontWeight: 800, fontSize: '11px', cursor: 'pointer'
+                }}
+              >
+                {type}
+              </button>
+            ))}
+          </div>
         </div>
+
+        {targetType === 'MANUAL' && (
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: 'var(--text-muted)', marginBottom: '8px', letterSpacing: '1px' }}>RECIPIENT PHONE NUMBERS</label>
+            <input
+              value={recipients}
+              onChange={e => setRecipients(e.target.value)}
+              placeholder="+2348034567890, +2347081234567, ..."
+              style={{ width: '100%', padding: '14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.5)', color: 'white', fontFamily: 'Inter', fontSize: '13px' }}
+            />
+            <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>Comma-separated international format.</p>
+          </div>
+        )}
+
+        {targetType === 'WARD' && (
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: 'var(--text-muted)', marginBottom: '8px', letterSpacing: '1px' }}>SIEC WARD IDENTIFIER</label>
+            <input
+              value={targetSiecWard}
+              onChange={e => setTargetSiecWard(e.target.value)}
+              placeholder="e.g. JOS_NORTH_01"
+              style={{ width: '100%', padding: '14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.5)', color: 'white', fontFamily: 'Inter', fontSize: '13px' }}
+            />
+            <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>Exact match with SIEC database identifier.</p>
+          </div>
+        )}
 
         <div style={{ marginBottom: '24px' }}>
           <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 800, color: 'var(--text-muted)', marginBottom: '8px', letterSpacing: '1px' }}>
@@ -104,9 +190,11 @@ export const MassBroadcast = () => {
 
         <button 
           onClick={handleBroadcast}
-          disabled={status === 'sending' || !message || !recipients.trim()}
-          style={{ width: '100%', padding: '16px', background: status === 'success' ? '#4CAF50' : status === 'error' ? '#E53935' : 'white', color: (status === 'success' || status === 'error') ? 'white' : 'black', fontWeight: 900, border: 'none', borderRadius: '8px', cursor: (status === 'sending' || !message || !recipients.trim()) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
-          {status === 'sending' ? (
+          disabled={status === 'sending' || status === 'fetching' || !message || (targetType === 'MANUAL' && !recipients.trim()) || (targetType === 'WARD' && !targetSiecWard.trim())}
+          style={{ width: '100%', padding: '16px', background: status === 'success' ? '#4CAF50' : status === 'error' ? '#E53935' : 'white', color: (status === 'success' || status === 'error') ? 'white' : 'black', fontWeight: 900, border: 'none', borderRadius: '8px', cursor: (status === 'sending' || status === 'fetching' || !message) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+          {status === 'fetching' ? (
+             <span style={{ fontSize: '14px', letterSpacing: '1px' }}>RESOLVING TARGETS...</span>
+          ) : status === 'sending' ? (
              <span style={{ fontSize: '14px', letterSpacing: '1px' }}>TRANSMITTING...</span>
           ) : status === 'success' ? (
              <span style={{ fontSize: '14px', letterSpacing: '1px' }}>PAYLOAD DELIVERED ✓</span>
@@ -115,7 +203,7 @@ export const MassBroadcast = () => {
           ) : (
             <>
               <Send size={18} />
-              <span style={{ fontSize: '14px', letterSpacing: '1px' }}>INITIATE STATEWIDE PUSH</span>
+              <span style={{ fontSize: '14px', letterSpacing: '1px' }}>INITIATE PUSH</span>
             </>
           )}
         </button>

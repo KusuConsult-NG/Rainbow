@@ -4,6 +4,14 @@
       "collectionGroup": "alerts",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "reportedByUid", "order": "ASCENDING" },
+        { "fieldPath": "reportedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "alerts",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "reportedBy", "order": "ASCENDING" },
         { "fieldPath": "reportedAt", "order": "DESCENDING" }
       ]
@@ -29,6 +37,22 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "isCritical", "order": "ASCENDING" },
+        { "fieldPath": "reportedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "broadcast_alerts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "alerts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "arrayConfig": "CONTAINS" },
         { "fieldPath": "reportedAt", "order": "DESCENDING" }
       ]
     }

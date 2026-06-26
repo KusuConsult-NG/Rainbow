@@ -1,17 +1,26 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_map/flutter_map.dart';
-import '../../core/theme/app_colors.dart';
-import '../../shared/widgets/rainbow_app_bar.dart';
-import '../../shared/widgets/bottom_nav_bar.dart';
-import '../../shared/widgets/rainbow_map.dart';
-import '../../services/location_service.dart';
-import '../../services/background_tracking_service.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData, HapticFeedback;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/providers/auth_provider.dart';
+import 'package:rainbow_app/providers/emergency_provider.dart';
+import 'package:rainbow_app/services/background_tracking_service.dart';
+import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
+import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
+import 'package:share_plus/share_plus.dart';
+
+/// Documentation for this public member.
 
 class LiveTrackingScreen extends ConsumerStatefulWidget {
+  /// Documentation for this public member.
   const LiveTrackingScreen({super.key});
 
   @override
@@ -21,6 +30,9 @@ class LiveTrackingScreen extends ConsumerStatefulWidget {
 class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
+  final List<LatLng> _pathPoints = [];
+  StreamSubscription<Position>? _positionSubscription;
+  Position? _currentPosition;
   bool _isTracking = true;
 
   @override
@@ -29,28 +41,81 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2000),
-    )..repeat(reverse: true);
+    );
+    unawaited(_pulseController.repeat(reverse: true));
+    _startTracking();
+
+    // GAP-3: BackgroundTrackingService integration
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final alertId = ref.read(emergencyProvider).alertId;
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        if (alertId != null) {
+          unawaited(BackgroundTrackingService().startSosTracking(alertId, uid));
+        } else {
+          unawaited(BackgroundTrackingService().startResponderTracking(uid));
+        }
+      }
+    });
+  }
+
+  void _startTracking() {
+    _positionSubscription = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+      ),
+    ).listen((position) {
+      if (!mounted) return;
+      setState(() {
+        _currentPosition = position;
+        final loc = LatLng(position.latitude, position.longitude);
+        if (_pathPoints.isEmpty || _pathPoints.last != loc) {
+          _pathPoints.add(loc);
+        }
+      });
+
+      // GAP-F: Write live position to Firestore so HQ can see citizen's path
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null && _isTracking) {
+        FirebaseFirestore.instance.collection('tracking').doc(uid).set(
+          {
+            'lat': position.latitude,
+            'lng': position.longitude,
+            'speed': position.speed,
+            'heading': position.heading,
+            'updatedAt': FieldValue.serverTimestamp(),
+            'status': 'ACTIVE',
+            'path': FieldValue.arrayUnion([
+              {
+                'lat': position.latitude,
+                'lng': position.longitude,
+                'timestamp': DateTime.now().toIso8601String(),
+              }
+            ]),
+          },
+          SetOptions(merge: true),
+        ).ignore();
+      }
+    });
   }
 
   @override
   void dispose() {
     _pulseController.dispose();
+    unawaited(_positionSubscription?.cancel());
+    unawaited(BackgroundTrackingService().stopTracking());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final userLocAsync = ref.watch(userLocationStreamProvider);
-    
     final markers = <Marker>[];
-    final points = <LatLng>[];
-
-    userLocAsync.whenData((pos) {
-      final loc = LatLng(pos.latitude, pos.longitude);
-      points.add(loc);
+    if (_currentPosition != null) {
       markers.add(
         Marker(
-          point: loc,
+          point:
+              LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
           width: 50,
           height: 50,
           child: AnimatedBuilder(
@@ -62,9 +127,10 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
                 border: Border.all(color: Colors.white, width: 4),
                 boxShadow: [
                   BoxShadow(
-                    color: AppColors.secondary.withAlpha((70 - _pulseController.value * 70).toInt()),
+                    color: AppColors.secondary
+                        .withAlpha((70 - _pulseController.value * 70).toInt()),
                     spreadRadius: _pulseController.value * 20,
-                  )
+                  ),
                 ],
               ),
               child: const Icon(Icons.person, color: Colors.white, size: 20),
@@ -72,13 +138,21 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
           ),
         ),
       );
-    });
+    }
 
-    final polylines = points.length == 2 ? [
-      Polyline(points: points, strokeWidth: 4.0, color: AppColors.secondary)
-    ] : <Polyline>[];
+    final polylines = _pathPoints.length >= 2
+        ? [
+            Polyline(
+              points: _pathPoints,
+              strokeWidth: 4,
+              color: AppColors.secondary,
+            ),
+          ]
+        : <Polyline>[];
 
-    final center = points.isNotEmpty ? points.first : const LatLng(9.9167, 8.8917);
+    final center = _currentPosition != null
+        ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
+        : const LatLng(9.9167, 8.8917);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -91,13 +165,12 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
           Positioned.fill(
             child: RainbowMap(
               center: center,
-              initialZoom: 15.0,
               markers: markers,
               polylines: polylines,
             ),
           ),
 
-          // Top Info Card - Conversational
+          // Top Info Card
           Positioned(
             top: 24,
             left: 24,
@@ -112,7 +185,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
                     color: Colors.black.withAlpha(20),
                     blurRadius: 30,
                     offset: const Offset(0, 10),
-                  )
+                  ),
                 ],
               ),
               child: Row(
@@ -124,14 +197,20 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
                       height: 12,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: _isTracking ? AppColors.secondary : AppColors.outlineVariant,
-                        boxShadow: _isTracking ? [
-                          BoxShadow(
-                            color: AppColors.secondary.withAlpha((_pulseController.value * 100).toInt()),
-                            blurRadius: 10,
-                            spreadRadius: 2,
-                          )
-                        ] : null,
+                        color: _isTracking
+                            ? AppColors.secondary
+                            : AppColors.outlineVariant,
+                        boxShadow: _isTracking
+                            ? [
+                                BoxShadow(
+                                  color: AppColors.secondary.withAlpha(
+                                    (_pulseController.value * 100).toInt(),
+                                  ),
+                                  blurRadius: 10,
+                                  spreadRadius: 2,
+                                ),
+                              ]
+                            : null,
                       ),
                     ),
                   ),
@@ -140,7 +219,13 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _isTracking ? 'You are moving' : 'Tracking paused',
+                        !_isTracking
+                            ? 'Tracking paused'
+                            : (_currentPosition == null)
+                                ? 'Acquiring signal...'
+                                : ((_currentPosition!.speed * 3.6) > 2.0)
+                                    ? 'Moving at ${(_currentPosition!.speed * 3.6).toStringAsFixed(1)} km/h'
+                                    : 'Stationary',
                         style: GoogleFonts.inter(
                           fontSize: 20,
                           fontWeight: FontWeight.w800,
@@ -150,7 +235,9 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Last update: Just now',
+                        _currentPosition != null
+                            ? 'Last update: Just now'
+                            : 'Initializing...',
                         style: GoogleFonts.inter(
                           fontSize: 13,
                           color: AppColors.onSurfaceVariant,
@@ -173,19 +260,18 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
               children: [
                 GestureDetector(
                   onTap: () {
-                    HapticFeedback.selectionClick();
-                    final loc = points.isNotEmpty ? points.first : null;
-                    if (loc != null) {
-                      final link = 'https://maps.google.com/?q=${loc.latitude},${loc.longitude}';
-                      Clipboard.setData(ClipboardData(text: link));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Tracking link copied!', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-                          behavior: SnackBarBehavior.floating,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    unawaited(HapticFeedback.selectionClick());
+                    final auth = ref.read(authProvider);
+                    final badgeId = auth.profile?['badgeId'] ?? 'unknown';
+                    final link =
+                        'https://hq.operationrainbow.plateau.gov.ng/track/agent/$badgeId';
+                    unawaited(
+                      SharePlus.instance.share(
+                        ShareParams(
+                          text: 'Live tactical tracking established: $link',
                         ),
-                      );
-                    }
+                      ),
+                    );
                   },
                   child: Container(
                     height: 56,
@@ -203,7 +289,10 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.share_rounded, color: AppColors.secondary),
+                        const Icon(
+                          Icons.share_rounded,
+                          color: AppColors.secondary,
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           'Share Live Link',
@@ -220,36 +309,47 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
                 const SizedBox(height: 12),
                 GestureDetector(
                   onTap: () async {
-                    HapticFeedback.lightImpact();
+                    unawaited(HapticFeedback.lightImpact());
                     final newValue = !_isTracking;
                     setState(() {
                       _isTracking = newValue;
                     });
-                    final userId = ref.read(userRoleProvider).value ?? 'AGENT';
+
+                    final auth = ref.watch(authProvider);
+                    final userId = auth.user?.uid ?? 'unknown';
+
                     if (newValue) {
-                       await BackgroundTrackingService().startTracking('MANUAL', userId);
+                      await BackgroundTrackingService()
+                          .startSosTracking('MANUAL', userId);
                     } else {
-                       await BackgroundTrackingService().stopTracking();
+                      await BackgroundTrackingService().stopTracking();
                     }
                   },
                   child: Container(
                     height: 56,
                     decoration: BoxDecoration(
-                      color: _isTracking ? AppColors.surfaceContainerHigh : AppColors.primary,
+                      color: _isTracking
+                          ? AppColors.surfaceContainerHigh
+                          : AppColors.primary,
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(
-                          _isTracking ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                          color: _isTracking ? AppColors.onSurface : Colors.white
+                          _isTracking
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                          color:
+                              _isTracking ? AppColors.onSurface : Colors.white,
                         ),
                         const SizedBox(width: 8),
                         Text(
                           _isTracking ? 'Pause Tracking' : 'Resume Tracking',
                           style: GoogleFonts.inter(
-                            color: _isTracking ? AppColors.onSurface : Colors.white,
+                            color: _isTracking
+                                ? AppColors.onSurface
+                                : Colors.white,
                             fontWeight: FontWeight.w700,
                             fontSize: 15,
                           ),
@@ -263,7 +363,6 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
           ),
         ],
       ),
-      bottomNavigationBar: const RainbowBottomNav(currentIndex: 1),
     );
   }
 }

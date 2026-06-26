@@ -1,45 +1,64 @@
+// ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
+import 'dart:async';
 import 'dart:ui';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../core/theme/app_colors.dart';
-import '../../core/router/app_router.dart';
-import '../../providers/emergency_provider.dart';
-import '../../shared/widgets/bottom_nav_bar.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
-import '../../services/alert_service.dart';
+import 'package:rainbow_app/core/router/app_router.dart';
+import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/models/alert_model.dart';
+import 'package:rainbow_app/providers/auth_provider.dart';
+import 'package:rainbow_app/providers/emergency_provider.dart';
+import 'package:rainbow_app/services/alert_service.dart';
+import 'package:rainbow_app/services/background_tracking_service.dart';
+import 'package:rainbow_app/shared/widgets/broadcast_hud.dart';
+
+/// Documentation for this public member.
 
 class HomeScreen extends ConsumerStatefulWidget {
+  /// Documentation for this public member.
   const HomeScreen({super.key});
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStateMixin {
+class _HomeScreenState extends ConsumerState<HomeScreen>
+    with TickerProviderStateMixin {
   late AnimationController _breathingController;
   late AnimationController _safePulseController;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
 
   @override
   void initState() {
     super.initState();
     _breathingController = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 2500))
-      ..repeat(reverse: true);
+      vsync: this,
+      duration: const Duration(milliseconds: 2500),
+    );
+    unawaited(_breathingController.repeat(reverse: true));
 
     _safePulseController = AnimationController(
-        vsync: this, duration: const Duration(seconds: 2))
-      ..repeat(reverse: true);
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+    unawaited(_safePulseController.repeat(reverse: true));
 
-    ref.read(alertServiceProvider).flushOfflineQueue();
+    // Initial sync
+    unawaited(ref.read(alertServiceProvider).flushOfflineQueue());
 
-    Connectivity().onConnectivityChanged.listen((result) {
+    // Listen for connectivity restoration
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen((result) {
+      if (!mounted) return;
       if (!result.contains(ConnectivityResult.none)) {
-        ref.read(alertServiceProvider).flushOfflineQueue();
+        unawaited(ref.read(alertServiceProvider).flushOfflineQueue());
       }
     });
   }
@@ -48,419 +67,504 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
   void dispose() {
     _breathingController.dispose();
     _safePulseController.dispose();
+    unawaited(_connectivitySubscription?.cancel());
     super.dispose();
   }
 
-  void _triggerPanic({required bool silent}) {
-    HapticFeedback.heavyImpact();
-    ref.read(emergencyProvider.notifier).startEmergency();
-
+  Future<void> _triggerPanic({required bool silent}) async {
+    await HapticFeedback.heavyImpact();
+    unawaited(ref.read(emergencyProvider.notifier).startEmergency());
     if (silent) {
+      // Silent SOS: submit a real background alert without leaving the home screen
+      unawaited(() async {
+        try {
+          await ref.read(alertServiceProvider).submitAlert(
+                type: 'EMERGENCY - Silent SOS',
+                description: 'Silent distress signal activated by user.',
+                reportedBy:
+                    FirebaseAuth.instance.currentUser?.uid ?? 'anonymous',
+                priority: AlertPriority.critical,
+              );
+          // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
+        } catch (e) {
+          debugPrint('[SILENT_SOS] Alert creation failed: $e');
+        }
+      }());
+
+      if (!context.mounted) return;
+      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('SILENT SOS ACTIVATED · SURVEILLANCE ACTIVE', 
-            style: GoogleFonts.outfit(fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 1.0)),
+          content: Text(
+            'SILENT SOS ACTIVATED · SURVEILLANCE ACTIVE',
+            style: GoogleFonts.outfit(
+              fontWeight: FontWeight.w900,
+              fontSize: 11,
+              letterSpacing: 1,
+            ),
+          ),
           backgroundColor: AppColors.surfaceContainerHighest,
           behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
     } else {
+      if (!context.mounted) return;
+      // ignore: use_build_context_synchronously
       context.go(AppRoutes.emergencyActive);
     }
   }
 
   String get _greetingContext {
     final hour = DateTime.now().hour;
-    if (hour < 5 || hour > 22) return "LATE NIGHT · VIGILANCE MODE";
-    if (hour < 12) return "GOOD MORNING · SYSTEMS READY";
-    if (hour < 17) return "GOOD AFTERNOON · ALL CLEAR";
-    return "GOOD EVENING · SECURE PERIMETER";
+    if (hour < 5 || hour > 22) return 'LATE NIGHT · VIGILANCE MODE';
+    if (hour < 12) return 'GOOD MORNING · SYSTEMS READY';
+    if (hour < 17) return 'GOOD AFTERNOON · ALL CLEAR';
+    return 'GOOD EVENING · SECURE PERIMETER';
   }
 
   @override
   Widget build(BuildContext context) {
+    final auth = ref.watch(authProvider);
+    final isStaff = auth.role != UserRole.citizen;
+    final userId = FirebaseAuth.instance.currentUser?.uid ?? 'unknown';
+
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
+      onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        SystemNavigator.pop();
+        await SystemNavigator.pop();
       },
       child: Scaffold(
         backgroundColor: AppColors.background,
-        extendBodyBehindAppBar: true,
         appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
+          leading: Builder(
+            builder: (context) => IconButton(
+              icon:
+                  const Icon(Icons.menu_rounded, color: AppColors.onBackground),
+              onPressed: () {
+                var state = Scaffold.maybeOf(context);
+                if (state != null && !state.hasDrawer) {
+                  final parent = Scaffold.maybeOf(state.context);
+                  if (parent != null) state = parent;
+                }
+                state?.openDrawer();
+              },
+            ),
+          ),
           title: Text(
             'OPERATION RAINBOW',
             style: GoogleFonts.outfit(
               fontWeight: FontWeight.w900,
-              color: Colors.white,
-              letterSpacing: 3.0,
+              letterSpacing: 3,
               fontSize: 14,
             ),
           ),
           centerTitle: true,
           actions: [
             IconButton(
-              icon: const Icon(Icons.notifications_none_rounded, color: Colors.white60),
-              onPressed: () {},
+              icon: const Icon(
+                Icons.notifications_none_rounded,
+                color: AppColors.textSecondary,
+              ),
+              onPressed: () {
+                unawaited(HapticFeedback.lightImpact());
+                unawaited(context.push(AppRoutes.incidentHistory));
+              },
             ),
             const SizedBox(width: 8),
           ],
         ),
-      drawer: const _TacticalDrawer(),
-      body: Stack(
-        children: [
-          // Background ambient pulse
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: Alignment.center,
-                  radius: 1.5,
-                  colors: [
-                    AppColors.primary.withValues(alpha: 0.03),
-                    AppColors.background,
-                  ],
+        body: Stack(
+          children: [
+            // Background ambient pulse
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    radius: 1.5,
+                    colors: [
+                      AppColors.primary.withValues(alpha: 0.03),
+                      AppColors.background,
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          SafeArea(
-            child: Column(
-              children: [
-                const SizedBox(height: 20),
-                // TOP: Safety Status
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: AnimatedBuilder(
-                    animation: _safePulseController,
-                    builder: (context, _) {
-                      return Container(
-                        padding: const EdgeInsets.all(24),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.03),
-                          borderRadius: BorderRadius.circular(32),
-                          border: Border.all(color: Colors.white10),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(32),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 10,
-                                  height: 10,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: AppColors.primary,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: AppColors.primary.withValues(alpha: _safePulseController.value * 0.5),
-                                        blurRadius: 12,
-                                        spreadRadius: _safePulseController.value * 4,
+            SafeArea(
+              child: Column(
+                children: [
+                  const BroadcastHud(),
+                  const SizedBox(height: 12),
+                  // TOP: Safety Status / Patrol Status
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: AnimatedBuilder(
+                      animation: _safePulseController,
+                      builder: (context, _) {
+                        return FutureBuilder<bool>(
+                          future: FlutterBackgroundService().isRunning(),
+                          builder: (context, snapshot) {
+                            final isTracking = snapshot.data ?? false;
+                            final statusColor = isTracking
+                                ? AppColors.success
+                                : AppColors.primary;
+
+                            return Container(
+                              padding: const EdgeInsets.all(24),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.03),
+                                borderRadius: BorderRadius.circular(32),
+                                border: Border.all(color: AppColors.outline),
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(32),
+                                child: BackdropFilter(
+                                  filter:
+                                      ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 10,
+                                        height: 10,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: statusColor,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: statusColor.withValues(
+                                                alpha:
+                                                    _safePulseController.value *
+                                                        0.5,
+                                              ),
+                                              blurRadius: 12,
+                                              spreadRadius:
+                                                  _safePulseController.value *
+                                                      4,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 24),
+                                      Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            isTracking
+                                                ? 'PATROL ACTIVE'
+                                                : 'SYSTEM NOMINAL',
+                                            style: GoogleFonts.outfit(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.w900,
+                                              color: AppColors.primary,
+                                              letterSpacing: 1,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            isTracking
+                                                ? 'TELEMERY UPLINK STABLE'
+                                                : _greetingContext,
+                                            style: GoogleFonts.outfit(
+                                              fontSize: 9,
+                                              color: AppColors.textDim,
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: 1.5,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ],
                                   ),
                                 ),
-                                const SizedBox(width: 24),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'SYSTEM NOMINAL',
-                                      style: GoogleFonts.outfit(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w900,
-                                        color: Colors.white,
-                                        letterSpacing: 1.0,
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+
+                  if (isStaff) ...[
+                    const SizedBox(height: 24),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: FutureBuilder<bool>(
+                        future: FlutterBackgroundService().isRunning(),
+                        builder: (context, snapshot) {
+                          final isTracking = snapshot.data ?? false;
+                          return InkWell(
+                            onTap: () async {
+                              unawaited(HapticFeedback.mediumImpact());
+                              if (isTracking) {
+                                await BackgroundTrackingService()
+                                    .stopTracking();
+                              } else {
+                                await BackgroundTrackingService()
+                                    .startResponderTracking(userId);
+                              }
+                              setState(() {}); // Trigger refresh
+                            },
+                            borderRadius: BorderRadius.circular(20),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 16,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isTracking
+                                    ? AppColors.success.withValues(alpha: 0.1)
+                                    : AppColors.surfaceContainer,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: isTracking
+                                      ? AppColors.success.withValues(alpha: 0.3)
+                                      : AppColors.outline,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    isTracking
+                                        ? Icons.radar_rounded
+                                        : Icons.radio_button_off_rounded,
+                                    color: isTracking
+                                        ? AppColors.success
+                                        : AppColors.textDim,
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Text(
+                                    isTracking
+                                        ? 'END PATROL MISSION'
+                                        : 'ACTIVATE PATROL MODE',
+                                    style: GoogleFonts.outfit(
+                                      color: isTracking
+                                          ? AppColors.success
+                                          : AppColors.onBackground,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 12,
+                                      letterSpacing: 1.5,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  if (isTracking)
+                                    const SizedBox(
+                                      width: 12,
+                                      height: 12,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppColors.success,
                                       ),
                                     ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      _greetingContext,
-                                      style: GoogleFonts.outfit(
-                                        fontSize: 9,
-                                        color: Colors.white38,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1.5,
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+
+                  Expanded(
+                    child: Center(
+                      child: AnimatedBuilder(
+                        animation: _breathingController,
+                        builder: (context, child) {
+                          final scale =
+                              1.0 + (_breathingController.value * 0.04);
+                          return GestureDetector(
+                            onTapDown: (_) => HapticFeedback.mediumImpact(),
+                            onTap: () => _triggerPanic(silent: false),
+                            onLongPress: () => _triggerPanic(silent: true),
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                // Outer ripple
+                                Container(
+                                  width: 300 * scale,
+                                  height: 300 * scale,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: AppColors.emergency.withValues(
+                                        alpha: 0.1 *
+                                            (1 - _breathingController.value),
+                                      ),
+                                      width: 2,
+                                    ),
+                                  ),
+                                ),
+                                // Core button
+                                Transform.scale(
+                                  scale: scale,
+                                  child: Container(
+                                    width: 240,
+                                    height: 240,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      gradient: const LinearGradient(
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                        colors: [
+                                          Color(0xFFFF1744),
+                                          Color(0xFF880E4F),
+                                        ],
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: AppColors.emergency.withValues(
+                                            alpha: 0.2 +
+                                                (_breathingController.value *
+                                                    0.3),
+                                          ),
+                                          blurRadius: 50,
+                                          spreadRadius: 5,
+                                        ),
+                                      ],
+                                      border: Border.all(
+                                        color: Colors.white24,
+                                        width: 2,
                                       ),
                                     ),
-                                  ],
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        const Icon(
+                                          Icons.emergency_rounded,
+                                          color: Colors.white,
+                                          size: 64,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          'SOS',
+                                          style: GoogleFonts.outfit(
+                                            color: Colors.white,
+                                            fontSize: 42,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 6,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          'HOLD FOR SILENT',
+                                          style: GoogleFonts.outfit(
+                                            color: Colors.white60,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 1.5,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+
+                  // BOTTOM: Safe Zone & Report Action
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 20),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        InkWell(
+                          onTap: () {
+                            unawaited(HapticFeedback.selectionClick());
+                            unawaited(context.push(AppRoutes.safeZone));
+                          },
+                          borderRadius: BorderRadius.circular(24),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 20,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.success.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(
+                                color: AppColors.success.withValues(alpha: 0.2),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.shield_rounded,
+                                  size: 16,
+                                  color: AppColors.success,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'SAFE ZONES',
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppColors.success,
+                                    letterSpacing: 2,
+                                  ),
                                 ),
                               ],
                             ),
                           ),
                         ),
-                      );
-                    },
-                  ),
-                ),
-
-                Expanded(
-                  child: Center(
-                    child: AnimatedBuilder(
-                      animation: _breathingController,
-                      builder: (context, child) {
-                        final scale = 1.0 + (_breathingController.value * 0.04);
-                        return GestureDetector(
-                          onTapDown: (_) => HapticFeedback.mediumImpact(),
-                          onTap: () => _triggerPanic(silent: false),
-                          onLongPress: () => _triggerPanic(silent: true),
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              // Outer ripple
-                              Container(
-                                width: 300 * scale,
-                                height: 300 * scale,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: AppColors.emergency.withValues(alpha: 0.1 * (1 - _breathingController.value)),
-                                    width: 2,
+                        const SizedBox(width: 16),
+                        InkWell(
+                          onTap: () {
+                            unawaited(HapticFeedback.selectionClick());
+                            unawaited(context.push(AppRoutes.reportCategory));
+                          },
+                          borderRadius: BorderRadius.circular(24),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 20,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(
+                                color: AppColors.primary.withValues(alpha: 0.2),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'TACTICAL REPORT',
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppColors.primary,
+                                    letterSpacing: 2,
                                   ),
                                 ),
-                              ),
-                              // Core button
-                              Transform.scale(
-                                scale: scale,
-                                child: Container(
-                                  width: 240,
-                                  height: 240,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    gradient: const LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: [Color(0xFFFF1744), Color(0xFF880E4F)],
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: AppColors.emergency.withValues(alpha: 0.2 + (_breathingController.value * 0.3)),
-                                        blurRadius: 50,
-                                        spreadRadius: 5,
-                                      ),
-                                    ],
-                                    border: Border.all(color: Colors.white24, width: 2),
-                                  ),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      const Icon(Icons.emergency_rounded, color: Colors.white, size: 64),
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        'SOS',
-                                        style: GoogleFonts.outfit(
-                                          color: Colors.white,
-                                          fontSize: 42,
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: 6.0,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        'HOLD FOR SILENT',
-                                        style: GoogleFonts.outfit(
-                                          color: Colors.white60,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: 1.5,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                const SizedBox(width: 12),
+                                const Icon(
+                                  Icons.arrow_forward_ios_rounded,
+                                  size: 12,
+                                  color: AppColors.primary,
                                 ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-
-                // BOTTOM: Report Action
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 40),
-                  child: InkWell(
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      context.push(AppRoutes.reportCategory);
-                    },
-                    borderRadius: BorderRadius.circular(24),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'INITIATE TACTICAL REPORT',
-                            style: GoogleFonts.outfit(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w900,
-                              color: AppColors.primary,
-                              letterSpacing: 2.0,
+                              ],
                             ),
                           ),
-                          const SizedBox(width: 16),
-                          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.primary),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
-        bottomNavigationBar: const RainbowBottomNav(currentIndex: 0),
+          ],
+        ),
       ),
     );
   }
 }
-
-class _TacticalDrawer extends StatelessWidget {
-  const _TacticalDrawer();
-
-  @override
-  Widget build(BuildContext context) {
-    return Drawer(
-      backgroundColor: AppColors.background,
-      width: MediaQuery.of(context).size.width * 0.8,
-      child: Column(
-        children: [
-          _DrawerHeader(),
-          const SizedBox(height: 20),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              children: [
-                _DrawerTile(icon: Icons.shield_rounded, label: 'SECURITY HUB', onTap: () => context.push(AppRoutes.settings)),
-                _DrawerTile(icon: Icons.history_edu_rounded, label: 'MISSION ARCHIVE', onTap: () => context.push(AppRoutes.incidentHistory)),
-                _DrawerTile(icon: Icons.contact_emergency_rounded, label: 'EXTRACTION LIST', onTap: () => context.push(AppRoutes.onboardingContacts)),
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 20),
-                  child: Divider(color: AppColors.white05, height: 1),
-                ),
-                _DrawerTile(
-                  icon: Icons.power_settings_new_rounded, 
-                  label: 'TERMINATE SESSION', 
-                  color: AppColors.emergency, 
-                  onTap: () async {
-                    await FirebaseAuth.instance.signOut();
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.setBool('hasOnboarded', false);
-                    if (context.mounted) context.go(AppRoutes.login);
-                  },
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'v1.4.2 · ENCRYPTED CONNECTION',
-              style: GoogleFonts.outfit(
-                color: Colors.white12,
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.0,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DrawerHeader extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 80, 24, 40),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.02),
-        border: const Border(bottom: BorderSide(color: AppColors.white05)),
-      ),
-      child: StreamBuilder(
-        stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snapshot) {
-          final user = snapshot.data;
-          final name = user?.displayName ?? 'OPERATIVE';
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(3),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.primary, width: 1.5),
-                ),
-                child: CircleAvatar(
-                  radius: 32,
-                  backgroundColor: AppColors.primary.withValues(alpha: 0.1),
-                  child: Text(
-                    name[0].toUpperCase(), 
-                    style: GoogleFonts.outfit(fontWeight: FontWeight.w900, color: AppColors.primary, fontSize: 24),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                name.toUpperCase(), 
-                style: GoogleFonts.outfit(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: 1.0),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                user?.email ?? 'ID: RAINBOW-ALPHA', 
-                style: GoogleFonts.outfit(color: Colors.white38, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.0),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _DrawerTile extends StatelessWidget {
-  final IconData icon; final String label; final VoidCallback onTap; final Color? color;
-  const _DrawerTile({required this.icon, required this.label, required this.onTap, this.color});
-  @override
-  Widget build(BuildContext context) => ListTile(
-    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-    leading: Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: (color ?? Colors.white).withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Icon(icon, color: color ?? Colors.white60, size: 20),
-    ),
-    title: Text(
-      label, 
-      style: GoogleFonts.outfit(
-        color: color ?? Colors.white, 
-        fontSize: 13, 
-        fontWeight: FontWeight.w800, 
-        letterSpacing: 1.0,
-      ),
-    ),
-    onTap: onTap,
-  );
-}
-

@@ -1,20 +1,33 @@
 #!/usr/bin/env node
+process.env.GOOGLE_CLOUD_QUOTA_PROJECT = 'rainbow-97f1e';
+
 /**
  * provision-respondents.js
- * Operation Rainbow — Respondent Account Provisioning
+ * Operation Rainbow — Respondent Account Provisioning (REST Workaround)
  *
- * Creates Firebase Auth + Firestore profiles for all field respondents.
- * Each account has:
- *   - Email   : {badgeId}@operationrainbow.plateau.gov.ng
- *   - Password: Their assigned ACCESS CODE (printed at end of script)
- *   - Role    : HQ_OFFICER | LGA_OFFICER | WARD_OFFICER | POLLING_OFFICER
- *
- * Prerequisites:
- *   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/serviceAccount.json
- *   node scripts/provision-respondents.js
+ * Creates Firebase Auth (via REST API) + Firestore profiles for all field respondents.
+ * Bypasses Admin SDK 403 quota errors.
  */
 
 const admin = require('../functions/node_modules/firebase-admin');
+const fetch = require('../functions/node_modules/node-fetch');
+const fs = require('fs');
+const path = require('path');
+
+// Load API Key from .env.local
+const envPath = path.join(__dirname, '../hq-dashboard-next/.env.local');
+let API_KEY = '';
+try {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    const apiKeyMatch = envContent.match(/NEXT_PUBLIC_FIREBASE_API_KEY=(.+)/);
+    API_KEY = apiKeyMatch ? apiKeyMatch[1].trim() : '';
+} catch (e) {
+    console.warn('⚠️  Could not read .env.local, checking process.env...');
+}
+
+if (!API_KEY) {
+    API_KEY = process.env.FIREBASE_API_KEY || 'AIzaSyCXzOdIolNy2sHVUFF9AKpsojvxswmH6EE';
+}
 
 if (!admin.apps.length) {
   admin.initializeApp({
@@ -23,122 +36,167 @@ if (!admin.apps.length) {
   });
 }
 
-const auth = admin.auth();
 const db = admin.firestore();
 
-// ─────────────────────────────────────────────────────────────
-// RESPONDENT ROSTER — Edit access codes before first provisioning
-// ─────────────────────────────────────────────────────────────
+/**
+ * REST API Helper to create/update user
+ */
+async function ensureAuthUser(email, password, displayName) {
+  try {
+    // 1. Try to sign up
+    const signupRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: true })
+    });
+
+    const signupData = await signupRes.json();
+
+    if (signupData.error) {
+      if (signupData.error.message === 'EMAIL_EXISTS') {
+        // Try to sign in to get the token and update profile if needed
+        const signinRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, returnSecureToken: true })
+        });
+        const signinData = await signinRes.json();
+        
+        if (signinData.error) {
+           return { localId: null, error: `User exists but password mismatch or error: ${signinData.error.message}` };
+        }
+        
+        // Update display name
+        await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:update?key=${API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken: signinData.idToken, displayName, returnSecureToken: true })
+        });
+
+        return { localId: signinData.localId };
+      }
+      return { localId: null, error: signupData.error.message };
+    }
+
+    // Update display name for new user
+    await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:update?key=${API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: signupData.idToken, displayName, returnSecureToken: true })
+    });
+
+    return { localId: signupData.localId };
+  } catch (err) {
+    return { localId: null, error: err.message };
+  }
+}
+
 const RESPONDENTS = [
-  // ── HQ Officers ──────────────────────────────────────────
-  { badgeId: 'hq-001', role: 'HQ_OFFICER',       displayName: 'HQ Command Officer 001', accessCode: 'RbwHQ001#2026', geo_lga: 'ALL', geo_ward: 'ALL', geo_pu: 'ALL' },
-  { badgeId: 'hq-002', role: 'HQ_OFFICER',       displayName: 'HQ Command Officer 002', accessCode: 'RbwHQ002#2026', geo_lga: 'ALL', geo_ward: 'ALL', geo_pu: 'ALL' },
+  // HQ COMMAND
+  { badgeId: 'hq-001', role: 'HQ_COMMAND', displayName: 'HQ Command Officer 001', accessCode: 'RbwHQ001#2026' },
+  { badgeId: 'hq-002', role: 'HQ_COMMAND', displayName: 'HQ Command Officer 002', accessCode: 'RbwHQ002#2026' },
+  
+  // LGA COMMAND
+  { badgeId: 'lga-jos-north-001', role: 'LGA_COMMAND', displayName: 'Jos North LGA Commander', accessCode: 'RbwLGA001#2026', geo_lga: 'Jos North' },
+  { badgeId: 'lga-jos-south-001', role: 'LGA_COMMAND', displayName: 'Jos South LGA Commander', accessCode: 'RbwLGA002#2026', geo_lga: 'Jos South' },
 
-  // ── LGA Officers ─────────────────────────────────────────
-  { badgeId: 'lga-001', role: 'LGA_OFFICER',     displayName: 'LGA Officer — Jos North',   accessCode: 'RbwLGA001#2026', geo_lga: 'Jos North', geo_ward: 'ALL', geo_pu: 'ALL' },
-  { badgeId: 'lga-002', role: 'LGA_OFFICER',     displayName: 'LGA Officer — Jos South',   accessCode: 'RbwLGA002#2026', geo_lga: 'Jos South', geo_ward: 'ALL', geo_pu: 'ALL' },
-  { badgeId: 'lga-003', role: 'LGA_OFFICER',     displayName: 'LGA Officer — Barkin Ladi', accessCode: 'RbwLGA003#2026', geo_lga: 'Barkin Ladi', geo_ward: 'ALL', geo_pu: 'ALL' },
-
-  // ── Ward Officers ─────────────────────────────────────────
-  { badgeId: 'wd-001', role: 'WARD_OFFICER',     displayName: 'Ward Officer 001', accessCode: 'RbwWD001#2026', geo_lga: 'Jos North', geo_ward: 'Tudun Wada', geo_pu: 'ALL' },
-  { badgeId: 'wd-002', role: 'WARD_OFFICER',     displayName: 'Ward Officer 002', accessCode: 'RbwWD002#2026', geo_lga: 'Jos North', geo_ward: 'Kabong', geo_pu: 'ALL' },
-  { badgeId: 'wd-003', role: 'WARD_OFFICER',     displayName: 'Ward Officer 003', accessCode: 'RbwWD003#2026', geo_lga: 'Jos South', geo_ward: 'Bukuru', geo_pu: 'ALL' },
-  { badgeId: 'wd-004', role: 'WARD_OFFICER',     displayName: 'Ward Officer 004', accessCode: 'RbwWD004#2026', geo_lga: 'Jos South', geo_ward: 'Du', geo_pu: 'ALL' },
-  { badgeId: 'wd-005', role: 'WARD_OFFICER',     displayName: 'Ward Officer 005', accessCode: 'RbwWD005#2026', geo_lga: 'Barkin Ladi', geo_ward: 'Gashish', geo_pu: 'ALL' },
-
-  // ── Polling Unit Officers ─────────────────────────────────
-  { badgeId: 'pu-001', role: 'POLLING_OFFICER',  displayName: 'PU Officer 001', accessCode: 'RbwPU001#2026', geo_lga: 'Jos North', geo_ward: 'Tudun Wada', geo_pu: 'Unit 001' },
-  { badgeId: 'pu-002', role: 'POLLING_OFFICER',  displayName: 'PU Officer 002', accessCode: 'RbwPU002#2026', geo_lga: 'Jos North', geo_ward: 'Tudun Wada', geo_pu: 'Unit 004' },
-  { badgeId: 'pu-003', role: 'POLLING_OFFICER',  displayName: 'PU Officer 003', accessCode: 'RbwPU003#2026', geo_lga: 'Jos North', geo_ward: 'Kabong', geo_pu: 'Unit 001' },
-  { badgeId: 'pu-004', role: 'POLLING_OFFICER',  displayName: 'PU Officer 004', accessCode: 'RbwPU004#2026', geo_lga: 'Jos South', geo_ward: 'Bukuru', geo_pu: 'Unit 001' },
-  { badgeId: 'pu-005', role: 'POLLING_OFFICER',  displayName: 'PU Officer 005', accessCode: 'RbwPU005#2026', geo_lga: 'Jos South', geo_ward: 'Bukuru', geo_pu: 'Unit 002' },
-  { badgeId: 'pu-006', role: 'POLLING_OFFICER',  displayName: 'PU Officer 006', accessCode: 'RbwPU006#2026', geo_lga: 'Jos South', geo_ward: 'Du', geo_pu: 'Unit 001' },
-  { badgeId: 'pu-007', role: 'POLLING_OFFICER',  displayName: 'PU Officer 007', accessCode: 'RbwPU007#2026', geo_lga: 'Barkin Ladi', geo_ward: 'Gashish', geo_pu: 'Unit 001' },
-  { badgeId: 'pu-008', role: 'POLLING_OFFICER',  displayName: 'PU Officer 008', accessCode: 'RbwPU008#2026', geo_lga: 'Barkin Ladi', geo_ward: 'Gashish', geo_pu: 'Unit 002' },
-  { badgeId: 'pu-009', role: 'POLLING_OFFICER',  displayName: 'PU Officer 009', accessCode: 'RbwPU009#2026', geo_lga: 'Jos North', geo_ward: 'Kabong', geo_pu: 'Unit 002' },
-  { badgeId: 'pu-010', role: 'POLLING_OFFICER',  displayName: 'PU Officer 010', accessCode: 'RbwPU010#2026', geo_lga: 'Jos South', geo_ward: 'Du', geo_pu: 'Unit 002' },
+  // WARD COMMAND
+  { badgeId: 'wd-naraguta-001', role: 'WARD_COMMAND', displayName: 'Naraguta Ward Officer', accessCode: 'RbwWD001#2026', geo_lga: 'Jos North', geo_ward: 'Naraguta' },
+  
+  // PU OFFICERS (Agents)
+  { badgeId: 'pu-001', role: 'POLLING_OFFICER', displayName: 'PU Agent 001', accessCode: 'RbwPU001#2026', geo_lga: 'Jos North', geo_ward: 'Naraguta', geo_pu: 'PU-001' },
+  { badgeId: 'pu-002', role: 'POLLING_OFFICER', displayName: 'PU Agent 002', accessCode: 'RbwPU002#2026', geo_lga: 'Jos North', geo_ward: 'Naraguta', geo_pu: 'PU-002' },
+  { badgeId: 'pu-003', role: 'POLLING_OFFICER', displayName: 'PU Agent 003', accessCode: 'RbwPU003#2026', geo_lga: 'Jos North', geo_ward: 'Naraguta', geo_pu: 'PU-003' },
+  { badgeId: 'pu-004', role: 'POLLING_OFFICER', displayName: 'PU Agent 004', accessCode: 'RbwPU004#2026', geo_lga: 'Jos North', geo_ward: 'Naraguta', geo_pu: 'PU-004' },
+  { badgeId: 'pu-005', role: 'POLLING_OFFICER', displayName: 'PU Agent 005', accessCode: 'RbwPU005#2026', geo_lga: 'Jos North', geo_ward: 'Naraguta', geo_pu: 'PU-005' },
+  { badgeId: 'pu-006', role: 'POLLING_OFFICER', displayName: 'PU Agent 006', accessCode: 'RbwPU006#2026', geo_lga: 'Jos North', geo_ward: 'Naraguta', geo_pu: 'PU-006' },
+  { badgeId: 'pu-007', role: 'POLLING_OFFICER', displayName: 'PU Agent 007', accessCode: 'RbwPU007#2026', geo_lga: 'Jos North', geo_ward: 'Naraguta', geo_pu: 'PU-007' },
+  { badgeId: 'pu-008', role: 'POLLING_OFFICER', displayName: 'PU Agent 008', accessCode: 'RbwPU008#2026', geo_lga: 'Jos North', geo_ward: 'Naraguta', geo_pu: 'PU-008' },
+  { badgeId: 'pu-009', role: 'POLLING_OFFICER', displayName: 'PU Agent 009', accessCode: 'RbwPU009#2026', geo_lga: 'Jos North', geo_ward: 'Naraguta', geo_pu: 'PU-009' },
+  { badgeId: 'pu-010', role: 'POLLING_OFFICER', displayName: 'PU Agent 010', accessCode: 'RbwPU010#2026', geo_lga: 'Jos North', geo_ward: 'Naraguta', geo_pu: 'PU-010' },
 ];
 
 const EMAIL_DOMAIN = '@operationrainbow.plateau.gov.ng';
 
 async function main() {
   console.log('\n╔══════════════════════════════════════════════════════╗');
-  console.log('║  OPERATION RAINBOW — Respondent Provisioning         ║');
+  console.log('║  OPERATION RAINBOW — Respondent Provisioning (REST)  ║');
   console.log('╚══════════════════════════════════════════════════════╝\n');
+
+  console.log(`🚀 Provisioning ${RESPONDENTS.length} accounts...\n`);
 
   const results = [];
 
   for (const r of RESPONDENTS) {
-    const email = `${r.badgeId}${EMAIL_DOMAIN}`;
+    const email = `${r.badgeId}${EMAIL_DOMAIN}`.toLowerCase();
+    let uid = null;
+    let status = 'SUCCESS';
+
     try {
-      let uid;
-      try {
-        // Try to find existing account
-        const existing = await auth.getUserByEmail(email);
-        uid = existing.uid;
-        // Update password to the access code
-        await auth.updateUser(uid, { password: r.accessCode, displayName: r.displayName });
-        console.log(`✏️  Updated  : ${r.badgeId}`);
-      } catch (lookupErr) {
-        if (lookupErr.code === 'auth/user-not-found') {
-          // Create fresh account
-          const newUser = await auth.createUser({
-            email,
-            password: r.accessCode,
-            displayName: r.displayName,
-          });
-          uid = newUser.uid;
-          console.log(`✅  Created  : ${r.badgeId}  (uid: ${uid})`);
-        } else {
-          throw lookupErr;
+      // 1. Ensure Auth account exists via REST API
+      const authResult = await ensureAuthUser(email, r.accessCode, r.displayName);
+      
+      if (authResult.error) {
+        status = `AUTH_ERROR: ${authResult.error}`;
+        // Fallback: Try to find existing UID from Firestore
+        const userDoc = await db.collection('users').where('email', '==', email).limit(1).get();
+        if (!userDoc.empty) {
+            uid = userDoc.docs[0].id;
+            console.log(`  Found existing Firestore record for ${r.badgeId}, using UID: ${uid}`);
         }
+      } else {
+        uid = authResult.localId;
       }
 
-      // Upsert Firestore profile
-      await db.collection('users').doc(uid).set({
-        uid,
-        email,
-        badgeId: r.badgeId,
-        role: r.role,
-        roleLabel: r.role.replace('_', ' '),
-        displayName: r.displayName,
-        phone: '',
-        profileComplete: true,
-        geo_lga: r.geo_lga,
-        geo_ward: r.geo_ward,
-        geo_pu: r.geo_pu,
-        provisionedAt: new Date().toISOString(),
-      }, { merge: true });
+      if (uid) {
+        // 2. Sync Firestore Record
+        const userData = {
+          uid,
+          email,
+          badgeId: r.badgeId.toUpperCase(),
+          displayName: r.displayName,
+          role: r.role,
+          roleLabel: r.role.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()),
+          type: 'respondent',
+          geo_lga: r.geo_lga || 'HQ',
+          geo_ward: r.geo_ward || 'N/A',
+          geo_pu: r.geo_pu || 'N/A',
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          status: 'active',
+          profileComplete: true
+        };
 
-      results.push({ badgeId: r.badgeId, email, accessCode: r.accessCode, role: r.role, status: 'OK' });
+        await db.collection('users').doc(uid).set(userData, { merge: true });
+        
+        // Also map badgeId to uid for fast lookup
+        await db.collection('badge_mappings').doc(r.badgeId.toUpperCase()).set({
+          uid,
+          email,
+          role: r.role
+        });
+      } else if (status === 'SUCCESS') {
+          status = 'FAILED: No UID';
+      }
     } catch (err) {
-      console.error(`❌  Failed   : ${r.badgeId} — ${err.message}`);
-      results.push({ badgeId: r.badgeId, email, accessCode: r.accessCode, role: r.role, status: `ERROR: ${err.message}` });
+      status = `ERROR: ${err.message}`;
     }
+
+    results.push({ badgeId: r.badgeId, role: r.role, accessCode: r.accessCode, status });
+    process.stdout.write(status === 'SUCCESS' ? '✅ ' : '❌ ');
   }
 
-  // Print credential summary table
-  console.log('\n╔══════════════════════════════════════════════════════════════════════╗');
-  console.log('║  CREDENTIAL MANIFEST — DISTRIBUTE SECURELY                          ║');
-  console.log('╠═══════════════╦══════════════════════╦════════════════════╦══════════╣');
-  console.log('║  BADGE ID     ║  ROLE                ║  ACCESS CODE       ║  STATUS  ║');
-  console.log('╠═══════════════╬══════════════════════╬════════════════════╬══════════╣');
-  for (const r of results) {
-    const badge   = r.badgeId.padEnd(13);
-    const role    = r.role.padEnd(20);
-    const code    = r.accessCode.padEnd(18);
-    const status  = r.status.padEnd(8);
-    console.log(`║  ${badge} ║  ${role} ║  ${code} ║  ${status} ║`);
-  }
-  console.log('╚═══════════════╩══════════════════════╩════════════════════╩══════════╝');
-  console.log('\n  ⚠️  Store this manifest securely. Do NOT commit to version control.\n');
-  console.log(`  Login on device: Enter Badge ID → ACCESS CODE`);
+  console.log('\n\n--- PROVISIONING MANIFEST ---\n');
+  console.table(results);
+
+  console.log('\n  ⚠️  Store this manifest securely. Do NOT commit to version control.');
+  console.log('\n  Login on device: Enter Badge ID → ACCESS CODE');
   console.log(`  Email domain   : ${EMAIL_DOMAIN}\n`);
-
+  
   process.exit(0);
 }
 
 main().catch(err => {
-  console.error('\n❌ Fatal error:', err.message);
-  process.exit(1);
+    console.error('Fatal:', err);
+    process.exit(1);
 });

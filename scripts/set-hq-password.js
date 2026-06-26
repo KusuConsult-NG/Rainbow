@@ -36,7 +36,15 @@ async function main() {
 
     // Force-update the password
     await admin.auth().updateUser(user.uid, { password: NEW_PASSWORD });
-    console.log('\n✅  Password updated successfully.');
+    
+    // PRD: Enforce Custom Claims for Dashboard RBAC
+    await admin.auth().setCustomUserClaims(user.uid, { 
+      isStaff: true, 
+      role: 'HQ_OFFICER',
+      badgeId: 'HQ-001'
+    });
+
+    console.log('\n✅  Password and Claims updated successfully.');
     console.log('   Login  : http://localhost:3001/login');
     console.log('   Badge  : HQ-001');
     console.log('   Password:', NEW_PASSWORD);
@@ -49,15 +57,24 @@ async function main() {
         displayName: 'HQ Command Officer 001',
       });
 
+      // PRD: Enforce Custom Claims for Dashboard RBAC
+      await admin.auth().setCustomUserClaims(newUser.uid, { 
+        isStaff: true, 
+        role: 'HQ_OFFICER',
+        badgeId: 'HQ-001'
+      });
+
       // Also write Firestore profile
       await admin.firestore().collection('users').doc(newUser.uid).set({
+        uid: newUser.uid,
         email: TARGET_EMAIL,
         badgeId: 'HQ-001',
         role: 'HQ_OFFICER',
         displayName: 'HQ Command Officer 001',
+        isStaff: true,
         createdAt: new Date().toISOString(),
       });
-      console.log('\n✅  Account created and password set.');
+      console.log('\n✅  Account created, Claims set, and password set.');
       console.log('   UID    :', newUser.uid);
       console.log('   Login  : http://localhost:3001/login');
       console.log('   Badge  : HQ-001');

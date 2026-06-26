@@ -1,20 +1,22 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../core/theme/app_colors.dart';
-import '../../core/router/app_router.dart';
 
-class SplashScreen extends StatefulWidget {
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/providers/navigation_provider.dart';
+
+/// Documentation for this public member.
+
+class SplashScreen extends ConsumerStatefulWidget {
+  /// Documentation for this public member.
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
+class _SplashScreenState extends ConsumerState<SplashScreen>
     with TickerProviderStateMixin {
   late AnimationController _progressController;
   late AnimationController _pulseController;
@@ -36,17 +38,20 @@ class _SplashScreenState extends State<SplashScreen>
     _progressController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 3000),
-    )..forward();
+    );
+    unawaited(_progressController.forward());
 
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
-    )..repeat();
+    );
+    unawaited(_pulseController.repeat());
 
     _fadeController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 500),
-    )..forward();
+    );
+    unawaited(_fadeController.forward());
 
     _fadeIn = CurvedAnimation(parent: _fadeController, curve: Curves.easeIn);
 
@@ -60,33 +65,8 @@ class _SplashScreenState extends State<SplashScreen>
         setState(() => _statusIndex++);
       } else {
         timer.cancel();
-        _verifyIdentityAndRoute();
+        ref.read(splashFinishedProvider.notifier).state = true;
       }
-    });
-  }
-
-  void _verifyIdentityAndRoute() async {
-    final prefs = await SharedPreferences.getInstance();
-    final hasOnboarded = prefs.getBool('hasOnboarded') ?? false;
-
-    // Fix #5: .first hangs forever without internet — add 8s timeout, fall back to roleSelection
-    FirebaseAuth.instance
-        .authStateChanges()
-        .first
-        .timeout(
-          const Duration(seconds: 8),
-          onTimeout: () => null,
-        )
-        .then((user) {
-      if (!mounted) return;
-      if (user != null) {
-        context.go(hasOnboarded ? AppRoutes.home : AppRoutes.onboardingPermissions);
-      } else {
-        context.go(AppRoutes.login);
-      }
-    }).catchError((_) {
-      // Any Firebase init error → send to login safely
-      if (mounted) context.go(AppRoutes.login);
     });
   }
 
@@ -101,34 +81,26 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primary,
+      backgroundColor: AppColors.background,
       body: FadeTransition(
         opacity: _fadeIn,
         child: Stack(
           children: [
-            // Background radial glow
-            const Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: Alignment.center,
-                    radius: 1.0,
-                    colors: [Color(0xFFD32F2F), Color(0xFF7A0B12)],
-                  ),
-                ),
-              ),
-            ),
-
-            // Top-right light blob
+            // Top-right tactical glow
             Positioned(
-              top: -100,
-              right: -100,
+              top: -150,
+              right: -150,
               child: Container(
                 width: 400,
                 height: 400,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.white.withAlpha(20),
+                  gradient: RadialGradient(
+                    colors: [
+                      AppColors.primary.withValues(alpha: 0.05),
+                      AppColors.transparent,
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -136,142 +108,77 @@ class _SplashScreenState extends State<SplashScreen>
             // Main content
             SafeArea(
               child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Spacer(),
-                  // Rotating ring + shield
+                  // High-Resolution Branding Mark
                   AnimatedBuilder(
                     animation: _pulseController,
                     builder: (context, child) {
-                      return SizedBox(
-                        width: 200,
-                        height: 200,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            Transform.rotate(
-                              angle: _pulseController.value * 6.28318,
-                              child: Container(
-                                width: 190,
-                                height: 190,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: Colors.white.withAlpha(50),
-                                    width: 3,
-                                  ),
-                                ),
-                                child: Align(
-                                  alignment: Alignment.topCenter,
-                                  child: Container(
-                                    width: 8,
-                                    height: 8,
-                                    margin: const EdgeInsets.only(top: 4),
-                                    decoration: const BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Container(
-                              width: 160,
-                              height: 160,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white.withAlpha(20),
-                              ),
-                            ),
-                            const Icon(
-                              Icons.shield_rounded,
-                              color: Colors.white,
-                              size: 100,
-                            ),
-                          ],
+                      return Transform.scale(
+                        scale: 1.0 + (_pulseController.value * 0.05),
+                        child: SizedBox(
+                          width: 180,
+                          height: 180,
+                          child: Image.asset(
+                            'assets/images/app_icon_large.png',
+                            fit: BoxFit.contain,
+                            filterQuality: FilterQuality.high,
+                          ),
                         ),
                       );
                     },
                   ),
-                  const SizedBox(height: 40),
-
-                  // Title
-                  Text(
-                    'OPERATION',
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 40,
-                      letterSpacing: -1.5,
-                      height: 1.0,
-                    ),
-                  ),
-                  Text(
-                    'RAINBOW',
-                    style: GoogleFonts.inter(
-                      color: Colors.white.withAlpha(229),
-                      fontWeight: FontWeight.w900,
-                      fontSize: 40,
-                      letterSpacing: -1.5,
-                      height: 1.0,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(height: 1, width: 30, color: Colors.white30),
-                      const SizedBox(width: 12),
-                      Text(
-                        'PLATEAU STATE SECURITY RESPONSE',
-                        style: GoogleFonts.inter(
-                          color: Colors.white.withAlpha(178),
-                          fontWeight: FontWeight.w700,
-                          fontSize: 10,
-                          letterSpacing: 2.0,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Container(height: 1, width: 30, color: Colors.white30),
-                    ],
-                  ),
-
                   const Spacer(),
 
-                  // Progress section
+                  // Tactical Status Feed
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    padding: const EdgeInsets.symmetric(horizontal: 50),
                     child: Column(
                       children: [
                         AnimatedBuilder(
                           animation: _progressController,
                           builder: (context, _) {
-                            return ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: LinearProgressIndicator(
-                                value: _progressController.value,
-                                backgroundColor: Colors.white.withAlpha(25),
-                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                                minHeight: 4,
-                              ),
+                            return Stack(
+                              children: [
+                                Container(
+                                  height: 2,
+                                  width: double.infinity,
+                                  color:
+                                      AppColors.primary.withValues(alpha: 0.1),
+                                ),
+                                Container(
+                                  height: 2,
+                                  width: MediaQuery.of(context).size.width *
+                                      0.7 *
+                                      _progressController.value,
+                                  color: AppColors.primary,
+                                ),
+                              ],
                             );
                           },
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(Icons.cell_tower, color: Colors.white54, size: 14),
-                            const SizedBox(width: 8),
+                            const Icon(
+                              Icons.security,
+                              color: AppColors.primary,
+                              size: 12,
+                            ),
+                            const SizedBox(width: 10),
                             AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 400),
+                              duration: const Duration(milliseconds: 300),
                               child: Text(
                                 _statusMessages[_statusIndex],
                                 key: ValueKey(_statusIndex),
                                 style: GoogleFonts.inter(
-                                  color: Colors.white54,
+                                  color:
+                                      AppColors.primary.withValues(alpha: 0.8),
                                   fontWeight: FontWeight.w700,
-                                  fontSize: 9,
-                                  letterSpacing: 2.0,
+                                  fontSize: 8,
+                                  letterSpacing: 2,
                                 ),
                               ),
                             ),
@@ -280,16 +187,24 @@ class _SplashScreenState extends State<SplashScreen>
                       ],
                     ),
                   ),
-                  const SizedBox(height: 48),
+                  const SizedBox(height: 60),
 
-                  // Bottom status bar
+                  // Footer Security Signature
                   Container(
-                    margin: const EdgeInsets.fromLTRB(20, 0, 20, 32),
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 32,
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 14,
+                    ),
                     decoration: BoxDecoration(
-                      color: Colors.black.withAlpha(40),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.white.withAlpha(13)),
+                      color: AppColors.primary.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.primary.withValues(alpha: 0.1),
+                      ),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -297,37 +212,31 @@ class _SplashScreenState extends State<SplashScreen>
                         Row(
                           children: [
                             Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
+                              width: 6,
+                              height: 6,
+                              decoration: const BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: AppColors.tertiaryFixed,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: AppColors.tertiaryFixed.withAlpha(128),
-                                    blurRadius: 8,
-                                  ),
-                                ],
+                                color: AppColors.primary,
                               ),
                             ),
                             const SizedBox(width: 10),
                             Text(
-                              'NETWORK: CRITICAL ONLY',
+                              'ENCRYPTION: AES-256',
                               style: GoogleFonts.inter(
-                                color: Colors.white70,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 9,
+                                color: AppColors.primary.withValues(alpha: 0.8),
+                                fontWeight: FontWeight.w800,
+                                fontSize: 8,
                                 letterSpacing: 1.5,
                               ),
                             ),
                           ],
                         ),
                         Text(
-                          'SENTINEL GUARD v4.2',
+                          'COMMAND v4.5.0',
                           style: GoogleFonts.inter(
-                            color: Colors.white54,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 9,
+                            color: AppColors.primary.withValues(alpha: 0.5),
+                            fontWeight: FontWeight.w800,
+                            fontSize: 8,
                             letterSpacing: 1.5,
                           ),
                         ),
@@ -342,4 +251,33 @@ class _SplashScreenState extends State<SplashScreen>
       ),
     );
   }
+}
+
+/// Documentation for this public member.
+
+class GridPainter extends CustomPainter {
+  /// Documentation for this public member.
+  GridPainter({required this.color});
+
+  /// Documentation for this public member.
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.0;
+
+    const spacing = 40;
+
+    for (double i = 0; i <= size.width; i += spacing) {
+      canvas.drawLine(Offset(i, 0), Offset(i, size.height), paint);
+    }
+    for (double i = 0; i <= size.height; i += spacing) {
+      canvas.drawLine(Offset(0, i), Offset(size.width, i), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

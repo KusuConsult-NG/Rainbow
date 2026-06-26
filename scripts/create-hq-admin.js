@@ -40,11 +40,19 @@ async function main() {
         displayName: admin.displayName,
       });
 
+      // PRD: Enforce Custom Claims for RBAC Hardening
+      await auth.setCustomUserClaims(userRecord.uid, {
+        role: admin.role,
+        isStaff: true,
+        badgeId: admin.badgeId
+      });
+
       // Write Firestore profile
       await db.collection('users').doc(userRecord.uid).set({
         email,
         badgeId: admin.badgeId,
         role: admin.role,
+        isStaff: true,
         displayName: admin.displayName,
         createdAt: new Date().toISOString(),
       });

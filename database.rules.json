@@ -1,7 +1,7 @@
 {
   "rules": {
     "tracking": {
-      ".read": "auth.token.role === 'HQ_OFFICER' || auth.token.role === 'LGA_OFFICER' || auth.token.role === 'WARD_OFFICER'",
+      ".read": "auth != null && (auth.token.isStaff === true || auth.token.role === 'HQ_OFFICER' || auth.token.role === 'HQ_COMMAND' || auth.token.role === 'LGA_COMMAND' || auth.token.role === 'LGA_OFFICER' || auth.token.role === 'WARD_COMMAND' || auth.token.role === 'WARD_OFFICER' || auth.token.role === 'UNIT_COMMAND' || auth.token.role === 'POLLING_OFFICER' || auth.token.role === 'POLLING_UNIT_OFFICER')",
       "$uid": {
         ".read": "auth.uid === $uid",
         ".write": "auth != null && $uid === auth.uid"
