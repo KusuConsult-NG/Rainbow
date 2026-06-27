@@ -1479,13 +1479,15 @@ function AlertCard({ alert, agents, usersMap, onDispatch, onEscalate, onResolve,
       const prompt = `You are the Operation Rainbow Emergency Triage AI. Analyze the following raw incident description:
 "${alert.description}"
 
-Categorize the incident and recommend threat priority. You MUST respond with a valid JSON object matching this exact schema:
+Categorize the incident, recommend threat priority, detect the input language (especially Hausa, Nigerian Pidgin, or other Plateau State local dialects), and translate it to professional English if it is not in English. You MUST respond with a valid JSON object matching this exact schema:
 {
   "recommended_type": "The classified type (e.g. PROTEST, ROAD_ACCIDENT, CIVIL_UNREST, ELECTRICAL_FIRE, BOLO, ROBBERY, MEDICAL_EMERGENCY, ILLEGAL_CHECKPOINT)",
   "recommended_priority": "LOW, MEDIUM, HIGH, or CRITICAL",
   "justification": "A single sentence explaining your classification.",
   "weapons_detected": true,
-  "crowd_size": "Estimated number of people involved, or N/A if not applicable"
+  "crowd_size": "Estimated number of people involved, or N/A if not applicable",
+  "detected_language": "The language/dialect of the raw text (e.g., English, Hausa, Nigerian Pidgin, Berom)",
+  "translated_description": "Clean, professional English translation of the raw text. If the raw text is already in English, output the original text."
 }
 Ensure that "weapons_detected" is a boolean (true/false).
 Do not include any markdown backticks or formatting outside the raw JSON object.`;
@@ -1502,6 +1504,8 @@ Do not include any markdown backticks or formatting outside the raw JSON object.
           justification: parsed.justification || "",
           weapons_detected: !!parsed.weapons_detected,
           crowd_size: parsed.crowd_size || "N/A",
+          detected_language: parsed.detected_language || "English",
+          translated_description: parsed.translated_description || alert.description,
           timestamp: new Date().toISOString()
         }
       });
@@ -1725,6 +1729,16 @@ Do not include any markdown backticks or formatting outside the raw JSON object.
                     <span style={{ fontSize: 10.5, fontWeight: 900, color: 'var(--text-primary)' }}>{triage.crowd_size}</span>
                   </div>
                 </div>
+                {triage.detected_language && triage.detected_language.toLowerCase() !== 'english' && (
+                  <div style={{ gridColumn: 'span 2', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+                    <span style={{ fontSize: 8, color: 'var(--primary)', display: 'block', fontWeight: 900, letterSpacing: 0.5 }}>
+                      TRANSLATION ({triage.detected_language.toUpperCase()} ➔ ENGLISH)
+                    </span>
+                    <p style={{ fontSize: 11.5, color: 'var(--text-primary)', margin: '4px 0 0 0', fontStyle: 'italic', lineHeight: 1.4, background: 'var(--input-bg)', border: '1px solid var(--border)', padding: 8, borderRadius: 8 }}>
+                      "{triage.translated_description}"
+                    </p>
+                  </div>
+                )}
               </div>
 
               {!isMatch ? (
