@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface Alert {
   id: string;
@@ -47,6 +47,10 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   const agentMarkersRef = useRef<Map<string, any>>(new Map());
   const agentPolylinesRef = useRef<Map<string, any>>(new Map());
   const tileLayerRef = useRef<any>(null);
+
+  const [mapReady, setMapReady] = useState(false);
+  const [showRiskGrid, setShowRiskGrid] = useState(true);
+  const riskGridLayersRef = useRef<any[]>([]);
 
   // Plateau State Tactical Bounds
   const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.50, 10.80]];
@@ -105,8 +109,10 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
       .catch(err => console.error('Failed to load boundaries:', err));
 
     mapInstanceRef.current = { map, L: Leaflet };
+    setMapReady(true);
 
     return () => {
+      setMapReady(false);
       if (mapInstanceRef.current) {
         mapInstanceRef.current.map.remove();
         mapInstanceRef.current = null;
@@ -117,6 +123,76 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
       tileLayerRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current) return;
+    const { map, L } = mapInstanceRef.current;
+
+    // Clear existing grid layers
+    riskGridLayersRef.current.forEach(layer => layer.remove());
+    riskGridLayersRef.current = [];
+
+    if (!showRiskGrid) return;
+
+    // Jos and Plateau core coordinate bounding box grid (step ~0.04 degrees)
+    const minLat = 9.78;
+    const maxLat = 10.06;
+    const minLng = 8.78;
+    const maxLng = 9.06;
+    const step = 0.04;
+
+    const layers: any[] = [];
+    for (let lat = minLat; lat < maxLat; lat += step) {
+      for (let lng = minLng; lng < maxLng; lng += step) {
+        const cellAlerts = alerts.filter(a =>
+          a.lat && a.lng &&
+          a.lat >= lat && a.lat < lat + step &&
+          a.lng >= lng && a.lng < lng + step &&
+          a.status !== 'RESOLVED'
+        );
+
+        if (cellAlerts.length === 0) continue;
+
+        let color = '#FFC107'; // Moderate
+        let riskLabel = 'MODERATE RISK CELL';
+        let opacity = 0.15;
+        if (cellAlerts.length >= 4) {
+          color = '#F44336'; // Critical
+          riskLabel = 'CRITICAL HOTSPOT CELL';
+          opacity = 0.4;
+        } else if (cellAlerts.length >= 2) {
+          color = '#FF9800'; // Elevated
+          riskLabel = 'ELEVATED RISK CELL';
+          opacity = 0.28;
+        }
+
+        const bounds: [[number, number], [number, number]] = [[lat, lng], [lat + step, lng + step]];
+        const rect = L.rectangle(bounds, {
+          color: color,
+          weight: 1.5,
+          opacity: 0.6,
+          fillColor: color,
+          fillOpacity: opacity
+        });
+
+        rect.bindPopup(`
+          <div style="font-family:Inter,sans-serif;padding:6px;min-width:165px;color:black;">
+            <strong style="color:${color};font-size:11px;letter-spacing:1px;">${riskLabel}</strong>
+            <hr style="border:0;border-top:1px solid #eee;margin:6px 0;"/>
+            <div style="font-size:10px;color:#555;">
+              <b>Incident Count:</b> ${cellAlerts.length}<br/>
+              <b>Types:</b> ${cellAlerts.map(a => a.type || 'Distress').join(', ')}<br/>
+              <b>Trend:</b> Spatial Hazard Hotspot
+            </div>
+          </div>
+        `);
+
+        rect.addTo(map);
+        layers.push(rect);
+      }
+    }
+    riskGridLayersRef.current = layers;
+  }, [alerts, showRiskGrid, mapReady]);
 
   useEffect(() => {
     if (!mapInstanceRef.current || !tileLayerRef.current) return;
@@ -314,6 +390,63 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
         }
       `}</style>
       <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
+
+      {/* Strategic Forecasting Dashboard Overlay */}
+      <div style={{
+        position: 'absolute',
+        top: '20px',
+        right: '20px',
+        zIndex: 1000,
+        background: 'var(--surface, #1e1e1e)',
+        border: '1px solid var(--outline, #333)',
+        borderRadius: '16px',
+        padding: '16px',
+        width: '240px',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+        backdropFilter: 'blur(8px)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '1.5px', color: 'var(--text-primary, #fff)' }}>
+            FORECASTING HUD
+          </span>
+          <button
+            onClick={() => setShowRiskGrid(!showRiskGrid)}
+            style={{
+              background: showRiskGrid ? 'var(--duress, #ff4d4d)' : 'var(--outline, #333)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '4px 8px',
+              fontSize: '9px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              letterSpacing: '1px'
+            }}
+          >
+            {showRiskGrid ? 'GRID: ON' : 'GRID: OFF'}
+          </button>
+        </div>
+
+        {showRiskGrid && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ fontSize: '9px', color: 'var(--text-secondary, #aaa)', marginBottom: '4px' }}>
+              SPATIAL-TEMPORAL RISK DENSITY:
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '12px', height: '12px', background: '#F44336', borderRadius: '3px', opacity: 0.8 }} />
+              <span style={{ fontSize: '10px', color: 'var(--text-primary, #fff)', fontWeight: 600 }}>Critical Hotspot (4+ alerts)</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '12px', height: '12px', background: '#FF9800', borderRadius: '3px', opacity: 0.8 }} />
+              <span style={{ fontSize: '10px', color: 'var(--text-primary, #fff)', fontWeight: 600 }}>Elevated Risk (2-3 alerts)</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '12px', height: '12px', background: '#FFC107', borderRadius: '3px', opacity: 0.8 }} />
+              <span style={{ fontSize: '10px', color: 'var(--text-primary, #fff)', fontWeight: 600 }}>Moderate Risk (1 alert)</span>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
