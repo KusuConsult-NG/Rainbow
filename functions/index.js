@@ -1,5 +1,6 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
+const { VertexAI } = require("@google-cloud/vertexai");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -1208,5 +1209,120 @@ exports.syncUserCustomClaims = functions.firestore
     }
     return null;
   });
+
+// PRD: Multimodal Audio Transcription & Triage
+// Automatically transcribes and triages incident reports that include a newly uploaded audio attachment (.m4a or .wav)
+exports.processAudioIncidentReport = functions.firestore
+  .document("alerts/{alertId}")
+  .onUpdate(async (change, context) => {
+    const beforeData = change.before.data();
+    const afterData = change.after.data();
+    const alertId = context.params.alertId;
+
+    // 1. Guard against infinite loops or already processed documents
+    if (afterData.ai_triage && afterData.ai_triage.detected_language) {
+      return null;
+    }
+
+    // 2. Identify new attachments
+    const beforeUrls = beforeData.attachments || [];
+    const afterUrls = afterData.attachments || [];
+    const newUrls = afterUrls.filter(url => !beforeUrls.includes(url));
+
+    // 3. Find if any of the new attachments are audio files (.m4a or .wav)
+    const audioUrl = newUrls.find(url => 
+      url.toLowerCase().includes(".m4a") || 
+      url.toLowerCase().includes(".wav") || 
+      url.toLowerCase().includes(".mp3")
+    );
+
+    if (!audioUrl) {
+      return null;
+    }
+
+    console.log(`[AUDIO_TRIAGE] New audio attachment detected for alert: ${alertId}. URL: ${audioUrl}`);
+
+    try {
+      // Decode GCS path from firebasestorage download URL
+      // Format: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{path}?alt=media
+      const decodedUrl = decodeURIComponent(audioUrl);
+      const oIndex = decodedUrl.indexOf('/o/');
+      if (oIndex === -1) {
+        throw new Error("Could not parse Storage path from URL");
+      }
+      const qIndex = decodedUrl.indexOf('?');
+      const storagePath = decodedUrl.substring(oIndex + 3, qIndex !== -1 ? qIndex : decodedUrl.length);
+
+      console.log(`[AUDIO_TRIAGE] Downloading audio file from storage path: ${storagePath}`);
+      const bucket = admin.storage().bucket();
+      const [fileBuffer] = await bucket.file(storagePath).download();
+
+      console.log(`[AUDIO_TRIAGE] Initializing Vertex AI Gemini multimodal audio analysis`);
+      const project = process.env.GCP_PROJECT || process.env.GCLOUD_PROJECT || "kusuconsult-rainbow";
+      const vertexAI = new VertexAI({ project: project, location: "us-central1" });
+      const generativeModel = vertexAI.getGenerativeModel({
+        model: "gemini-1.5-flash",
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
+      });
+
+      const audioPart = {
+        inlineData: {
+          data: fileBuffer.toString("base64"),
+          mimeType: "audio/m4a"
+        }
+      };
+
+      const prompt = `You are the Operation Rainbow Emergency Audio Transcriber & Triage AI.
+Analyze the attached audio recording of a citizen reporting an emergency.
+
+1. Transcribe the raw audio text accurately. Detect and translate to professional English if the speech is in Hausa, Nigerian Pidgin, or other local Plateau State dialects.
+2. Categorize the incident, recommend priority (LOW, MEDIUM, HIGH, CRITICAL), indicate if weapons are present, and estimate crowd size.
+
+Output your response strictly as a JSON object matching this schema:
+{
+  "transcription": "The full English translation or transcription of the speech",
+  "detected_language": "English" | "Hausa" | "Pidgin" | "Berom" | "Other",
+  "recommended_type": "Protest" | "Road Accident" | "Civil Unrest" | "Attack" | "Kidnap" | "Other",
+  "recommended_priority": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
+  "justification": "1-sentence reason for priority",
+  "weapons_detected": true | false,
+  "crowd_size": "N/A" | "1-5" | "5-20" | "20-100" | "100+"
+}`;
+
+      console.log(`[AUDIO_TRIAGE] Generating Gemini response...`);
+      const responseStream = await generativeModel.generateContent({
+        contents: [{ role: "user", parts: [audioPart, { text: prompt }] }]
+      });
+
+      const response = await responseStream.response;
+      const responseText = response.candidates[0].content.parts[0].text;
+      console.log(`[AUDIO_TRIAGE] Raw Gemini response text: ${responseText}`);
+
+      const triageResult = JSON.parse(responseText);
+
+      // 4. Update the Firestore alert document with the translation and triage parameters
+      await db.collection("alerts").doc(alertId).update({
+        description: triageResult.transcription,
+        ai_triage: {
+          recommended_type: triageResult.recommended_type,
+          recommended_priority: triageResult.recommended_priority,
+          justification: triageResult.justification,
+          weapons_detected: triageResult.weapons_detected,
+          crowd_size: triageResult.crowd_size,
+          detected_language: triageResult.detected_language,
+          translated_description: triageResult.transcription
+        }
+      });
+
+      console.log(`[AUDIO_TRIAGE] Alert ${alertId} successfully updated with voice transcription and triage parameters.`);
+    } catch (error) {
+      console.error(`[AUDIO_TRIAGE_ERR] Failed to process audio report:`, error);
+    }
+
+    return null;
+  });
+
 
 
