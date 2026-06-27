@@ -8,12 +8,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rainbow_app/features/home/home_screen.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
-import 'package:rainbow_app/providers/emergency_provider.dart';
 import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/push_notification_service.dart';
 import 'package:rainbow_app/services/sync_service.dart';
 import 'package:rainbow_app/services/broadcast_service.dart';
-import 'package:rainbow_app/shared/widgets/broadcast_hud.dart';
 
 // Mocks to isolate screen widget from hardware/services
 class FakePushNotificationService implements PushNotificationService {
@@ -113,7 +111,7 @@ void main() {
     final element = tester.element(find.byType(HomeScreen));
     final container = ProviderScope.containerOf(element);
     
-    container.read(languageProvider.notifier).setLanguage(AppLanguage.hausa);
+    await container.read(languageProvider.notifier).setLanguage(AppLanguage.hausa);
     await pumpSettleWithMax(tester);
 
     // 4. Verify title and bottom navigation options update immediately to Hausa translations
@@ -121,7 +119,7 @@ void main() {
     expect(find.text('SASHEN TSIRA'), findsOneWidget);
 
     // 5. Programmatically change language to Pidgin
-    container.read(languageProvider.notifier).setLanguage(AppLanguage.pidgin);
+    await container.read(languageProvider.notifier).setLanguage(AppLanguage.pidgin);
     await pumpSettleWithMax(tester);
 
     // 6. Verify title updates back (Pidgin uses English title but translates nav actions)
