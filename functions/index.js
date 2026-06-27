@@ -862,7 +862,46 @@ exports.escalationWatchdog = functions.pubsub.schedule('every 5 minutes').onRun(
         minutes_elapsed: safetyBuffer,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         actor: "SYSTEM_WATCHDOG"
-      });
+    }
+  }
+
+  // SLA Watchdog: Check for responders stuck en route (exceeding 15 mins response SLA)
+  const responseLimit = 15; // 15 minutes SLA
+  const responseThreshold = new Date(Date.now() - responseLimit * 60 * 1000);
+
+  const delayedAlerts = await db.collection("alerts")
+    .where("status", "in", ["DISPATCHED", "ACKNOWLEDGED", "ON_ROUTE"])
+    .get();
+
+  for (const doc of delayedAlerts.docs) {
+    const data = doc.data();
+    const startTimestamp = data.dispatched_at || data.acknowledgedAt || data.reportedAt;
+    if (startTimestamp && startTimestamp.toDate() <= responseThreshold) {
+      if (!data.sla_breached) {
+        console.warn(`[SLA_BREACH] Alert ${doc.id} breached response SLA of ${responseLimit} minutes!`);
+        
+        const timelineEvent = {
+          type: "SLA_BREACH_ALERT",
+          actor: "SYSTEM_WATCHDOG",
+          role: "SYSTEM",
+          timestamp: new Date().toISOString(),
+          reason: "Responder failed to arrive on site within response threshold.",
+          notes: `Incident has been in ${data.status} state since ${startTimestamp.toDate().toISOString()}`
+        };
+
+        batch.update(doc.ref, {
+          sla_breached: true,
+          timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
+        });
+
+        // Trigger push notification to LGA/Ward commanders notifying them of SLA breach
+        await sendPushToTier(doc.id, {
+          ...data,
+          status: "SLA_BREACH",
+          title: "SLA RESPONSE BREACH ALERT",
+          body: `Emergency in ${data.geo_pu || 'Polling Unit'} has exceeded the 15-minute response SLA. Immediate review required.`
+        });
+      }
     }
   }
 
