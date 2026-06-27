@@ -9,6 +9,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
+
 import 'package:rainbow_app/core/constants/alert_categories.dart';
 import 'package:rainbow_app/core/constants/tactical_mapping.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
@@ -56,6 +59,10 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   final List<File> _attachedFiles = [];
   final ImagePicker _picker = ImagePicker();
 
+  final _audioRecorder = AudioRecorder();
+  bool _isRecording = false;
+  String? _recordedAudioPath;
+
   Future<void> _pickImage() async {
     final image =
         await _picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
@@ -86,9 +93,65 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     }
   }
 
+  Future<void> _startRecording() async {
+    try {
+      if (await _audioRecorder.hasPermission()) {
+        final tempDir = await getTemporaryDirectory();
+        final path = '${tempDir.path}/audio_report_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        
+        await _audioRecorder.start(
+          const RecordConfig(
+            encoder: AudioEncoder.aacLc,
+            bitRate: 128000,
+            sampleRate: 44100,
+          ),
+          path: path,
+        );
+        setState(() {
+          _isRecording = true;
+          _recordedAudioPath = null;
+        });
+      }
+    } catch (e) {
+      debugPrint('[AUDIO_REC] Start failed: $e');
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    try {
+      final path = await _audioRecorder.stop();
+      if (path != null) {
+        final file = File(path);
+        setState(() {
+          _isRecording = false;
+          _recordedAudioPath = path;
+          _attachedFiles.add(file);
+          _narrativeCtrl.text = '[AUDIO_REPORT] voice message recorded';
+        });
+      }
+    } catch (e) {
+      debugPrint('[AUDIO_REC] Stop failed: $e');
+    }
+  }
+
+  void _deleteRecording() {
+    if (_recordedAudioPath != null) {
+      final file = File(_recordedAudioPath!);
+      if (file.existsSync()) {
+        file.deleteSync();
+      }
+      setState(() {
+        _attachedFiles.removeWhere((f) => f.path == _recordedAudioPath);
+        _recordedAudioPath = null;
+        _narrativeCtrl.clear();
+      });
+    }
+  }
+
   @override
   void dispose() {
     _narrativeCtrl.dispose();
+    unawaited(_audioRecorder.dispose());
     super.dispose();
   }
 
@@ -226,6 +289,98 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           // Narrative
           const _SectionLabel('MISSION NARRATIVE'),
           const SizedBox(height: 12),
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _isRecording 
+                  ? AppColors.emergency.withValues(alpha: 0.05) 
+                  : Colors.black.withValues(alpha: 0.02),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _isRecording ? AppColors.emergency : AppColors.outline,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _isRecording ? 'RECORDING VOICE REPORT...' : 'VOICE REPORTING (OPTIONAL)',
+                      style: GoogleFonts.outfit(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        color: _isRecording ? AppColors.emergency : AppColors.primary,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    if (_recordedAudioPath != null)
+                      IconButton(
+                        icon: const Icon(Icons.delete_forever_rounded, color: AppColors.emergency, size: 18),
+                        onPressed: _deleteRecording,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    if (_isRecording) ...[
+                      const Icon(Icons.fiber_manual_record_rounded, color: AppColors.emergency, size: 14),
+                      const SizedBox(width: 8),
+                      Text(
+                        'SPEAK NOW (TAP STOP TO FINISH)',
+                        style: GoogleFonts.outfit(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textDim,
+                        ),
+                      ),
+                      const Spacer(),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.emergency,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        icon: const Icon(Icons.stop_rounded, size: 14),
+                        label: Text('STOP', style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w900)),
+                        onPressed: _stopRecording,
+                      ),
+                    ] else if (_recordedAudioPath != null) ...[
+                      const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'VOICE NOTE ATTACHED (TRANSCRIBING...)',
+                          style: GoogleFonts.outfit(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.success,
+                          ),
+                        ),
+                      ),
+                    ] else ...[
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.surfaceContainer,
+                          foregroundColor: AppColors.onBackground,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: const BorderSide(color: AppColors.outline),
+                          ),
+                        ),
+                        icon: const Icon(Icons.mic_none_rounded, size: 14, color: AppColors.primary),
+                        label: Text('RECORD VOICE REPORT', style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+                        onPressed: _startRecording,
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
           Container(
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.03),
