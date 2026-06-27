@@ -83,7 +83,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 type: 'EMERGENCY - Silent SOS',
                 description: 'Silent distress signal activated by user.',
                 reportedBy:
-                    FirebaseAuth.instance.currentUser?.uid ?? 'anonymous',
+                    ref.read(authProvider).user?.uid ?? 'anonymous',
                 priority: AlertPriority.critical,
               );
           // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
@@ -125,11 +125,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return Translations.get('good_evening', lang);
   }
 
+  Future<bool> _isBackgroundServiceRunning() async {
+    try {
+      return await FlutterBackgroundService().isRunning();
+      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
+    } catch (_) {
+      return false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
     final isStaff = auth.role != UserRole.citizen;
-    final userId = FirebaseAuth.instance.currentUser?.uid ?? 'unknown';
+    final userId = auth.user?.uid ?? 'unknown';
     final lang = ref.watch(languageProvider);
 
     return PopScope(
@@ -242,7 +251,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       animation: _safePulseController,
                       builder: (context, _) {
                         return FutureBuilder<bool>(
-                          future: FlutterBackgroundService().isRunning(),
+                          future: _isBackgroundServiceRunning(),
                           builder: (context, snapshot) {
                             final isTracking = snapshot.data ?? false;
                             final statusColor = isTracking
@@ -330,7 +339,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24),
                       child: FutureBuilder<bool>(
-                        future: FlutterBackgroundService().isRunning(),
+                        future: _isBackgroundServiceRunning(),
                         builder: (context, snapshot) {
                           final isTracking = snapshot.data ?? false;
                           return InkWell(
