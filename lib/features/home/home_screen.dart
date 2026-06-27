@@ -17,6 +17,7 @@ import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
 import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/broadcast_hud.dart';
 
 /// Documentation for this public member.
@@ -116,12 +117,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
-  String get _greetingContext {
+  String _getGreetingContext(AppLanguage lang) {
     final hour = DateTime.now().hour;
-    if (hour < 5 || hour > 22) return 'LATE NIGHT · VIGILANCE MODE';
-    if (hour < 12) return 'GOOD MORNING · SYSTEMS READY';
-    if (hour < 17) return 'GOOD AFTERNOON · ALL CLEAR';
-    return 'GOOD EVENING · SECURE PERIMETER';
+    if (hour < 5 || hour > 22) return Translations.get('late_night', lang);
+    if (hour < 12) return Translations.get('good_morning', lang);
+    if (hour < 17) return Translations.get('good_afternoon', lang);
+    return Translations.get('good_evening', lang);
   }
 
   @override
@@ -129,6 +130,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final auth = ref.watch(authProvider);
     final isStaff = auth.role != UserRole.citizen;
     final userId = FirebaseAuth.instance.currentUser?.uid ?? 'unknown';
+    final lang = ref.watch(languageProvider);
 
     return PopScope(
       canPop: false,
@@ -154,7 +156,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ),
           ),
           title: Text(
-            'OPERATION RAINBOW',
+            Translations.get('title', lang),
             style: GoogleFonts.outfit(
               fontWeight: FontWeight.w900,
               letterSpacing: 3,
@@ -163,6 +165,42 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ),
           centerTitle: true,
           actions: [
+            PopupMenuButton<AppLanguage>(
+              icon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    lang.flagLabel,
+                    style: GoogleFonts.outfit(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  const Icon(
+                    Icons.arrow_drop_down_rounded,
+                    color: AppColors.textSecondary,
+                    size: 16,
+                  ),
+                ],
+              ),
+              onSelected: (AppLanguage selected) async {
+                await HapticFeedback.selectionClick();
+                await ref.read(languageProvider.notifier).setLanguage(selected);
+              },
+              itemBuilder: (BuildContext context) => AppLanguage.values.map((l) {
+                return PopupMenuItem<AppLanguage>(
+                  value: l,
+                  child: Text(
+                    '${l.flagLabel} - ${l.label}',
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
             IconButton(
               icon: const Icon(
                 Icons.notifications_none_rounded,
@@ -253,8 +291,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                         children: [
                                           Text(
                                             isTracking
-                                                ? 'PATROL ACTIVE'
-                                                : 'SYSTEM NOMINAL',
+                                                ? Translations.get('patrol_active', lang)
+                                                : Translations.get('system_nominal', lang),
                                             style: GoogleFonts.outfit(
                                               fontSize: 18,
                                               fontWeight: FontWeight.w900,
@@ -265,8 +303,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                           const SizedBox(height: 4),
                                           Text(
                                             isTracking
-                                                ? 'TELEMERY UPLINK STABLE'
-                                                : _greetingContext,
+                                                ? Translations.get('telemetry_stable', lang)
+                                                : _getGreetingContext(lang),
                                             style: GoogleFonts.outfit(
                                               fontSize: 9,
                                               color: AppColors.textDim,
@@ -337,8 +375,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   const SizedBox(width: 16),
                                   Text(
                                     isTracking
-                                        ? 'END PATROL MISSION'
-                                        : 'ACTIVATE PATROL MODE',
+                                        ? Translations.get('end_patrol', lang)
+                                        : Translations.get('activate_patrol', lang),
                                     style: GoogleFonts.outfit(
                                       color: isTracking
                                           ? AppColors.success
@@ -449,7 +487,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                         ),
                                         const SizedBox(height: 6),
                                         Text(
-                                          'HOLD FOR SILENT',
+                                          Translations.get('silent_sos', lang),
                                           style: GoogleFonts.outfit(
                                             color: Colors.white60,
                                             fontSize: 10,
@@ -503,7 +541,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
-                                  'SAFE ZONES',
+                                  Translations.get('safe_zone', lang),
                                   style: GoogleFonts.outfit(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w900,
@@ -538,7 +576,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  'TACTICAL REPORT',
+                                  Translations.get('report_incident', lang),
                                   style: GoogleFonts.outfit(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w900,
