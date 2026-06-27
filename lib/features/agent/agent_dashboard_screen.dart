@@ -18,6 +18,7 @@ import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/auth_service.dart';
+import 'package:rainbow_app/services/tts_service.dart';
 import 'package:rainbow_app/shared/widgets/broadcast_hud.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
 
@@ -910,6 +911,12 @@ class _TacticalActionSheet extends StatelessWidget {
                 return;
               }
               try {
+                if (nextStatus == 'ACKNOWLEDGED') {
+                  final type = (alertDoc.data() as Map<String, dynamic>?)?['type'] as String? ?? 'UNKNOWN';
+                  final desc = (alertDoc.data() as Map<String, dynamic>?)?['description'] as String? ?? 'No details provided.';
+                  final speechText = "Mission accepted. Emergency type: $type. Threat details: $desc.";
+                  unawaited(TtsService.instance.speak(speechText));
+                }
                 final func = FirebaseFunctions.instance
                     .httpsCallable('agentUpdateMissionStatus');
                 await func.call<dynamic>({
