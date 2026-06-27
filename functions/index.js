@@ -283,6 +283,77 @@ const resolveJurisdiction = async (latitude, longitude) => {
 
 
 
+const crypto = require("crypto");
+
+async function verifyRequestAuthenticity(data, context) {
+  // 1. If App Check passes, request is verified
+  if (context.app !== undefined) {
+    return true;
+  }
+
+  // 2. Fallback: Verify HMAC signature
+  const hmacData = data._hmac;
+  if (!hmacData) {
+    throw new functions.https.HttpsError("failed-precondition", "App Check verification failed, and no HMAC signature fallback was provided.");
+  }
+
+  const { signature, timestamp, badgeId, uid } = hmacData;
+  if (!signature || !timestamp || !badgeId || !uid) {
+    throw new functions.https.HttpsError("invalid-argument", "Invalid HMAC payload format.");
+  }
+
+  // Prevent Replay Attacks: Signature must be fresh (within 5 minutes / 300 seconds)
+  const currentSeconds = Math.floor(Date.now() / 1000);
+  if (Math.abs(currentSeconds - timestamp) > 300) {
+    throw new functions.https.HttpsError("deadline-exceeded", "HMAC signature has expired (timestamp skew too high).");
+  }
+
+  // 3. Retrieve user profile from Firestore to verify badge association
+  const userSnap = await db.collection("users").doc(uid).get();
+  if (!userSnap.exists) {
+    throw new functions.https.HttpsError("unauthenticated", "User profile not found.");
+  }
+  const profile = userSnap.data();
+  if (profile.badgeId !== badgeId) {
+    throw new functions.https.HttpsError("permission-denied", "Badge verification mismatch.");
+  }
+
+  // 4. Derive signature key and verify hash
+  const sharedSecret = "RAINBOW_PLATEAU_SECURE_HMAC_GATEWAY_KEY_2026";
+  const keySource = `${sharedSecret}:${uid}:${badgeId}`;
+  
+  // Exclude _hmac field from the payload sorting to match client computation
+  const payload = { ...data };
+  delete payload._hmac;
+  
+  const sortMap = (map) => {
+    const sorted = {};
+    Object.keys(map).sort().forEach(key => {
+      const val = map[key];
+      if (val && typeof val === "object" && !Array.isArray(val)) {
+        sorted[key] = sortMap(val);
+      } else {
+        sorted[key] = val;
+      }
+    });
+    return sorted;
+  };
+
+  const sortedPayload = sortMap(payload);
+  const payloadString = JSON.stringify(sortedPayload);
+  const signText = `${payloadString}:${timestamp}`;
+
+  const hmac = crypto.createHmac("sha256", keySource);
+  hmac.update(signText);
+  const computedSignature = hmac.digest("hex");
+
+  if (computedSignature !== signature) {
+    throw new functions.https.HttpsError("permission-denied", "App Check signature failed verification.");
+  }
+
+  return true;
+}
+
 // ============================================================
 // 2. API: CREATE ALERT (BACKEND FIRST FLOW)
 // Ensures 100% success/failure tracking and logs every alert request.
@@ -290,9 +361,7 @@ const resolveJurisdiction = async (latitude, longitude) => {
 exports.createAlert = functions.https.onCall(async (data, context) => {
   console.log(`[ALERT_CREATED] Received createAlert payload: ${JSON.stringify(data)}`);
 
-  if (context.app === undefined) {
-    throw new functions.https.HttpsError('failed-precondition', 'The function must be called from an App Check verified app.');
-  }
+  await verifyRequestAuthenticity(data, context);
 
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
@@ -654,6 +723,7 @@ exports.adminDispatchAlert = functions.https.onCall(async (data, context) => {
 });
 
 exports.agentUpdateMissionStatus = functions.https.onCall(async (data, context) => {
+  await verifyRequestAuthenticity(data, context);
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Auth required.");
   
   const { alertId, nextStatus } = data;
