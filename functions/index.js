@@ -151,10 +151,46 @@ const sendPushToTier = async (alertId, alertData) => {
   }
 };
 
-exports.notifyStaffOnAlert = functions.firestore
+exports.onAlertCreatedGIS = functions.firestore
   .document("alerts/{alertId}")
   .onCreate(async (snap, context) => {
-    return sendPushToTier(context.params.alertId, snap.data());
+    const data = snap.data();
+    const alertId = context.params.alertId;
+    const lat = data.lat;
+    const lng = data.lng;
+
+    if (!lat || !lng) return null;
+
+    try {
+      console.log(`[GIS_ASYNC] Resolving jurisdiction for alert ${alertId} at (${lat}, ${lng})...`);
+      const geoMapped = await resolveJurisdiction(lat, lng);
+
+      const timelineEvent = {
+        type: "GIS_RESOLVED",
+        actor: "SYSTEM_GIS",
+        role: "SYSTEM",
+        timestamp: new Date().toISOString(),
+        reason: "Geospatial boundary lookup complete.",
+        notes: `Mapped to LGA: ${geoMapped.lga}, Ward: ${geoMapped.ward}, PU: ${geoMapped.pu}`
+      };
+
+      await snap.ref.update({
+        geo_lga: geoMapped.lga,
+        geo_ward: geoMapped.ward,
+        geo_pu: geoMapped.pu,
+        timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
+      });
+
+      console.log(`[GIS_ASYNC] Successfully updated alert ${alertId} with geo mapping.`);
+
+      // Notify the correct responders now that geographic mapping has completed
+      const updatedSnap = await snap.ref.get();
+      await sendPushToTier(alertId, updatedSnap.data());
+
+    } catch (err) {
+      console.error(`[GIS_ASYNC_ERR] Failed to resolve alert ${alertId}:`, err);
+    }
+    return null;
 });
 
 exports.logAlertChanges = functions.firestore
@@ -280,16 +316,14 @@ exports.createAlert = functions.https.onCall(async (data, context) => {
     const finalLat = lat || 9.9167;
     const finalLng = lng || 8.8917;
 
-    const geoMapped = await resolveJurisdiction(finalLat, finalLng);
-
     const alertData = {
       type: type || "UNKNOWN",
       description: description || "",
       lat: finalLat,
       lng: finalLng,
-      geo_lga: geoMapped.lga,
-      geo_ward: geoMapped.ward,
-      geo_pu: geoMapped.pu,
+      geo_lga: "RESOLVING",
+      geo_ward: "RESOLVING",
+      geo_pu: "RESOLVING",
       reportedBy: userId,
       status: "OPEN", // Normalized: OPEN replaces ACTIVE
       priority: priority || "HIGH",
@@ -304,7 +338,7 @@ exports.createAlert = functions.https.onCall(async (data, context) => {
           role: "CITIZEN",
           timestamp: new Date().toISOString(),
           reason: "SOS Distress Signal Initiated",
-          notes: `Incident reported at geoscope: ${geoMapped.lga}, ${geoMapped.ward}, ${geoMapped.pu}`
+          notes: "Incident reported, geoscope resolving..."
         }
       ]
     };
@@ -347,15 +381,13 @@ exports.smsWebhook = functions.https.onRequest(async (req, res) => {
     const typeMap = { 'KD': 'Kidnap', 'FR': 'Fire', 'DA': 'Drug abuse', 'CM': 'Attack', 'OT': 'Other' };
     const alertType = typeMap[typeCode] || 'Unknown';
 
-    const geoMapped = await resolveJurisdiction(lat, lng);
-
     const docRef = await db.collection("alerts").add({
       type: alertType,
       description: `[OFFLINE_SMS] Reported via SMS gateway.`,
       lat, lng,
-      geo_lga: geoMapped.lga,
-      geo_ward: geoMapped.ward,
-      geo_pu: geoMapped.pu,
+      geo_lga: "RESOLVING",
+      geo_ward: "RESOLVING",
+      geo_pu: "RESOLVING",
       reportedBy: reporterPhone,
       status: "OPEN",
       priority: "CRITICAL",
@@ -370,7 +402,7 @@ exports.smsWebhook = functions.https.onRequest(async (req, res) => {
           role: "CITIZEN",
           timestamp: new Date().toISOString(),
           reason: "SOS Distress Signal via SMS Gateway",
-          notes: `Incident reported at offline geoscope: ${geoMapped.lga}, ${geoMapped.ward}, ${geoMapped.pu}`
+          notes: "Incident reported, geoscope resolving..."
         }
       ]
     });
