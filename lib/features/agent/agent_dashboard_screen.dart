@@ -26,10 +26,11 @@ final alertsStreamProvider = StreamProvider<QuerySnapshot>((ref) {
   final auth = ref.watch(authProvider);
   final profile = auth.profile ?? {};
   final role = profile['role'] as String? ?? '';
+  final uid = auth.user?.uid ?? 'unknown';
   Query<Map<String, dynamic>> query =
       FirebaseFirestore.instance.collection('alerts');
 
-  // 1. Check staff role for scope limitation to prevent PERMISSION_DENIED
+  // Server-side filter based on roles & scopes to avoid client-side load
   if (role == 'LGA_COMMAND' || role == 'LGA_OFFICER') {
     final assignedLgas =
         (profile['geo_lgas'] as List<dynamic>?)?.cast<String>() ??
@@ -38,9 +39,19 @@ final alertsStreamProvider = StreamProvider<QuerySnapshot>((ref) {
                 .toList();
     if (assignedLgas.isNotEmpty && !assignedLgas.contains('ALL')) {
       if (assignedLgas.length == 1) {
-        query = query.where('geo_lga', isEqualTo: assignedLgas.first);
+        query = query.where(
+          Filter.or(
+            Filter('assignedToUid', isEqualTo: uid),
+            Filter('geo_lga', isEqualTo: assignedLgas.first),
+          ),
+        );
       } else {
-        query = query.where('geo_lga', whereIn: assignedLgas);
+        query = query.where(
+          Filter.or(
+            Filter('assignedToUid', isEqualTo: uid),
+            Filter('geo_lga', whereIn: assignedLgas),
+          ),
+        );
       }
     }
   } else if (role == 'WARD_COMMAND' || role == 'WARD_OFFICER') {
@@ -51,9 +62,19 @@ final alertsStreamProvider = StreamProvider<QuerySnapshot>((ref) {
                 .toList();
     if (assignedWards.isNotEmpty && !assignedWards.contains('ALL')) {
       if (assignedWards.length == 1) {
-        query = query.where('geo_ward', isEqualTo: assignedWards.first);
+        query = query.where(
+          Filter.or(
+            Filter('assignedToUid', isEqualTo: uid),
+            Filter('geo_ward', isEqualTo: assignedWards.first),
+          ),
+        );
       } else {
-        query = query.where('geo_ward', whereIn: assignedWards);
+        query = query.where(
+          Filter.or(
+            Filter('assignedToUid', isEqualTo: uid),
+            Filter('geo_ward', whereIn: assignedWards),
+          ),
+        );
       }
     }
   } else if (role == 'POLLING_UNIT_COMMAND' ||
@@ -63,21 +84,13 @@ final alertsStreamProvider = StreamProvider<QuerySnapshot>((ref) {
     final geoPu = profile['geo_pu'] as String? ??
         profile['pu'] as String? ??
         'UNKNOWN';
-    query = query.where('geo_pu', isEqualTo: geoPu);
+    query = query.where(
+      Filter.or(
+        Filter('assignedToUid', isEqualTo: uid),
+        Filter('geo_pu', isEqualTo: geoPu),
+      ),
+    );
   }
-
-  // 2. Base filter: only show active and non-resolved alerts to agents
-  query = query.where('status', whereIn: [
-    'OPEN',
-    'ACTIVE',
-    'DISPATCHED',
-    'ACKNOWLEDGED',
-    'ON_ROUTE',
-    'ON_SITE',
-    'ARRIVED',
-    'DURESS',
-    'ESCALATED'
-  ]);
 
   return query.snapshots();
 });
