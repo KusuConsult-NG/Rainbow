@@ -41,6 +41,7 @@ dependencies:
   path_provider: ^2.1.3
   permission_handler: ^12.0.1
   record: ^6.2.1
+  speech_to_text: any
   riverpod_annotation: any
   sentry_flutter: ^8.14.2
   share_plus: ^12.0.2
