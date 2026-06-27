@@ -31,3 +31,28 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const rtdb = getDatabase(app);
 export const functions = getFunctions(app);
+
+// Initialize Firebase AI Logic (Gemini API Provider)
+let aiInstance: any = null;
+if (typeof window !== 'undefined') {
+  try {
+    const { getAI, GoogleAIBackend } = require('firebase/ai');
+    aiInstance = getAI(app, { backend: new GoogleAIBackend() });
+  } catch (error) {
+    console.error('Failed to initialize Firebase AI Logic SDK:', error);
+  }
+}
+
+export const ai = aiInstance;
+
+export const getGeminiModel = () => {
+  if (!ai) return null;
+  const { getGenerativeModel } = require('firebase/ai');
+  return getGenerativeModel(ai, {
+    model: "gemini-flash-latest",
+    generationConfig: {
+      temperature: 0.7,
+    }
+  });
+};
+

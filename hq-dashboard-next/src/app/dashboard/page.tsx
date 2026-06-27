@@ -4,7 +4,7 @@ import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { collection, onSnapshot, query, where, doc, orderBy, limit, getDoc, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref as dbRef, onValue } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
-import { auth, db, rtdb, functions } from '@/lib/firebase';
+import { auth, db, rtdb, functions, getGeminiModel } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import AdminDirectory from '@/components/AdminDirectory';
@@ -19,8 +19,9 @@ import {
   ShieldAlert, Map as MapIcon, Users, Radio, Settings,
   LogOut, AlertTriangle, CheckCircle, ChevronUp, Phone,
   Loader2, Filter, Bell, Activity, Clock, Target, Edit3, Send,
-  Sun, Moon, X
+  Sun, Moon, X, Sparkles
 } from 'lucide-react';
+
 
 // Leaflet must be client-only (no SSR)
 const LiveMap = dynamic(() => import('@/components/LiveMap'), { ssr: false });
@@ -66,6 +67,90 @@ const fSel: React.CSSProperties = {
 
 type Tab = 'map' | 'alerts' | 'history' | 'analytics' | 'broadcast' | 'admin' | 'settings' | 'audit' | 'uninstall';
 
+const renderFormattedSummary = (text: string) => {
+  if (!text) return null;
+  const parts = text.split(/###\s+/);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {parts.map((part, index) => {
+        if (!part.trim()) return null;
+        const firstLineEnd = part.indexOf('\n');
+        let title = '';
+        let content = '';
+        if (firstLineEnd !== -1) {
+          title = part.substring(0, firstLineEnd).trim();
+          content = part.substring(firstLineEnd + 1).trim();
+        } else {
+          const firstColon = part.indexOf(':');
+          if (firstColon !== -1) {
+            title = part.substring(0, firstColon).trim();
+            content = part.substring(firstColon + 1).trim();
+          } else {
+            title = 'ANALYSIS NOTE';
+            content = part.trim();
+          }
+        }
+        title = title.replace(/^:\s*/, '').replace(/:\s*$/, '').toUpperCase();
+        const contentLines = content.split('\n').map((line, lIdx) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+            return (
+              <li key={lIdx} style={{ fontSize: 11.5, color: 'var(--text-primary)', marginBottom: 6, marginLeft: 12, lineHeight: 1.5, listStyleType: 'disc' }}>
+                {trimmed.substring(2)}
+              </li>
+            );
+          }
+          if (trimmed.match(/^\d+\.\s+/)) {
+            const clean = trimmed.replace(/^\d+\.\s+/, '');
+            return (
+              <li key={lIdx} style={{ fontSize: 11.5, color: 'var(--text-primary)', marginBottom: 6, marginLeft: 12, listStyleType: 'decimal', lineHeight: 1.5 }}>
+                {clean}
+              </li>
+            );
+          }
+          return trimmed ? (
+            <p key={lIdx} style={{ fontSize: 11.5, color: 'var(--text-primary)', margin: '0 0 8px 0', lineHeight: 1.5 }}>
+              {trimmed}
+            </p>
+          ) : null;
+        });
+
+        let sectionColor = 'var(--primary)';
+        if (title.includes('EXECUTIVE')) sectionColor = 'var(--accent)';
+        else if (title.includes('SLA') || title.includes('TIMELINE')) sectionColor = 'var(--warning)';
+        else if (title.includes('RESOURCE') || title.includes('PERFORMANCE')) sectionColor = 'var(--success)';
+        else if (title.includes('RECOMMENDATIONS') || title.includes('STRATEGIC')) sectionColor = 'var(--duress)';
+
+        return (
+          <div key={index} style={{
+            background: 'var(--bg-card)',
+            borderLeft: `3px solid ${sectionColor}`,
+            padding: '14px 18px',
+            borderRadius: '0 12px 12px 0',
+            boxShadow: 'var(--shadow-sm)',
+            border: '1px solid var(--border)',
+            borderLeftWidth: 0
+          }}>
+            <h5 style={{ 
+              fontSize: 10, 
+              fontWeight: 900, 
+              color: sectionColor, 
+              letterSpacing: 1.2, 
+              margin: '0 0 10px 0', 
+              fontFamily: "'Outfit', sans-serif" 
+            }}>
+              {title}
+            </h5>
+            <ul style={{ margin: 0, padding: 0, listStyleType: 'none' }}>
+              {contentLines}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState('HQ_OFFICER');
@@ -81,7 +166,63 @@ export default function DashboardPage() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [timeString, setTimeString] = useState('');
   const [selectedReport, setSelectedReport] = useState<Alert | null>(null);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    setAiSummary(null);
+    setIsGeneratingSummary(false);
+  }, [selectedReport]);
+
+  const generateAISummary = async (report: Alert) => {
+    if (!report) return;
+    setIsGeneratingSummary(true);
+    setAiSummary(null);
+    try {
+      const model = getGeminiModel();
+      if (!model) {
+        throw new Error('Firebase AI Logic service is not initialized.');
+      }
+
+      const timelineText = (report.timeline || []).map((e: any) => {
+        const t = e.timestamp ? new Date(e.timestamp).toISOString() : '';
+        return `[${t}] ${e.type} by ${e.actor || 'System'} (${e.role || 'System'}): ${e.notes || ''}${e.reason ? ' Reason: ' + e.reason : ''}`;
+      }).join('\n');
+
+      const prompt = `You are the Operation Rainbow Forensic AI Assistant. Your task is to analyze the following resolved incident report and compile a premium, structured Post-Action Operational Summary.
+      
+INCIDENT METADATA:
+- ID: ${report.id}
+- Type: ${report.type || 'N/A'}
+- Description: ${report.description || 'No description provided'}
+- Scope: ${report.assigned_to}
+- Priority: ${report.priority}
+- LGA: ${report.geo_lga || 'STATE HQ'}
+- Ward: ${report.geo_ward || 'N/A'}
+- Resolved By: ${report.resolved_by || 'Unknown'}
+
+HISTORICAL AUDIT TIMELINE:
+${timelineText || 'No timeline events recorded.'}
+
+Provide your analysis formatted in Markdown. Your summary MUST contain the following four specific sections:
+1. ### EXECUTIVE OPERATIONAL SUMMARY: A concise 2-sentence tactical summary of the incident and its resolution.
+2. ### TIMELINE SLA AUDIT: Audit the timeline response times, highlighting latency between creation, dispatch, and resolution. Determine if SLAs were met.
+3. ### KEY RESOURCE PERFORMANCE: Evaluate the actions taken by responding officers and system actors.
+4. ### STRATEGIC RECOMMENDATIONS: Provide 2-3 actionable, high-impact tactical recommendations for geofenced patrols or resources in this LGA/Ward to prevent future similar incidents.
+
+Be precise, objective, and professional. Avoid generic filler. Use clean markdown formatting.`;
+
+      const result = await model.generateContent(prompt);
+      const text = await result.response.text();
+      setAiSummary(text);
+    } catch (error: any) {
+      console.error('Error generating AI summary:', error);
+      setAiSummary(`Failed to generate forensic summary: ${error.message || error}. Please ensure Generative Language API Terms of Service are accepted for the project.`);
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
 
   useEffect(() => {
     const updateTime = () => {
@@ -1111,6 +1252,97 @@ export default function DashboardPage() {
                       textAlign: 'center'
                     }}>
                       No forensic timeline events recorded for this incident.
+                    </div>
+                  )}
+                </div>
+
+                {/* Forensic AI Summary */}
+                <div style={{
+                  padding: 24,
+                  background: 'var(--input-bg)',
+                  borderRadius: 20,
+                  border: '1px solid var(--border)',
+                  marginTop: 8
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Sparkles size={16} style={{ color: 'var(--primary)' }} />
+                      <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', margin: 0, fontFamily: "'Outfit', sans-serif" }}>
+                        Tactical Forensic AI Analysis
+                      </h4>
+                    </div>
+                    {aiSummary && !isGeneratingSummary && (
+                      <button
+                        onClick={() => generateAISummary(selectedReport)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--primary)',
+                          fontSize: 9,
+                          fontWeight: 900,
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                          padding: 0
+                        }}
+                      >
+                        REGENERATE
+                      </button>
+                    )}
+                  </div>
+
+                  {!aiSummary && !isGeneratingSummary && (
+                    <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
+                        Synthesize raw dispatch timeline, responder telemetry, and incident outcomes into a post-action operational report.
+                      </p>
+                      <button
+                        onClick={() => generateAISummary(selectedReport)}
+                        style={{
+                          padding: '10px 20px',
+                          background: 'var(--primary)',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: 10,
+                          fontSize: 11,
+                          fontWeight: 900,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          boxShadow: 'var(--primary-glow)'
+                        }}
+                        className="card-hover"
+                      >
+                        <Sparkles size={12} />
+                        GENERATE FORENSIC DEBRIEF
+                      </button>
+                    </div>
+                  )}
+
+                  {isGeneratingSummary && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 0' }}>
+                      <style dangerouslySetInnerHTML={{__html: `
+                        @keyframes pulse {
+                          0%, 100% { opacity: 0.6; }
+                          50% { opacity: 1; }
+                        }
+                        .tactical-pulse {
+                          animation: pulse 1.5s infinite ease-in-out;
+                        }
+                      `}} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--primary)', fontSize: 12, fontWeight: 700 }}>
+                        <Loader2 size={16} className="animate-spin" />
+                        <span>Querying Gemini AI Engine...</span>
+                      </div>
+                      <div className="tactical-pulse" style={{ height: 16, width: '90%', borderRadius: 4, background: 'var(--bg-secondary)' }} />
+                      <div className="tactical-pulse" style={{ height: 16, width: '75%', borderRadius: 4, background: 'var(--bg-secondary)' }} />
+                      <div className="tactical-pulse" style={{ height: 16, width: '80%', borderRadius: 4, background: 'var(--bg-secondary)' }} />
+                    </div>
+                  )}
+
+                  {aiSummary && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      {renderFormattedSummary(aiSummary)}
                     </div>
                   )}
                 </div>
