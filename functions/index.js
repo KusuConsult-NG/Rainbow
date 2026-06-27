@@ -487,55 +487,56 @@ exports.adminEscalateAlert = functions.https.onCall(async (data, context) => {
   }
 
   const alertRef = db.collection("alerts").doc(alertId);
-  const alertSnap = await alertRef.get();
-  if (!alertSnap.exists) throw new functions.https.HttpsError("not-found", "Alert not found.");
-  
-  const oldTier = alertSnap.data().assigned_to || "POLLING_UNIT";
 
-  const timelineEvent = {
-    type: "ESCALATION",
-    actor: context.auth.token.email || context.auth.uid,
-    role: role || "RESPONDER",
-    timestamp: new Date().toISOString(),
-    reason: reason || "Tactical Escalation",
-    notes: notes || `Manual escalation from ${oldTier} to ${targetTier}.`
-  };
+  await db.runTransaction(async (transaction) => {
+    const alertSnap = await transaction.get(alertRef);
+    if (!alertSnap.exists) throw new functions.https.HttpsError("not-found", "Alert not found.");
+    
+    const alertData = alertSnap.data();
+    const oldTier = alertData.assigned_to || "POLLING_UNIT";
 
-  await alertRef.update({
-    assigned_to: targetTier,
-    last_edited_by: context.auth.token.email || context.auth.uid,
-    escalated_at: admin.firestore.FieldValue.serverTimestamp(),
-    timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
+    const timelineEvent = {
+      type: "ESCALATION",
+      actor: context.auth.token.email || context.auth.uid,
+      role: role || "RESPONDER",
+      timestamp: new Date().toISOString(),
+      reason: reason || "Tactical Escalation",
+      notes: notes || `Manual escalation from ${oldTier} to ${targetTier}.`
+    };
+
+    transaction.update(alertRef, {
+      assigned_to: targetTier,
+      last_edited_by: context.auth.token.email || context.auth.uid,
+      escalated_at: admin.firestore.FieldValue.serverTimestamp(),
+      timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
+    });
+
+    const auditRef = db.collection("audit_logs").doc();
+    transaction.set(auditRef, {
+      action: "MANUAL_ESCALATION",
+      alert_id: alertId,
+      from_tier: oldTier,
+      to_tier: targetTier,
+      actor: context.auth.token.email || context.auth.uid,
+      reason: reason || "Tactical Escalation",
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
   });
 
-  await db.collection("audit_logs").add({
-    action: "MANUAL_ESCALATION",
-    alert_id: alertId,
-    from_tier: oldTier,
-    to_tier: targetTier,
-    actor: context.auth.token.email || context.auth.uid,
-    reason: reason || "Tactical Escalation",
-    timestamp: admin.firestore.FieldValue.serverTimestamp()
-  });
-
-  // Schedule the NEXT jump if we are not yet at HQ
-  let nextTier = null;
-  if (targetTier === "WARD") nextTier = "LGA";
-  else if (targetTier === "LGA") nextTier = "HQ";
-
-  if (nextTier) {
-    try {
-      const configSnap = await db.collection("system").doc("config").get();
-      const thresholds = configSnap.exists ? (configSnap.data().escalation_thresholds || {}) : {};
+  // Schedule task queue outside transaction
+  try {
+    const nextTier = targetTier === "POLLING_UNIT" ? "WARD" : targetTier === "WARD" ? "LGA" : "PLATEAU_HQ";
+    if (nextTier !== "PLATEAU_HQ") {
+      const thresholds = { WARD: 5, LGA: 10 };
       const waitMinutes = thresholds[targetTier] || (targetTier === "WARD" ? 5 : 10);
 
       const queue = getFunctions().taskQueue("escalateTask");
       await queue.enqueue({ alertId, targetTier: nextTier }, {
         scheduleDelaySeconds: waitMinutes * 60
       });
-    } catch (err) {
-      console.warn("[ESCALATE_QUEUE] Failed to enqueue next task queue:", err);
     }
+  } catch (err) {
+    console.warn("[ESCALATE_QUEUE] Failed to enqueue next task queue:", err);
   }
 
   return { success: true };
@@ -545,21 +546,28 @@ exports.adminResolveAlert = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Auth required.");
   const { alertId } = data;
   
-  const timelineEvent = {
-    type: "RESOLVED",
-    actor: context.auth.token.email || context.auth.uid,
-    role: context.auth.token.role || "RESPONDER",
-    timestamp: new Date().toISOString(),
-    reason: "Incident Resolved",
-    notes: `Incident marked as resolved by ${context.auth.token.email || context.auth.uid}`
-  };
+  const alertRef = db.collection("alerts").doc(alertId);
 
-  await db.collection("alerts").doc(alertId).update({
-    status: "RESOLVED",
-    resolved_by: context.auth.token.email || context.auth.uid,
-    last_edited_by: context.auth.token.email || context.auth.uid,
-    resolved_at: admin.firestore.FieldValue.serverTimestamp(),
-    timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
+  await db.runTransaction(async (transaction) => {
+    const alertSnap = await transaction.get(alertRef);
+    if (!alertSnap.exists) throw new functions.https.HttpsError("not-found", "Alert not found.");
+
+    const timelineEvent = {
+      type: "RESOLVED",
+      actor: context.auth.token.email || context.auth.uid,
+      role: context.auth.token.role || "RESPONDER",
+      timestamp: new Date().toISOString(),
+      reason: "Incident Resolved",
+      notes: `Incident marked as resolved by ${context.auth.token.email || context.auth.uid}`
+    };
+
+    transaction.update(alertRef, {
+      status: "RESOLVED",
+      resolved_by: context.auth.token.email || context.auth.uid,
+      last_edited_by: context.auth.token.email || context.auth.uid,
+      resolved_at: admin.firestore.FieldValue.serverTimestamp(),
+      timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
+    });
   });
 
   return { success: true };
@@ -574,35 +582,40 @@ exports.adminDispatchAlert = functions.https.onCall(async (data, context) => {
   }
 
   const alertRef = db.collection("alerts").doc(alertId);
-  const responderSnap = await db.collection("users").doc(responderUid).get();
+  const responderRef = db.collection("users").doc(responderUid);
   
-  if (!responderSnap.exists) {
-    throw new functions.https.HttpsError("not-found", "Responder not found.");
-  }
+  await db.runTransaction(async (transaction) => {
+    const alertSnap = await transaction.get(alertRef);
+    if (!alertSnap.exists) throw new functions.https.HttpsError("not-found", "Alert not found.");
+    
+    const responderSnap = await transaction.get(responderRef);
+    if (!responderSnap.exists) throw new functions.https.HttpsError("not-found", "Responder not found.");
 
-  const timelineEvent = {
-    type: "DISPATCHED",
-    actor: context.auth.token.email || context.auth.uid,
-    role: context.auth.token.role || "RESPONDER",
-    timestamp: new Date().toISOString(),
-    reason: "Unit Dispatched",
-    notes: `Dispatched tactical unit ${responderSnap.data().displayName || responderUid} to incident site.`
-  };
+    const timelineEvent = {
+      type: "DISPATCHED",
+      actor: context.auth.token.email || context.auth.uid,
+      role: context.auth.token.role || "RESPONDER",
+      timestamp: new Date().toISOString(),
+      reason: "Unit Dispatched",
+      notes: `Dispatched tactical unit ${responderSnap.data().displayName || responderUid} to incident site.`
+    };
 
-  await alertRef.update({
-    status: "DISPATCHED",
-    assignedToUid: responderUid,
-    last_edited_by: context.auth.token.email || context.auth.uid,
-    dispatched_at: admin.firestore.FieldValue.serverTimestamp(),
-    timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
-  });
+    transaction.update(alertRef, {
+      status: "DISPATCHED",
+      assignedToUid: responderUid,
+      last_edited_by: context.auth.token.email || context.auth.uid,
+      dispatched_at: admin.firestore.FieldValue.serverTimestamp(),
+      timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
+    });
 
-  await db.collection("audit_logs").add({
-    action: "ADMIN_DISPATCH",
-    alert_id: alertId,
-    actor: context.auth.token.email || context.auth.uid,
-    target_uid: responderUid,
-    timestamp: admin.firestore.FieldValue.serverTimestamp()
+    const auditRef = db.collection("audit_logs").doc();
+    transaction.set(auditRef, {
+      action: "ADMIN_DISPATCH",
+      alert_id: alertId,
+      actor: context.auth.token.email || context.auth.uid,
+      target_uid: responderUid,
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
   });
 
   return { success: true };
