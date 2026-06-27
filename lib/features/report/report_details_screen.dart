@@ -18,6 +18,7 @@ import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/alert_service.dart';
+import 'package:rainbow_app/services/speech_service.dart';
 import 'package:rainbow_app/services/auth_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/services/sync_service.dart';
@@ -107,6 +108,16 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           ),
           path: path,
         );
+
+        await SpeechService.instance.initialize();
+        await SpeechService.instance.startListening(
+          onResult: (text) {
+            setState(() {
+              _narrativeCtrl.text = text;
+            });
+          },
+        );
+
         setState(() {
           _isRecording = true;
           _recordedAudioPath = null;
@@ -120,13 +131,16 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   Future<void> _stopRecording() async {
     try {
       final path = await _audioRecorder.stop();
+      await SpeechService.instance.stopListening();
       if (path != null) {
         final file = File(path);
         setState(() {
           _isRecording = false;
           _recordedAudioPath = path;
           _attachedFiles.add(file);
-          _narrativeCtrl.text = '[AUDIO_REPORT] voice message recorded';
+          if (_narrativeCtrl.text.isEmpty || _narrativeCtrl.text == '[AUDIO_REPORT] voice message recorded') {
+            _narrativeCtrl.text = '[AUDIO_REPORT] voice message recorded';
+          }
         });
       }
     } catch (e) {
