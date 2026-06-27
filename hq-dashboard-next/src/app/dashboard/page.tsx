@@ -1463,6 +1463,85 @@ function AlertCard({ alert, agents, usersMap, onDispatch, onEscalate, onResolve,
   const a = alert as any;
   const [showDispatch, setShowDispatch] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [triageLoading, setTriageLoading] = useState(false);
+  const [triageError, setTriageError] = useState<string | null>(null);
+
+  const runTriageAssessment = async () => {
+    if (!alert.description) return;
+    setTriageLoading(true);
+    setTriageError(null);
+    try {
+      const model = getGeminiModel({ responseMimeType: "application/json" });
+      if (!model) {
+        throw new Error("Firebase AI Logic is not initialized.");
+      }
+
+      const prompt = `You are the Operation Rainbow Emergency Triage AI. Analyze the following raw incident description:
+"${alert.description}"
+
+Categorize the incident and recommend threat priority. You MUST respond with a valid JSON object matching this exact schema:
+{
+  "recommended_type": "The classified type (e.g. PROTEST, ROAD_ACCIDENT, CIVIL_UNREST, ELECTRICAL_FIRE, BOLO, ROBBERY, MEDICAL_EMERGENCY, ILLEGAL_CHECKPOINT)",
+  "recommended_priority": "LOW, MEDIUM, HIGH, or CRITICAL",
+  "justification": "A single sentence explaining your classification.",
+  "weapons_detected": true,
+  "crowd_size": "Estimated number of people involved, or N/A if not applicable"
+}
+Ensure that "weapons_detected" is a boolean (true/false).
+Do not include any markdown backticks or formatting outside the raw JSON object.`;
+
+      const result = await model.generateContent(prompt);
+      const text = await result.response.text();
+      const parsed = JSON.parse(text);
+
+      const alertRef = doc(db, 'alerts', alert.id);
+      await updateDoc(alertRef, {
+        ai_triage: {
+          recommended_type: parsed.recommended_type || "UNKNOWN",
+          recommended_priority: parsed.recommended_priority || "HIGH",
+          justification: parsed.justification || "",
+          weapons_detected: !!parsed.weapons_detected,
+          crowd_size: parsed.crowd_size || "N/A",
+          timestamp: new Date().toISOString()
+        }
+      });
+    } catch (err: any) {
+      console.error("AI Triage failed:", err);
+      setTriageError(err.message || String(err));
+    } finally {
+      setTriageLoading(false);
+    }
+  };
+
+  const applyTriage = async () => {
+    const ai_triage = (alert as any).ai_triage;
+    if (!ai_triage) return;
+    
+    setLoading(true);
+    try {
+      const alertRef = doc(db, 'alerts', alert.id);
+      
+      const newTimeline = [...(alert.timeline || [])];
+      newTimeline.push({
+        type: 'AI_TRIAGE_APPLIED',
+        timestamp: new Date().toISOString(),
+        notes: `Applied AI recommended classification: ${ai_triage.recommended_type} / ${ai_triage.recommended_priority}`,
+        actor: 'HQ Dispatcher',
+        role: 'HQ_OFFICER'
+      });
+
+      await updateDoc(alertRef, {
+        type: ai_triage.recommended_type,
+        priority: ai_triage.recommended_priority,
+        timeline: newTimeline
+      });
+    } catch (err: any) {
+      console.error("Failed to apply triage:", err);
+      window.alert("Failed to apply AI classifications: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Resolve reporter dynamically from usersMap to eliminate placeholders
   const reporterId = alert.reportedBy || '';
@@ -1543,6 +1622,144 @@ function AlertCard({ alert, agents, usersMap, onDispatch, onEscalate, onResolve,
       </div>
 
       <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 20 }}>{alert.description}</p>
+
+      {/* AI Triage Panel */}
+      <div style={{
+        background: 'var(--input-bg)',
+        border: '1px solid var(--border)',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 20,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Sparkles size={13} style={{ color: 'var(--primary)' }} />
+            <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, fontFamily: "'Outfit', sans-serif" }}>AI TRIAGE ASSESSMENT</span>
+          </div>
+          {(alert as any).ai_triage && !triageLoading && (
+            <button
+              onClick={runTriageAssessment}
+              style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: 9, fontWeight: 900, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+            >
+              RERUN
+            </button>
+          )}
+        </div>
+
+        {triageError && (
+          <div style={{ fontSize: 11, color: 'var(--duress)', marginBottom: 8, fontWeight: 700 }}>
+            Triage Failed: {triageError}
+          </div>
+        )}
+
+        {!(alert as any).ai_triage && !triageLoading && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Classify incident category and priority via AI</span>
+            <button
+              onClick={runTriageAssessment}
+              style={{
+                background: 'var(--primary-dim)',
+                color: 'var(--primary)',
+                border: '1px solid rgba(59,130,246,0.2)',
+                borderRadius: 8,
+                padding: '6px 12px',
+                fontSize: 10,
+                fontWeight: 900,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+              className="card-hover"
+            >
+              <Sparkles size={10} />
+              RUN AI TRIAGE
+            </button>
+          </div>
+        )}
+
+        {triageLoading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+            <Loader2 size={14} className="animate-spin" />
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Analyzing telemetry & text payload...</span>
+          </div>
+        )}
+
+        {(alert as any).ai_triage && !triageLoading && (() => {
+          const triage = (alert as any).ai_triage;
+          const isMatch = alert.type === triage.recommended_type && alert.priority === triage.recommended_priority;
+          const priorityColors: Record<string, string> = {
+            'LOW': 'var(--success)',
+            'MEDIUM': 'var(--warning)',
+            'HIGH': 'var(--duress)',
+            'CRITICAL': 'var(--duress)'
+          };
+          const prioCol = priorityColors[triage.recommended_priority] || 'var(--text-muted)';
+          
+          return (
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, background: 'var(--bg-secondary)', padding: 12, borderRadius: 10, border: '1px solid var(--border)', marginBottom: 12 }}>
+                <div>
+                  <span style={{ fontSize: 9, color: 'var(--text-dim)', display: 'block', fontWeight: 800 }}>RECOMMENDED TYPE</span>
+                  <span style={{ fontSize: 11, fontWeight: 900, color: 'var(--text-primary)' }}>{triage.recommended_type}</span>
+                </div>
+                <div>
+                  <span style={{ fontSize: 9, color: 'var(--text-dim)', display: 'block', fontWeight: 800 }}>RECOMMENDED PRIORITY</span>
+                  <span style={{ fontSize: 9, fontWeight: 900, color: prioCol, background: `${prioCol}15`, border: `1px solid ${prioCol}44`, padding: '2px 8px', borderRadius: 10, display: 'inline-block', marginTop: 2 }}>
+                    {triage.recommended_priority}
+                  </span>
+                </div>
+                <div style={{ gridColumn: 'span 2', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+                  <span style={{ fontSize: 9, color: 'var(--text-dim)', display: 'block', fontWeight: 800 }}>AI JUSTIFICATION</span>
+                  <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '2px 0 0 0', lineHeight: 1.4 }}>{triage.justification}</p>
+                </div>
+                <div style={{ gridColumn: 'span 2', borderTop: '1px solid var(--border)', paddingTop: 8, display: 'flex', gap: 16 }}>
+                  <div>
+                    <span style={{ fontSize: 8, color: 'var(--text-dim)', display: 'block', fontWeight: 800 }}>WEAPONS DETECTED</span>
+                    <span style={{ fontSize: 10.5, fontWeight: 900, color: triage.weapons_detected ? 'var(--duress)' : 'var(--text-muted)' }}>
+                      {triage.weapons_detected ? 'YES 🚨' : 'NO'}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 8, color: 'var(--text-dim)', display: 'block', fontWeight: 800 }}>CROWD SIZE</span>
+                    <span style={{ fontSize: 10.5, fontWeight: 900, color: 'var(--text-primary)' }}>{triage.crowd_size}</span>
+                  </div>
+                </div>
+              </div>
+
+              {!isMatch ? (
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={applyTriage}
+                    style={{
+                      background: 'var(--success-dim)',
+                      color: 'var(--success)',
+                      border: '1px solid rgba(16,185,129,0.2)',
+                      borderRadius: 8,
+                      padding: '6px 12px',
+                      fontSize: 10,
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                    className="card-hover"
+                  >
+                    <CheckCircle size={10} />
+                    APPLY AI CLASSIFICATIONS
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--success)', fontSize: 10, fontWeight: 800, justifyContent: 'flex-end' }}>
+                  <CheckCircle size={10} />
+                  <span>AI RECOMMENDATIONS ALIGNED & APPLIED</span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </div>
 
       {/* Dynamic Geospatial & Reporter Profiles (Purging all placeholders) */}
       <div style={{ 

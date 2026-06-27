@@ -45,14 +45,18 @@ if (typeof window !== 'undefined') {
 
 export const ai = aiInstance;
 
-export const getGeminiModel = () => {
+export const getGeminiModel = (options?: { responseMimeType?: string }) => {
   if (!ai) return null;
   const { getGenerativeModel } = require('firebase/ai');
+  const generationConfig: any = {
+    temperature: 0.7,
+  };
+  if (options?.responseMimeType) {
+    generationConfig.responseMimeType = options.responseMimeType;
+  }
   return getGenerativeModel(ai, {
     model: "gemini-flash-latest",
-    generationConfig: {
-      temperature: 0.7,
-    }
+    generationConfig
   });
 };
 
