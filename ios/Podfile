@@ -28,6 +28,7 @@ flutter_ios_podfile_setup
 
 target 'Runner' do
   use_frameworks!
+  inhibit_all_warnings!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
   target 'RunnerTests' do
@@ -41,6 +42,7 @@ post_install do |installer|
     
     # Configure permission_handler macros to prevent App Store rejection
     target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
       config.build_settings['DEBUG_INFORMATION_FORMAT'] = 'dwarf-with-dsym'
       config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
         '$(inherited)',
