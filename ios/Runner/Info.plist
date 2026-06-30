@@ -69,6 +69,10 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Operation Rainbow may use your microphone for voice-activated emergency alerts and duress detection features.</string>
 
+	<!-- Speech Recognition — Required for voice report dictation -->
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Operation Rainbow uses speech recognition to transcribe your spoken voice reports and chat messages into text.</string>
+
 	<!-- Camera & Photo Library — Required for adding incident evidence -->
 	<key>NSCameraUsageDescription</key>
 	<string>Operation Rainbow needs access to your camera so you can take photos or videos of incidents to submit as evidence.</string>

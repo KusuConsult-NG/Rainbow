@@ -9,7 +9,15 @@ class SpeechService {
   bool _isInitialized = false;
   bool _useFallback = false;
 
+  set useFallback(bool value) {
+    _useFallback = value;
+  }
+
   Future<bool> initialize() async {
+    if (_useFallback) {
+      _isInitialized = true;
+      return true;
+    }
     try {
       if (kIsWeb) {
         _useFallback = true;
@@ -20,6 +28,10 @@ class SpeechService {
         onError: (val) => debugPrint('[SPEECH_ERR] error: $val'),
         onStatus: (val) => debugPrint('[SPEECH_STATUS] status: $val'),
       );
+      if (!_isInitialized) {
+        _useFallback = true;
+        _isInitialized = true;
+      }
       return _isInitialized;
     } catch (e) {
       debugPrint('[SPEECH_INIT_ERR] Failed to initialize native speech: $e');

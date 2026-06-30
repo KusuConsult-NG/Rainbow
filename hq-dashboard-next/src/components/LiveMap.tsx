@@ -51,18 +51,38 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   const [mapReady, setMapReady] = useState(false);
   const [showRiskGrid, setShowRiskGrid] = useState(true);
   const riskGridLayersRef = useRef<any[]>([]);
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
 
   // Plateau State Tactical Bounds
   const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.50, 10.80]];
 
+  // Polling check to ensure both Leaflet (L) and MarkerCluster are loaded on window
   useEffect(() => {
-    if (!mapRef.current || mapInstanceRef.current) return;
+    const isLeafletReady = () => {
+      const L = (window as any).L;
+      return L && typeof L.markerClusterGroup === 'function';
+    };
 
-    const Leaflet = (window as any).L;
-    if (!Leaflet) {
-      console.warn('[HQ_MAP] Leaflet is not loaded on window.');
+    if (isLeafletReady()) {
+      setLeafletLoaded(true);
       return;
     }
+
+    const interval = setInterval(() => {
+      if (isLeafletReady()) {
+        setLeafletLoaded(true);
+        clearInterval(interval);
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef.current || mapInstanceRef.current || !leafletLoaded) return;
+
+    const Leaflet = (window as any).L;
+    if (!Leaflet) return;
 
     const map = Leaflet.map(mapRef.current!, {
       center: [9.9167, 8.8917],
@@ -75,8 +95,8 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
     Leaflet.control.zoom({ position: 'bottomright' }).addTo(map);
 
     const tileUrl = theme === 'dark'
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
 
     const tileLayer = Leaflet.tileLayer(tileUrl, { attribution: '© CARTO' }).addTo(map);
     tileLayerRef.current = tileLayer;
@@ -122,7 +142,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
       agentPolylinesRef.current.clear();
       tileLayerRef.current = null;
     };
-  }, []);
+  }, [leafletLoaded]);
 
   useEffect(() => {
     if (!mapReady || !mapInstanceRef.current) return;
@@ -197,8 +217,8 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   useEffect(() => {
     if (!mapInstanceRef.current || !tileLayerRef.current) return;
     const tileUrl = theme === 'dark'
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
     tileLayerRef.current.setUrl(tileUrl);
   }, [theme]);
 
@@ -397,23 +417,24 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
         top: '20px',
         right: '20px',
         zIndex: 1000,
-        background: 'var(--surface, #1e1e1e)',
-        border: '1px solid var(--outline, #333)',
+        background: theme === 'dark' ? 'rgba(17, 23, 38, 0.95)' : 'rgba(255, 255, 255, 0.98)',
+        border: theme === 'dark' ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(148, 163, 184, 0.35)',
         borderRadius: '16px',
         padding: '16px',
         width: '240px',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
-        backdropFilter: 'blur(8px)'
+        boxShadow: 'var(--shadow-md)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '1.5px', color: 'var(--text-primary, #fff)' }}>
+          <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '1.5px', color: theme === 'dark' ? '#f8fafc' : '#0f172a' }}>
             FORECASTING HUD
           </span>
           <button
             onClick={() => setShowRiskGrid(!showRiskGrid)}
             style={{
-              background: showRiskGrid ? 'var(--duress, #ff4d4d)' : 'var(--outline, #333)',
-              color: 'white',
+              background: showRiskGrid ? 'var(--duress, #ff4d4d)' : (theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'),
+              color: showRiskGrid ? 'white' : (theme === 'dark' ? '#cbd5e1' : '#475569'),
               border: 'none',
               borderRadius: '8px',
               padding: '4px 8px',
@@ -429,20 +450,20 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
 
         {showRiskGrid && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ fontSize: '9px', color: 'var(--text-secondary, #aaa)', marginBottom: '4px' }}>
+            <div style={{ fontSize: '9px', color: theme === 'dark' ? '#94a3b8' : '#64748b', marginBottom: '4px' }}>
               SPATIAL-TEMPORAL RISK DENSITY:
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '12px', height: '12px', background: '#F44336', borderRadius: '3px', opacity: 0.8 }} />
-              <span style={{ fontSize: '10px', color: 'var(--text-primary, #fff)', fontWeight: 600 }}>Critical Hotspot (4+ alerts)</span>
+              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#e2e8f0' : '#334155', fontWeight: 600 }}>Critical Hotspot (4+ alerts)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '12px', height: '12px', background: '#FF9800', borderRadius: '3px', opacity: 0.8 }} />
-              <span style={{ fontSize: '10px', color: 'var(--text-primary, #fff)', fontWeight: 600 }}>Elevated Risk (2-3 alerts)</span>
+              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#e2e8f0' : '#334155', fontWeight: 600 }}>Elevated Risk (2-3 alerts)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '12px', height: '12px', background: '#FFC107', borderRadius: '3px', opacity: 0.8 }} />
-              <span style={{ fontSize: '10px', color: 'var(--text-primary, #fff)', fontWeight: 600 }}>Moderate Risk (1 alert)</span>
+              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#e2e8f0' : '#334155', fontWeight: 600 }}>Moderate Risk (1 alert)</span>
             </div>
           </div>
         )}

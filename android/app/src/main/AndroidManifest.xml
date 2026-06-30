@@ -23,6 +23,11 @@
     <!-- Phone calls for emergency escalation -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
 
+    <!-- Declare hardware features as optional to maximize device compatibility (e.g., tablets, smartwatches) -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+
     <application
         android:label="rainbow_app"
         android:name="${applicationName}"

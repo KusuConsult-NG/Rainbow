@@ -6,6 +6,7 @@ import 'package:rainbow_app/core/theme/app_theme.dart';
 import 'package:rainbow_app/services/push_notification_service.dart';
 import 'package:rainbow_app/services/sync_service.dart';
 import 'package:rainbow_app/shared/widgets/system_alert_listener.dart';
+import 'package:rainbow_app/shared/widgets/update_check_listener.dart';
 
 /// Documentation for this public member.
 
@@ -42,7 +43,9 @@ class _RainbowAppState extends ConsumerState<RainbowApp> {
       theme: AppTheme.light,
       routerConfig: ref.watch(appRouter),
       builder: (context, child) {
-        return SystemAlertListener(child: child!);
+        return UpdateCheckListener(
+          child: SystemAlertListener(child: child!),
+        );
       },
     );
   }

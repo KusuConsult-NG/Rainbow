@@ -1,4 +1,5 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/services/location_service.dart';
+import 'package:rainbow_app/services/tts_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
 // Firestore-driven safe zone data
@@ -185,6 +187,11 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
       _routePassesNearThreat = warning;
       _isCalculatingRoute = false;
     });
+
+    final message = warning
+        ? "Safe route calculated to ${zone.name}. Warning: The route passes near an active threat. Proceed with extreme caution."
+        : "Safe route calculated to ${zone.name}. The path is clear.";
+    unawaited(TtsService.instance.speak(message));
   }
 
   IconData _iconForType(String type) {
