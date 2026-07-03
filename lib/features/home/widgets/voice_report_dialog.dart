@@ -73,6 +73,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
   }
 
   Future<void> _startListeningFlow() async {
+    final lang = ref.read(languageProvider);
     setState(() {
       _errorMessage = null;
       _isListening = true;
@@ -82,7 +83,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
     if (!initSuccess) {
       setState(() {
         _isListening = false;
-        _errorMessage = 'Could not initialize speech recognition.';
+        _errorMessage = Translations.get('error_initialize', lang);
       });
       return;
     }
@@ -120,9 +121,10 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
   }
 
   Future<void> _submitReport() async {
+    final lang = ref.read(languageProvider);
     if (_transcription.trim().isEmpty) {
       setState(() {
-        _errorMessage = 'Please say something to report.';
+        _errorMessage = Translations.get('no_voice_input', lang);
       });
       return;
     }
@@ -155,7 +157,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'AI REPORT SUBMITTED SUCCESSFULLY',
+              Translations.get('success_toast', lang),
               style: GoogleFonts.outfit(
                 fontWeight: FontWeight.w900,
                 fontSize: 11,
@@ -178,17 +180,6 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
         _isTriaging = false;
         _errorMessage = 'Triage failed: $e';
       });
-    }
-  }
-
-  String _getDialogTitle(AppLanguage lang) {
-    switch (lang) {
-      case AppLanguage.hausa:
-        return 'AI DICTATION REPORT';
-      case AppLanguage.pidgin:
-        return 'AI VOICE REPORT';
-      default:
-        return 'AI VOICE REPORT';
     }
   }
 
@@ -250,7 +241,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        _getDialogTitle(lang),
+                        Translations.get('ai_report', lang),
                         style: GoogleFonts.outfit(
                           fontSize: 13,
                           fontWeight: FontWeight.w900,
@@ -276,7 +267,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                           ),
                           const SizedBox(height: 24),
                           Text(
-                            'AI TRIAGING INCIDENT...',
+                            Translations.get('ai_triaging_incident', lang),
                             style: GoogleFonts.outfit(
                               fontSize: 10,
                               fontWeight: FontWeight.w900,
@@ -286,7 +277,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'Classifying category & priority',
+                            Translations.get('classifying_details', lang),
                             style: GoogleFonts.outfit(
                               fontSize: 9,
                               color: AppColors.textDim,
@@ -353,7 +344,9 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                     const SizedBox(height: 24),
 
                     Text(
-                      _isListening ? 'LISTENING / SPEAK NOW' : 'TAP TO RECORD AGAIN',
+                      _isListening
+                          ? Translations.get('listening_speak_now', lang)
+                          : Translations.get('tap_to_record_again', lang),
                       style: GoogleFonts.outfit(
                         fontSize: 10,
                         fontWeight: FontWeight.w900,
@@ -377,8 +370,8 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                         child: Text(
                           _transcription.isEmpty
                               ? (_isListening
-                                  ? 'Say something like: "Violent crash on Bauchi Road..."'
-                                  : 'No voice input recorded.')
+                                  ? Translations.get('sample_speech_prompt', lang)
+                                  : Translations.get('no_voice_input', lang))
                               : _transcription,
                           style: GoogleFonts.outfit(
                             fontSize: 12,
@@ -418,7 +411,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                               ),
                             ),
                             child: Text(
-                              'CANCEL',
+                              Translations.get('cancel', lang),
                               style: GoogleFonts.outfit(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w900,
@@ -444,7 +437,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                               ),
                             ),
                             child: Text(
-                              'SUBMIT REPORT',
+                              Translations.get('submit_report', lang),
                               style: GoogleFonts.outfit(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w900,
