@@ -185,6 +185,85 @@ exports.onAlertCreatedGIS = functions.firestore
     if (!lat || !lng) return null;
 
     try {
+      // 1. Spatiotemporal duplicate correlation check (15 mins, 500 meters, matching type)
+      const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
+      const activeAlerts = await db.collection("alerts")
+        .where("status", "in", ["OPEN", "DISPATCHED", "ACKNOWLEDGED"])
+        .get();
+
+      let duplicateParentId = null;
+
+      for (const doc of activeAlerts.docs) {
+        if (doc.id === alertId) continue;
+        const other = doc.data();
+        
+        // Ensure other alert has reportedAt time and is within 15 minutes
+        if (other.reportedAt && other.type === data.type) {
+          const otherTime = new Date(other.reportedAt);
+          if (Math.abs(otherTime - new Date(data.reportedAt || Date.now())) <= 15 * 60 * 1000) {
+            const R = 6371;
+            const dLat = (other.lat - lat) * Math.PI / 180;
+            const dLng = (other.lng - lng) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(lat * Math.PI / 180) * Math.cos(other.lat * Math.PI / 180) *
+                      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            const distanceMeters = R * c * 1000;
+
+            if (distanceMeters <= 500) {
+              duplicateParentId = doc.id;
+              break;
+            }
+          }
+        }
+      }
+
+      if (duplicateParentId) {
+        console.log(`[CORRELATION] Alert ${alertId} identified as duplicate of ${duplicateParentId}. Merging...`);
+        
+        await snap.ref.update({
+          status: "MERGED",
+          parentAlertId: duplicateParentId,
+          sync_status: "MERGED"
+        });
+
+        const parentRef = db.collection("alerts").doc(duplicateParentId);
+        const parentSnap = await parentRef.get();
+        const parentData = parentSnap.data();
+
+        const updatedDescription = `${parentData.description || ''}\n[Duplicate Report]: ${data.description || ''}`;
+        const newAttachments = data.attachments || data.mediaUrls || [];
+
+        const parentUpdate = {
+          description: updatedDescription
+        };
+        if (newAttachments.length > 0) {
+          parentUpdate.attachments = admin.firestore.FieldValue.arrayUnion(...newAttachments);
+        }
+
+        await parentRef.update(parentUpdate);
+
+        const correlationEvent = {
+          type: "DUPLICATE_MERGED",
+          actor: "SYSTEM_CORRELATION",
+          role: "SYSTEM",
+          timestamp: new Date().toISOString(),
+          reason: "Spatiotemporal duplicate match detected.",
+          notes: `Merged duplicate report ${alertId} into this primary record. Description and media appended.`
+        };
+        await writeTimelineEvent(duplicateParentId, correlationEvent);
+
+        await db.collection("incident_relations").add({
+          primaryAlertId: duplicateParentId,
+          relatedAlertId: alertId,
+          confidence: 0.95,
+          reason: "Same incident category and spatiotemporal proximity.",
+          timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        return null;
+      }
+
       console.log(`[GIS_ASYNC] Resolving jurisdiction for alert ${alertId} at (${lat}, ${lng})...`);
       const geoMapped = await resolveJurisdiction(lat, lng);
 
