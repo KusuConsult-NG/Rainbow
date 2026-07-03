@@ -1978,6 +1978,65 @@ exports.findBestResponders = functions.https.onCall(async (data, context) => {
   };
 });
 
+exports.calculateSafetyIndex = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
+  }
+
+  const { lga } = data;
+  if (!lga) {
+    throw new functions.https.HttpsError('invalid-argument', 'Missing lga parameter.');
+  }
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const incidentsSnap = await db.collection('alerts')
+    .where('geo_lga', '==', lga)
+    .where('status', 'in', ['OPEN', 'DISPATCHED', 'ACKNOWLEDGED'])
+    .get();
+
+  let totalWeight = 0;
+  let incidentCount = 0;
+
+  for (const doc of incidentsSnap.docs) {
+    const alert = doc.data();
+    const reportedAtStr = alert.reportedAt;
+    if (reportedAtStr) {
+      const reportedAt = new Date(reportedAtStr);
+      if (reportedAt >= thirtyDaysAgo) {
+        incidentCount++;
+        const priority = alert.priority || 'MEDIUM';
+        if (priority === 'CRITICAL') {
+          totalWeight += 12;
+        } else if (priority === 'HIGH') {
+          totalWeight += 6;
+        } else if (priority === 'MEDIUM') {
+          totalWeight += 3;
+        } else {
+          totalWeight += 1;
+        }
+      }
+    }
+  }
+
+  const safetyScore = Math.max(0, 100 - totalWeight);
+  let rating = 'EXCELLENT';
+  if (safetyScore < 50) {
+    rating = 'CRITICAL';
+  } else if (safetyScore < 75) {
+    rating = 'FAIR';
+  } else if (safetyScore < 90) {
+    rating = 'GOOD';
+  }
+
+  return {
+    lga: lga,
+    safetyIndex: safetyScore,
+    incidentCount: incidentCount,
+    rating: rating,
+    calculatedAt: new Date().toISOString()
+  };
+});
+
 
 
 
