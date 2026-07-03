@@ -873,6 +873,7 @@ exports.escalationWatchdog = functions.pubsub.schedule('every 5 minutes').onRun(
         minutes_elapsed: safetyBuffer,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         actor: "SYSTEM_WATCHDOG"
+      });
     }
   }
 
@@ -1425,10 +1426,88 @@ exports.processAudioIncidentReport = functions.firestore
       console.log(`[AUDIO_TRIAGE] Initializing Vertex AI Gemini multimodal audio analysis`);
       const project = process.env.GCP_PROJECT || process.env.GCLOUD_PROJECT || "kusuconsult-rainbow";
       const vertexAI = new VertexAI({ project: project, location: "us-central1" });
+      
+      const responseSchema = {
+        type: "OBJECT",
+        properties: {
+          transcription: { type: "STRING" },
+          detected_language: { type: "STRING" },
+          recommended_type: { type: "STRING" },
+          recommended_priority: { type: "STRING" },
+          justification: { type: "STRING" },
+          weapons_detected: { type: "BOOLEAN" },
+          crowd_size: { type: "STRING" },
+          confidence_score: { type: "NUMBER" },
+          extracted_intel: {
+            type: "OBJECT",
+            properties: {
+              suspects: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    description: { type: "STRING" },
+                    weapons: { type: "ARRAY", items: { type: "STRING" } }
+                  },
+                  required: ["description", "weapons"]
+                }
+              },
+              victims: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    count: { type: "INTEGER" },
+                    condition: { type: "STRING" }
+                  },
+                  required: ["count", "condition"]
+                }
+              },
+              weapons: { type: "ARRAY", items: { type: "STRING" } },
+              vehicles: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    type: { type: "STRING" },
+                    color: { type: "STRING" },
+                    plate: { type: "STRING" }
+                  },
+                  required: ["type", "color", "plate"]
+                }
+              },
+              direction: { type: "STRING" },
+              injuries: { type: "ARRAY", items: { type: "STRING" } },
+              buildings_affected: { type: "ARRAY", items: { type: "STRING" } },
+              fires: { type: "BOOLEAN" },
+              hostages: {
+                type: "OBJECT",
+                properties: {
+                  count: { type: "INTEGER" },
+                  details: { type: "STRING" }
+                },
+                required: ["count", "details"]
+              }
+            },
+            required: [
+              "suspects", "victims", "weapons", "vehicles", 
+              "direction", "injuries", "buildings_affected", 
+              "fires", "hostages"
+            ]
+          }
+        },
+        required: [
+          "transcription", "detected_language", "recommended_type", 
+          "recommended_priority", "justification", "weapons_detected", 
+          "crowd_size", "confidence_score", "extracted_intel"
+        ]
+      };
+
       const generativeModel = vertexAI.getGenerativeModel({
         model: "gemini-1.5-flash",
         generationConfig: {
-          responseMimeType: "application/json"
+          responseMimeType: "application/json",
+          responseSchema: responseSchema
         }
       });
 
@@ -1443,18 +1522,8 @@ exports.processAudioIncidentReport = functions.firestore
 Analyze the attached audio recording of a citizen reporting an emergency.
 
 1. Transcribe the raw audio text accurately. Detect and translate to professional English if the speech is in Hausa, Nigerian Pidgin, or other local Plateau State dialects.
-2. Categorize the incident, recommend priority (LOW, MEDIUM, HIGH, CRITICAL), indicate if weapons are present, and estimate crowd size.
-
-Output your response strictly as a JSON object matching this schema:
-{
-  "transcription": "The full English translation or transcription of the speech",
-  "detected_language": "English" | "Hausa" | "Pidgin" | "Berom" | "Other",
-  "recommended_type": "Protest" | "Road Accident" | "Civil Unrest" | "Attack" | "Kidnap" | "Other",
-  "recommended_priority": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
-  "justification": "1-sentence reason for priority",
-  "weapons_detected": true | false,
-  "crowd_size": "N/A" | "1-5" | "5-20" | "20-100" | "100+"
-}`;
+2. Categorize the incident, recommend priority (LOW, MEDIUM, HIGH, CRITICAL), estimate confidence score, and extract all tactical entities (weapons, crowd size, suspects, victims, vehicles, injuries, direction, buildings affected, fires, and hostages).
+If any entity is not mentioned, provide an empty list, empty string, or false/zero.`;
 
       console.log(`[AUDIO_TRIAGE] Generating Gemini response...`);
       const responseStream = await generativeModel.generateContent({
@@ -1477,7 +1546,9 @@ Output your response strictly as a JSON object matching this schema:
           weapons_detected: triageResult.weapons_detected,
           crowd_size: triageResult.crowd_size,
           detected_language: triageResult.detected_language,
-          translated_description: triageResult.transcription
+          translated_description: triageResult.transcription,
+          confidence_score: triageResult.confidence_score || 1.0,
+          extracted_intel: triageResult.extracted_intel || {}
         }
       });
 
@@ -1525,10 +1596,80 @@ exports.triageAndCreateVoiceAlert = functions.https.onCall(async (data, context)
     // 1. Initialize Vertex AI Gemini for Triage
     const project = process.env.GCP_PROJECT || process.env.GCLOUD_PROJECT || "kusuconsult-rainbow";
     const vertexAI = new VertexAI({ project: project, location: "us-central1" });
+
+    const responseSchema = {
+      type: "OBJECT",
+      properties: {
+        category: { type: "STRING" },
+        priority: { type: "STRING" },
+        summary: { type: "STRING" },
+        confidence_score: { type: "NUMBER" },
+        extracted_intel: {
+          type: "OBJECT",
+          properties: {
+            suspects: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  description: { type: "STRING" },
+                  weapons: { type: "ARRAY", items: { type: "STRING" } }
+                },
+                required: ["description", "weapons"]
+              }
+            },
+            victims: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  count: { type: "INTEGER" },
+                  condition: { type: "STRING" }
+                },
+                required: ["count", "condition"]
+              }
+            },
+            weapons: { type: "ARRAY", items: { type: "STRING" } },
+            vehicles: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  type: { type: "STRING" },
+                  color: { type: "STRING" },
+                  plate: { type: "STRING" }
+                },
+                required: ["type", "color", "plate"]
+              }
+            },
+            direction: { type: "STRING" },
+            injuries: { type: "ARRAY", items: { type: "STRING" } },
+            buildings_affected: { type: "ARRAY", items: { type: "STRING" } },
+            fires: { type: "BOOLEAN" },
+            hostages: {
+              type: "OBJECT",
+              properties: {
+                count: { type: "INTEGER" },
+                details: { type: "STRING" }
+              },
+              required: ["count", "details"]
+            }
+          },
+          required: [
+            "suspects", "victims", "weapons", "vehicles", 
+            "direction", "injuries", "buildings_affected", 
+            "fires", "hostages"
+          ]
+        }
+      },
+      required: ["category", "priority", "summary", "confidence_score", "extracted_intel"]
+    };
+
     const generativeModel = vertexAI.getGenerativeModel({
       model: "gemini-1.5-flash",
       generationConfig: {
-        responseMimeType: "application/json"
+        responseMimeType: "application/json",
+        responseSchema: responseSchema
       }
     });
 
@@ -1539,13 +1680,8 @@ Analyze the following emergency description reported by a citizen:
 1. Classify the incident into exactly one of these categories: "Kidnap", "Fire", "Drug abuse", "Police brutality", "Flood", "Cyber crime", "Child abuse", "Domestic violence", "Cattle rustling", "Community attack", or "Other".
 2. Recommend the priority: "LOW", "MEDIUM", "HIGH", or "CRITICAL".
 3. Provide a brief 1-sentence summary of the incident.
-
-Format your output strictly as a JSON object matching this schema:
-{
-  "category": "The matched category string",
-  "priority": "The priority string",
-  "summary": "1-sentence summary of the report details"
-}`;
+4. Extract structured intelligence details (suspects, weapons, vehicles, direction, injuries, buildings, hostages, fires, and your confidence score).
+If any field is missing or not mentioned in the transcript, set it to a blank array, a blank string, or zero where appropriate.`;
 
     const responseStream = await generativeModel.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }]
@@ -1576,10 +1712,12 @@ Format your output strictly as a JSON object matching this schema:
         recommended_type: triageResult.category || "Other",
         recommended_priority: triageResult.priority || "HIGH",
         justification: triageResult.summary || "AI Triaged from voice report",
-        weapons_detected: false,
+        weapons_detected: (triageResult.extracted_intel && triageResult.extracted_intel.weapons && triageResult.extracted_intel.weapons.length > 0) || false,
         crowd_size: "N/A",
         detected_language: "English",
-        translated_description: text
+        translated_description: text,
+        confidence_score: triageResult.confidence_score || 1.0,
+        extracted_intel: triageResult.extracted_intel || {}
       },
       timeline: [
         {
