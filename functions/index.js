@@ -124,6 +124,17 @@ const sendPushToTier = async (alertId, alertData) => {
       const data = doc.data();
       if (data.fcmToken) tokens.push(data.fcmToken);
     });
+
+    // Also notify HQ officers for AI voice reports or high/critical priority alerts
+    if (alertData.ai_triage || priority === "CRITICAL" || priority === "HIGH") {
+      const hqSnap = await db.collection("users").where("role", "==", "HQ_OFFICER").get();
+      hqSnap.forEach(doc => {
+        const data = doc.data();
+        if (data.fcmToken && !tokens.includes(data.fcmToken)) {
+          tokens.push(data.fcmToken);
+        }
+      });
+    }
   }
 
   if (tokens.length === 0) return;
