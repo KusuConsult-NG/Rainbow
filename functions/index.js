@@ -5,6 +5,18 @@ const { VertexAI } = require("@google-cloud/vertexai");
 admin.initializeApp();
 const db = admin.firestore();
 
+const writeTimelineEvent = async (alertId, event) => {
+  try {
+    const alertRef = db.collection("alerts").doc(alertId);
+    await alertRef.update({
+      timeline: admin.firestore.FieldValue.arrayUnion(event)
+    });
+    await alertRef.collection("timeline").add(event);
+  } catch (error) {
+    console.error(`[TIMELINE_WRITE_ERR] Failed to write event for alert ${alertId}:`, error);
+  }
+};
+
 const { getFunctions } = require("firebase-admin/functions");
 
 // ============================================================
@@ -54,9 +66,9 @@ exports.escalateTask = functions.tasks.taskQueue('escalateTask').onDispatch(asyn
   await alertRef.update({
     assigned_to: targetTier,
     last_edited_by: "SYSTEM_AUTO_ESCALATION",
-    escalated_at: admin.firestore.FieldValue.serverTimestamp(),
-    timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
+    escalated_at: admin.firestore.FieldValue.serverTimestamp()
   });
+  await writeTimelineEvent(alertId, timelineEvent);
 
   await db.collection("audit_logs").add({
     action: "AUTO_ESCALATION",
@@ -188,9 +200,9 @@ exports.onAlertCreatedGIS = functions.firestore
       await snap.ref.update({
         geo_lga: geoMapped.lga,
         geo_ward: geoMapped.ward,
-        geo_pu: geoMapped.pu,
-        timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
+        geo_pu: geoMapped.pu
       });
+      await writeTimelineEvent(alertId, timelineEvent);
 
       console.log(`[GIS_ASYNC] Successfully updated alert ${alertId} with geo mapping.`);
 
@@ -616,12 +628,14 @@ exports.adminEscalateAlert = functions.https.onCall(async (data, context) => {
       notes: notes || `Manual escalation from ${oldTier} to ${targetTier}.`
     };
 
+    const timelineSubRef = db.collection("alerts").doc(alertId).collection("timeline").doc();
     transaction.update(alertRef, {
       assigned_to: targetTier,
       last_edited_by: context.auth.token.email || context.auth.uid,
       escalated_at: admin.firestore.FieldValue.serverTimestamp(),
       timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
     });
+    transaction.set(timelineSubRef, timelineEvent);
 
     const auditRef = db.collection("audit_logs").doc();
     transaction.set(auditRef, {
@@ -673,6 +687,7 @@ exports.adminResolveAlert = functions.https.onCall(async (data, context) => {
       notes: `Incident marked as resolved by ${context.auth.token.email || context.auth.uid}`
     };
 
+    const timelineSubRef = db.collection("alerts").doc(alertId).collection("timeline").doc();
     transaction.update(alertRef, {
       status: "RESOLVED",
       resolved_by: context.auth.token.email || context.auth.uid,
@@ -680,6 +695,7 @@ exports.adminResolveAlert = functions.https.onCall(async (data, context) => {
       resolved_at: admin.firestore.FieldValue.serverTimestamp(),
       timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
     });
+    transaction.set(timelineSubRef, timelineEvent);
   });
 
   return { success: true };
@@ -712,6 +728,7 @@ exports.adminDispatchAlert = functions.https.onCall(async (data, context) => {
       notes: `Dispatched tactical unit ${responderSnap.data().displayName || responderUid} to incident site.`
     };
 
+    const timelineSubRef = db.collection("alerts").doc(alertId).collection("timeline").doc();
     transaction.update(alertRef, {
       status: "DISPATCHED",
       assignedToUid: responderUid,
@@ -719,6 +736,7 @@ exports.adminDispatchAlert = functions.https.onCall(async (data, context) => {
       dispatched_at: admin.firestore.FieldValue.serverTimestamp(),
       timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
     });
+    transaction.set(timelineSubRef, timelineEvent);
 
     const auditRef = db.collection("audit_logs").doc();
     transaction.set(auditRef, {
@@ -762,6 +780,8 @@ exports.agentUpdateMissionStatus = functions.https.onCall(async (data, context) 
       reason: `Agent updated mission state to ${nextStatus}`,
       notes: nextStatus === "ACKNOWLEDGED" ? "Agent successfully self-deployed to emergency." : ""
     };
+    
+    const timelineSubRef = db.collection("alerts").doc(alertId).collection("timeline").doc();
 
     const updateData = {
       status: nextStatus,
@@ -781,6 +801,7 @@ exports.agentUpdateMissionStatus = functions.https.onCall(async (data, context) 
     }
 
     transaction.update(alertRef, updateData);
+    transaction.set(timelineSubRef, timelineEvent);
 
     // Sync with RTDB if possible (using admin SDK)
     try {
@@ -901,10 +922,12 @@ exports.escalationWatchdog = functions.pubsub.schedule('every 5 minutes').onRun(
           notes: `Incident has been in ${data.status} state since ${startTimestamp.toDate().toISOString()}`
         };
 
+        const timelineSubRef = db.collection("alerts").doc(doc.id).collection("timeline").doc();
         batch.update(doc.ref, {
           sla_breached: true,
           timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
         });
+        batch.set(timelineSubRef, timelineEvent);
 
         // Trigger push notification to LGA/Ward commanders notifying them of SLA breach
         await sendPushToTier(doc.id, {
@@ -1300,9 +1323,9 @@ exports.triggerSLASweep = functions.https.onCall(async (data, context) => {
         await doc.ref.update({
           assigned_to: targetTier,
           last_edited_by: "SYSTEM_SLA_SWEEP_ENGINE",
-          escalated_at: admin.firestore.FieldValue.serverTimestamp(),
-          timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
+          escalated_at: admin.firestore.FieldValue.serverTimestamp()
         });
+        await writeTimelineEvent(alertId, timelineEvent);
 
         await db.collection("audit_logs").add({
           action: "SLA_AUTO_ESCALATION",
