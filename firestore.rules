@@ -119,6 +119,12 @@ service cloud.firestore {
       );
 
       allow delete: if false; // Immutable audit trail
+
+      match /timeline/{eventId} {
+        allow read: if isAuth();
+        allow create: if isStaff();
+        allow update, delete: if false; // Immutable audit trail
+      }
     }
 
     // ─── Tracking (Telemetry Engine) ──────────────────────────────────────────
