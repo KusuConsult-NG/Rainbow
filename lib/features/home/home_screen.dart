@@ -175,41 +175,73 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ),
           centerTitle: true,
           actions: [
-            PopupMenuButton<AppLanguage>(
-              icon: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    lang.flagLabel,
-                    style: GoogleFonts.outfit(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                      color: AppColors.textSecondary,
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: AppColors.primary.withValues(alpha: 0.15),
+                    width: 1.5,
+                  ),
+                ),
+                child: PopupMenuButton<AppLanguage>(
+                  padding: EdgeInsets.zero,
+                  offset: const Offset(0, 48),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          lang.flagLabel,
+                          style: GoogleFonts.outfit(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.primary,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          color: AppColors.primary,
+                          size: 14,
+                        ),
+                      ],
                     ),
                   ),
-                  const Icon(
-                    Icons.arrow_drop_down_rounded,
-                    color: AppColors.textSecondary,
-                    size: 16,
-                  ),
-                ],
+                  onSelected: (AppLanguage selected) async {
+                    await HapticFeedback.selectionClick();
+                    await ref.read(languageProvider.notifier).setLanguage(selected);
+                  },
+                  itemBuilder: (BuildContext context) => AppLanguage.values.map((l) {
+                    return PopupMenuItem<AppLanguage>(
+                      value: l,
+                      child: Row(
+                        children: [
+                          Text(
+                            l.flagLabel,
+                            style: GoogleFonts.outfit(
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            l.label,
+                            style: GoogleFonts.outfit(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
               ),
-              onSelected: (AppLanguage selected) async {
-                await HapticFeedback.selectionClick();
-                await ref.read(languageProvider.notifier).setLanguage(selected);
-              },
-              itemBuilder: (BuildContext context) => AppLanguage.values.map((l) {
-                return PopupMenuItem<AppLanguage>(
-                  value: l,
-                  child: Text(
-                    '${l.flagLabel} - ${l.label}',
-                    style: GoogleFonts.outfit(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                );
-              }).toList(),
             ),
             IconButton(
               icon: const Icon(
@@ -590,7 +622,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                               ),
                                               const SizedBox(height: 6),
                                               Text(
-                                                'AI REPORT',
+                                                Translations.get('ai_report', lang),
                                                 style: GoogleFonts.outfit(
                                                   color: Colors.white,
                                                   fontSize: 22,
@@ -600,7 +632,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                               ),
                                               const SizedBox(height: 2),
                                               Text(
-                                                'SPEAK TO REPORT',
+                                                Translations.get('speak_to_report', lang),
                                                 style: GoogleFonts.outfit(
                                                   color: Colors.white60,
                                                   fontSize: 8,

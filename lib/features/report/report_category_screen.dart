@@ -5,20 +5,24 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/constants/alert_categories.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
 /// Documentation for this public member.
 
-class ReportCategoryScreen extends StatelessWidget {
+class ReportCategoryScreen extends ConsumerWidget {
   /// Documentation for this public member.
   const ReportCategoryScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lang = ref.watch(languageProvider);
+
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const RainbowAppBar(
-        title: 'INCIDENT PROTOCOL',
+      appBar: RainbowAppBar(
+        title: Translations.get('incident_protocol', lang),
         subtitle: 'SELECT CATEGORY FOR TACTICAL REPORT',
       ),
       body: ListView(
@@ -42,7 +46,7 @@ class ReportCategoryScreen extends StatelessWidget {
                 const SizedBox(width: 20),
                 Expanded(
                   child: Text(
-                    'SELECT THE CATEGORY THAT BEST DESCRIBES THE CURRENT EMERGENCY. LOCATION TELEMETRY IS AUTO-ATTACHED.',
+                    Translations.get('select_category_desc', lang),
                     style: GoogleFonts.outfit(
                       fontSize: 10,
                       color: AppColors.textSecondary,
@@ -57,7 +61,7 @@ class ReportCategoryScreen extends StatelessWidget {
           ),
           const SizedBox(height: 32),
           Text(
-            'AVAILABLE CATEGORIES',
+            Translations.get('available_categories', lang),
             style: GoogleFonts.outfit(
               fontSize: 10,
               fontWeight: FontWeight.w900,
