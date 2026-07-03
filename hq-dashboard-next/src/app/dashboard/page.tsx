@@ -14,6 +14,7 @@ import MassBroadcast from '@/components/MassBroadcast';
 import SystemAlertListener from '@/components/SystemAlertListener';
 import Analytics from '@/components/Analytics';
 import UninstallRequests from '@/components/UninstallRequests';
+import IncidentReplayPanel from '@/components/IncidentReplayPanel';
 import { plateauTacticalMap, TacticalJurisdiction, TacticalWard } from '@/lib/tactical_mapping';
 import {
   ShieldAlert, Map as MapIcon, Users, Radio, Settings,
@@ -1188,72 +1189,8 @@ Be precise, objective, and professional. Avoid generic filler. Use clean markdow
                 </div>
 
                 {/* Complete Forensic Timeline */}
-                <div>
-                  <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "'Outfit', sans-serif" }}>FORENSIC INCIDENT AUDIT</h4>
-                  {selectedReport.timeline && selectedReport.timeline.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, borderLeft: '2px solid var(--border)', paddingLeft: 20, marginLeft: 8, marginTop: 12 }}>
-                      {selectedReport.timeline.map((event: any, idx: number) => {
-                        const date = new Date(event.timestamp);
-                        const formattedTime = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' HRS';
-                        const formattedDate = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-                        
-                        let eventColor = 'var(--text-muted)';
-                        if (event.type === 'CREATED') eventColor = 'var(--warning)';
-                        else if (event.type === 'ESCALATION' || event.type === 'SLA_AUTO_ESCALATION') eventColor = 'var(--duress)';
-                        else if (event.type === 'DISPATCHED') eventColor = 'var(--accent)';
-                        else if (event.type === 'ACKNOWLEDGED') eventColor = 'var(--success)';
-                        else if (event.type === 'RESOLVED') eventColor = 'var(--success)';
-
-                        return (
-                          <div key={idx} style={{ position: 'relative' }}>
-                            {/* Stepper Node Indicator */}
-                            <div style={{
-                              position: 'absolute',
-                              left: -28,
-                              top: 2,
-                              width: 12,
-                              height: 12,
-                              borderRadius: '50%',
-                              background: 'var(--bg-secondary)',
-                              border: `3.5px solid ${eventColor}`,
-                              boxShadow: `0 0 6px ${eventColor}`
-                            }} />
-                            
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                              <span style={{ fontSize: 10, fontWeight: 900, color: eventColor, letterSpacing: 0.5 }}>{event.type}</span>
-                              <span style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 600 }}>{formattedDate} · {formattedTime}</span>
-                            </div>
-                            
-                            <div style={{ fontSize: 11, color: 'var(--text-primary)', marginTop: 4, fontWeight: 700 }}>
-                              {event.notes || (event.type === 'CREATED' ? 'Incident created.' : '')}
-                            </div>
-                            
-                            {event.reason && (
-                              <div style={{ fontSize: 9, color: 'var(--warning)', marginTop: 2, fontWeight: 700 }}>
-                                Reason: <span style={{ color: 'var(--text-muted)' }}>{event.reason}</span>
-                              </div>
-                            )}
-                            
-                            <div style={{ fontSize: 8, color: 'var(--text-dim)', marginTop: 4, fontStyle: 'italic', fontWeight: 600 }}>
-                              Actor: {event.actor} ({event.role})
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div style={{ 
-                      padding: '16px 20px', 
-                      background: 'var(--input-bg)', 
-                      borderRadius: 16, 
-                      border: '1px dashed var(--border)',
-                      fontSize: 12,
-                      color: 'var(--text-muted)',
-                      textAlign: 'center'
-                    }}>
-                      No forensic timeline events recorded for this incident.
-                    </div>
-                  )}
+                <div style={{ marginTop: 12 }}>
+                  <IncidentReplayPanel alertId={selectedReport.id} />
                 </div>
 
                 {/* Forensic AI Summary */}
