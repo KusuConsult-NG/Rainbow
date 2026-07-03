@@ -1478,5 +1478,129 @@ Output your response strictly as a JSON object matching this schema:
     return null;
   });
 
+// PRD: AI Voice Triage and Classification
+// Accepts transcribed voice text and uses Gemini to categorize and create the incident.
+exports.triageAndCreateVoiceAlert = functions.https.onCall(async (data, context) => {
+  console.log(`[AI_VOICE_TRIAGE] Received triage payload: ${JSON.stringify(data)}`);
+
+  await verifyRequestAuthenticity(data, context);
+
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
+  }
+
+  try {
+    const { text, lat, lng } = data;
+    const userId = context.auth.uid;
+
+    if (!text || text.trim().length === 0) {
+      throw new functions.https.HttpsError('invalid-argument', 'Text description is required for triage.');
+    }
+
+    // Rate limiting (5 per hour)
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recentSnap = await db.collection("alerts")
+      .where("reportedBy", "==", userId)
+      .where("reportedAt", ">=", admin.firestore.Timestamp.fromDate(oneHourAgo))
+      .get();
+    
+    if (recentSnap.size >= 5) {
+      throw new functions.https.HttpsError("resource-exhausted", "Rate limit exceeded.");
+    }
+
+    const finalLat = lat || 9.9167;
+    const finalLng = lng || 8.8917;
+
+    // 1. Initialize Vertex AI Gemini for Triage
+    const project = process.env.GCP_PROJECT || process.env.GCLOUD_PROJECT || "kusuconsult-rainbow";
+    const vertexAI = new VertexAI({ project: project, location: "us-central1" });
+    const generativeModel = vertexAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
+    });
+
+    const prompt = `You are the Operation Rainbow Emergency Report Triage AI.
+Analyze the following emergency description reported by a citizen:
+"${text}"
+
+1. Classify the incident into exactly one of these categories: "Kidnap", "Fire", "Drug abuse", "Police brutality", "Flood", "Cyber crime", "Child abuse", "Domestic violence", "Cattle rustling", "Community attack", or "Other".
+2. Recommend the priority: "LOW", "MEDIUM", "HIGH", or "CRITICAL".
+3. Provide a brief 1-sentence summary of the incident.
+
+Format your output strictly as a JSON object matching this schema:
+{
+  "category": "The matched category string",
+  "priority": "The priority string",
+  "summary": "1-sentence summary of the report details"
+}`;
+
+    const responseStream = await generativeModel.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }]
+    });
+
+    const response = await responseStream.response;
+    const responseText = response.candidates[0].content.parts[0].text;
+    console.log(`[AI_VOICE_TRIAGE] Raw Gemini response text: ${responseText}`);
+
+    const triageResult = JSON.parse(responseText);
+
+    const alertData = {
+      type: triageResult.category || "Other",
+      description: text,
+      lat: finalLat,
+      lng: finalLng,
+      geo_lga: "RESOLVING",
+      geo_ward: "RESOLVING",
+      geo_pu: "RESOLVING",
+      reportedBy: userId,
+      status: "OPEN",
+      priority: triageResult.priority || "HIGH",
+      assigned_to: "POLLING_UNIT",
+      reportedAt: admin.firestore.FieldValue.serverTimestamp(),
+      attachments: [],
+      sync_status: "COMPLETED",
+      ai_triage: {
+        recommended_type: triageResult.category || "Other",
+        recommended_priority: triageResult.priority || "HIGH",
+        justification: triageResult.summary || "AI Triaged from voice report",
+        weapons_detected: false,
+        crowd_size: "N/A",
+        detected_language: "English",
+        translated_description: text
+      },
+      timeline: [
+        {
+          type: "CREATED",
+          actor: userId,
+          role: "CITIZEN",
+          timestamp: new Date().toISOString(),
+          reason: "AI Voice Report Initiated",
+          notes: `Classified by AI as ${triageResult.category} with ${triageResult.priority} priority. Summary: ${triageResult.summary}`
+        }
+      ]
+    };
+
+    const docRef = await db.collection("alerts").add(alertData);
+    
+    // Initial Escalation Task
+    const configSnap = await db.collection("system").doc("config").get();
+    const thresholds = configSnap.exists ? (configSnap.data().escalation_thresholds || {}) : { POLLING_UNIT: 2 };
+    const waitMinutes = thresholds.POLLING_UNIT || 2;
+
+    const queue = getFunctions().taskQueue("escalateTask");
+    await queue.enqueue({ alertId: docRef.id, targetTier: "WARD" }, {
+      scheduleDelaySeconds: waitMinutes * 60 
+    });
+
+    return { success: true, alertId: docRef.id, category: triageResult.category, priority: triageResult.priority };
+  } catch (error) {
+    console.error(`[AI_VOICE_TRIAGE_ERR]`, error);
+    throw new functions.https.HttpsError('internal', error.message || 'Triage failed');
+  }
+});
+
+
 
 

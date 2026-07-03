@@ -120,8 +120,20 @@ class AlertService {
         return localId;
       }
 
-      final callable = FirebaseFunctions.instance.httpsCallable('createAlert');
-      final result = await callable.call<Map<String, dynamic>>(alertData);
+      final isVoiceReport = type == 'AI_VOICE_REPORT';
+      final callable = isVoiceReport
+          ? FirebaseFunctions.instance.httpsCallable('triageAndCreateVoiceAlert')
+          : FirebaseFunctions.instance.httpsCallable('createAlert');
+      
+      final payload = isVoiceReport
+          ? {
+              'text': description,
+              'lat': finalLat,
+              'lng': finalLng,
+            }
+          : alertData;
+
+      final result = await callable.call<Map<String, dynamic>>(payload);
       final data = result.data;
 
       final alertId = data['alertId'] as String?;
@@ -185,8 +197,6 @@ class AlertService {
 
       debugPrint('[SYNC] Recovering ${offlineQueue.length} offline alerts...');
       final remainingQueue = <String>[];
-      final callable = FirebaseFunctions.instance.httpsCallable('createAlert');
-
       for (final alertJson in offlineQueue) {
         try {
           final alertData = jsonDecode(alertJson) as Map<String, dynamic>;
@@ -194,8 +204,21 @@ class AlertService {
 
           alertData['sync_status'] = 'RECOVERED';
 
+          final isVoiceReport = alertData['type'] == 'AI_VOICE_REPORT';
+          final recoveryCallable = isVoiceReport
+              ? FirebaseFunctions.instance.httpsCallable('triageAndCreateVoiceAlert')
+              : FirebaseFunctions.instance.httpsCallable('createAlert');
+
+          final payload = isVoiceReport
+              ? {
+                  'text': alertData['description'],
+                  'lat': alertData['lat'],
+                  'lng': alertData['lng'],
+                }
+              : alertData;
+
           try {
-            final result = await callable.call<Map<String, dynamic>>(alertData);
+            final result = await recoveryCallable.call<Map<String, dynamic>>(payload);
             final realId = result.data['alertId'] as String?;
 
             if (realId != null && localId != null) {
