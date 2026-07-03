@@ -1750,6 +1750,132 @@ If any field is missing or not mentioned in the transcript, set it to a blank ar
   }
 });
 
+exports.getETA = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
+  }
+
+  const { incidentLat, incidentLng, responderLat, responderLng, roadQuality = 'GRAVEL', trafficLevel = 'LOW' } = data;
+
+  if (incidentLat === undefined || incidentLng === undefined || responderLat === undefined || responderLng === undefined) {
+    throw new functions.https.HttpsError('invalid-argument', 'Missing latitude/longitude arguments.');
+  }
+
+  // Haversine straight-line distance calculation
+  const R = 6371; // Earth radius in km
+  const dLat = (responderLat - incidentLat) * Math.PI / 180;
+  const dLng = (responderLng - incidentLng) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(incidentLat * Math.PI / 180) * Math.cos(responderLat * Math.PI / 180) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const straightLineDistance = R * c;
+
+  // Detour/winding factor to estimate real path length
+  const windingFactor = 1.35;
+  const realDistanceKm = straightLineDistance * windingFactor;
+
+  // Base speed in km/h based on road quality
+  let baseSpeedKmh = 25; // Default for DIRT or low quality
+  if (roadQuality === 'PAVED') {
+    baseSpeedKmh = 60;
+  } else if (roadQuality === 'GRAVEL') {
+    baseSpeedKmh = 40;
+  }
+
+  // Speed reduction based on traffic level
+  let speedModifier = 1.0;
+  if (trafficLevel === 'MODERATE') {
+    speedModifier = 0.75;
+  } else if (trafficLevel === 'HIGH') {
+    speedModifier = 0.45;
+  }
+
+  const finalSpeedKmh = baseSpeedKmh * speedModifier;
+  const timeHours = realDistanceKm / finalSpeedKmh;
+  const timeMinutes = Math.max(1, Math.round(timeHours * 60));
+
+  return {
+    distanceKm: parseFloat(realDistanceKm.toFixed(2)),
+    etaMinutes: timeMinutes,
+    roadQuality: roadQuality,
+    trafficLevel: trafficLevel
+  };
+});
+
+exports.findBestResponders = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
+  }
+
+  const { alertId, limit = 5 } = data;
+  if (!alertId) {
+    throw new functions.https.HttpsError('invalid-argument', 'Missing alertId.');
+  }
+
+  const alertDoc = await db.collection('alerts').doc(alertId).get();
+  if (!alertDoc.exists) {
+    throw new functions.https.HttpsError('not-found', 'Alert not found.');
+  }
+  const alert = alertDoc.data();
+  const alertLat = alert.lat;
+  const alertLng = alert.lng;
+  const alertType = alert.type;
+
+  const respondersSnap = await db.collection('users')
+    .where('role', 'in', ['POLLING_UNIT_OFFICER', 'WARD_OFFICER', 'LGA_OFFICER'])
+    .get();
+
+  const ratedResponders = [];
+
+  for (const doc of respondersSnap.docs) {
+    const user = doc.data();
+    if (user.capabilities && user.capabilities.live_status === 'AVAILABLE') {
+      const R = 6371;
+      const rLat = user.lat || 9.9167;
+      const rLng = user.lng || 8.8917;
+      const dLat = (rLat - alertLat) * Math.PI / 180;
+      const dLng = (rLng - alertLng) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(alertLat * Math.PI / 180) * Math.cos(rLat * Math.PI / 180) *
+                Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const distance = R * c;
+
+      let score = 100 - (distance * 2);
+
+      if (alertType === 'Fire' && user.agencyId === 'FIRE') {
+        score += 30;
+      } else if (['Kidnap', 'Cattle rustling', 'Community attack'].includes(alertType) && ['POLICE', 'MILITARY'].includes(user.agencyId)) {
+        score += 30;
+      }
+
+      if (user.capabilities.certifications && user.capabilities.certifications.includes('EMT')) {
+        score += 15;
+      }
+
+      if (alertType === 'Community attack' && user.capabilities.equipment && user.capabilities.equipment.includes('Drone')) {
+        score += 20;
+      }
+
+      ratedResponders.push({
+        uid: doc.id,
+        displayName: user.displayName || 'Officer',
+        agencyId: user.agencyId || 'UNKNOWN',
+        distanceKm: parseFloat(distance.toFixed(2)),
+        score: Math.max(0, score),
+        capabilities: user.capabilities
+      });
+    }
+  }
+
+  ratedResponders.sort((a, b) => b.score - a.score);
+
+  return {
+    responders: ratedResponders.slice(0, limit)
+  };
+});
+
 
 
 
