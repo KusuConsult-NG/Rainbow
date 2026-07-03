@@ -19,6 +19,7 @@ import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/broadcast_hud.dart';
+import 'package:rainbow_app/features/home/widgets/voice_report_dialog.dart';
 
 /// Documentation for this public member.
 
@@ -416,102 +417,208 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
                   Expanded(
                     child: Center(
-                      child: AnimatedBuilder(
-                        animation: _breathingController,
-                        builder: (context, child) {
-                          final scale =
-                              1.0 + (_breathingController.value * 0.04);
-                          return GestureDetector(
-                            onTapDown: (_) => HapticFeedback.mediumImpact(),
-                            onTap: () => _triggerPanic(silent: false),
-                            onLongPress: () => _triggerPanic(silent: true),
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                // Outer ripple
-                                Container(
-                                  width: 300 * scale,
-                                  height: 300 * scale,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: AppColors.emergency.withValues(
-                                        alpha: 0.1 *
-                                            (1 - _breathingController.value),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            AnimatedBuilder(
+                              animation: _breathingController,
+                              builder: (context, child) {
+                                final scale =
+                                    1.0 + (_breathingController.value * 0.04);
+                                return GestureDetector(
+                                  onTapDown: (_) => HapticFeedback.mediumImpact(),
+                                  onTap: () => _triggerPanic(silent: false),
+                                  onLongPress: () => _triggerPanic(silent: true),
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      // Outer ripple
+                                      Container(
+                                        width: 220 * scale,
+                                        height: 220 * scale,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: AppColors.primary.withValues(
+                                              alpha: 0.1 *
+                                                  (1 - _breathingController.value),
+                                            ),
+                                            width: 2,
+                                          ),
+                                        ),
                                       ),
-                                      width: 2,
-                                    ),
+                                      // Core button
+                                      Transform.scale(
+                                        scale: scale,
+                                        child: Container(
+                                          width: 170,
+                                          height: 170,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            gradient: const LinearGradient(
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                              colors: [
+                                                Color(0xFFFF1744),
+                                                Color(0xFF880E4F),
+                                              ],
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: AppColors.primary.withValues(
+                                                  alpha: 0.2 +
+                                                      (_breathingController.value *
+                                                          0.3),
+                                                ),
+                                                blurRadius: 35,
+                                                spreadRadius: 4,
+                                              ),
+                                            ],
+                                            border: Border.all(
+                                              color: Colors.white24,
+                                              width: 2,
+                                            ),
+                                          ),
+                                          child: Column(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                              const Icon(
+                                                Icons.emergency_rounded,
+                                                color: Colors.white,
+                                                size: 44,
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Text(
+                                                'SOS',
+                                                style: GoogleFonts.outfit(
+                                                  color: Colors.white,
+                                                  fontSize: 28,
+                                                  fontWeight: FontWeight.w900,
+                                                  letterSpacing: 4,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                Translations.get('silent_sos', lang),
+                                                style: GoogleFonts.outfit(
+                                                  color: Colors.white60,
+                                                  fontSize: 8,
+                                                  fontWeight: FontWeight.w900,
+                                                  letterSpacing: 1,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                                // Core button
-                                Transform.scale(
-                                  scale: scale,
-                                  child: Container(
-                                    width: 240,
-                                    height: 240,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      gradient: const LinearGradient(
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                        colors: [
-                                          Color(0xFFFF1744),
-                                          Color(0xFF880E4F),
-                                        ],
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: AppColors.emergency.withValues(
-                                            alpha: 0.2 +
-                                                (_breathingController.value *
-                                                    0.3),
-                                          ),
-                                          blurRadius: 50,
-                                          spreadRadius: 5,
-                                        ),
-                                      ],
-                                      border: Border.all(
-                                        color: Colors.white24,
-                                        width: 2,
-                                      ),
-                                    ),
-                                    child: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        const Icon(
-                                          Icons.emergency_rounded,
-                                          color: Colors.white,
-                                          size: 64,
-                                        ),
-                                        const SizedBox(height: 12),
-                                        Text(
-                                          'SOS',
-                                          style: GoogleFonts.outfit(
-                                            color: Colors.white,
-                                            fontSize: 42,
-                                            fontWeight: FontWeight.w900,
-                                            letterSpacing: 6,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          Translations.get('silent_sos', lang),
-                                          style: GoogleFonts.outfit(
-                                            color: Colors.white60,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w900,
-                                            letterSpacing: 1.5,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
+                                );
+                              },
                             ),
-                          );
-                        },
+                            const SizedBox(height: 24),
+                            AnimatedBuilder(
+                              animation: _breathingController,
+                              builder: (context, child) {
+                                final scale =
+                                    1.0 + (_breathingController.value * 0.04);
+                                return GestureDetector(
+                                  onTapDown: (_) => HapticFeedback.mediumImpact(),
+                                  onTap: () {
+                                    VoiceReportDialog.show(context);
+                                  },
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      // Outer ripple
+                                      Container(
+                                        width: 220 * scale,
+                                        height: 220 * scale,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: AppColors.info.withValues(
+                                              alpha: 0.1 *
+                                                  (1 - _breathingController.value),
+                                            ),
+                                            width: 2,
+                                          ),
+                                        ),
+                                      ),
+                                      // Core button
+                                      Transform.scale(
+                                        scale: scale,
+                                        child: Container(
+                                          width: 170,
+                                          height: 170,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            gradient: const LinearGradient(
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                              colors: [
+                                                Color(0xFF3F51B5),
+                                                Color(0xFF00BCD4),
+                                              ],
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: AppColors.info.withValues(
+                                                  alpha: 0.2 +
+                                                      (_breathingController.value *
+                                                          0.3),
+                                                ),
+                                                blurRadius: 35,
+                                                spreadRadius: 4,
+                                              ),
+                                            ],
+                                            border: Border.all(
+                                              color: Colors.white24,
+                                              width: 2,
+                                            ),
+                                          ),
+                                          child: Column(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                              const Icon(
+                                                Icons.mic_rounded,
+                                                color: Colors.white,
+                                                size: 44,
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Text(
+                                                'AI REPORT',
+                                                style: GoogleFonts.outfit(
+                                                  color: Colors.white,
+                                                  fontSize: 22,
+                                                  fontWeight: FontWeight.w900,
+                                                  letterSpacing: 2,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                'SPEAK TO REPORT',
+                                                style: GoogleFonts.outfit(
+                                                  color: Colors.white60,
+                                                  fontSize: 8,
+                                                  fontWeight: FontWeight.w900,
+                                                  letterSpacing: 1,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
