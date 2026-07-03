@@ -10,19 +10,22 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:rainbow_app/services/sqlite_service.dart';
 
 /// Documentation for this public member.
 
 final alertServiceProvider = Provider<AlertService>((ref) {
-  return AlertService();
+  return AlertService(ref.read(sqliteServiceProvider));
 });
 
 /// Handles synchronization of Alert and Incident Report data
 /// between the local client and the Firestore `alerts` collection.
 class AlertService {
   /// Documentation for this public member.
-  AlertService();
+  AlertService([SqliteService? sqliteService])
+      : _sqliteService = sqliteService ?? SqliteService();
+
+  final SqliteService _sqliteService;
 
   /// PRD: Escrows to POLLING_UNIT, Priorities strictly enforced. Detects offline to execute SMS Fallback.
   Future<String?> submitAlert({
@@ -107,13 +110,25 @@ class AlertService {
       };
 
       if (isOffline) {
-        final prefs = await SharedPreferences.getInstance();
-        final offlineQueue =
-            prefs.getStringList('offline_alerts_queue') ?? <String>[];
-        await prefs.setStringList(
-          'offline_alerts_queue',
-          offlineQueue..add(jsonEncode(alertData)),
+        await _sqliteService.enqueueAlert(
+          localId: localId,
+          type: type,
+          description: description,
+          lat: finalLat,
+          lng: finalLng,
+          priority: priority.name.toUpperCase(),
+          isAnonymous: false,
+          createdAt: DateTime.now().toIso8601String(),
         );
+
+        if (attachments != null) {
+          for (final path in attachments) {
+            await _sqliteService.enqueueMedia(
+              localAlertId: localId,
+              localFilePath: path,
+            );
+          }
+        }
 
         // Start local tracking
         await BackgroundTrackingService().startSosTracking(localId, reportedBy);
@@ -189,80 +204,84 @@ class AlertService {
   Future<Map<String, String>> flushOfflineQueue() async {
     final mappings = <String, String>{};
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final offlineQueue =
-          prefs.getStringList('offline_alerts_queue') ?? <String>[];
+      final offlineQueue = await _sqliteService.getPendingAlerts();
 
       if (offlineQueue.isEmpty) return mappings;
 
       debugPrint('[SYNC] Recovering ${offlineQueue.length} offline alerts...');
-      final remainingQueue = <String>[];
-      for (final alertJson in offlineQueue) {
+      for (final row in offlineQueue) {
+        final localId = row['local_id'] as String;
         try {
-          final alertData = jsonDecode(alertJson) as Map<String, dynamic>;
-          final localId = alertData['local_id'] as String?;
-
-          alertData['sync_status'] = 'RECOVERED';
-
-          final isVoiceReport = alertData['type'] == 'AI_VOICE_REPORT';
+          final isVoiceReport = row['type'] == 'AI_VOICE_REPORT';
           final recoveryCallable = isVoiceReport
               ? FirebaseFunctions.instance.httpsCallable('triageAndCreateVoiceAlert')
               : FirebaseFunctions.instance.httpsCallable('createAlert');
 
           final payload = isVoiceReport
               ? {
-                  'text': alertData['description'],
-                  'lat': alertData['lat'],
-                  'lng': alertData['lng'],
+                  'text': row['description'],
+                  'lat': row['lat'],
+                  'lng': row['lng'],
                 }
-              : alertData;
+              : {
+                  'type': row['type'],
+                  'description': row['description'],
+                  'lat': row['lat'],
+                  'lng': row['lng'],
+                  'reportedByUid': 'unknown',
+                  'reportedBy': 'unknown',
+                  'status': 'OPEN',
+                  'priority': row['priority'],
+                  'assigned_to': 'POLLING_UNIT',
+                  'sync_status': 'RECOVERED',
+                  'reportedAt': row['created_at'],
+                  'local_id': localId,
+                };
 
           try {
             final result = await recoveryCallable.call<Map<String, dynamic>>(payload);
             final realId = result.data['alertId'] as String?;
 
-            if (realId != null && localId != null) {
+            if (realId != null) {
               mappings[localId] = realId;
-              final userId = alertData['reportedBy'] as String?;
-              if (userId != null) {
-                await BackgroundTrackingService()
-                    .startSosTracking(realId, userId);
-              }
+              await _sqliteService.deleteAlert(localId);
             }
             debugPrint(
               '[SYNC_SUCCESS] Alert $localId synchronized as $realId.',
             );
-            // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
           } catch (e) {
             debugPrint(
               '[SYNC_FALLBACK] Cloud Function Failed. Using direct fallback for $localId: $e',
             );
-            alertData['createdAt'] = FieldValue.serverTimestamp();
+            final alertData = <String, dynamic>{
+              'type': row['type'],
+              'description': row['description'],
+              'lat': row['lat'],
+              'lng': row['lng'],
+              'reportedByUid': 'unknown',
+              'reportedBy': 'unknown',
+              'status': 'OPEN',
+              'priority': row['priority'],
+              'assigned_to': 'POLLING_UNIT',
+              'sync_status': 'COMPLETED',
+              'createdAt': FieldValue.serverTimestamp(),
+              'reportedAt': FieldValue.serverTimestamp(),
+            };
             final docRef = await FirebaseFirestore.instance
                 .collection('alerts')
                 .add(alertData);
             final realId = docRef.id;
-            if (localId != null) {
-              mappings[localId] = realId;
-              final userId = alertData['reportedBy'] as String?;
-              if (userId != null) {
-                await BackgroundTrackingService()
-                    .startSosTracking(realId, userId);
-              }
-            }
+            mappings[localId] = realId;
+            await _sqliteService.deleteAlert(localId);
             debugPrint(
               '[SYNC_SUCCESS_FALLBACK] Alert $localId synchronized as $realId.',
             );
           }
-          // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
         } catch (e) {
-          debugPrint('[SYNC_RETRY] Failed to sync alert: $e');
-          remainingQueue.add(alertJson);
+          debugPrint('[SYNC_RETRY] Failed to sync alert $localId: $e');
+          await _sqliteService.updateSyncStatus(localId, 'FAILED');
         }
       }
-
-      await prefs.setStringList('offline_alerts_queue', remainingQueue);
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (e) {
       debugPrint('[CRITICAL_SYNC_ERR] Failed to flush offline queue: $e');
     }
