@@ -188,7 +188,7 @@ exports.onAlertCreatedGIS = functions.firestore
       // 1. Spatiotemporal duplicate correlation check (15 mins, 500 meters, matching type)
       const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
       const activeAlerts = await db.collection("alerts")
-        .where("status", "in", ["OPEN", "DISPATCHED", "ACKNOWLEDGED"])
+        .where("reportedAt", ">=", fifteenMinsAgo)
         .get();
 
       let duplicateParentId = null;
@@ -197,10 +197,31 @@ exports.onAlertCreatedGIS = functions.firestore
         if (doc.id === alertId) continue;
         const other = doc.data();
         
-        // Ensure other alert has reportedAt time and is within 15 minutes
-        if (other.reportedAt && other.type === data.type) {
-          const otherTime = new Date(other.reportedAt);
-          if (Math.abs(otherTime - new Date(data.reportedAt || Date.now())) <= 15 * 60 * 1000) {
+        // Ensure other alert has reportedAt time, matching type, and is in an active state
+        if (other.reportedAt && other.type === data.type && ["OPEN", "DISPATCHED", "ACKNOWLEDGED"].includes(other.status)) {
+          let otherTime;
+          if (typeof other.reportedAt.toDate === 'function') {
+            otherTime = other.reportedAt.toDate();
+          } else if (other.reportedAt.seconds) {
+            otherTime = new Date(other.reportedAt.seconds * 1000);
+          } else {
+            otherTime = new Date(other.reportedAt);
+          }
+
+          let thisTime;
+          if (data.reportedAt) {
+            if (typeof data.reportedAt.toDate === 'function') {
+              thisTime = data.reportedAt.toDate();
+            } else if (data.reportedAt.seconds) {
+              thisTime = new Date(data.reportedAt.seconds * 1000);
+            } else {
+              thisTime = new Date(data.reportedAt);
+            }
+          } else {
+            thisTime = new Date();
+          }
+
+          if (Math.abs(otherTime - thisTime) <= 15 * 60 * 1000) {
             const R = 6371;
             const dLat = (other.lat - lat) * Math.PI / 180;
             const dLng = (other.lng - lng) * Math.PI / 180;

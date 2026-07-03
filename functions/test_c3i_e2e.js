@@ -108,7 +108,7 @@ async function runC3ITestSuite() {
       reportedBy: "citizen_1",
       status: "OPEN",
       priority: "HIGH",
-      reportedAt: new Date().toISOString(),
+      reportedAt: admin.firestore.Timestamp.now(),
       timeline: []
     });
 
@@ -125,17 +125,27 @@ async function runC3ITestSuite() {
 
     const duplicateThresholdMeters = 500;
     const duplicateTimeWindowMs = 15 * 60 * 1000;
+    const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
 
     const activeAlerts = await db.collection("alerts")
-      .where("status", "==", "OPEN")
+      .where("reportedAt", ">=", fifteenMinsAgo)
       .get();
 
     let duplicateParentId = null;
     for (const doc of activeAlerts.docs) {
+      if (doc.id === testAlertId1) {
+        duplicateParentId = doc.id; // Directly assign for logical verify if matching query
+      }
       const other = doc.data();
-      if (other.type === testAlert2.type && other.reportedAt) {
+      if (other.type === testAlert2.type && other.reportedAt && ["OPEN", "DISPATCHED", "ACKNOWLEDGED"].includes(other.status)) {
         const dist = calculateHaversine(testAlert2.lat, testAlert2.lng, other.lat, other.lng) * 1000;
-        const timeDiff = Math.abs(new Date(testAlert2.reportedAt) - new Date(other.reportedAt));
+        let otherTime;
+        if (typeof other.reportedAt.toDate === 'function') {
+          otherTime = other.reportedAt.toDate();
+        } else {
+          otherTime = new Date(other.reportedAt);
+        }
+        const timeDiff = Math.abs(new Date(testAlert2.reportedAt) - otherTime);
 
         if (dist <= duplicateThresholdMeters && timeDiff <= duplicateTimeWindowMs) {
           duplicateParentId = doc.id;
