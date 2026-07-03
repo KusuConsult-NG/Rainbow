@@ -116,6 +116,8 @@ class SyncService {
       final rows = entry.value;
       final urls = <String>[];
 
+      final uploadedRowIds = <int>[];
+
       for (final row in rows) {
         final mediaId = row['id'] as int;
         final path = row['local_file_path'] as String;
@@ -128,6 +130,7 @@ class SyncService {
             await storageRef.putFile(file);
             final url = await storageRef.getDownloadURL();
             urls.add(url);
+            uploadedRowIds.add(mediaId);
             await sqlite.updateMediaStatus(mediaId, 'COMPLETE', remoteStoragePath: url);
             await file.delete();
           } else {
@@ -145,8 +148,8 @@ class SyncService {
             'attachments': FieldValue.arrayUnion(urls),
             'sync_status': 'COMPLETED',
           });
-          for (final row in rows) {
-            await sqlite.deleteMedia(row['id'] as int);
+          for (final id in uploadedRowIds) {
+            await sqlite.deleteMedia(id);
           }
         } catch (e) {
           debugPrint('[SYNC_FIRESTORE_ERR] Failed to update attachments: $e');
