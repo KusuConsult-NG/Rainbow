@@ -460,8 +460,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                     1.0 + (_breathingController.value * 0.04);
                                 return GestureDetector(
                                   onTapDown: (_) => HapticFeedback.mediumImpact(),
-                                  onTap: () => _triggerPanic(silent: false),
-                                  onLongPress: () => _triggerPanic(silent: true),
+                                  onTap: () => _triggerPanic(silent: true),
+                                  onLongPress: () => _triggerPanic(silent: false),
                                   child: Stack(
                                     alignment: Alignment.center,
                                     children: [
