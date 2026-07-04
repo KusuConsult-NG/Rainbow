@@ -1,7 +1,7 @@
 name: rainbow_app
 description: Operation Rainbow - Plateau State Emergency Security Response App
 publish_to: 'none'
-version: 1.0.3+19
+version: 1.0.3+20
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

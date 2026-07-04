@@ -64,8 +64,9 @@ class SpeechService {
           onResult(result.recognizedWords);
         },
         localeId: languageCode,
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 5),
+        listenFor: const Duration(minutes: 10), // Allow up to 10 minutes of active tracking
+        pauseFor: const Duration(seconds: 15),  // Allow up to 15 seconds of silence before auto-stopping
+        listenMode: ListenMode.dictation,        // Continuous transcription mode
       );
     }
   }
