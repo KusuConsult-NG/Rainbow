@@ -143,6 +143,21 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
                   .orderBy('timestamp', descending: true)
                   .snapshots(),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'Failed to load chat: ${snapshot.error}',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.outfit(
+                          color: AppColors.emergency,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  );
+                }
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }

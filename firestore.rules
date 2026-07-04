@@ -125,6 +125,14 @@ service cloud.firestore {
         allow create: if isStaff();
         allow update, delete: if false; // Immutable audit trail
       }
+
+      match /messages/{messageId} {
+        allow read, write: if isAuth() && (
+          isStaff() ||
+          get(/databases/$(database)/documents/alerts/$(alertId)).data.reportedByUid == request.auth.uid ||
+          get(/databases/$(database)/documents/alerts/$(alertId)).data.reportedBy == request.auth.uid
+        );
+      }
     }
 
     // ─── Tracking (Telemetry Engine) ──────────────────────────────────────────
