@@ -101,15 +101,30 @@ class LocationService {
         return;
       }
 
+      // Fetch and yield the current/initial position immediately to populate the UI instantly
+      try {
+        final initialPosition = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.bestForNavigation,
+          ),
+        ).timeout(const Duration(seconds: 3));
+        yield initialPosition;
+      } catch (e) {
+        debugPrint('[LOC_TRACE] Failed to get initial position for stream: $e');
+        final lastKnown = await Geolocator.getLastKnownPosition();
+        if (lastKnown != null) {
+          yield lastKnown;
+        }
+      }
+
       debugPrint(
         '[LOC_TRACE] Requesting continuous hardware location stream lock...',
       );
 
-      // Configured for Navigation profile (high density tracking)
+      // Configured for Navigation profile (high density tracking, no distance filter during active SOS)
       const locationSettings = LocationSettings(
         accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter:
-            10, // Only trigger stream updates after moving 10 physical meters
+        distanceFilter: 0,
       );
 
       yield* Geolocator.getPositionStream(locationSettings: locationSettings)
