@@ -23,19 +23,21 @@ class LocationService {
   LocationService();
 
   /// Requests hardware location permissions from the user.
-  Future<bool> requestPermission() async {
+  Future<bool> requestPermission({bool force = false}) async {
     bool serviceEnabled;
     LocationPermission permission;
 
-    // 1. Guard against native popups if user has not accepted prominent disclosure
-    final prefs = await SharedPreferences.getInstance();
-    final isDisclosureAccepted =
-        prefs.getBool('location_disclosure_accepted') ?? false;
-    if (!isDisclosureAccepted) {
-      debugPrint(
-        '[LOC_WARN] LocationService: Prominent disclosure not yet accepted. Aborting permission request.',
-      );
-      return false;
+    if (!force) {
+      // 1. Guard against native popups if user has not accepted prominent disclosure
+      final prefs = await SharedPreferences.getInstance();
+      final isDisclosureAccepted =
+          prefs.getBool('location_disclosure_accepted') ?? false;
+      if (!isDisclosureAccepted) {
+        debugPrint(
+          '[LOC_WARN] LocationService: Prominent disclosure not yet accepted. Aborting permission request.',
+        );
+        return false;
+      }
     }
 
     serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -62,9 +64,9 @@ class LocationService {
   }
 
   /// Gets the current instantaneous position.
-  Future<Position?> getCurrentPosition() async {
+  Future<Position?> getCurrentPosition({bool force = false}) async {
     try {
-      final hasPermission = await requestPermission().timeout(
+      final hasPermission = await requestPermission(force: force).timeout(
         const Duration(seconds: 4),
         onTimeout: () => false,
       );
