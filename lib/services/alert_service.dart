@@ -10,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
+import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/services/sqlite_service.dart';
 
 /// Documentation for this public member.
@@ -48,29 +49,9 @@ class AlertService {
 
     try {
       if (latitude == null || longitude == null) {
-        final permStatus = await Permission.locationWhenInUse.status;
-        if (permStatus.isGranted) {
-          final pos = await Geolocator.getCurrentPosition(
-            locationSettings:
-                const LocationSettings(accuracy: LocationAccuracy.high),
-          ).timeout(
-            const Duration(seconds: 3),
-            onTimeout: () async {
-              return await Geolocator.getLastKnownPosition() ??
-                  Position(
-                    latitude: finalLat,
-                    longitude: finalLng,
-                    timestamp: DateTime.now(),
-                    accuracy: 0,
-                    altitude: 0,
-                    heading: 0,
-                    speed: 0,
-                    speedAccuracy: 0,
-                    altitudeAccuracy: 0,
-                    headingAccuracy: 0,
-                  );
-            },
-          );
+        // Force location query for emergency alerts (bypasses check for prominent disclosure)
+        final pos = await LocationService().getCurrentPosition(force: true);
+        if (pos != null) {
           finalLat = pos.latitude;
           finalLng = pos.longitude;
         }

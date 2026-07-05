@@ -10,6 +10,7 @@ import 'package:rainbow_app/core/models/emergency_state.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
+import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/services/termii_service.dart';
 
 /// Documentation for this public member.
@@ -34,14 +35,26 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
     final lga = auth.profile?['geo_lga'] as String?;
     final ward = auth.profile?['geo_ward'] as String?;
 
+    // Resolve location immediately for dispatch details
+    Position? currentPos;
+    try {
+      currentPos = await LocationService().getCurrentPosition(force: true);
+    } catch (_) {}
+
+    final latVal = currentPos?.latitude;
+    final lngVal = currentPos?.longitude;
+
     // 1. SMS — isolated try/catch. Failure MUST NOT block alert creation.
     try {
       var locationText = 'Location Unknown';
-      try {
-        final pos = await Geolocator.getLastKnownPosition();
-        if (pos != null) locationText = '${pos.latitude}, ${pos.longitude}';
-        // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
-      } catch (_) {}
+      if (latVal != null && lngVal != null) {
+        locationText = '$latVal, $lngVal';
+      } else {
+        try {
+          final lastPos = await Geolocator.getLastKnownPosition();
+          if (lastPos != null) locationText = '${lastPos.latitude}, ${lastPos.longitude}';
+        } catch (_) {}
+      }
 
       await ref.read(termiiServiceProvider).sendEmergencyAlert(
             dotenv.env['SOS_PHONE'] ?? '0800RAINBOWHQ',
@@ -68,11 +81,9 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
                 );
           }
         }
-        // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
       } catch (e) {
         dev.log('Emergency Contacts SMS failed: $e', name: 'SYS_WARN');
       }
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (smsErr) {
       dev.log('SMS non-fatal failure: $smsErr', name: 'SYS_WARN');
     }
@@ -83,6 +94,8 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
             type: 'PANIC SOS',
             description: 'Public Panic Button Activated',
             reportedBy: userId,
+            latitude: latVal,
+            longitude: lngVal,
             isCritical: true,
             geoLga: lga,
             geoWard: ward,
