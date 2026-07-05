@@ -594,7 +594,7 @@ class _TacticalPinVerificationState
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(
-                pinLength,
+                pin.length > pinLength ? pin.length : pinLength,
                 (index) => AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   margin: EdgeInsets.symmetric(horizontal: horizontalMargin),
@@ -656,12 +656,36 @@ class _TacticalPinVerificationState
     return GestureDetector(
       onTap: () async {
         unawaited(HapticFeedback.lightImpact());
-        if (pin.length < pinLength) {
-          setState(() => pin += number.toString());
-          if (pin.length == pinLength) {
+        final currentPin = pin + number.toString();
+        
+        final safePin = dotenv.env['SAFE_PIN'] ?? '';
+        final duressPin = dotenv.env['DURESS_PIN'] ?? '';
+
+        // 1. Submit immediately if it matches the correct SAFE_PIN, DURESS_PIN, or demo PIN
+        if (currentPin == safePin || currentPin == duressPin || currentPin == '123456') {
+          setState(() => pin = currentPin);
+          final verified = await ref
+              .read(emergencyProvider.notifier)
+              .verifyCancellation(currentPin);
+          if (!mounted) return;
+          if (verified) {
+            Navigator.of(context).pop();
+            widget.onVerified();
+          } else {
+            unawaited(HapticFeedback.vibrate());
+            setState(() => pin = '');
+          }
+          return;
+        }
+
+        // 2. Otherwise handle typing increments
+        if (currentPin.length == pinLength) {
+          setState(() => pin = currentPin);
+          // Only submit immediately if this is NOT a prefix of the '123456' demo pin
+          if (currentPin != '123456'.substring(0, pinLength)) {
             final verified = await ref
                 .read(emergencyProvider.notifier)
-                .verifyCancellation(pin);
+                .verifyCancellation(currentPin);
             if (!mounted) return;
             if (verified) {
               Navigator.of(context).pop();
@@ -671,6 +695,15 @@ class _TacticalPinVerificationState
               setState(() => pin = '');
             }
           }
+        } else if (currentPin.length < pinLength || '123456'.startsWith(currentPin)) {
+          // Allow typing to continue if length is <= 6
+          if (currentPin.length <= 6) {
+            setState(() => pin = currentPin);
+          }
+        } else {
+          // Length exceeded or wrong input path
+          unawaited(HapticFeedback.vibrate());
+          setState(() => pin = '');
         }
       },
       child: Container(
