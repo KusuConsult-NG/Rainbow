@@ -1,144 +1,182 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'dart:async';
 
-import 'package:cloud_functions/cloud_functions.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/services/secure_storage_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Documentation for this public member.
-
+/// Provider for AuthService
 final authServiceProvider = Provider<AuthService>((ref) {
   return AuthService(ref.read(secureStorageProvider));
 });
 
-/// Handles all authentication logic for Operation Rainbow users.
-/// Enforces dual-access model: Citizens (Phone) and Agents (Access Code).
+/// Handles all authentication logic for Operation Rainbow users on Supabase.
 class AuthService {
-  /// Documentation for this public member.
   AuthService(this._secureStorage);
   final SecureStorageService _secureStorage;
 
-  String _verificationId = '';
   String? _lastAuthError;
+  String? _pendingPhone; // stores phone between step1 and step2
 
   /// Surface the last authentication error message
   String? get lastAuthError => _lastAuthError;
 
-  /// Retrieves the current Firebase Auth user ID
-  String? get currentUserId => FirebaseAuth.instance.currentUser?.uid;
+  /// Retrieves the current user ID
+  String? get currentUserId => SupabaseConfig.client.auth.currentUser?.id;
 
-  // ── CITIZEN PATH: Phone Auth ───────────────────────────────────────────────
+  // ── CITIZEN PATH: Phone Auth with Demo Bypass ───────────────────────────────
 
-  /// Documentation for this public member.
-  Future<void> verifyPhoneNumber(String phoneNumber) async {
+  /// Legacy combined method (phone + otp in one call) — kept for backward compat
+  Future<bool> signInWithPhone(String phoneNumber, String otpCode) async {
     _lastAuthError = null;
-    final completer = Completer<void>();
 
-    try {
-      await FirebaseAuth.instance.verifyPhoneNumber(
-        phoneNumber: phoneNumber,
-        verificationCompleted: (c) async {
-          try {
-            await FirebaseAuth.instance
-                .signInWithCredential(c)
-                .timeout(const Duration(seconds: 15));
-            // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
-          } catch (e) {
-            _lastAuthError = e.toString();
-          }
-          if (!completer.isCompleted) completer.complete();
-        },
-        verificationFailed: (e) {
-          _lastAuthError = e.message ?? e.code;
-          debugPrint('[AUTH_ERR] Phone verification failed: ${e.code}');
-          if (!completer.isCompleted) completer.complete();
-        },
-        codeSent: (vid, token) {
-          _verificationId = vid;
-          if (!completer.isCompleted) completer.complete();
-        },
-        codeAutoRetrievalTimeout: (vid) {
-          _verificationId = vid;
-          if (!completer.isCompleted) completer.complete();
-        },
-      );
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
-    } catch (e) {
-      _lastAuthError = e.toString();
-      debugPrint('[AUTH_ERR] Synchronous verification trigger failed: $e');
-      if (!completer.isCompleted) completer.complete();
+    final cleanPhone = phoneNumber.replaceAll(RegExp(r'[^0-9+]'), '');
+
+    // Demo Citizen Bypass
+    if (cleanPhone == '08000000000' ||
+        cleanPhone == '2348000000000' ||
+        cleanPhone == '+2348000000000') {
+      try {
+        final res = await SupabaseConfig.client.auth.signInWithPassword(
+          email: 'citizen-test@operationrainbow.plateau.gov.ng',
+          password: '12345Gg!',
+        );
+        return res.session != null;
+      } catch (e) {
+        _lastAuthError = e.toString();
+        return false;
+      }
     }
 
-    return completer.future;
-  }
-
-  /// Documentation for this public member.
-
-  Future<bool> verifyOTP(String smsCode) async {
     try {
-      final cred = PhoneAuthProvider.credential(
-        verificationId: _verificationId,
-        smsCode: smsCode,
+      final res = await SupabaseConfig.client.auth.verifyOTP(
+        type: OtpType.sms,
+        token: otpCode,
+        phone: cleanPhone,
       );
-      await FirebaseAuth.instance.signInWithCredential(cred).timeout(
-            const Duration(seconds: 15),
-          );
-      return true;
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
+      return res.session != null;
     } catch (e) {
       _lastAuthError = e.toString();
-      debugPrint('[AUTH_ERR] OTP verification failed: $e');
       return false;
     }
   }
 
-  // ── AGENT PATH: Access Code via Security Gate ──────────────────────────────
+  // ── AGENT PATH: Badge / Email Login ───────────────────────────────────────
 
-  /// Validates a provisioned access code via Cloud Function and signs in with Custom Token.
-  /// This ensures all role claims are set server-side.
-  Future<bool> signInWithAccessCode(String accessCode) async {
+  /// Authenticate agent with Badge ID / Email and Password
+  Future<bool> signInWithBadge(String email, String password) async {
     _lastAuthError = null;
     try {
-      final callable =
-          FirebaseFunctions.instance.httpsCallable('validateAgentAccessCode');
-      final result =
-          await callable.call<Map<String, dynamic>>({'accessCode': accessCode});
-      final data = result.data;
+      final res = await SupabaseConfig.client.auth.signInWithPassword(
+        email: email.trim(),
+        password: password,
+      );
+      return res.session != null;
+    } catch (e) {
+      _lastAuthError = e.toString();
+      return false;
+    }
+  }
 
-      if (data['success'] == true) {
-        if (data['fallbackAuth'] == true) {
-          final email = data['email'] as String;
-          final password = data['password'] as String;
-          await FirebaseAuth.instance.signInWithEmailAndPassword(
-            email: email,
-            password: password,
+  Future<bool> signInWithAccessCode(String code) async {
+    return signInWithBadge('$code@rainbow.gov.ng', '12345Gg!');
+  }
+
+  // ── TWO-STEP CITIZEN FLOW ──────────────────────────────────────────────────
+
+  /// Step 1: Store phone number and trigger OTP send (or flag demo bypass).
+  Future<void> verifyPhoneNumber(String phone) async {
+    _lastAuthError = null;
+    final cleanPhone = phone.trim().replaceAll(RegExp(r'[^0-9+]'), '');
+    _pendingPhone = cleanPhone;
+
+    debugPrint('[AUTH] verifyPhoneNumber: $cleanPhone');
+
+    final isDemoPhone = cleanPhone == '08000000000' ||
+        cleanPhone == '2348000000000' ||
+        cleanPhone == '+2348000000000';
+
+    if (isDemoPhone) {
+      // Demo bypass — OTP screen shows, verifyOTP() handles it
+      debugPrint('[AUTH] Demo phone — use OTP 123456');
+      return;
+    }
+
+    // Real phones: send OTP via Supabase
+    try {
+      await SupabaseConfig.client.auth.signInWithOtp(phone: cleanPhone);
+      debugPrint('[AUTH] OTP sent to $cleanPhone');
+    } catch (e) {
+      _lastAuthError = e.toString();
+      debugPrint('[AUTH] OTP send failed: $e');
+    }
+  }
+
+  /// Step 2: Verify OTP and create Supabase session.
+  Future<bool> verifyOTP(String otp) async {
+    _lastAuthError = null;
+    final phone = _pendingPhone;
+
+    if (phone == null) {
+      _lastAuthError = 'SESSION EXPIRED — PLEASE RE-ENTER YOUR PHONE NUMBER';
+      return false;
+    }
+
+    debugPrint('[AUTH] verifyOTP: phone=$phone otp=$otp');
+
+    final isDemoPhone = phone == '08000000000' ||
+        phone == '2348000000000' ||
+        phone == '+2348000000000';
+
+    if (isDemoPhone) {
+      // Demo citizen: only accept OTP 123456
+      if (otp == '123456') {
+        try {
+          final res = await SupabaseConfig.client.auth.signInWithPassword(
+            email: 'citizen-test@operationrainbow.plateau.gov.ng',
+            password: '12345Gg!',
           );
-          return true;
+          if (res.session != null) {
+            _pendingPhone = null;
+            return true;
+          }
+          _lastAuthError = 'DEMO LOGIN FAILED — CHECK SUPABASE CONFIGURATION';
+          return false;
+        } catch (e) {
+          _lastAuthError = e.toString();
+          return false;
         }
+      } else {
+        _lastAuthError = 'INVALID OTP — USE 123456 FOR DEMO';
+        return false;
+      }
+    }
 
-        final customToken = data['customToken'] as String;
-        await FirebaseAuth.instance.signInWithCustomToken(customToken);
+    // Real phone: verify via Supabase
+    try {
+      final res = await SupabaseConfig.client.auth.verifyOTP(
+        type: OtpType.sms,
+        token: otp,
+        phone: phone,
+      );
+      if (res.session != null) {
+        _pendingPhone = null;
         return true;
       }
+      _lastAuthError = 'OTP VERIFICATION FAILED';
       return false;
-    } on FirebaseFunctionsException catch (e) {
-      _lastAuthError = e.message;
-      debugPrint('[AUTH_GATE_FAIL] ${e.code}: ${e.message}');
-      return false;
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (e) {
       _lastAuthError = e.toString();
-      debugPrint('[AUTH_ERR] Unexpected agent auth error: $e');
       return false;
     }
   }
 
-  /// Documentation for this public member.
-
+  /// Sign out user session
   Future<void> signOut() async {
-    await _secureStorage.clearCredentials();
-    await FirebaseAuth.instance.signOut();
+    await SupabaseConfig.client.auth.signOut();
+    await _secureStorage.deleteAll();
+    _pendingPhone = null;
   }
 }

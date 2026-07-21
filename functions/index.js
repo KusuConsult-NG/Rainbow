@@ -120,26 +120,48 @@ const sendPushToTier = async (alertId, alertData) => {
   } else {
     // 2. Jurisdictional Tier Notification
     let query = db.collection("users");
-    
+    let targetRoles = [];
+
     if (assignedLevel === "HQ") {
-      query = query.where("role", "==", "HQ_OFFICER");
+      targetRoles = ["HQ_OFFICER", "HQ_COMMAND"];
     } else if (assignedLevel === "LGA") {
-      query = query.where("role", "==", "LGA_OFFICER").where("lga", "==", alertData.geo_lga);
+      targetRoles = ["LGA_OFFICER", "LGA_COMMAND"];
     } else if (assignedLevel === "WARD") {
-      query = query.where("role", "==", "WARD_OFFICER").where("ward", "==", alertData.geo_ward);
+      targetRoles = ["WARD_OFFICER", "WARD_COMMAND"];
     } else {
-      query = query.where("role", "==", "POLLING_UNIT_OFFICER").where("pu", "==", alertData.geo_pu);
+      targetRoles = ["POLLING_UNIT_OFFICER", "POLLING_OFFICER", "UNIT_COMMAND"];
     }
 
+    query = query.where("role", "in", targetRoles);
     const staffSnapshot = await query.get();
+
     staffSnapshot.forEach(doc => {
       const data = doc.data();
-      if (data.fcmToken) tokens.push(data.fcmToken);
+      if (!data.fcmToken) return;
+
+      if (assignedLevel === "HQ") {
+        tokens.push(data.fcmToken);
+      } else if (assignedLevel === "LGA") {
+        const userLga = data.geo_lga || data.lga;
+        if (userLga === alertData.geo_lga) {
+          tokens.push(data.fcmToken);
+        }
+      } else if (assignedLevel === "WARD") {
+        const userWard = data.geo_ward || data.ward;
+        if (userWard === alertData.geo_ward) {
+          tokens.push(data.fcmToken);
+        }
+      } else {
+        const userPu = data.geo_pu || data.pu;
+        if (userPu === alertData.geo_pu) {
+          tokens.push(data.fcmToken);
+        }
+      }
     });
 
     // Also notify HQ officers for AI voice reports or high/critical priority alerts
     if (alertData.ai_triage || priority === "CRITICAL" || priority === "HIGH") {
-      const hqSnap = await db.collection("users").where("role", "==", "HQ_OFFICER").get();
+      const hqSnap = await db.collection("users").where("role", "in", ["HQ_OFFICER", "HQ_COMMAND"]).get();
       hqSnap.forEach(doc => {
         const data = doc.data();
         if (data.fcmToken && !tokens.includes(data.fcmToken)) {
@@ -698,11 +720,20 @@ exports.massBroadcast = functions.https.onCall(async (data, context) => {
 exports.adminEscalateAlert = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Auth required.");
   
-  // Enforce staff/agent permissions
-  const role = context.auth.token.role || "";
-  const isAuthorized = context.auth.token.isStaff || role === "HQ_COMMAND" || role === "HQ_OFFICER" || role === "LGA_COMMAND" || role === "WARD_COMMAND";
+  // Role may be in JWT claim (fast path) or only in Firestore (fallback for users without claims set)
+  let role = context.auth.token.role || "";
+  if (!role) {
+    const userSnap = await db.collection("users").doc(context.auth.uid).get();
+    if (userSnap.exists) role = userSnap.data().role || "";
+  }
+
+  const isAuthorized = context.auth.token.isStaff ||
+    role === "HQ_COMMAND" || role === "HQ_OFFICER" ||
+    role === "LGA_COMMAND" || role === "LGA_OFFICER" ||
+    role === "WARD_COMMAND" || role === "WARD_OFFICER";
+
   if (!isAuthorized) {
-    throw new functions.https.HttpsError("permission-denied", "Only tactical agents can manually escalate alerts.");
+    throw new functions.https.HttpsError("permission-denied", `Insufficient role: '${role}'. Only tactical command agents can escalate alerts.`);
   }
 
   const { alertId, targetTier, reason, notes } = data;
@@ -728,14 +759,12 @@ exports.adminEscalateAlert = functions.https.onCall(async (data, context) => {
       notes: notes || `Manual escalation from ${oldTier} to ${targetTier}.`
     };
 
-    const timelineSubRef = db.collection("alerts").doc(alertId).collection("timeline").doc();
     transaction.update(alertRef, {
       assigned_to: targetTier,
       last_edited_by: context.auth.token.email || context.auth.uid,
       escalated_at: admin.firestore.FieldValue.serverTimestamp(),
       timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
     });
-    transaction.set(timelineSubRef, timelineEvent);
 
     const auditRef = db.collection("audit_logs").doc();
     transaction.set(auditRef, {
@@ -771,6 +800,14 @@ exports.adminEscalateAlert = functions.https.onCall(async (data, context) => {
 exports.adminResolveAlert = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Auth required.");
   const { alertId } = data;
+  if (!alertId) throw new functions.https.HttpsError("invalid-argument", "alertId is required.");
+
+  // Role may be in JWT claim or only in Firestore (fallback)
+  let role = context.auth.token.role || "";
+  if (!role) {
+    const userSnap = await db.collection("users").doc(context.auth.uid).get();
+    if (userSnap.exists) role = userSnap.data().role || "";
+  }
   
   const alertRef = db.collection("alerts").doc(alertId);
 
@@ -781,13 +818,12 @@ exports.adminResolveAlert = functions.https.onCall(async (data, context) => {
     const timelineEvent = {
       type: "RESOLVED",
       actor: context.auth.token.email || context.auth.uid,
-      role: context.auth.token.role || "RESPONDER",
+      role: role || "HQ_OFFICER",
       timestamp: new Date().toISOString(),
       reason: "Incident Resolved",
       notes: `Incident marked as resolved by ${context.auth.token.email || context.auth.uid}`
     };
 
-    const timelineSubRef = db.collection("alerts").doc(alertId).collection("timeline").doc();
     transaction.update(alertRef, {
       status: "RESOLVED",
       resolved_by: context.auth.token.email || context.auth.uid,
@@ -795,7 +831,6 @@ exports.adminResolveAlert = functions.https.onCall(async (data, context) => {
       resolved_at: admin.firestore.FieldValue.serverTimestamp(),
       timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
     });
-    transaction.set(timelineSubRef, timelineEvent);
   });
 
   return { success: true };
@@ -807,6 +842,13 @@ exports.adminDispatchAlert = functions.https.onCall(async (data, context) => {
   
   if (!alertId || !responderUid) {
     throw new functions.https.HttpsError("invalid-argument", "Missing alertId or responderUid.");
+  }
+
+  // Role may be in JWT claim or only in Firestore (fallback)
+  let role = context.auth.token.role || "";
+  if (!role) {
+    const callerSnap = await db.collection("users").doc(context.auth.uid).get();
+    if (callerSnap.exists) role = callerSnap.data().role || "";
   }
 
   const alertRef = db.collection("alerts").doc(alertId);
@@ -822,13 +864,12 @@ exports.adminDispatchAlert = functions.https.onCall(async (data, context) => {
     const timelineEvent = {
       type: "DISPATCHED",
       actor: context.auth.token.email || context.auth.uid,
-      role: context.auth.token.role || "RESPONDER",
+      role: role || "HQ_OFFICER",
       timestamp: new Date().toISOString(),
       reason: "Unit Dispatched",
       notes: `Dispatched tactical unit ${responderSnap.data().displayName || responderUid} to incident site.`
     };
 
-    const timelineSubRef = db.collection("alerts").doc(alertId).collection("timeline").doc();
     transaction.update(alertRef, {
       status: "DISPATCHED",
       assignedToUid: responderUid,
@@ -836,7 +877,6 @@ exports.adminDispatchAlert = functions.https.onCall(async (data, context) => {
       dispatched_at: admin.firestore.FieldValue.serverTimestamp(),
       timeline: admin.firestore.FieldValue.arrayUnion(timelineEvent)
     });
-    transaction.set(timelineSubRef, timelineEvent);
 
     const auditRef = db.collection("audit_logs").doc();
     transaction.set(auditRef, {
@@ -1946,7 +1986,11 @@ exports.findBestResponders = functions.https.onCall(async (data, context) => {
   const alertType = alert.type;
 
   const respondersSnap = await db.collection('users')
-    .where('role', 'in', ['POLLING_UNIT_OFFICER', 'WARD_OFFICER', 'LGA_OFFICER'])
+    .where('role', 'in', [
+      'POLLING_UNIT_OFFICER', 'POLLING_OFFICER', 'UNIT_COMMAND',
+      'WARD_OFFICER', 'WARD_COMMAND',
+      'LGA_OFFICER', 'LGA_COMMAND'
+    ])
     .get();
 
   const ratedResponders = [];

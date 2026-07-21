@@ -3,13 +3,14 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/models/alert_model.dart';
@@ -36,6 +37,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   late AnimationController _breathingController;
   late AnimationController _safePulseController;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  // Cache tracking state — do NOT call platform channel inside AnimatedBuilder (60fps)
+  bool _isTracking = false;
+
+  Future<void> _refreshTrackingState() async {
+    try {
+      final running = await FlutterBackgroundService().isRunning();
+      if (mounted) setState(() => _isTracking = running);
+    } catch (_) {}
+  }
 
   @override
   void initState() {
@@ -54,6 +64,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     // Initial sync
     unawaited(ref.read(alertServiceProvider).flushOfflineQueue());
+    unawaited(_refreshTrackingState());
 
     // Listen for connectivity restoration
     _connectivitySubscription =
@@ -75,6 +86,64 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Future<void> _triggerPanic({required bool silent}) async {
     await HapticFeedback.heavyImpact();
+
+    // Enforce location permission for emergency responder routing accuracy
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.background,
+            title: Text(
+              'LOCATION REQUIRED',
+              style: GoogleFonts.outfit(
+                color: AppColors.emergency,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            content: Text(
+              'Operation Rainbow requires active location permissions to route emergency responders to your position. Please enable location in device settings.',
+              style: GoogleFonts.outfit(
+                color: AppColors.textSecondary,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: Text(
+                  'OK',
+                  style: GoogleFonts.outfit(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () async {
+                  Navigator.of(ctx).pop();
+                  await openAppSettings();
+                },
+                child: Text(
+                  'SETTINGS',
+                  style: GoogleFonts.outfit(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
     unawaited(ref.read(emergencyProvider.notifier).startEmergency());
     if (silent) {
       // Silent SOS: submit a real background alert without leaving the home screen
@@ -84,7 +153,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 type: 'EMERGENCY - Silent SOS',
                 description: 'Silent distress signal activated by user.',
                 reportedBy:
-                    ref.read(authProvider).user?.uid ?? 'anonymous',
+                    ref.read(authProvider).user?.id ?? 'anonymous',
                 priority: AlertPriority.critical,
               );
           // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
@@ -139,7 +208,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
     final isStaff = auth.role != UserRole.citizen;
-    final userId = auth.user?.uid ?? 'unknown';
+    final userId = auth.user?.id ?? 'unknown';
     final lang = ref.watch(languageProvider);
 
     return PopScope(
@@ -283,13 +352,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     child: AnimatedBuilder(
                       animation: _safePulseController,
                       builder: (context, _) {
-                        return FutureBuilder<bool>(
-                          future: _isBackgroundServiceRunning(),
-                          builder: (context, snapshot) {
-                            final isTracking = snapshot.data ?? false;
-                            final statusColor = isTracking
-                                ? AppColors.success
-                                : AppColors.primary;
+                        // Use cached _isTracking — never call a platform channel here (60fps)
+                        final isTracking = _isTracking;
+                        final statusColor = isTracking
+                            ? AppColors.success
+                            : AppColors.primary;
 
                             return Container(
                               padding: const EdgeInsets.all(24),
@@ -362,87 +429,79 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               ),
                             );
                           },
-                        );
-                      },
-                    ),
-                  ),
+                        ),
+                      ),
 
                   if (isStaff) ...[
                     const SizedBox(height: 24),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: FutureBuilder<bool>(
-                        future: _isBackgroundServiceRunning(),
-                        builder: (context, snapshot) {
-                          final isTracking = snapshot.data ?? false;
-                          return InkWell(
-                            onTap: () async {
-                              unawaited(HapticFeedback.mediumImpact());
-                              if (isTracking) {
-                                await BackgroundTrackingService()
-                                    .stopTracking();
-                              } else {
-                                await BackgroundTrackingService()
-                                    .startResponderTracking(userId);
-                              }
-                              setState(() {}); // Trigger refresh
-                            },
+                      child: InkWell(
+                        onTap: () async {
+                          unawaited(HapticFeedback.mediumImpact());
+                          if (_isTracking) {
+                            await BackgroundTrackingService().stopTracking();
+                          } else {
+                            await BackgroundTrackingService()
+                                .startResponderTracking(userId);
+                          }
+                          // Refresh cached state after toggle instead of re-calling Future in build
+                          unawaited(_refreshTrackingState());
+                        },
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 16,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _isTracking
+                                ? AppColors.success.withValues(alpha: 0.1)
+                                : AppColors.surfaceContainer,
                             borderRadius: BorderRadius.circular(20),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24,
-                                vertical: 16,
+                            border: Border.all(
+                              color: _isTracking
+                                  ? AppColors.success.withValues(alpha: 0.3)
+                                  : AppColors.outline,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                _isTracking
+                                    ? Icons.radar_rounded
+                                    : Icons.radio_button_off_rounded,
+                                color: _isTracking
+                                    ? AppColors.success
+                                    : AppColors.textDim,
                               ),
-                              decoration: BoxDecoration(
-                                color: isTracking
-                                    ? AppColors.success.withValues(alpha: 0.1)
-                                    : AppColors.surfaceContainer,
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: isTracking
-                                      ? AppColors.success.withValues(alpha: 0.3)
-                                      : AppColors.outline,
+                              const SizedBox(width: 16),
+                              Text(
+                                _isTracking
+                                    ? Translations.get('end_patrol', lang)
+                                    : Translations.get('activate_patrol', lang),
+                                style: GoogleFonts.outfit(
+                                  color: _isTracking
+                                      ? AppColors.success
+                                      : AppColors.onBackground,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 12,
+                                  letterSpacing: 1.5,
                                 ),
                               ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    isTracking
-                                        ? Icons.radar_rounded
-                                        : Icons.radio_button_off_rounded,
-                                    color: isTracking
-                                        ? AppColors.success
-                                        : AppColors.textDim,
+                              const Spacer(),
+                              if (_isTracking)
+                                const SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.success,
                                   ),
-                                  const SizedBox(width: 16),
-                                  Text(
-                                    isTracking
-                                        ? Translations.get('end_patrol', lang)
-                                        : Translations.get('activate_patrol', lang),
-                                    style: GoogleFonts.outfit(
-                                      color: isTracking
-                                          ? AppColors.success
-                                          : AppColors.onBackground,
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 12,
-                                      letterSpacing: 1.5,
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  if (isTracking)
-                                    const SizedBox(
-                                      width: 12,
-                                      height: 12,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: AppColors.success,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
+                                ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ],

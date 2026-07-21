@@ -1,319 +1,215 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, deleteDoc, doc, setDoc, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { Users, UserPlus, Trash2, Loader2, RefreshCw, LogOut } from 'lucide-react';
-
+import { supabase } from '@/lib/supabase';
+import { Users, UserPlus, Trash2, Loader2, RefreshCw } from 'lucide-react';
 import { plateauTacticalMap, TacticalJurisdiction, TacticalWard } from '@/lib/tactical_mapping';
 
 interface StaffRecord {
   id: string;
   email?: string;
   role?: string;
-  badgeId?: string;
-  displayName?: string;
-  createdAt?: string;
+  full_name?: string;
+  phone?: string;
+  created_at?: string;
   geo_lga?: string;
   geo_ward?: string;
   geo_pu?: string;
 }
 
 const ROLES = [
-  { value: 'HQ_OFFICER', label: 'Tactical HQ (Statewide)' },
+  { value: 'HQ_COMMAND', label: 'Tactical HQ (Statewide)' },
   { value: 'LGA_COMMAND', label: 'LGA Command' },
   { value: 'WARD_COMMAND', label: 'Ward Command' },
   { value: 'UNIT_COMMAND', label: 'Unit Command (PU)' },
 ];
 
-const API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY!;
-
 export default function AdminDirectory() {
-  const [badgeId, setBadgeId] = useState('');
-  const [pin, setPin] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [role, setRole] = useState('UNIT_COMMAND');
-  const [displayName, setDisplayName] = useState('');
-  
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+
   const [selectedLga, setSelectedLga] = useState<TacticalJurisdiction | null>(null);
   const [selectedWard, setSelectedWard] = useState<TacticalWard | null>(null);
   const [selectedPu, setSelectedPu] = useState('');
 
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState('');
-  const [msgType, setMsgType] = useState<'ok' | 'err'>('ok');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffRecord[]>([]);
-  const [staffLoading, setStaffLoading] = useState(true);
-  const [roleFilter, setRoleFilter] = useState('ALL');
+
+  const fetchStaff = async () => {
+    try {
+      const { data, error: err } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+      if (err) throw err;
+      setStaff((data || []) as StaffRecord[]);
+    } catch (e: any) {
+      console.error('Failed to load profiles:', e);
+    }
+  };
 
   useEffect(() => {
-    const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, snap => {
-      setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() } as StaffRecord)));
-      setStaffLoading(false);
-    }, () => setStaffLoading(false));
-    return () => unsub();
+    fetchStaff();
   }, []);
 
-  const provision = async () => {
-    if (!badgeId.trim() || !pin.trim()) return;
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true);
-    setMsg('');
-    try {
-      const email = `${badgeId.toLowerCase().replace(/\s/g, '-')}@operationrainbow.plateau.gov.ng`;
-      const res = await fetch(
-        `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password: pin, returnSecureToken: true }),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || 'Provisioning failed');
+    setError(null);
+    setSuccess(null);
 
-      // Write Firestore profile
-      await setDoc(doc(db, 'users', data.localId), {
+    try {
+      const { data, error: signUpErr } = await supabase.auth.signUp({
         email,
-        badgeId: badgeId.toUpperCase(),
-        role,
-        displayName: displayName || badgeId.toUpperCase(),
-        createdAt: new Date().toISOString(),
-        geo_lgas: selectedLga ? [selectedLga.name] : ['ALL'],
-        geo_wards: selectedWard ? [selectedWard.name] : ['ALL'],
-        geo_pus: selectedPu ? [selectedPu] : ['ALL'],
-        geo_lga: selectedLga?.name || 'STATEWIDE', // Legacy
-        geo_ward: selectedWard?.name || 'STATEWIDE',
-        geo_pu: selectedPu || 'STATEWIDE',
-        isStaff: true,
-        active: true,
-        profileComplete: true,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+            role,
+            phone,
+            geo_lga: (selectedLga as any)?.name || 'STATEWIDE HQ',
+            geo_ward: selectedWard?.name || 'N/A',
+            geo_pu: selectedPu || 'N/A',
+          },
+        },
       });
 
-      setMsg(`✓ BADGE SECURED: ${badgeId.toUpperCase()} · ${email}`);
-      setMsgType('ok');
-      setBadgeId(''); setPin(''); setDisplayName('');
-      setSelectedLga(null); setSelectedWard(null); setSelectedPu('');
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Unknown error';
-      setMsg(`ERROR: ${msg.includes('EMAIL_EXISTS') ? 'Badge ID already exists' : msg}`);
-      setMsgType('err');
+      if (signUpErr) throw signUpErr;
+
+      setSuccess(`Account registered successfully for ${email}`);
+      setEmail('');
+      setPassword('');
+      setFullName('');
+      setPhone('');
+      fetchStaff();
+    } catch (err: any) {
+      setError(err.message || 'Failed to create user account');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDelete = async (userId: string, name: string) => {
-    if (!confirm(`Remove ${name} from platform? Auth account remains active.`)) return;
-    try {
-      await deleteDoc(doc(db, 'users', userId));
-    } catch (e) {
-      alert('Delete failed: ' + e);
-    }
-  };
-
-  // PRD §5 + §12: HQ-controlled forced logout
-  const handleForceLogout = async (userId: string, name: string) => {
-    if (!confirm(`Force logout ${name} from all devices immediately?`)) return;
-    try {
-      await updateDoc(doc(db, 'users', userId), { forceLogout: true });
-      setMsg(`✓ FORCE LOGOUT sent to ${name}. Device will disconnect within seconds.`);
-      setMsgType('ok');
-    } catch (e: unknown) {
-      setMsg('Force logout failed: ' + (e instanceof Error ? e.message : String(e)));
-      setMsgType('err');
-    }
-  };
-
-  const filtered = roleFilter === 'ALL' ? staff : staff.filter(s => s.role === roleFilter);
-
   return (
-    <div style={{ padding: '8px 0', maxWidth: 1200 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 32 }}>
-        <div style={{ padding: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 12 }}>
-          <Users size={28} color="var(--text-secondary)" />
-        </div>
-        <div>
-          <h2 style={{ fontSize: 22, fontWeight: 900 }}>ADMIN DIRECTORY</h2>
-          <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>Provision and manage Rainbow platform access</p>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div className="tactical-panel glass" style={{ padding: 24 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-primary)' }}>
+          <UserPlus style={{ width: 20, height: 20, color: 'var(--primary)' }} />
+          Provision Tactical Officer Account
+        </h2>
+
+        {error && (
+          <div style={{ padding: 12, background: 'var(--duress-dim)', border: '1px solid var(--duress)', borderRadius: 10, color: 'var(--duress)', marginBottom: 16, fontSize: 13 }}>
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div style={{ padding: 12, background: 'var(--success-dim)', border: '1px solid var(--success)', borderRadius: 10, color: 'var(--success)', marginBottom: 16, fontSize: 13 }}>
+            {success}
+          </div>
+        )}
+
+        <form onSubmit={handleCreateUser} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Full Name</label>
+            <input
+              type="text"
+              required
+              className="input-tactical"
+              style={{ width: '100%' }}
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Officer Name"
+            />
+          </div>
+
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Email / Badge ID</label>
+            <input
+              type="email"
+              required
+              className="input-tactical"
+              style={{ width: '100%' }}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="officer@operationrainbow.plateau.gov.ng"
+            />
+          </div>
+
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Password</label>
+            <input
+              type="password"
+              required
+              className="input-tactical"
+              style={{ width: '100%' }}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+            />
+          </div>
+
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Role</label>
+            <select
+              className="input-tactical"
+              style={{ width: '100%' }}
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+            >
+              {ROLES.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ gridColumn: '1 / -1', marginTop: 8 }}>
+            <button
+              type="submit"
+              disabled={loading}
+              className="btn-tactical btn-primary"
+              style={{ width: '100%', padding: '14px' }}
+            >
+              {loading ? <Loader2 className="animate-spin" style={{ width: 16, height: 16 }} /> : 'Register Tactical Officer'}
+            </button>
+          </div>
+        </form>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24 }}>
-        {/* Provision Panel */}
-        <div className="tactical-panel glass" style={{ padding: 24, alignSelf: 'start' }}>
-          <h3 style={{ fontSize: 13, fontWeight: 900, marginBottom: 22, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <UserPlus size={15} color="var(--primary)" /> PROVISION NEW BADGE
-          </h3>
+      <div className="tactical-panel glass" style={{ padding: 24 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-primary)' }}>
+          <Users style={{ width: 20, height: 20, color: 'var(--primary)' }} />
+          Active Personnel Directory ({staff.length})
+        </h2>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: 1.2, marginBottom: 6 }}>BADGE IDENTIFIER</label>
-              <input value={badgeId} onChange={e => setBadgeId(e.target.value)} placeholder="e.g. WD-045" className="input-tactical" style={{ width: '100%' }} />
-              <p style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 4 }}>
-                Login email: {badgeId ? `${badgeId.toLowerCase()}@operationrainbow.plateau.gov.ng` : '—'}
-              </p>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: 1.2, marginBottom: 6 }}>DISPLAY NAME</label>
-              <input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="e.g. Sgt. Musa Ibrahim" className="input-tactical" style={{ width: '100%' }} />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: 1.2, marginBottom: 6 }}>ROLE</label>
-              <select value={role} onChange={e => {
-                setRole(e.target.value);
-                setSelectedLga(null); setSelectedWard(null); setSelectedPu('');
-              }} className="input-tactical" style={{ width: '100%', cursor: 'pointer' }}>
-                {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
-            </div>
-
-            {role !== 'HQ_OFFICER' && (
-              <>
-                <div style={{ padding: '12px', background: 'var(--input-bg)', borderRadius: 12, border: '1px dashed var(--border)' }}>
-                  <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1, marginBottom: 12 }}>JURISDICTIONAL BOUNDS</p>
-                  
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 6 }}>ASSIGNED LGA</label>
-                    <select 
-                      value={selectedLga?.id || ''} 
-                      onChange={e => {
-                        const lga = plateauTacticalMap.find(l => l.id === e.target.value);
-                        setSelectedLga(lga || null);
-                        setSelectedWard(null);
-                        setSelectedPu('');
-                      }} 
-                      className="input-tactical"
-                      style={{ width: '100%' }}
-                    >
-                      <option value="">Select LGA...</option>
-                      {plateauTacticalMap.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                    </select>
-                  </div>
-
-                  {(role === 'WARD_OFFICER' || role === 'POLLING_UNIT_OFFICER' || role === 'WARD_COMMAND' || role === 'UNIT_COMMAND') && selectedLga && (
-                    <div style={{ marginBottom: 12 }}>
-                      <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 6 }}>ASSIGNED WARD</label>
-                      <select 
-                        value={selectedWard?.id || ''} 
-                        onChange={e => {
-                          const ward = selectedLga.wards.find(w => w.id === e.target.value);
-                          setSelectedWard(ward || null);
-                          setSelectedPu('');
-                        }} 
-                        className="input-tactical"
-                        style={{ width: '100%' }}
-                      >
-                        <option value="">Select Ward...</option>
-                        {selectedLga.wards.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                      </select>
-                    </div>
-                  )}
-
-                  {(role === 'POLLING_UNIT_OFFICER' || role === 'UNIT_COMMAND') && selectedWard && (
-                    <div>
-                      <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 6 }}>ASSIGNED POLLING UNIT</label>
-                      <select value={selectedPu} onChange={e => setSelectedPu(e.target.value)} className="input-tactical" style={{ width: '100%' }}>
-                        <option value="">Select Polling Unit...</option>
-                        {selectedWard.pollingUnits.map(pu => <option key={pu} value={pu}>{pu}</option>)}
-                      </select>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-
-            <div>
-              <label style={{ display: 'block', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: 1.2, marginBottom: 6 }}>SECURE PIN / PASSWORD</label>
-              <input type="password" value={pin} onChange={e => setPin(e.target.value)} placeholder="Min 6 characters" className="input-tactical" style={{ width: '100%', letterSpacing: pin ? 6 : 0 }} />
-            </div>
-
-            <button onClick={provision} disabled={loading || !badgeId || !pin || (role !== 'HQ_OFFICER' && !selectedLga)}
-              className="btn-tactical btn-primary"
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {staff.map((s) => (
+            <div
+              key={s.id}
               style={{
-                padding: '13px',
-                width: '100%',
-                opacity: loading ? 0.6 : 1,
-                cursor: loading ? 'not-allowed' : 'pointer'
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '16px 20px',
+                background: 'var(--input-bg)',
+                border: '1px solid var(--border)',
+                borderRadius: 14,
               }}
             >
-              {loading ? <><Loader2 size={14} className="spin" /> PROVISIONING...</> : 'GENERATE CREDENTIALS'}
-            </button>
+              <div>
+                <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{s.full_name || s.email || 'Officer'}</h4>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.email} | Role: {s.role}</p>
+                <p style={{ fontSize: 10, color: 'var(--text-dim)' }}>LGA: {s.geo_lga || 'HQ'} | Ward: {s.geo_ward || 'N/A'}</p>
+              </div>
 
-            {msg && (
-              <p style={{ fontSize: 11, fontWeight: 800, color: msgType === 'ok' ? 'var(--success)' : 'var(--duress)', textAlign: 'center', lineHeight: 1.4 }}>{msg}</p>
-            )}
-          </div>
-        </div>
-
-        {/* Staff Table */}
-        <div className="tactical-panel glass" style={{ padding: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 20, gap: 12 }}>
-            <h3 style={{ fontSize: 13, fontWeight: 900, flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-              ACTIVE PERSONNEL
-              {staffLoading && <RefreshCw size={13} className="spin" color="var(--text-muted)" />}
-            </h3>
-            <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}
-              className="input-tactical"
-              style={{ padding: '6px 10px', fontSize: 11, fontWeight: 700, width: 'auto' }}>
-              <option value="ALL">ALL ROLES</option>
-              {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-            </select>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 800 }}>{filtered.length} REGISTERED</span>
-          </div>
-
-          {filtered.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-muted)' }}>
-              <Users size={36} style={{ opacity: 0.2, marginBottom: 12 }} />
-              <p style={{ fontSize: 13, fontWeight: 700 }}>No personnel in this category</p>
+              <span style={{ fontSize: 10, fontWeight: 900, background: 'var(--primary-dim)', color: 'var(--primary)', padding: '4px 10px', borderRadius: 20 }}>
+                {s.role}
+              </span>
             </div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['NAME / BADGE', 'ROLE', 'JURISDICTION', 'CREATED', 'ACTIONS'].map(h => (
-                    <th key={h} style={{ padding: '10px 8px', fontSize: 10, color: 'var(--text-muted)', fontWeight: 800, letterSpacing: 1, textAlign: h === 'ACTIONS' ? 'right' : 'left' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(s => (
-                  <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '14px 8px' }}>
-                      <div style={{ fontWeight: 900, fontSize: 13 }}>{s.displayName || s.badgeId || s.id}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{s.badgeId}</div>
-                    </td>
-                    <td style={{ padding: '14px 8px' }}>
-                      <span style={{ fontSize: 9, fontWeight: 800, padding: '4px 8px', borderRadius: 20, background: 'var(--primary-dim)', color: 'var(--primary)' }}>
-                        {s.role?.replace('_', ' ') || 'CITIZEN'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '14px 8px' }}>
-                      <div style={{ fontSize: 10, color: 'var(--text-primary)', fontWeight: 800 }}>{s.geo_lga || 'NATIONAL'}</div>
-                      {(s.geo_ward || s.geo_pu) && (
-                        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
-                          {s.geo_ward}{s.geo_pu ? ` · ${s.geo_pu}` : ''}
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ padding: '14px 8px', fontSize: 10, color: 'var(--text-muted)' }}>
-                      {s.createdAt ? new Date(s.createdAt).toLocaleDateString('en-GB') : '—'}
-                    </td>
-                    <td style={{ padding: '14px 8px', textAlign: 'right', display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                       <button onClick={() => handleForceLogout(s.id, s.displayName || s.id)}
-                         title="Force Logout from all devices"
-                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--warning)', padding: 4 }}>
-                         <LogOut size={14} />
-                       </button>
-                       <button onClick={() => handleDelete(s.id, s.displayName || s.id)}
-                         title="Remove from platform"
-                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--duress)', padding: 4 }}>
-                         <Trash2 size={15} />
-                       </button>
-                     </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          ))}
         </div>
       </div>
     </div>

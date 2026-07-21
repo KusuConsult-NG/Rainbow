@@ -1,16 +1,14 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-/// Documentation for this public member.
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
+import 'package:rainbow_app/providers/auth_provider.dart';
 
 final userProfileProvider = StreamProvider<Map<String, dynamic>?>((ref) {
-  final user = FirebaseAuth.instance.currentUser;
+  final user = ref.watch(authProvider).user;
   if (user == null) return Stream.value(null);
 
-  return FirebaseFirestore.instance
-      .collection('users')
-      .doc(user.uid)
-      .snapshots()
-      .map((snap) => snap.data());
+  return SupabaseConfig.client
+      .from('profiles')
+      .stream(primaryKey: ['id'])
+      .eq('id', user.id)
+      .map((list) => list.firstOrNull);
 });

@@ -27,8 +27,24 @@ class LocationService {
     bool serviceEnabled;
     LocationPermission permission;
 
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      // Location services are disabled.
+      return false;
+    }
+
+    // 1. First check if permission has ALREADY been granted at OS level
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.whileInUse ||
+        permission == LocationPermission.always) {
+      // Ensure disclosure flag is marked accepted since OS permission is active
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('location_disclosure_accepted', true);
+      return true;
+    }
+
     if (!force) {
-      // 1. Guard against native popups if user has not accepted prominent disclosure
+      // 2. Guard against native popups if user has not accepted prominent disclosure
       final prefs = await SharedPreferences.getInstance();
       final isDisclosureAccepted =
           prefs.getBool('location_disclosure_accepted') ?? false;
@@ -40,24 +56,22 @@ class LocationService {
       }
     }
 
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      // Location services are disabled.
-      return false;
-    }
-
-    permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        // Permissions are denied.
         return false;
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
-      // Permissions are denied forever.
       return false;
+    }
+
+    if (permission == LocationPermission.whileInUse ||
+        permission == LocationPermission.always) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('location_disclosure_accepted', true);
+      return true;
     }
 
     return true;

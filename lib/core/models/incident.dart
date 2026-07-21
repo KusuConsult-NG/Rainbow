@@ -1,6 +1,3 @@
-// ignore_for_file: invalid_annotation_target
-// ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 part 'incident.freezed.dart';

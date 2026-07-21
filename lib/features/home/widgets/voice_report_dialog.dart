@@ -140,7 +140,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
 
     try {
       final auth = ref.read(authProvider);
-      final userId = auth.user?.uid ?? 'anonymous';
+      final userId = auth.user?.id ?? 'anonymous';
 
       final alertId = await ref.read(alertServiceProvider).submitAlert(
             type: 'AI_VOICE_REPORT',

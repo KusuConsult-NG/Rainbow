@@ -1,8 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Documentation for this public member.
 
@@ -121,8 +121,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   void initAuth() {
-    // Safety net: if Firebase auth hasn't emitted within 10s (slow network / iOS 26),
-    // force isLoading=false so the router never stays frozen on splash forever.
     Future.delayed(const Duration(seconds: 5), () {
       if (mounted && state.isLoading) {
         debugPrint('[AUTH] Safety timeout — forcing isLoading=false');
@@ -130,7 +128,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
       }
     });
 
-    FirebaseAuth.instance.authStateChanges().listen((user) async {
+    SupabaseConfig.client.auth.onAuthStateChange.listen((data) async {
+      final session = data.session;
+      final user = session?.user;
       if (user == null) {
         state = AuthState(isLoading: false);
       } else {
@@ -145,27 +145,26 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = state.copyWith(isLoading: true, user: user);
 
     try {
-      // First try to get cached token result without forcing a network refresh/App Check verification
-      final idTokenResult = await user.getIdTokenResult().timeout(
-            const Duration(seconds: 5),
-            onTimeout: () =>
-                user.getIdTokenResult().timeout(const Duration(seconds: 5)),
-          );
-      final claims = idTokenResult.claims;
-
       var role = UserRole.citizen;
       var tier = ResponderTier.unknown;
       String? jurisdiction;
 
-      if (claims != null && claims.containsKey('role')) {
-        final roleStr = claims['role']?.toString() ?? '';
+      // Fetch profile from Supabase PostgreSQL profiles table
+      final profileDoc = await SupabaseConfig.client
+          .from('profiles')
+          .select()
+          .eq('id', user.id)
+          .maybeSingle();
+
+      final profile = profileDoc;
+      if (profile != null) {
+        final roleStr = profile['role']?.toString() ?? '';
         if (roleStr == 'CITIZEN' || roleStr == 'USER') {
           role = UserRole.citizen;
         } else {
           role = UserRole.responder;
-          // Align with HQ Dashboard segments
           if (roleStr.contains('HQ')) {
-            tier = ResponderTier.unknown; // HQ is special
+            tier = ResponderTier.unknown;
           } else if (roleStr.contains('LGA')) {
             tier = ResponderTier.lga;
           } else if (roleStr.contains('WARD')) {
@@ -173,37 +172,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
           } else if (roleStr.contains('UNIT') || roleStr.contains('POLLING')) {
             tier = ResponderTier.pu;
           }
-
-          jurisdiction = claims['jurisdiction'] as String?;
         }
-      } else if (user.phoneNumber != null) {
-        role = UserRole.citizen;
+        jurisdiction = profile['geo_lga'] as String?;
       }
 
-      // Fetch profile from Firestore (with timeout for slow review network)
-      final profileDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get()
-          .timeout(
-            const Duration(seconds: 6),
-            onTimeout: () => FirebaseFirestore.instance
-                .collection('users')
-                .doc(user.uid)
-                .get(const GetOptions(source: Source.cache)),
-          );
-      final profile = profileDoc.data();
-
-      // Load onboarding status
-      // Responders are provisioned by HQ — always treat as onboarded.
-      // Citizens rely on SharedPreferences + Firestore profileComplete flag.
       bool hasOnboarded;
       if (role == UserRole.responder) {
         hasOnboarded = true;
       } else {
         final prefs = await SharedPreferences.getInstance();
         hasOnboarded = prefs.getBool('hasOnboarded') ??
-            (profile?['profileComplete'] as bool? ?? false);
+            (profile?['profile_complete'] as bool? ?? false);
       }
 
       state = AuthState(
@@ -215,73 +194,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
         hasOnboarded: hasOnboarded,
         isLoading: false,
       );
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (e) {
-      debugPrint(
-        '[AUTH] Token resolving failed: $e. Falling back to email/profile resolution...',
-      );
-
-      // FALLBACK RESOLUTION GATE: Handles local debugging/App Check blockages gracefully
-      try {
-        var role = UserRole.citizen;
-        var tier = ResponderTier.unknown;
-        String? jurisdiction;
-
-        if (user.uid.startsWith('agent_') ||
-            (user.email != null &&
-                user.email!.endsWith('@operationrainbow.plateau.gov.ng'))) {
-          role = UserRole.responder;
-        }
-
-        final profileDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get()
-            .timeout(
-              const Duration(seconds: 3),
-              onTimeout: () => FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(user.uid)
-                  .get(const GetOptions(source: Source.cache)),
-            );
-
-        final profile = profileDoc.data();
-        if (profile != null) {
-          final roleStr = profile['role']?.toString() ?? '';
-          if (roleStr.isNotEmpty) {
-            if (roleStr == 'CITIZEN' || roleStr == 'USER') {
-              role = UserRole.citizen;
-            } else {
-              role = UserRole.responder;
-              if (roleStr.contains('HQ')) {
-                tier = ResponderTier.unknown;
-              } else if (roleStr.contains('LGA')) {
-                tier = ResponderTier.lga;
-              } else if (roleStr.contains('WARD')) {
-                tier = ResponderTier.ward;
-              } else if (roleStr.contains('UNIT') ||
-                  roleStr.contains('POLLING')) {
-                tier = ResponderTier.pu;
-              }
-            }
-          }
-          jurisdiction = profile['geo_lga'] as String?;
-        }
-
-        state = AuthState(
-          user: user,
-          role: role,
-          tier: tier,
-          jurisdiction: jurisdiction,
-          profile: profile,
-          hasOnboarded: true,
-          isLoading: false,
-        );
-        // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
-      } catch (fallbackErr) {
-        debugPrint('[AUTH] Fallback resolution failed: $fallbackErr');
-        state = state.copyWith(isLoading: false, role: UserRole.unknown);
-      }
+      debugPrint('[AUTH] Profile resolution failed: $e');
+      state = state.copyWith(isLoading: false, role: UserRole.citizen);
     }
   }
 
@@ -297,6 +212,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
   /// Documentation for this public member.
 
   Future<void> signOut() async {
-    await FirebaseAuth.instance.signOut();
+    await SupabaseConfig.client.auth.signOut();
   }
 }

@@ -1,13 +1,9 @@
-// ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
@@ -20,7 +16,7 @@ final alertServiceProvider = Provider<AlertService>((ref) {
 });
 
 /// Handles synchronization of Alert and Incident Report data
-/// between the local client and the Firestore `alerts` collection.
+/// between the local client and the Supabase `alerts` table.
 class AlertService {
   /// Documentation for this public member.
   AlertService([SqliteService? sqliteService])
@@ -28,7 +24,7 @@ class AlertService {
 
   final SqliteService _sqliteService;
 
-  /// PRD: Escrows to POLLING_UNIT, Priorities strictly enforced. Detects offline to execute SMS Fallback.
+  /// Submits an emergency SOS or incident alert to Supabase.
   Future<String?> submitAlert({
     required String type,
     required String description,
@@ -49,18 +45,14 @@ class AlertService {
 
     try {
       if (latitude == null || longitude == null) {
-        // Force location query for emergency alerts (bypasses check for prominent disclosure)
         final pos = await LocationService().getCurrentPosition(force: true);
         if (pos != null) {
           finalLat = pos.latitude;
           finalLng = pos.longitude;
         }
       }
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (e) {
-      debugPrint(
-        '[SYS_ERR] AlertService: Critical error resolving location: $e',
-      );
+      debugPrint('[SYS_ERR] AlertService: Error resolving location: $e');
     }
 
     final localId = 'OFFLINE_${DateTime.now().millisecondsSinceEpoch}';
@@ -68,27 +60,6 @@ class AlertService {
     try {
       final connectivityResult = await Connectivity().checkConnectivity();
       final isOffline = connectivityResult.contains(ConnectivityResult.none);
-
-      final alertData = <String, dynamic>{
-        'type': type,
-        'description': description,
-        'lat': finalLat,
-        'lng': finalLng,
-        'reportedByUid': reportedBy, // canonical field — all queries use this
-        'reportedBy':
-            reportedBy, // legacy alias — keep for HQ dashboard compatibility
-        'status': 'OPEN',
-        'priority': priority.name.toUpperCase(),
-        'assigned_to': 'POLLING_UNIT',
-        'geo_lga': geoLga,
-        'geo_ward': geoWard,
-        'geo_siec_ward': geoSiecWard,
-        'geo_pu': geoPu,
-        'mediaUrls': attachments ?? <String>[],
-        'sync_status': isOffline ? 'PENDING' : syncStatus,
-        'reportedAt': DateTime.now().toIso8601String(),
-        'local_id': localId,
-      };
 
       if (isOffline) {
         await _sqliteService.enqueueAlert(
@@ -111,160 +82,80 @@ class AlertService {
           }
         }
 
-        // Start local tracking
         await BackgroundTrackingService().startSosTracking(localId, reportedBy);
         return localId;
       }
 
-      final isVoiceReport = type == 'AI_VOICE_REPORT';
-      final callable = isVoiceReport
-          ? FirebaseFunctions.instance.httpsCallable('triageAndCreateVoiceAlert')
-          : FirebaseFunctions.instance.httpsCallable('createAlert');
-      
-      final payload = isVoiceReport
-          ? {
-              'text': description,
-              'lat': finalLat,
-              'lng': finalLng,
-            }
-          : alertData;
+      final alertPayload = <String, dynamic>{
+        'local_id': localId,
+        'type': type,
+        'description': description,
+        'latitude': finalLat,
+        'longitude': finalLng,
+        'status': 'PENDING',
+        'severity': priority.name.toUpperCase(),
+        'geo_lga': geoLga,
+        'geo_ward': geoWard,
+        'geo_pu': geoPu,
+      };
 
-      final result = await callable.call<Map<String, dynamic>>(payload);
-      final data = result.data;
+      final response = await SupabaseConfig.client
+          .from('alerts')
+          .insert(alertPayload)
+          .select()
+          .single();
 
-      final alertId = data['alertId'] as String?;
+      final alertId = response['id'] as String?;
       if (alertId != null) {
         await BackgroundTrackingService().startSosTracking(alertId, reportedBy);
         return alertId;
       }
 
-      debugPrint('[SYS_WARN] AlertService: Server response missing alertId');
       return null;
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (e) {
-      debugPrint(
-        '[CRITICAL_SERVICE_ERR] AlertService Submission Failed: $e. Using direct fallback.',
-      );
-      try {
-        final alertData = <String, dynamic>{
-          'type': type,
-          'description': description,
-          'lat': finalLat,
-          'lng': finalLng,
-          'reportedByUid': reportedBy,
-          'reportedBy': reportedBy,
-          'status': 'OPEN',
-          'priority': priority.name.toUpperCase(),
-          'assigned_to': 'POLLING_UNIT',
-          'geo_lga': geoLga,
-          'geo_ward': geoWard,
-          'geo_pu': geoPu,
-          'mediaUrls': attachments ?? <String>[],
-          'sync_status': 'COMPLETED',
-          'createdAt': FieldValue.serverTimestamp(),
-          'reportedAt': FieldValue.serverTimestamp(),
-        };
-        final docRef = await FirebaseFirestore.instance
-            .collection('alerts')
-            .add(alertData);
-        await BackgroundTrackingService()
-            .startSosTracking(docRef.id, reportedBy);
-        return docRef.id;
-        // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
-      } catch (fallbackErr) {
-        debugPrint(
-          '[CRITICAL_SERVICE_ERR] Fallback Submission Failed: $fallbackErr',
-        );
-        return null;
-      }
+      debugPrint('[CRITICAL_SERVICE_ERR] AlertService Submission Failed: $e');
+      return null;
     }
   }
 
   /// Replays pending alerts once connectivity is restored.
-  /// Returns a map of local_id -> real_id for media remapping.
   Future<Map<String, String>> flushOfflineQueue() async {
     final mappings = <String, String>{};
     try {
       final offlineQueue = await _sqliteService.getPendingAlerts();
-
       if (offlineQueue.isEmpty) return mappings;
 
       debugPrint('[SYNC] Recovering ${offlineQueue.length} offline alerts...');
       for (final row in offlineQueue) {
         final localId = row['local_id'] as String;
         try {
-          final isVoiceReport = row['type'] == 'AI_VOICE_REPORT';
-          final recoveryCallable = isVoiceReport
-              ? FirebaseFunctions.instance.httpsCallable('triageAndCreateVoiceAlert')
-              : FirebaseFunctions.instance.httpsCallable('createAlert');
+          final payload = <String, dynamic>{
+            'local_id': localId,
+            'type': row['type'],
+            'description': row['description'],
+            'latitude': row['latitude'],
+            'longitude': row['longitude'],
+            'severity': row['priority'],
+            'status': 'PENDING',
+          };
 
-          final payload = isVoiceReport
-              ? {
-                  'text': row['description'],
-                  'lat': row['lat'],
-                  'lng': row['lng'],
-                }
-              : {
-                  'type': row['type'],
-                  'description': row['description'],
-                  'lat': row['lat'],
-                  'lng': row['lng'],
-                  'reportedByUid': 'unknown',
-                  'reportedBy': 'unknown',
-                  'status': 'OPEN',
-                  'priority': row['priority'],
-                  'assigned_to': 'POLLING_UNIT',
-                  'sync_status': 'RECOVERED',
-                  'reportedAt': row['created_at'],
-                  'local_id': localId,
-                };
+          final response = await SupabaseConfig.client
+              .from('alerts')
+              .insert(payload)
+              .select()
+              .single();
 
-          try {
-            final result = await recoveryCallable.call<Map<String, dynamic>>(payload);
-            final realId = result.data['alertId'] as String?;
-
-            if (realId != null) {
-              mappings[localId] = realId;
-              await _sqliteService.deleteAlert(localId);
-            }
-            debugPrint(
-              '[SYNC_SUCCESS] Alert $localId synchronized as $realId.',
-            );
-          } catch (e) {
-            debugPrint(
-              '[SYNC_FALLBACK] Cloud Function Failed. Using direct fallback for $localId: $e',
-            );
-            final alertData = <String, dynamic>{
-              'type': row['type'],
-              'description': row['description'],
-              'lat': row['lat'],
-              'lng': row['lng'],
-              'reportedByUid': 'unknown',
-              'reportedBy': 'unknown',
-              'status': 'OPEN',
-              'priority': row['priority'],
-              'assigned_to': 'POLLING_UNIT',
-              'sync_status': 'COMPLETED',
-              'createdAt': FieldValue.serverTimestamp(),
-              'reportedAt': FieldValue.serverTimestamp(),
-            };
-            final docRef = await FirebaseFirestore.instance
-                .collection('alerts')
-                .add(alertData);
-            final realId = docRef.id;
-            mappings[localId] = realId;
-            await _sqliteService.deleteAlert(localId);
-            debugPrint(
-              '[SYNC_SUCCESS_FALLBACK] Alert $localId synchronized as $realId.',
-            );
+          final alertId = response['id'] as String?;
+          if (alertId != null) {
+            mappings[localId] = alertId;
+            await _sqliteService.markAlertSynced(localId);
           }
         } catch (e) {
-          debugPrint('[SYNC_RETRY] Failed to sync alert $localId: $e');
-          await _sqliteService.updateSyncStatus(localId, 'FAILED');
+          debugPrint('[SYNC_ERR] Alert sync failed for $localId: $e');
         }
       }
     } catch (e) {
-      debugPrint('[CRITICAL_SYNC_ERR] Failed to flush offline queue: $e');
+      debugPrint('[SYNC_ERR] Flush offline queue failed: $e');
     }
     return mappings;
   }

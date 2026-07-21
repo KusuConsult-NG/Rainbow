@@ -1,16 +1,16 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/services/user_service.dart';
 
 /// Documentation for this public member.
-final systemAlertsStreamProvider = StreamProvider<QuerySnapshot>((ref) {
-  return FirebaseFirestore.instance
-      .collection('system_alerts')
-      .where('active', isEqualTo: true)
-      .snapshots();
+final systemAlertsStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
+  return SupabaseConfig.client
+      .from('system_alerts')
+      .stream(primaryKey: ['id'])
+      .eq('is_active', true);
 });
 
 /// Documentation for this public member.
@@ -33,19 +33,15 @@ class _SystemAlertListenerState extends ConsumerState<SystemAlertListener> {
   @override
   Widget build(BuildContext context) {
     final userProfile = ref.watch(userProfileProvider).value;
+    final systemAlertsAsync = ref.watch(systemAlertsStreamProvider);
 
     return Stack(
       children: [
         widget.child,
-        StreamBuilder<QuerySnapshot>(
-          stream: ref.watch(systemAlertsStreamProvider.stream),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-              return const SizedBox.shrink();
-            }
+        systemAlertsAsync.when(
+          data: (allAlerts) {
+            if (allAlerts.isEmpty) return const SizedBox.shrink();
 
-            // FILTER LOGIC: Match against user jurisdiction
-            final allAlerts = snapshot.data!.docs;
             final userRole = userProfile?['role'] as String? ?? 'CITIZEN';
             final assignedLgas =
                 List<String>.from((userProfile?['geo_lgas'] as List?) ?? []);
@@ -53,9 +49,9 @@ class _SystemAlertListenerState extends ConsumerState<SystemAlertListener> {
                 List<String>.from((userProfile?['geo_wards'] as List?) ?? []);
 
             final relevantAlerts = allAlerts.where((doc) {
-              final data = doc.data()! as Map<String, dynamic>;
-              final targetType = data['target_type'] as String? ?? 'ALL';
-              final targetValue = data['target_value'] as String? ?? '';
+              final targetType = doc['target_type'] as String? ?? 'ALL';
+              final targetValue = doc['target_value'] as String? ?? '';
+              final alertId = doc['id'] as String;
 
               if (userRole == 'HQ_OFFICER' || targetType == 'ALL') return true;
 
@@ -66,18 +62,17 @@ class _SystemAlertListenerState extends ConsumerState<SystemAlertListener> {
                 return assignedWards.contains(targetValue);
               }
 
-              return mounted && !_dismissedAlerts.contains(doc.id);
+              return mounted && !_dismissedAlerts.contains(alertId);
             }).toList();
 
             if (relevantAlerts.isEmpty) return const SizedBox.shrink();
 
             final firstDoc = relevantAlerts.first;
-            final alertId = firstDoc.id;
-            final alert = firstDoc.data()! as Map<String, dynamic>;
+            final alertId = firstDoc['id'] as String;
             final severity =
-                (alert['severity'] as String? ?? 'INFO').toUpperCase();
+                (firstDoc['severity'] as String? ?? 'INFO').toUpperCase();
             final message =
-                alert['message']?.toString() ?? 'Operational Advisory Active';
+                firstDoc['message']?.toString() ?? 'Operational Advisory Active';
 
             var bgColor = AppColors.info;
             var icon = Icons.info_outline_rounded;
@@ -159,6 +154,8 @@ class _SystemAlertListenerState extends ConsumerState<SystemAlertListener> {
               ),
             );
           },
+          loading: () => const SizedBox.shrink(),
+          error: (_, __) => const SizedBox.shrink(),
         ),
       ],
     );

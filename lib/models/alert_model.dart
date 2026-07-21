@@ -1,5 +1,3 @@
-// ignore_for_file: invalid_annotation_target
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 part 'alert_model.freezed.dart';
@@ -100,31 +98,20 @@ abstract class AlertModel with _$AlertModel {
 
   factory AlertModel.fromJson(Map<String, dynamic> json) =>
       _$AlertModelFromJson(json);
-
-  /// Documentation for this public member.
-
-  factory AlertModel.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>?;
-    if (data == null) throw Exception('Document data was null');
-    return AlertModel.fromJson({
-      ...data,
-      'id': doc.id,
-    });
-  }
 }
 
 DateTime _timestampFromJson(dynamic timestamp) {
-  if (timestamp is Timestamp) return timestamp.toDate();
-  if (timestamp is String) return DateTime.parse(timestamp);
+  if (timestamp is String) return DateTime.tryParse(timestamp) ?? DateTime.now();
+  if (timestamp is int) return DateTime.fromMillisecondsSinceEpoch(timestamp);
   return DateTime.now();
 }
 
-Timestamp _timestampToJson(DateTime date) => Timestamp.fromDate(date);
+String _timestampToJson(DateTime date) => date.toIso8601String();
 
 DateTime? _timestampFromJsonNullable(dynamic timestamp) {
   if (timestamp == null) return null;
   return _timestampFromJson(timestamp);
 }
 
-Timestamp? _timestampToJsonNullable(DateTime? date) =>
-    date != null ? Timestamp.fromDate(date) : null;
+String? _timestampToJsonNullable(DateTime? date) =>
+    date?.toIso8601String();

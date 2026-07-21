@@ -1,4 +1,3 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -77,12 +76,11 @@ class TacticalDrawer extends ConsumerWidget {
 
 /// Documentation for this public member.
 
-class DrawerHeaderWidget extends StatelessWidget {
-  /// Documentation for this public member.
+class DrawerHeaderWidget extends ConsumerWidget {
   const DrawerHeaderWidget({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(24, 80, 24, 40),
@@ -90,11 +88,12 @@ class DrawerHeaderWidget extends StatelessWidget {
         color: AppColors.primary,
         border: Border(bottom: BorderSide(color: AppColors.primaryDark)),
       ),
-      child: StreamBuilder(
-        stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snapshot) {
-          final user = snapshot.data;
-          final name = user?.displayName ?? 'OPERATIVE';
+      child: Builder(
+        builder: (context) {
+          final authState = ref.watch(authProvider);
+          final user = authState.user;
+          final profile = authState.profile;
+          final name = profile?['full_name'] as String? ?? user?.email ?? 'OPERATIVE';
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -129,7 +128,7 @@ class DrawerHeaderWidget extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                user?.email ?? 'ID: RAINBOW-ALPHA',
+                user?.email ?? 'ID: 08000000000',
                 style: GoogleFonts.outfit(
                   color: Colors.white.withValues(alpha: 0.7),
                   fontSize: 11,
