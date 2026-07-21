@@ -1600,7 +1600,7 @@ class _DispatchDialog extends StatefulWidget {
 class _DispatchDialogState extends State<_DispatchDialog> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _responders = [];
-  String? _selectedResponderId;
+  final Set<String> _selectedResponderIds = {};
   bool _isSubmitting = false;
 
   @override
@@ -1628,22 +1628,24 @@ class _DispatchDialogState extends State<_DispatchDialog> {
   }
 
   Future<void> _submitDispatch() async {
-    if (_selectedResponderId == null) return;
+    if (_selectedResponderIds.isEmpty) return;
     setState(() => _isSubmitting = true);
 
     try {
       final alertId = widget.alertDoc['id'] as String?;
       final userEmail = SupabaseConfig.client.auth.currentUser?.email ?? 'COMMANDER';
-      final selectedObj = _responders.firstWhere((r) => r['id'] == _selectedResponderId);
-      final officerName = selectedObj['full_name'] ?? selectedObj['badge_number'] ?? 'Officer';
+      
+      final selectedObjs = _responders.where((r) => _selectedResponderIds.contains(r['id'])).toList();
+      final teamNames = selectedObjs.map((r) => '${r['full_name'] ?? 'Officer'} [${r['badge_number'] ?? r['role']}]').join(', ');
+      final leadOfficerId = _selectedResponderIds.first;
 
       final existingNotes = widget.alertDoc['ai_summary'] as String? ?? '';
-      final dispatchNote = '[UNIT DISPATCHED] Assigned to $officerName by $userEmail';
+      final dispatchNote = '[MULTI-UNIT DISPATCH] Assigned Team (${_selectedResponderIds.length} Officers): $teamNames by $userEmail';
 
       if (alertId != null) {
         await SupabaseConfig.client.from('alerts').update({
           'status': 'DISPATCHED',
-          'assigned_to': _selectedResponderId,
+          'assigned_to': leadOfficerId,
           'ai_summary': existingNotes.isEmpty ? dispatchNote : '$existingNotes\n$dispatchNote',
           'updated_at': DateTime.now().toIso8601String(),
         }).eq('id', alertId);
@@ -1664,7 +1666,7 @@ class _DispatchDialogState extends State<_DispatchDialog> {
         side: const BorderSide(color: AppColors.primary, width: 1.5),
       ),
       title: Text(
-        'DISPATCH FIELD UNIT',
+        'DISPATCH TACTICAL TEAM',
         style: GoogleFonts.outfit(
           fontSize: 16,
           fontWeight: FontWeight.w900,
@@ -1690,23 +1692,25 @@ class _DispatchDialogState extends State<_DispatchDialog> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'Select an active field officer to assign to this incident:',
+                        'Select one or multiple active field officers to assign to this mission:',
                         style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 11),
                       ),
                       const SizedBox(height: 12),
                       ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 200),
+                        constraints: const BoxConstraints(maxHeight: 220),
                         child: ListView.builder(
                           shrinkWrap: true,
                           itemCount: _responders.length,
                           itemBuilder: (ctx, idx) {
                             final r = _responders[idx];
                             final rId = r['id'] as String;
-                            final isSel = rId == _selectedResponderId;
-                            return ListTile(
+                            final isSel = _selectedResponderIds.contains(rId);
+                            return CheckboxListTile(
                               dense: true,
+                              value: isSel,
+                              activeColor: AppColors.primary,
                               selected: isSel,
-                              selectedTileColor: AppColors.primary.withValues(alpha: 0.2),
+                              selectedTileColor: AppColors.primary.withValues(alpha: 0.15),
                               title: Text(
                                 (r['full_name'] as String? ?? 'Officer') +
                                     (r['badge_number'] != null ? ' [${r['badge_number']}]' : ''),
@@ -1719,7 +1723,15 @@ class _DispatchDialogState extends State<_DispatchDialog> {
                                 'Role: ${r['role'] ?? 'RESPONDER'} · ${r['geo_lga'] ?? 'JOS'}',
                                 style: GoogleFonts.inter(fontSize: 10, color: AppColors.textDim),
                               ),
-                              onTap: () => setState(() => _selectedResponderId = rId),
+                              onChanged: (val) {
+                                setState(() {
+                                  if (val == true) {
+                                    _selectedResponderIds.add(rId);
+                                  } else {
+                                    _selectedResponderIds.remove(rId);
+                                  }
+                                });
+                              },
                             );
                           },
                         ),
@@ -1733,15 +1745,20 @@ class _DispatchDialogState extends State<_DispatchDialog> {
           child: Text('CANCEL', style: GoogleFonts.outfit(color: AppColors.textDim)),
         ),
         ElevatedButton(
-          onPressed: _isSubmitting || _selectedResponderId == null ? null : _submitDispatch,
+          onPressed: _isSubmitting || _selectedResponderIds.isEmpty ? null : _submitDispatch,
           style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
           child: _isSubmitting
               ? const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
-              : Text('DISPATCH NOW', style: GoogleFonts.outfit(fontWeight: FontWeight.w900, color: Colors.white)),
+              : Text(
+                  _selectedResponderIds.isEmpty
+                      ? 'SELECT OFFICERS'
+                      : 'DISPATCH (${_selectedResponderIds.length} UNITS)',
+                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white),
+                ),
         ),
       ],
     );
