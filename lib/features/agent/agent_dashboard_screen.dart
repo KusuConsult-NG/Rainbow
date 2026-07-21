@@ -492,14 +492,88 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
         ),
       );
     }
+
+    final criticalCount = alerts.where((a) => a['severity'] == 'CRITICAL' || a['status'] == 'DURESS').length;
+    final escalatedCount = alerts.where((a) => a['status'] == 'ESCALATED').length;
+
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 120, 16, 40),
-      itemCount: alerts.length,
+      itemCount: alerts.length + 1,
       itemBuilder: (context, index) {
-        final alert = alerts[index];
+        if (index == 0) {
+          return Container(
+            margin: const EdgeInsets.only(bottom: 20),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: criticalCount > 0
+                    ? [const Color(0xFF3B0000), const Color(0xFF1F0000)]
+                    : [const Color(0xFF0F172A), const Color(0xFF020617)],
+              ),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: criticalCount > 0 ? AppColors.danger : AppColors.primary,
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: (criticalCount > 0 ? AppColors.danger : AppColors.primary).withValues(alpha: 0.2),
+                  blurRadius: 10,
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: (criticalCount > 0 ? AppColors.danger : AppColors.primary).withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    criticalCount > 0 ? Icons.warning_amber_rounded : Icons.psychology_rounded,
+                    color: criticalCount > 0 ? AppColors.danger : AppColors.primary,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        criticalCount > 0 ? 'CRITICAL TACTICAL THREAT ALERT' : 'SMART TACTICAL AI ADVISORY',
+                        style: GoogleFonts.outfit(
+                          color: criticalCount > 0 ? AppColors.danger : AppColors.primary,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        criticalCount > 0
+                            ? '$criticalCount Critical Incidents require immediate field unit dispatch or HQ escalation.'
+                            : 'All systems active. $escalatedCount escalated alerts pending command review.',
+                        style: GoogleFonts.inter(
+                          color: AppColors.textSecondary,
+                          fontSize: 11,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final alert = alerts[index - 1];
         return _MissionCard(
           alert: alert,
-          onTap: () => _showActionDialog(alerts[index]),
+          onTap: () => _showActionDialog(alert),
+          onQuickAction: () => _showActionDialog(alert),
         );
       },
     );
@@ -534,20 +608,33 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
   }
 }
 
-class _MissionCard extends StatelessWidget {
-  const _MissionCard({required this.alert, required this.onTap});
+class _MissionCard extends ConsumerWidget {
+  const _MissionCard({
+    required this.alert,
+    required this.onTap,
+    required this.onQuickAction,
+  });
   final Map<String, dynamic> alert;
   final VoidCallback onTap;
+  final VoidCallback onQuickAction;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final auth = ref.watch(authProvider);
+    final assignedTier = auth.tier == ResponderTier.pu
+        ? 'UNIT'
+        : (auth.tier == ResponderTier.ward ? 'WARD' : 'LGA');
+
     final status = alert['status'] ?? 'OPEN';
+    final severity = alert['severity'] ?? 'MEDIUM';
     final uid = SupabaseConfig.client.auth.currentUser?.id;
-    final isMine = alert['assignedToUid'] == uid;
+    final isMine = alert['assignedToUid'] == uid || alert['assigned_to'] == uid;
 
     final statusColors = {
       'OPEN': AppColors.warning,
+      'PENDING': AppColors.warning,
       'ACTIVE': AppColors.warning,
+      'ESCALATED': AppColors.warning,
       'DISPATCHED': AppColors.primary,
       'ACKNOWLEDGED': AppColors.success,
       'ON_ROUTE': AppColors.accent,
@@ -563,11 +650,14 @@ class _MissionCard extends StatelessWidget {
         color: AppColors.surfaceContainerLow,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: isMine
-              ? AppColors.primary.withValues(alpha: 0.3)
-              : AppColors.outline,
-          width: isMine ? 2 : 1,
+          color: severity == 'CRITICAL'
+              ? AppColors.error
+              : (isMine ? AppColors.primary : AppColors.outline),
+          width: severity == 'CRITICAL' || isMine ? 2 : 1,
         ),
+        boxShadow: severity == 'CRITICAL'
+            ? [BoxShadow(color: AppColors.error.withValues(alpha: 0.2), blurRadius: 10)]
+            : null,
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(24),
@@ -576,7 +666,7 @@ class _MissionCard extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -592,9 +682,14 @@ class _MissionCard extends StatelessWidget {
                               label: status.toString().toUpperCase(),
                               color: color,
                             ),
+                            if (severity == 'CRITICAL')
+                              const _StatusBadge(
+                                label: 'CRITICAL',
+                                color: AppColors.error,
+                              ),
                             if (isMine)
                               const _StatusBadge(
-                                label: 'PERSONAL',
+                                label: 'ASSIGNED TO YOU',
                                 color: AppColors.primary,
                               ),
                           ],
@@ -615,7 +710,7 @@ class _MissionCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   Text(
                     alert['type']?.toString().toUpperCase() ??
                         'UNKNOWN MISSION',
@@ -626,7 +721,7 @@ class _MissionCard extends StatelessWidget {
                       letterSpacing: 0.5,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
                     (alert['description'] as String?) ??
                         'No narrative provided',
@@ -639,8 +734,6 @@ class _MissionCard extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 20),
-                  const Divider(color: AppColors.white05, height: 1),
                   const SizedBox(height: 16),
                   Row(
                     children: [
@@ -649,7 +742,7 @@ class _MissionCard extends StatelessWidget {
                         color: AppColors.primary,
                         size: 16,
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           '${alert['geo_lga'] ?? 'PLATEAU'} · ${alert['geo_ward'] ?? 'HQ'} · ${alert['geo_pu'] ?? 'UNIT'}'
@@ -662,10 +755,84 @@ class _MissionCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const Icon(
-                        Icons.chevron_right_rounded,
-                        color: AppColors.textDim,
-                        size: 20,
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(color: AppColors.white05, height: 1),
+                  const SizedBox(height: 14),
+                  // Direct Tactical Action Bar on Every Card!
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: onQuickAction,
+                          icon: const Icon(Icons.bolt_rounded, size: 16),
+                          label: Text(
+                            'ENGAGE',
+                            style: GoogleFonts.outfit(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 11,
+                              letterSpacing: 1,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (assignedTier == 'WARD' || assignedTier == 'LGA') ...[
+                        const SizedBox(width: 8),
+                        IconButton(
+                          tooltip: 'Dispatch Unit',
+                          onPressed: () async {
+                            await showDialog<bool>(
+                              context: context,
+                              barrierDismissible: true,
+                              builder: (ctx) => _DispatchDialog(alertDoc: alert),
+                            );
+                          },
+                          icon: const Icon(Icons.local_police_rounded, color: AppColors.primary, size: 20),
+                          style: IconButton.styleFrom(
+                            backgroundColor: AppColors.primary.withValues(alpha: 0.15),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'Escalate Mission',
+                        onPressed: () async {
+                          await showDialog<bool>(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (ctx) => _EscalationDialog(
+                              alertDoc: alert,
+                              assignedTier: assignedTier,
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.arrow_upward_rounded, color: AppColors.warning, size: 20),
+                        style: IconButton.styleFrom(
+                          backgroundColor: AppColors.warning.withValues(alpha: 0.15),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'Secure Chat',
+                        onPressed: () {
+                          context.push(AppRoutes.secureChat, extra: alert);
+                        },
+                        icon: const Icon(Icons.chat_rounded, color: AppColors.accent, size: 20),
+                        style: IconButton.styleFrom(
+                          backgroundColor: AppColors.accent.withValues(alpha: 0.15),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
                       ),
                     ],
                   ),
