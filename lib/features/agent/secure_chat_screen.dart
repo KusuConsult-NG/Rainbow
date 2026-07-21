@@ -1,9 +1,8 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
@@ -12,11 +11,11 @@ import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
 class SecureChatScreen extends ConsumerStatefulWidget {
   /// Documentation for this public member.
-  const SecureChatScreen({required this.alertDoc, super.key});
+  const SecureChatScreen({required this.alertData, super.key});
 
   /// Documentation for this public member.
 
-  final DocumentSnapshot alertDoc;
+  final Map<String, dynamic> alertData;
 
   @override
   ConsumerState<SecureChatScreen> createState() => _SecureChatScreenState();
@@ -32,134 +31,119 @@ class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
     _controller.clear();
 
     final auth = ref.read(authProvider);
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'unknown';
+    final user = auth.user;
+    if (user == null) return;
 
-    await FirebaseFirestore.instance
-        .collection('alerts')
-        .doc(widget.alertDoc.id)
-        .collection('messages')
-        .add({
-      'text': text,
-      'senderUid': uid,
-      'senderName': auth.profile?['displayName'] ?? 'Tactical Unit',
-      'senderRole': auth.role.toString(),
-      'timestamp': FieldValue.serverTimestamp(),
-    });
+    final alertId = widget.alertData['id'] as String;
+
+    try {
+      await SupabaseConfig.client.from('chat_messages').insert({
+        'alert_id': alertId,
+        'sender_id': user.id,
+        'sender_name': auth.profile?['full_name'] ?? 'Tactical Unit',
+        'sender_role': auth.role.name.toUpperCase(),
+        'message': text,
+      });
+    } catch (e) {
+      debugPrint('[CHAT_ERR] Secure chat insert failed: $e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final alertId = widget.alertData['id'] as String;
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const RainbowAppBar(
-        title: 'SECURE COMM LINK',
-        subtitle: 'ENCRYPTED TACTICAL CHANNEL',
+      appBar: RainbowAppBar(
+        title: 'TACTICAL COMMS CHANNEL',
+        subtitle: 'INCIDENT REF #${alertId.substring(0, 8)}',
       ),
       body: Column(
         children: [
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('alerts')
-                  .doc(widget.alertDoc.id)
-                  .collection('messages')
-                  .orderBy('timestamp', descending: true)
-                  .snapshots(),
+            child: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: SupabaseConfig.client
+                  .from('chat_messages')
+                  .stream(primaryKey: ['id'])
+                  .eq('alert_id', alertId),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        'Failed to load chat: ${snapshot.error}',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.outfit(
-                          color: AppColors.emergency,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                    child: Text(
+                      'Error loading channel messages',
+                      style: GoogleFonts.outfit(color: AppColors.danger),
                     ),
                   );
                 }
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final messages = snapshot.data!.docs;
+
+                final messages = snapshot.data!;
                 if (messages.isEmpty) {
                   return Center(
                     child: Text(
-                      'CHANNEL SECURED. WAITING FOR TRANSMISSION.',
+                      'NO SECURE MESSAGES RECORDED',
                       style: GoogleFonts.outfit(
                         color: AppColors.textDim,
-                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                        letterSpacing: 1.5,
                       ),
                     ),
                   );
                 }
+
+                final myUid = ref.watch(authProvider).user?.id;
+
                 return ListView.builder(
-                  reverse: true,
                   padding: const EdgeInsets.all(16),
                   itemCount: messages.length,
-                  itemBuilder: (context, i) {
-                    final msg = messages[i].data()! as Map<String, dynamic>;
-                    final isMe = msg['senderUid'] == uid;
+                  itemBuilder: (context, index) {
+                    final data = messages[index];
+                    final isMe = data['sender_id'] == myUid;
+                    final text = data['message'] as String? ?? '';
+                    final senderName = data['sender_name'] as String? ?? 'Unit';
 
                     return Align(
-                      alignment:
-                          isMe ? Alignment.centerRight : Alignment.centerLeft,
+                      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(16),
-                        constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width * 0.75,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
                         ),
                         decoration: BoxDecoration(
                           color: isMe
                               ? AppColors.primary.withValues(alpha: 0.2)
                               : AppColors.surfaceContainer,
-                          borderRadius: BorderRadius.circular(16).copyWith(
-                            bottomRight: isMe
-                                // ignore: use_named_constants, Stylistic override to match system design
-                                ? const Radius.circular(0)
-                                : const Radius.circular(16),
-                            bottomLeft: !isMe
-                                // ignore: use_named_constants, Stylistic override to match system design
-                                ? const Radius.circular(0)
-                                : const Radius.circular(16),
-                          ),
+                          borderRadius: BorderRadius.circular(16),
                           border: Border.all(
                             color: isMe
-                                ? AppColors.primary.withValues(alpha: 0.5)
+                                ? AppColors.primary.withValues(alpha: 0.4)
                                 : AppColors.outline,
                           ),
                         ),
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment: isMe
+                              ? CrossAxisAlignment.end
+                              : CrossAxisAlignment.start,
                           children: [
                             Text(
-                              isMe
-                                  ? 'YOU'
-                                  : (msg['senderName']
-                                          ?.toString()
-                                          .toUpperCase() ??
-                                      'UNKNOWN'),
+                              isMe ? 'YOU' : senderName.toUpperCase(),
                               style: GoogleFonts.outfit(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w900,
-                                color: isMe
-                                    ? AppColors.primary
-                                    : AppColors.textDim,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                color: isMe ? AppColors.primary : AppColors.textDim,
                                 letterSpacing: 1,
                               ),
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 4),
                             Text(
-                              msg['text']?.toString() ?? '',
-                              style: GoogleFonts.outfit(
+                              text,
+                              style: GoogleFonts.inter(
                                 fontSize: 14,
-                                color: AppColors.onSurface,
+                                color: AppColors.onBackground,
                               ),
                             ),
                           ],
@@ -172,14 +156,9 @@ class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
             ),
           ),
           Container(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              16,
-              16,
-              MediaQuery.of(context).padding.bottom + 16,
-            ),
+            padding: const EdgeInsets.all(16),
             decoration: const BoxDecoration(
-              color: AppColors.surface,
+              color: AppColors.surfaceContainer,
               border: Border(top: BorderSide(color: AppColors.outline)),
             ),
             child: Row(
@@ -187,18 +166,16 @@ class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
-                    style: GoogleFonts.outfit(color: AppColors.onSurface),
+                    style: GoogleFonts.inter(color: AppColors.onBackground),
                     decoration: InputDecoration(
-                      hintText: 'Transmit message...',
-                      hintStyle: GoogleFonts.outfit(color: AppColors.textDim),
+                      hintText: 'Transmit tactical telemetry...',
+                      hintStyle: GoogleFonts.inter(color: AppColors.textDim),
                       border: InputBorder.none,
                     ),
-                    onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
                 IconButton(
-                  icon:
-                      const Icon(Icons.send_rounded, color: AppColors.primary),
+                  icon: const Icon(Icons.send_rounded, color: AppColors.primary),
                   onPressed: _sendMessage,
                 ),
               ],

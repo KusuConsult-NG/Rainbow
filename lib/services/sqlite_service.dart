@@ -178,4 +178,14 @@ class SqliteService {
       whereArgs: [id],
     );
   }
+
+  Future<void> markAlertSynced(String localId) async {
+    final db = await database;
+    await db.update(
+      'offline_queue',
+      {'sync_status': 'SYNCED'},
+      where: 'local_id = ?',
+      whereArgs: [localId],
+    );
+  }
 }

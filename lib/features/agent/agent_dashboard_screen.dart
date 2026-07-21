@@ -2,10 +2,7 @@
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart' hide Query;
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -23,82 +20,32 @@ import 'package:rainbow_app/shared/widgets/broadcast_hud.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
 
 /// Documentation for this public member.
-final alertsStreamProvider = StreamProvider<QuerySnapshot>((ref) {
+final alertsStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
   final auth = ref.watch(authProvider);
   final profile = auth.profile ?? {};
   final role = profile['role'] as String? ?? '';
-  final uid = auth.user?.uid ?? 'unknown';
-  Query<Map<String, dynamic>> query =
-      FirebaseFirestore.instance.collection('alerts');
+  final geoLga = profile['geo_lga'] as String?;
+  final geoWard = profile['geo_ward'] as String?;
+  final geoPu = profile['geo_pu'] as String?;
 
-  // Server-side filter based on roles & scopes to avoid client-side load
-  if (role == 'LGA_COMMAND' || role == 'LGA_OFFICER') {
-    final assignedLgas =
-        (profile['geo_lgas'] as List<dynamic>?)?.cast<String>() ??
-            [profile['geo_lga'] as String? ?? profile['lga'] as String?]
-                .whereType<String>()
-                .toList();
-    if (assignedLgas.isNotEmpty && !assignedLgas.contains('ALL')) {
-      if (assignedLgas.length == 1) {
-        query = query.where(
-          Filter.or(
-            Filter('assignedToUid', isEqualTo: uid),
-            Filter('geo_lga', isEqualTo: assignedLgas.first),
-          ),
-        );
-      } else {
-        query = query.where(
-          Filter.or(
-            Filter('assignedToUid', isEqualTo: uid),
-            Filter('geo_lga', whereIn: assignedLgas),
-          ),
-        );
-      }
-    }
-  } else if (role == 'WARD_COMMAND' || role == 'WARD_OFFICER') {
-    final assignedWards =
-        (profile['geo_wards'] as List<dynamic>?)?.cast<String>() ??
-            [profile['geo_ward'] as String? ?? profile['ward'] as String?]
-                .whereType<String>()
-                .toList();
-    if (assignedWards.isNotEmpty && !assignedWards.contains('ALL')) {
-      if (assignedWards.length == 1) {
-        query = query.where(
-          Filter.or(
-            Filter('assignedToUid', isEqualTo: uid),
-            Filter('geo_ward', isEqualTo: assignedWards.first),
-          ),
-        );
-      } else {
-        query = query.where(
-          Filter.or(
-            Filter('assignedToUid', isEqualTo: uid),
-            Filter('geo_ward', whereIn: assignedWards),
-          ),
-        );
-      }
-    }
-  } else if (role == 'POLLING_UNIT_COMMAND' ||
-      role == 'POLLING_UNIT_OFFICER' ||
-      role == 'AGENT' ||
-      role == 'RESPONDER') {
-    final geoPu = profile['geo_pu'] as String? ??
-        profile['pu'] as String? ??
-        'UNKNOWN';
-    query = query.where(
-      Filter.or(
-        Filter('assignedToUid', isEqualTo: uid),
-        Filter('geo_pu', isEqualTo: geoPu),
-      ),
-    );
+  final builder = SupabaseConfig.client
+      .from('alerts')
+      .stream(primaryKey: ['id']);
+
+  if ((role == 'LGA_COMMAND' || role == 'LGA_OFFICER') && geoLga != null && geoLga != 'ALL') {
+    return builder.eq('geo_lga', geoLga);
+  } else if ((role == 'WARD_COMMAND' || role == 'WARD_OFFICER') && geoWard != null && geoWard != 'ALL') {
+    return builder.eq('geo_ward', geoWard);
+  } else if ((role == 'UNIT_COMMAND' || role == 'POLLING_UNIT_COMMAND' || role == 'AGENT' || role == 'RESPONDER') && geoPu != null && geoPu != 'ALL') {
+    return builder.eq('geo_pu', geoPu);
   }
 
-  return query.snapshots();
+  return builder;
 });
 
 /// Documentation for this public member.
-final trackingStreamProvider = StreamProvider<DatabaseEvent>((ref) {
-  return FirebaseDatabase.instance.ref('tracking').onValue;
+final trackingStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
+  return SupabaseConfig.client.from('telemetry').stream(primaryKey: ['user_id']);
 });
 
 /// Documentation for this public member.
@@ -236,7 +183,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
     );
   }
 
-  void _showActionDialog(DocumentSnapshot alertDoc) {
+  void _showActionDialog(Map<String, dynamic> alertDoc) {
     unawaited(
       showModalBottomSheet(
         context: context,
@@ -344,10 +291,10 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
               children: [
                 const BroadcastHud(),
                 Expanded(
-                  child: StreamBuilder<QuerySnapshot>(
+                  child: StreamBuilder<List<Map<String, dynamic>>>(
                     stream: ref.watch(alertsStreamProvider.stream),
                     builder: (context, alertSnapshot) {
-                      return StreamBuilder<DatabaseEvent>(
+                      return StreamBuilder<List<Map<String, dynamic>>>(
                         stream: ref.watch(trackingStreamProvider.stream),
                         builder: (context, trackingSnapshot) {
                           if (alertSnapshot.connectionState ==
@@ -383,9 +330,8 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
                                     profile['geo_pu'] as String? ??
                                         profile['pu'] as String?,
                                   ].whereType<String>().toList();
-                          final allDocs = alertSnapshot.data?.docs ?? [];
-                          final filteredAlerts = allDocs.where((doc) {
-                            final alert = doc.data()! as Map<String, dynamic>;
+                          final allDocs = alertSnapshot.data ?? [];
+                          final filteredAlerts = allDocs.where((alert) {
                             if (alert['assignedToUid'] == uid) return true;
 
 
@@ -418,51 +364,38 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
                             // HQ or special commands fall back to true
                             return true;
                           }).toList()
-                            ..sort((a, b) {
-                              final aData = a.data() as Map<String, dynamic>?;
-                              final bData = b.data() as Map<String, dynamic>?;
-                              final aTime = aData?['reportedAt'] as Timestamp?;
-                              final bTime = bData?['reportedAt'] as Timestamp?;
-                              if (aTime == null && bTime == null) return 0;
-                              if (aTime == null) return 1;
-                              if (bTime == null) return -1;
-                              return bTime.compareTo(aTime); // descending order
-                            });
+                              ..sort((a, b) {
+                                final aTime = a['created_at'] as String? ?? '';
+                                final bTime = b['created_at'] as String? ?? '';
+                                return bTime.compareTo(aTime);
+                              });
 
                           // Process Responder Telemetry
                           final responderMarkers = <Marker>[];
-                          if (trackingSnapshot.hasData &&
-                              trackingSnapshot.data!.snapshot.value != null) {
-                            final rawValue =
-                                trackingSnapshot.data!.snapshot.value;
-                            if (rawValue is Map) {
-                              final data = Map<dynamic, dynamic>.from(rawValue);
-                              for (final entry in data.entries) {
-                                final userId = entry.key;
-                                final telemetry = entry.value;
-                                if (userId == uid) {
-                                  continue; // Don't show self as responder marker
-                                }
-                                if (telemetry is! Map) continue;
-                                final t = Map<String, dynamic>.from(telemetry);
-                                final lat = t['lat'] as double?;
-                                final lng = t['lng'] as double?;
-                                if (lat != null && lng != null) {
-                                  responderMarkers.add(
-                                    Marker(
-                                      point: LatLng(lat, lng),
-                                      width: 40,
-                                      height: 40,
-                                      child: _ResponderMarker(
-                                        status: (t['status'] as String?) ??
-                                            'ONLINE',
-                                        isEmergency: t['mode'] == 'sos',
-                                      ),
+                          if (trackingSnapshot.hasData) {
+                            final telemetryList = trackingSnapshot.data ?? [];
+                            for (final telemetry in telemetryList) {
+                              final userId = telemetry['user_id'];
+                              if (userId == uid) {
+                                continue; // Don't show self as responder marker
+                              }
+                              final lat = (telemetry['latitude'] ?? telemetry['lat']) as double?;
+                              final lng = (telemetry['longitude'] ?? telemetry['lng']) as double?;
+                              if (lat != null && lng != null) {
+                                responderMarkers.add(
+                                  Marker(
+                                    point: LatLng(lat, lng),
+                                    width: 40,
+                                    height: 40,
+                                    child: _ResponderMarker(
+                                      status: (telemetry['status'] as String?) ??
+                                          'ONLINE',
+                                      isEmergency: telemetry['mode'] == 'sos',
                                     ),
-                                  );
-                                }
-                              } // end for
-                            } // end if (rawValue is Map)
+                                  ),
+                                );
+                              }
+                            }
                           }
 
                           return AnimatedSwitcher(
@@ -501,73 +434,13 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
     );
   }
 
-  Stream<QuerySnapshot> _buildAlertsStream(Map<String, dynamic> profile) {
-    final role = profile['role'] as String? ?? '';
-    Query<Map<String, dynamic>> query =
-        FirebaseFirestore.instance.collection('alerts');
-
-    // 1. Check staff role for scope limitation to prevent PERMISSION_DENIED
-    if (role == 'LGA_COMMAND' || role == 'LGA_OFFICER') {
-      final assignedLgas =
-          (profile['geo_lgas'] as List<dynamic>?)?.cast<String>() ??
-              [profile['geo_lga'] as String? ?? profile['lga'] as String?]
-                  .whereType<String>()
-                  .toList();
-      if (assignedLgas.isNotEmpty && !assignedLgas.contains('ALL')) {
-        if (assignedLgas.length == 1) {
-          query = query.where('geo_lga', isEqualTo: assignedLgas.first);
-        } else {
-          query = query.where('geo_lga', whereIn: assignedLgas);
-        }
-      }
-    } else if (role == 'WARD_COMMAND' || role == 'WARD_OFFICER') {
-      final assignedWards =
-          (profile['geo_wards'] as List<dynamic>?)?.cast<String>() ??
-              [profile['geo_ward'] as String? ?? profile['ward'] as String?]
-                  .whereType<String>()
-                  .toList();
-      if (assignedWards.isNotEmpty && !assignedWards.contains('ALL')) {
-        if (assignedWards.length == 1) {
-          query = query.where('geo_ward', isEqualTo: assignedWards.first);
-        } else {
-          query = query.where('geo_ward', whereIn: assignedWards);
-        }
-      }
-    } else if (role == 'UNIT_COMMAND' ||
-        role == 'POLLING_OFFICER' ||
-        role == 'POLLING_UNIT_OFFICER') {
-      final assignedPus =
-          (profile['geo_pus'] as List<dynamic>?)?.cast<String>() ??
-              [profile['geo_pu'] as String? ?? profile['pu'] as String?]
-                  .whereType<String>()
-                  .toList();
-      if (assignedPus.isNotEmpty && !assignedPus.contains('ALL')) {
-        if (assignedPus.length == 1) {
-          query = query.where('geo_pu', isEqualTo: assignedPus.first);
-        } else {
-          query = query.where('geo_pu', whereIn: assignedPus);
-        }
-      }
-    }
-
-    // 2. Filter by status (using whereIn since we only have isEqualTo/whereIn for geo filters above, they never execute together)
-    query = query.where(
-      'status',
-      whereIn: [
-        'OPEN',
-        'ACTIVE',
-        'DISPATCHED',
-        'ACKNOWLEDGED',
-        'ON_ROUTE',
-        'ON_SITE',
-        'DURESS',
-      ],
-    );
-
-    return query.snapshots();
+  Stream<List<Map<String, dynamic>>> _buildAlertsStream(Map<String, dynamic> profile) {
+    return SupabaseConfig.client
+        .from('alerts')
+        .stream(primaryKey: ['id']);
   }
 
-  Widget _buildList(List<DocumentSnapshot> alerts) {
+  Widget _buildList(List<Map<String, dynamic>> alerts) {
     if (alerts.isEmpty) {
       return Center(
         child: Column(
@@ -592,7 +465,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
       padding: const EdgeInsets.fromLTRB(16, 120, 16, 40),
       itemCount: alerts.length,
       itemBuilder: (context, index) {
-        final alert = alerts[index].data()! as Map<String, dynamic>;
+        final alert = alerts[index];
         return _MissionCard(
           alert: alert,
           onTap: () => _showActionDialog(alerts[index]),
@@ -601,12 +474,11 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
     );
   }
 
-  Widget _buildMap(List<DocumentSnapshot> alerts, List<Marker> responders) {
+  Widget _buildMap(List<Map<String, dynamic>> alerts, List<Marker> responders) {
     final alertMarkers = alerts
-        .map((doc) {
-          final data = doc.data()! as Map<String, dynamic>;
-          final lat = data['lat'] as double?;
-          final lng = data['lng'] as double?;
+        .map((data) {
+          final lat = (data['latitude'] ?? data['lat']) as double?;
+          final lng = (data['longitude'] ?? data['lng']) as double?;
           if (lat == null || lng == null) return null;
           final isEmergency =
               data['type']?.toString().contains('EMERGENCY') ?? false;
@@ -615,7 +487,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
             width: 60,
             height: 60,
             child: GestureDetector(
-              onTap: () => _showActionDialog(doc),
+              onTap: () => _showActionDialog(data),
               child: _PulseMarker(isEmergency: isEmergency),
             ),
           );
@@ -639,7 +511,7 @@ class _MissionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = alert['status'] ?? 'OPEN';
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final uid = SupabaseConfig.client.auth.currentUser?.id;
     final isMine = alert['assignedToUid'] == uid;
 
     final statusColors = {
@@ -777,9 +649,11 @@ class _MissionCard extends StatelessWidget {
 
   String _formatTime(dynamic timestamp) {
     if (timestamp == null) return 'T-00:00';
-    if (timestamp is Timestamp) {
-      final dt = timestamp.toDate();
-      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')} HRS';
+    if (timestamp is String) {
+      final dt = DateTime.tryParse(timestamp);
+      if (dt != null) {
+        return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')} HRS';
+      }
     }
     return 'RECENT';
   }
@@ -830,16 +704,16 @@ class _TacticalActionSheet extends StatelessWidget {
     required this.onAction,
     required this.verifyAndExecute,
   });
-  final DocumentSnapshot alertDoc;
+  final Map<String, dynamic> alertDoc;
   final String assignedTier;
   final VoidCallback onAction;
   final Future<void> Function(VoidCallback) verifyAndExecute;
 
   @override
   Widget build(BuildContext context) {
-    final alert = alertDoc.data()! as Map<String, dynamic>;
+    final alert = alertDoc;
     final status = alert['status'] ?? 'OPEN';
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'STAFF';
+    final uid = SupabaseConfig.client.auth.currentUser?.id ?? 'STAFF';
     final isAssignedToMe = alert['assignedToUid'] == uid;
 
     var buttonLabel = 'DEPLOY';
@@ -911,42 +785,25 @@ class _TacticalActionSheet extends StatelessWidget {
                 return;
               }
               try {
+                final alertId = alertDoc['id'] as String?;
+                final uid = SupabaseConfig.client.auth.currentUser?.id;
+
                 if (nextStatus == 'ACKNOWLEDGED') {
-                  final type = (alertDoc.data() as Map<String, dynamic>?)?['type'] as String? ?? 'UNKNOWN';
-                  final desc = (alertDoc.data() as Map<String, dynamic>?)?['description'] as String? ?? 'No details provided.';
+                  final type = alertDoc['type'] as String? ?? 'UNKNOWN';
+                  final desc = alertDoc['description'] as String? ?? 'No details provided.';
                   final speechText = "Mission accepted. Emergency type: $type. Threat details: $desc.";
                   unawaited(TtsService.instance.speak(speechText));
                 }
-                final func = FirebaseFunctions.instance
-                    .httpsCallable('agentUpdateMissionStatus');
-                await func.call<dynamic>({
-                  'alertId': alertDoc.id,
-                  'nextStatus': nextStatus,
-                });
-                // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
-              } catch (e) {
-                // FALLBACK: Direct Firestore update to bypass Firebase Functions IAM errors for testing
-                try {
-                  final uid = FirebaseAuth.instance.currentUser?.uid;
-                  await FirebaseFirestore.instance
-                      .collection('alerts')
-                      .doc(alertDoc.id)
-                      .update({
+
+                if (alertId != null) {
+                  await SupabaseConfig.client.from('alerts').update({
                     'status': nextStatus,
-                    if ((status == 'OPEN' || status == 'ACTIVE') && uid != null)
-                      'assignedToUid': uid,
-                  });
-                  // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
-                } catch (fallbackErr) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('FALLBACK FAILED: $fallbackErr'),
-                        backgroundColor: AppColors.error,
-                      ),
-                    );
-                  }
+                    if ((status == 'OPEN' || status == 'ACTIVE' || status == 'PENDING') && uid != null)
+                      'assigned_to': uid,
+                  }).eq('id', alertId);
                 }
+              } catch (e) {
+                debugPrint('[TACTICAL_SHEET_ERR] Update status failed: $e');
               }
             }),
           ),
@@ -1037,7 +894,7 @@ class _EscalationDialog extends StatefulWidget {
     required this.assignedTier,
   });
 
-  final DocumentSnapshot alertDoc;
+  final Map<String, dynamic> alertDoc;
   final String assignedTier;
 
   @override
@@ -1258,24 +1115,27 @@ class _EscalationDialogState extends State<_EscalationDialog> {
     if (widget.assignedTier == 'LGA') targetTier = 'HQ';
 
     try {
-      final func =
-          FirebaseFunctions.instance.httpsCallable('adminEscalateAlert');
-      await func.call<dynamic>({
-        'alertId': widget.alertDoc.id,
-        'targetTier': targetTier,
-        'reason': _selectedReason,
-        'notes': _notesController.text.trim(),
-      });
+      final alertId = widget.alertDoc['id'] as String?;
+      final userEmail = SupabaseConfig.client.auth.currentUser?.email ?? 'STAFF';
+
+      if (alertId != null) {
+        await SupabaseConfig.client
+            .from('alerts')
+            .update({
+              'status': 'ESCALATED',
+              'tier_escalated': targetTier,
+              'escalated_by': userEmail,
+            })
+            .eq('id', alertId);
+      }
+
       if (mounted) {
         Navigator.pop(context, true);
       }
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (e) {
-      debugPrint(
-        '[ESCALATION_ERROR] Cloud function failed: $e. Falling back...',
-      );
+      debugPrint('[ESCALATION_ERROR] Failed to escalate: $e');
       try {
-        final email = FirebaseAuth.instance.currentUser?.email ?? 'UNKNOWN';
+        final email = SupabaseConfig.client.auth.currentUser?.email ?? 'UNKNOWN';
         final newEvent = {
           'type': 'ESCALATION',
           'actor': email,
@@ -1288,14 +1148,9 @@ class _EscalationDialogState extends State<_EscalationDialog> {
           'reason': _selectedReason,
           'notes': _notesController.text.trim(),
         };
-        await FirebaseFirestore.instance
-            .collection('alerts')
-            .doc(widget.alertDoc.id)
-            .update({
+        await SupabaseConfig.client.from('alerts').update({
           'assigned_to': targetTier,
-          'escalated_at': FieldValue.serverTimestamp(),
-          'timeline': FieldValue.arrayUnion([newEvent]),
-        });
+        }).eq('id', widget.alertDoc['id']);
         if (mounted) {
           Navigator.pop(context, true);
         }

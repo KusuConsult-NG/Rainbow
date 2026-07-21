@@ -1,5 +1,4 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -208,7 +207,7 @@ final appRouter = Provider<GoRouter>((ref) {
       final splashFinished = ref.read(splashFinishedProvider);
 
       debugPrint(
-        '🧭 [ROUTER] Redirect check: path=${state.matchedLocation}, auth=${auth.user?.uid}, splashFinished=$splashFinished, role=${auth.role}',
+        '🧭 [ROUTER] Redirect check: path=${state.matchedLocation}, auth=${auth.user?.id}, splashFinished=$splashFinished, role=${auth.role}',
       );
 
       final result = _getRedirectResult(auth, splashFinished, state);
@@ -263,25 +262,25 @@ final appRouter = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.missionIntel,
             pageBuilder: (c, s) {
-              final doc = s.extra as DocumentSnapshot?;
-              if (doc == null) return _fade(s, const AgentDashboardScreen());
-              return _slide(s, MissionIntelScreen(alertDoc: doc));
+              final data = s.extra as Map<String, dynamic>?;
+              if (data == null) return _fade(s, const AgentDashboardScreen());
+              return _slide(s, MissionIntelScreen(alertData: data));
             },
           ),
           GoRoute(
             path: AppRoutes.missionResolution,
             pageBuilder: (c, s) {
-              final doc = s.extra as DocumentSnapshot?;
-              if (doc == null) return _fade(s, const AgentDashboardScreen());
-              return _slide(s, MissionResolutionScreen(alertDoc: doc));
+              final data = s.extra as Map<String, dynamic>?;
+              if (data == null) return _fade(s, const AgentDashboardScreen());
+              return _slide(s, MissionResolutionScreen(alertData: data));
             },
           ),
           GoRoute(
             path: AppRoutes.secureChat,
             pageBuilder: (c, s) {
-              final doc = s.extra as DocumentSnapshot?;
-              if (doc == null) return _fade(s, const AgentDashboardScreen());
-              return _slide(s, SecureChatScreen(alertDoc: doc));
+              final data = s.extra as Map<String, dynamic>?;
+              if (data == null) return _fade(s, const AgentDashboardScreen());
+              return _slide(s, SecureChatScreen(alertData: data));
             },
           ),
           GoRoute(
@@ -321,7 +320,7 @@ final appRouter = Provider<GoRouter>((ref) {
                 s,
                 ReportDetailsScreen(
                   categoryInfo: data['categoryInfo'] as AlertCategoryInfo,
-                  subType: data['subType'] as String,
+                  subType: data['subType'] as String? ?? '',
                 ),
               );
             },

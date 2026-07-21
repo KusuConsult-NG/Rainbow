@@ -53,13 +53,65 @@ class _OnboardingPermissionsScreenState
         );
       }
 
+      final locStatus = await Permission.location.status;
+      final locAlwaysStatus = await Permission.locationAlways.status;
+
+      if (!locStatus.isGranted && !locAlwaysStatus.isGranted) {
+        if (mounted) {
+          showDialog<void>(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: AppColors.background,
+              title: Text(
+                'LOCATION REQUIRED',
+                style: GoogleFonts.outfit(
+                  color: AppColors.emergency,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              content: Text(
+                'Operation Rainbow requires location access to map emergency alerts to local responders. You cannot proceed without granting location permission.',
+                style: GoogleFonts.outfit(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                  },
+                  child: Text(
+                    'RETRY',
+                    style: GoogleFonts.outfit(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    Navigator.of(ctx).pop();
+                    await openAppSettings();
+                  },
+                  child: Text(
+                    'OPEN SETTINGS',
+                    style: GoogleFonts.outfit(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
+      }
+
       await Permission.sms.request();
       await Permission.microphone.request();
       await Permission.ignoreBatteryOptimizations.request();
 
-      final locStatus = isDisclosureAccepted
-          ? await Permission.locationAlways.status
-          : PermissionStatus.denied;
       final smsStatus = await Permission.sms.status;
       final micStatus = await Permission.microphone.status;
 
@@ -68,7 +120,7 @@ class _OnboardingPermissionsScreenState
       final perms = ref.read(permissionsProvider);
 
       // Force explicit provider state matching based on actual native permissions status
-      if (locStatus.isGranted) {
+      if (locStatus.isGranted || locAlwaysStatus.isGranted) {
         if (!perms.location) {
           ref.read(permissionsProvider.notifier).toggle('location');
         }

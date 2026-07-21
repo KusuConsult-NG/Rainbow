@@ -56,3 +56,9 @@ ios/Runner/GoogleService-Info.plist
 # HQ Dashboard secrets
 hq-dashboard/.env.local
 hq-dashboard/.env
+
+# Temporary Agent Brain & Scratch Artifacts
+brain/
+scratch/
+*.txt
+.firebase/

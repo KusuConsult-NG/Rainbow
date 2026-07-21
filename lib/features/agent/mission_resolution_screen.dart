@@ -1,24 +1,16 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
-import 'package:rainbow_app/services/speech_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
-/// Documentation for this public member.
-
 class MissionResolutionScreen extends ConsumerStatefulWidget {
-  /// Documentation for this public member.
-  const MissionResolutionScreen({required this.alertDoc, super.key});
+  const MissionResolutionScreen({required this.alertData, super.key});
 
-  /// Documentation for this public member.
-
-  final DocumentSnapshot alertDoc;
+  final Map<String, dynamic> alertData;
 
   @override
   ConsumerState<MissionResolutionScreen> createState() =>
@@ -29,99 +21,30 @@ class _MissionResolutionScreenState
     extends ConsumerState<MissionResolutionScreen> {
   final _controller = TextEditingController();
   bool _isSubmitting = false;
-  bool _isListening = false;
-
-  Future<void> _toggleDictation() async {
-    if (_isListening) {
-      await SpeechService.instance.stopListening();
-      setState(() => _isListening = false);
-    } else {
-      await SpeechService.instance.initialize();
-      await SpeechService.instance.startListening(
-        onResult: (text) {
-          setState(() {
-            _controller.text = text;
-          });
-        },
-      );
-      setState(() => _isListening = true);
-    }
-  }
 
   @override
   void dispose() {
     _controller.dispose();
-    if (_isListening) {
-      SpeechService.instance.stopListening();
-    }
     super.dispose();
   }
 
   Future<void> _submitResolution() async {
-    if (_controller.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('NARRATIVE REPORT REQUIRED'),
-          backgroundColor: AppColors.error,
-        ),
-      );
-      return;
-    }
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
 
     setState(() => _isSubmitting = true);
 
     try {
-      final func =
-          FirebaseFunctions.instance.httpsCallable('agentUpdateMissionStatus');
-      await func.call<dynamic>({
-        'alertId': widget.alertDoc.id,
-        'nextStatus': 'RESOLVED',
-        'resolutionNotes': _controller.text.trim(),
-      });
+      final alertId = widget.alertData['id'] as String;
+      await SupabaseConfig.client.from('alerts').update({
+        'status': 'RESOLVED',
+        'citizen_feedback': text,
+      }).eq('id', alertId);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('MISSION SECURED AND RESOLVED'),
-            backgroundColor: AppColors.success,
-          ),
-        );
-        context.pop();
-      }
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
+      if (!mounted) return;
+      context.pop();
     } catch (e) {
-      // FALLBACK: Direct Firestore update to bypass Firebase Functions IAM errors for testing
-      try {
-        final uid = FirebaseAuth.instance.currentUser?.uid;
-        await FirebaseFirestore.instance
-            .collection('alerts')
-            .doc(widget.alertDoc.id)
-            .update({
-          'status': 'RESOLVED',
-          'resolutionNotes': _controller.text.trim(),
-          'resolved_by': uid,
-          'resolved_at': FieldValue.serverTimestamp(),
-        });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('MISSION RESOLVED (FALLBACK MODE)'),
-              backgroundColor: AppColors.warning,
-            ),
-          );
-          context.pop();
-        }
-        // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
-      } catch (fallbackErr) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('FAILED TO RESOLVE MISSION: $fallbackErr'),
-              backgroundColor: AppColors.error,
-            ),
-          );
-        }
-      }
+      debugPrint('[RESOLUTION_ERR] Resolution update failed: $e');
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -132,135 +55,58 @@ class _MissionResolutionScreenState
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: const RainbowAppBar(
-        title: 'RESOLVE MISSION',
-        subtitle: 'TACTICAL AFTER-ACTION REPORT',
+        title: 'MISSION DEBRIEF & RESOLUTION',
+        subtitle: 'CLOSING OPERATIONAL REPORT',
       ),
-      body: SingleChildScrollView(
+      body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'AAR NARRATIVE (REQUIRED)',
+              'RESOLUTION NOTES & AFTER-ACTION DEBRIEF',
               style: GoogleFonts.outfit(
-                color: AppColors.textDim,
-                fontWeight: FontWeight.w900,
                 fontSize: 12,
-                letterSpacing: 2,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textDim,
+                letterSpacing: 1.5,
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _controller,
-              maxLines: 8,
-              style:
-                  GoogleFonts.outfit(color: AppColors.onSurface, fontSize: 16),
+              maxLines: 5,
+              style: GoogleFonts.inter(color: AppColors.onBackground),
               decoration: InputDecoration(
-                hintText:
-                    'Detail the final outcome of this tactical engagement...',
-                hintStyle: GoogleFonts.outfit(
-                  color: AppColors.textDim.withValues(alpha: 0.5),
-                ),
+                hintText: 'Enter after-action tactical notes...',
+                hintStyle: GoogleFonts.inter(color: AppColors.textDim),
                 filled: true,
                 fillColor: AppColors.surfaceContainer,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(color: AppColors.outline),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: AppColors.outline),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide:
-                      const BorderSide(color: AppColors.primary, width: 2),
                 ),
               ),
             ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                    decoration: BoxDecoration(
-                      color: _isListening
-                          ? AppColors.emergency.withValues(alpha: 0.1)
-                          : AppColors.surfaceContainer,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: _isListening ? AppColors.emergency : AppColors.outline,
-                        width: 1,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _isListening
-                              ? Icons.fiber_manual_record_rounded
-                              : Icons.mic_rounded,
-                          color: _isListening ? AppColors.emergency : AppColors.primary,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            _isListening
-                                ? 'DICTATING REPORT... SPEAK NOW'
-                                : 'TAP MIC ICON TO DICTATE AFTER-ACTION REPORT',
-                            style: GoogleFonts.outfit(
-                              color: _isListening ? AppColors.emergency : AppColors.textDim,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: _toggleDictation,
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: _isListening ? AppColors.emergency : AppColors.primary,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              _isListening ? Icons.stop_rounded : Icons.mic_none_rounded,
-                              color: Colors.white,
-                              size: 16,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
-              height: 56,
               child: ElevatedButton(
                 onPressed: _isSubmitting ? null : _submitResolution,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.safe,
-                  foregroundColor: Colors.white,
+                  backgroundColor: AppColors.success,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  elevation: 0,
                 ),
-                child: _isSubmitting
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : Text(
-                        'FINALIZE & CLOSE MISSION',
-                        style: GoogleFonts.outfit(
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.5,
-                          fontSize: 14,
-                        ),
-                      ),
+                child: Text(
+                  _isSubmitting ? 'TRANSMITTING...' : 'MARK MISSION AS RESOLVED',
+                  style: GoogleFonts.outfit(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
               ),
             ),
           ],

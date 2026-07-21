@@ -1,5 +1,4 @@
 // ignore_for_file: invalid_annotation_target
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 part 'app_user.freezed.dart';
@@ -33,13 +32,13 @@ abstract class AppUser with _$AppUser {
       _$AppUserFromJson(json);
 
   static DateTime? _timestampFromJson(dynamic timestamp) {
-    if (timestamp is Timestamp) return timestamp.toDate();
     if (timestamp is String) return DateTime.tryParse(timestamp);
+    if (timestamp is int) return DateTime.fromMillisecondsSinceEpoch(timestamp);
     return null;
   }
 
   static dynamic _timestampToJson(DateTime? date) {
     if (date == null) return null;
-    return Timestamp.fromDate(date);
+    return date.toIso8601String();
   }
 }

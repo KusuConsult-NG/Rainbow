@@ -2,8 +2,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -38,70 +37,20 @@ class _SafetyFeedbackDialogState extends State<_SafetyFeedbackDialog> {
   Future<void> _submitFeedback(String status) async {
     setState(() => _saving = true);
     try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final uid = SupabaseConfig.client.auth.currentUser?.id;
 
-      // Write to the alert doc if we have an ID
-      if (widget.alertId != null) {
-        if (widget.alertId!.startsWith('OFFLINE_')) {
-          // It's offline, so update the offline queue
-          final prefs = await SharedPreferences.getInstance();
-          final offlineQueue =
-              prefs.getStringList('offline_alerts_queue') ?? <String>[];
-          final updatedQueue = <String>[];
-          var foundInQueue = false;
-          for (final jsonStr in offlineQueue) {
-            try {
-              final alertData = jsonDecode(jsonStr) as Map<String, dynamic>;
-              if (alertData['local_id'] == widget.alertId) {
-                alertData['citizenFeedback'] = status;
-                alertData['feedbackAt'] = DateTime.now().toIso8601String();
-                alertData['feedbackUid'] = uid;
-                foundInQueue = true;
-              }
-              updatedQueue.add(jsonEncode(alertData));
-              // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
-            } catch (_) {
-              updatedQueue.add(jsonStr);
-            }
-          }
-          await prefs.setStringList('offline_alerts_queue', updatedQueue);
-
-          // If it was already synced and removed from the queue, update it in Firestore
-          if (!foundInQueue) {
-            final snap = await FirebaseFirestore.instance
-                .collection('alerts')
-                .where('local_id', isEqualTo: widget.alertId)
-                .limit(1)
-                .get();
-            if (snap.docs.isNotEmpty) {
-              await snap.docs.first.reference.update({
-                'citizenFeedback': status,
-                'feedbackAt': FieldValue.serverTimestamp(),
-                'feedbackUid': uid,
-              });
-            }
-          }
-        } else {
-          await FirebaseFirestore.instance
-              .collection('alerts')
-              .doc(widget.alertId)
-              .update({
-            'citizenFeedback': status,
-            'feedbackAt': FieldValue.serverTimestamp(),
-            'feedbackUid': uid,
-          });
-        }
+      if (widget.alertId != null && !widget.alertId!.startsWith('OFFLINE_')) {
+        await SupabaseConfig.client.from('alerts').update({
+          'citizen_feedback': status,
+          'feedback_at': DateTime.now().toIso8601String(),
+        }).eq('id', widget.alertId!);
       }
 
-      // Also write to user profile for quick HQ lookup
+      // Also write to user profile in Supabase
       if (uid != null) {
-        await FirebaseFirestore.instance.collection('users').doc(uid).set(
-          {
-            'lastFeedback': status,
-            'lastFeedbackAt': FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true),
-        );
+        await SupabaseConfig.client.from('profiles').update({
+          'last_feedback': status,
+        }).eq('id', uid);
       }
       // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (e) {

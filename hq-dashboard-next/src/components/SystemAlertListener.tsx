@@ -1,22 +1,31 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { AlertTriangle, Info, ShieldAlert, X } from 'lucide-react';
 
 export default function SystemAlertListener() {
   const [activeAlert, setActiveAlert] = useState<any>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'system_alerts'), where('active', '==', true));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      if (!snap.empty) {
-        setActiveAlert({ id: snap.docs[0].id, ...snap.docs[0].data() });
-      } else {
-        setActiveAlert(null);
+    const fetchActiveAlert = async () => {
+      const { data } = await supabase.from('system_alerts').select('*').order('created_at', { ascending: false }).limit(1);
+      if (data && data.length > 0) {
+        setActiveAlert(data[0]);
       }
-    });
-    return () => unsubscribe();
+    };
+
+    fetchActiveAlert();
+
+    const channel = supabase
+      .channel('public:system_alerts')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'system_alerts' }, () => {
+        fetchActiveAlert();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   if (!activeAlert) return null;
@@ -29,7 +38,7 @@ export default function SystemAlertListener() {
       position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)',
       zIndex: 9999, minWidth: 400, maxWidth: '80%',
       background: isCritical ? 'var(--duress)' : 'var(--accent)',
-      color: 'white', padding: '16px 24px', borderRadius: 16,
+      color: '#ffffff', padding: '16px 24px', borderRadius: 16,
       boxShadow: `0 10px 40px ${isCritical ? 'var(--duress)' : 'var(--accent)'}66`,
       display: 'flex', alignItems: 'center', gap: 20,
       border: '2px solid rgba(255,255,255,0.2)',
@@ -48,7 +57,7 @@ export default function SystemAlertListener() {
       </div>
       <button 
         onClick={() => setActiveAlert(null)}
-        style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', opacity: 0.5 }}
+        style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer', opacity: 0.5 }}
       >
         <X size={20} />
       </button>

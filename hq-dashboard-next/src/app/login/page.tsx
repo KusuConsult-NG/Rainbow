@@ -1,7 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 import { ShieldAlert, Loader2, Eye, EyeOff, Lock, User as UserIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -30,7 +29,12 @@ export default function LoginPage() {
       const emailDomain = badgeId.toLowerCase().includes('@')
         ? ''
         : '@operationrainbow.plateau.gov.ng';
-      await signInWithEmailAndPassword(auth, `${badgeId.toLowerCase()}${emailDomain}`, pin);
+      const email = `${badgeId.toLowerCase()}${emailDomain}`;
+      const { error: authErr } = await supabase.auth.signInWithPassword({
+        email,
+        password: pin,
+      });
+      if (authErr) throw authErr;
       
       // Set session cookie for Next.js middleware compatibility in local development
       document.cookie = `__session=true; path=/; max-age=86400; SameSite=Strict; Secure`;

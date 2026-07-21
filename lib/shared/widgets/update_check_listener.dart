@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -25,7 +26,7 @@ class _UpdateCheckListenerState extends ConsumerState<UpdateCheckListener> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _runUpdateCheck();
+      unawaited(_runUpdateCheck());
     });
   }
 
@@ -48,7 +49,7 @@ class _UpdateCheckListenerState extends ConsumerState<UpdateCheckListener> {
   }
 
   void _showUpdateDialog(UpdateInfo updateInfo) {
-    showDialog(
+    unawaited(showDialog<void>(
       context: context,
       barrierDismissible: !updateInfo.isForceUpdate,
       builder: (context) {
@@ -70,13 +71,13 @@ class _UpdateCheckListenerState extends ConsumerState<UpdateCheckListener> {
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(
                   color: updateInfo.isForceUpdate
-                      ? AppColors.danger.withOpacity(0.4)
-                      : Colors.white.withOpacity(0.08),
+                      ? AppColors.danger.withValues(alpha: 0.4)
+                      : Colors.white.withValues(alpha: 0.08),
                   width: 1.5,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.5),
+                    color: Colors.black.withValues(alpha: 0.5),
                     blurRadius: 20,
                     offset: const Offset(0, 10),
                   ),
@@ -92,8 +93,8 @@ class _UpdateCheckListenerState extends ConsumerState<UpdateCheckListener> {
                     height: 72,
                     decoration: BoxDecoration(
                       color: updateInfo.isForceUpdate
-                          ? AppColors.danger.withOpacity(0.1)
-                          : AppColors.info.withOpacity(0.1),
+                          ? AppColors.danger.withValues(alpha: 0.1)
+                          : AppColors.info.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
@@ -125,7 +126,7 @@ class _UpdateCheckListenerState extends ConsumerState<UpdateCheckListener> {
                         ? 'A mandatory security update (version ${updateInfo.latestVersion}) is required to connect to emergency dispatch servers.'
                         : 'A new version (${updateInfo.latestVersion}) of Operation Rainbow is ready. Update now to access the latest features and bug fixes.',
                     style: GoogleFonts.inter(
-                      color: Colors.white.withOpacity(0.7),
+                      color: Colors.white.withValues(alpha: 0.7),
                       fontSize: 14,
                       height: 1.5,
                     ),
@@ -173,7 +174,7 @@ class _UpdateCheckListenerState extends ConsumerState<UpdateCheckListener> {
                           height: 48,
                           child: TextButton(
                             style: TextButton.styleFrom(
-                              foregroundColor: Colors.white.withOpacity(0.5),
+                              foregroundColor: Colors.white.withValues(alpha: 0.5),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14),
                               ),
@@ -197,7 +198,7 @@ class _UpdateCheckListenerState extends ConsumerState<UpdateCheckListener> {
           ),
         );
       },
-    );
+    ));
   }
 
   @override

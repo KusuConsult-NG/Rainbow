@@ -54,4 +54,12 @@ class SecureStorageService {
     await _storage.delete(key: _badgeKey);
     await _storage.delete(key: _pinKey);
   }
+
+  Future<void> deleteAll() async {
+    await _storage.deleteAll();
+  }
+
+  Future<void> clearAll() async {
+    await _storage.deleteAll();
+  }
 }
