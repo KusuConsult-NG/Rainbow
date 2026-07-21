@@ -875,42 +875,60 @@ class _TacticalActionSheet extends StatelessWidget {
               ],
             ),
           ],
-          if ((isAssignedToMe || status == 'OPEN' || status == 'ACTIVE') &&
-              status != 'RESOLVED' &&
-              assignedTier != 'HQ') ...[
+          if (status != 'RESOLVED' && assignedTier != 'HQ') ...[
             const SizedBox(height: 16),
-            _EscalateButton(
-              onTap: () => verifyAndExecute(() async {
-                onAction();
-                final success = await showDialog<bool>(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (ctx) => _EscalationDialog(
-                    alertDoc: alertDoc,
-                    assignedTier: assignedTier,
-                  ),
-                );
-                if ((success ?? false) && context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('MISSION ESCALATED SUCCESSFULLY'),
-                      backgroundColor: AppColors.success,
+            Row(
+              children: [
+                if (assignedTier == 'WARD' || assignedTier == 'LGA') ...[
+                  Expanded(
+                    child: _TacticalButton(
+                      label: 'DISPATCH UNIT',
+                      color: AppColors.primary,
+                      icon: Icons.local_police_rounded,
+                      onTap: () => verifyAndExecute(() async {
+                        onAction();
+                        final success = await showDialog<bool>(
+                          context: context,
+                          barrierDismissible: true,
+                          builder: (ctx) => _DispatchDialog(alertDoc: alertDoc),
+                        );
+                        if ((success ?? false) && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('FIELD UNIT DISPATCHED'),
+                              backgroundColor: AppColors.success,
+                            ),
+                          );
+                        }
+                      }),
                     ),
-                  );
-                }
-              }),
-            ),
-          ],
-          if (!isAssignedToMe && status != 'OPEN' && status != 'ACTIVE') ...[
-            const SizedBox(height: 16),
-            Text(
-              'MISSION ASSIGNED TO ANOTHER UNIT',
-              style: GoogleFonts.outfit(
-                color: AppColors.textDim,
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1,
-              ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                Expanded(
+                  child: _EscalateButton(
+                    onTap: () => verifyAndExecute(() async {
+                      onAction();
+                      final success = await showDialog<bool>(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (ctx) => _EscalationDialog(
+                          alertDoc: alertDoc,
+                          assignedTier: assignedTier,
+                        ),
+                      );
+                      if ((success ?? false) && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('MISSION ESCALATED SUCCESSFULLY'),
+                            backgroundColor: AppColors.success,
+                          ),
+                        );
+                      }
+                    }),
+                  ),
+                ),
+              ],
             ),
           ],
         ],
@@ -1147,16 +1165,35 @@ class _EscalationDialogState extends State<_EscalationDialog> {
 
     try {
       final alertId = widget.alertDoc['id'] as String?;
-      final userEmail = SupabaseConfig.client.auth.currentUser?.email ?? 'STAFF';
+      final user = SupabaseConfig.client.auth.currentUser;
+      final userEmail = user?.email ?? 'STAFF';
+
+      final profileRes = await SupabaseConfig.client
+          .from('profiles')
+          .select('geo_lga, geo_ward')
+          .eq('id', user?.id ?? '')
+          .maybeSingle();
+
+      final oLga = profileRes?['geo_lga'] as String? ?? widget.alertDoc['geo_lga'];
+      final oWard = profileRes?['geo_ward'] as String? ?? widget.alertDoc['geo_ward'];
+
+      final updatePayload = <String, dynamic>{
+        'status': 'ESCALATED',
+        'severity': targetTier == 'HQ' ? 'CRITICAL' : 'HIGH',
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      if (oWard != null) updatePayload['geo_ward'] = oWard;
+      if (oLga != null) updatePayload['geo_lga'] = oLga;
+
+      final existingSummary = widget.alertDoc['ai_summary'] as String? ?? '';
+      final note = '[ESCALATED TO $targetTier COMMAND] Reason: $_selectedReason. Notes: ${_notesController.text.trim()} (by $userEmail)';
+      updatePayload['ai_summary'] = existingSummary.isEmpty ? note : '$existingSummary\n$note';
 
       if (alertId != null) {
         await SupabaseConfig.client
             .from('alerts')
-            .update({
-              'status': 'ESCALATED',
-              'tier_escalated': targetTier,
-              'escalated_by': userEmail,
-            })
+            .update(updatePayload)
             .eq('id', alertId);
       }
 
@@ -1165,38 +1202,14 @@ class _EscalationDialogState extends State<_EscalationDialog> {
       }
     } catch (e) {
       debugPrint('[ESCALATION_ERROR] Failed to escalate: $e');
-      try {
-        final email = SupabaseConfig.client.auth.currentUser?.email ?? 'UNKNOWN';
-        final newEvent = {
-          'type': 'ESCALATION',
-          'actor': email,
-          'role': widget.assignedTier == 'UNIT'
-              ? 'UNIT_COMMAND'
-              : (widget.assignedTier == 'WARD'
-                  ? 'WARD_COMMAND'
-                  : 'LGA_COMMAND'),
-          'timestamp': DateTime.now().toIso8601String(),
-          'reason': _selectedReason,
-          'notes': _notesController.text.trim(),
-        };
-        await SupabaseConfig.client.from('alerts').update({
-          'assigned_to': targetTier,
-        }).eq('id', widget.alertDoc['id']);
-        if (mounted) {
-          Navigator.pop(context, true);
-        }
-        // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
-      } catch (fallbackErr) {
-        debugPrint('[ESCALATION_FALLBACK_ERROR] Fallback failed: $fallbackErr');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Escalation failed: $fallbackErr'),
-              backgroundColor: AppColors.error,
-            ),
-          );
-          setState(() => _isSubmitting = false);
-        }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Escalation failed: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+        setState(() => _isSubmitting = false);
       }
     }
   }
@@ -1403,6 +1416,165 @@ class _ResponderMarker extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DispatchDialog extends StatefulWidget {
+  const _DispatchDialog({required this.alertDoc});
+  final Map<String, dynamic> alertDoc;
+
+  @override
+  State<_DispatchDialog> createState() => _DispatchDialogState();
+}
+
+class _DispatchDialogState extends State<_DispatchDialog> {
+  bool _isLoading = true;
+  List<Map<String, dynamic>> _responders = [];
+  String? _selectedResponderId;
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadResponders();
+  }
+
+  Future<void> _loadResponders() async {
+    try {
+      final res = await SupabaseConfig.client
+          .from('profiles')
+          .select('id, full_name, badge_number, role, geo_lga, geo_ward')
+          .neq('role', 'CITIZEN');
+
+      if (mounted) {
+        setState(() {
+          _responders = List<Map<String, dynamic>>.from(res as List);
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _submitDispatch() async {
+    if (_selectedResponderId == null) return;
+    setState(() => _isSubmitting = true);
+
+    try {
+      final alertId = widget.alertDoc['id'] as String?;
+      final userEmail = SupabaseConfig.client.auth.currentUser?.email ?? 'COMMANDER';
+      final selectedObj = _responders.firstWhere((r) => r['id'] == _selectedResponderId);
+      final officerName = selectedObj['full_name'] ?? selectedObj['badge_number'] ?? 'Officer';
+
+      final existingNotes = widget.alertDoc['ai_summary'] as String? ?? '';
+      final dispatchNote = '[UNIT DISPATCHED] Assigned to $officerName by $userEmail';
+
+      if (alertId != null) {
+        await SupabaseConfig.client.from('alerts').update({
+          'status': 'DISPATCHED',
+          'assigned_to': _selectedResponderId,
+          'ai_summary': existingNotes.isEmpty ? dispatchNote : '$existingNotes\n$dispatchNote',
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', alertId);
+      }
+
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.surfaceLight,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: const BorderSide(color: AppColors.primary, width: 1.5),
+      ),
+      title: Text(
+        'DISPATCH FIELD UNIT',
+        style: GoogleFonts.outfit(
+          fontSize: 16,
+          fontWeight: FontWeight.w900,
+          color: AppColors.onPrimary,
+          letterSpacing: 1.2,
+        ),
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: _isLoading
+            ? const SizedBox(
+                height: 100,
+                child: Center(
+                  child: CircularProgressIndicator(color: AppColors.primary),
+                ),
+              )
+            : _responders.isEmpty
+                ? Text(
+                    'No registered officers available in database.',
+                    style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12),
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Select an active field officer to assign to this incident:',
+                        style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 11),
+                      ),
+                      const SizedBox(height: 12),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 200),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: _responders.length,
+                          itemBuilder: (ctx, idx) {
+                            final r = _responders[idx];
+                            final rId = r['id'] as String;
+                            final isSel = rId == _selectedResponderId;
+                            return ListTile(
+                              dense: true,
+                              selected: isSel,
+                              selectedTileColor: AppColors.primary.withValues(alpha: 0.2),
+                              title: Text(
+                                (r['full_name'] as String? ?? 'Officer') +
+                                    (r['badge_number'] != null ? ' [${r['badge_number']}]' : ''),
+                                style: GoogleFonts.outfit(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.onPrimary,
+                                ),
+                              ),
+                              subtitle: Text(
+                                'Role: ${r['role'] ?? 'RESPONDER'} · ${r['geo_lga'] ?? 'JOS'}',
+                                style: GoogleFonts.inter(fontSize: 10, color: AppColors.textDim),
+                              ),
+                              onTap: () => setState(() => _selectedResponderId = rId),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: Text('CANCEL', style: GoogleFonts.outfit(color: AppColors.textDim)),
+        ),
+        ElevatedButton(
+          onPressed: _isSubmitting || _selectedResponderId == null ? null : _submitDispatch,
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+          child: _isSubmitting
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                )
+              : Text('DISPATCH NOW', style: GoogleFonts.outfit(fontWeight: FontWeight.w900, color: Colors.white)),
         ),
       ],
     );
