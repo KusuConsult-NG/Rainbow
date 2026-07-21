@@ -13,6 +13,8 @@ class SpeechService {
     _useFallback = value;
   }
 
+  void Function(String status)? _onStatusCallback;
+
   Future<bool> initialize() async {
     if (_useFallback) {
       _isInitialized = true;
@@ -26,7 +28,10 @@ class SpeechService {
       }
       _isInitialized = await _speech.initialize(
         onError: (val) => debugPrint('[SPEECH_ERR] error: $val'),
-        onStatus: (val) => debugPrint('[SPEECH_STATUS] status: $val'),
+        onStatus: (val) {
+          debugPrint('[SPEECH_STATUS] status: $val');
+          _onStatusCallback?.call(val);
+        },
       );
       if (!_isInitialized) {
         _useFallback = true;
@@ -47,8 +52,10 @@ class SpeechService {
 
   Future<void> startListening({
     required Function(String text) onResult,
+    Function(String status)? onStatusChange,
     String? languageCode,
   }) async {
+    _onStatusCallback = onStatusChange;
     if (_useFallback) {
       _simulatedListening = true;
       // Simulate local dictation results for simulator fallback
@@ -64,9 +71,9 @@ class SpeechService {
           onResult(result.recognizedWords);
         },
         localeId: languageCode,
-        listenFor: const Duration(minutes: 10), // Allow up to 10 minutes of active tracking
-        pauseFor: const Duration(seconds: 15),  // Allow up to 15 seconds of silence before auto-stopping
-        listenMode: ListenMode.dictation,        // Continuous transcription mode
+        listenFor: const Duration(minutes: 10),
+        pauseFor: const Duration(seconds: 10),
+        listenMode: ListenMode.dictation,
       );
     }
   }

@@ -15,16 +15,6 @@ import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
-import 'package:workmanager/workmanager.dart';
-
-@pragma('vm:entry-point')
-void callbackDispatcher() {
-  Workmanager().executeTask((task, inputData) async {
-    await SupabaseConfig.init();
-    await AlertService().flushOfflineQueue();
-    return Future.value(true);
-  });
-}
 
 void main() {
   // ignore: discarded_futures
@@ -57,27 +47,9 @@ void main() {
       debugPrint('🔥 [CRITICAL_MAIN_ERR] Supabase Init Failed: $e');
     }
 
-    // ─── PHASE 2: Non-blocking background services ───
+// ─── PHASE 2: Non-blocking background services ───
     unawaited(
       Future(() async {
-        // Workmanager (Android offline sync worker)
-        try {
-          await Workmanager()
-              .initialize(callbackDispatcher)
-              .timeout(const Duration(seconds: 3));
-          await Workmanager()
-              .registerPeriodicTask(
-                '1',
-                'offlineSyncTask',
-                frequency: const Duration(minutes: 15),
-                constraints: Constraints(networkType: NetworkType.connected),
-              )
-              .timeout(const Duration(seconds: 3));
-          debugPrint('🚀 [MAIN] Workmanager initialized.');
-        } catch (e) {
-          debugPrint('⚠️ Workmanager Init Failed: $e');
-        }
-
         // Background tracking service configure
         try {
           await BackgroundTrackingService()

@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/providers/auth_provider.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 
 class OnboardingContactsScreen extends ConsumerStatefulWidget {
   const OnboardingContactsScreen({super.key});
@@ -81,7 +83,19 @@ class _OnboardingContactsScreenState
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () => context.go(AppRoutes.home),
+                  onPressed: () async {
+                    final name = _nameCtrl.text.trim();
+                    final phone = _phoneCtrl.text.trim();
+                    if (name.isNotEmpty && phone.isNotEmpty) {
+                      final user = ref.read(authProvider).user;
+                      if (user != null) {
+                        await SupabaseConfig.client.from('profiles').update({
+                          'emergency_contacts': [{'name': name, 'phone': phone}]
+                        }).eq('id', user.id);
+                      }
+                    }
+                    if (mounted) context.go(AppRoutes.home);
+                  },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     padding: const EdgeInsets.symmetric(vertical: 16),

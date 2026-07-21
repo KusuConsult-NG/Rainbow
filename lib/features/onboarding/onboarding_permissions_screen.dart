@@ -44,9 +44,21 @@ class _OnboardingPermissionsScreenState
 
       // 2. PRD: High-Assurance Permission Acquisition (Location triggered only if disclosure was agreed)
       if (isDisclosureAccepted) {
-        // Play Store & Android policy mandate requesting foreground permission before background
-        await Permission.location.request();
-        await Permission.locationAlways.request();
+        try {
+          final locStatus = await Permission.location.request();
+          if (locStatus.isGranted) {
+            try {
+              await Permission.locationAlways.request().timeout(
+                    const Duration(seconds: 3),
+                    onTimeout: () => PermissionStatus.denied,
+                  );
+            } catch (e) {
+              debugPrint('[PERM_WARN] Background location request skipped: $e');
+            }
+          }
+        } catch (e) {
+          debugPrint('[PERM_ERR] Location permission request failed: $e');
+        }
       } else {
         debugPrint(
           '[PERM_WARN] User declined location prominent disclosure, skipping native location request.',

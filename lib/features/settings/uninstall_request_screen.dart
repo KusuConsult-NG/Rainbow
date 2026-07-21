@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
+import 'package:rainbow_app/providers/auth_provider.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 
 class UninstallRequestScreen extends ConsumerStatefulWidget {
   const UninstallRequestScreen({super.key});
@@ -24,9 +26,22 @@ class _UninstallRequestScreenState
     super.dispose();
   }
 
-  void _submitRequest() {
+  Future<void> _submitRequest() async {
     setState(() => _isSubmitting = true);
-    Future.delayed(const Duration(seconds: 1), () {
+    final reason = 'Operational Justification';
+    final remarks = _remarksCtrl.text;
+    
+    try {
+      final user = ref.read(authProvider).user;
+      final userId = user?.id;
+      if (userId == null) throw Exception('No authenticated user');
+
+      await SupabaseConfig.client.from('uninstall_requests').insert({
+        'user_id': userId,
+        'reason': reason,
+        'remarks': remarks,
+      });
+
       if (!mounted) return;
       setState(() => _isSubmitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -34,7 +49,16 @@ class _UninstallRequestScreenState
           content: Text('Uninstall request submitted to HQ Command for authorization.'),
         ),
       );
-    });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error submitting request: $e'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    }
   }
 
   @override

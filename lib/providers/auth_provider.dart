@@ -211,6 +211,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   /// Documentation for this public member.
 
+  Future<void> refreshProfile() async {
+    final user = state.user;
+    if (user != null) {
+      await resolveRole(user);
+    }
+  }
+
   Future<void> signOut() async {
     await SupabaseConfig.client.auth.signOut();
   }

@@ -24,57 +24,79 @@ class LocationService {
 
   /// Requests hardware location permissions from the user.
   Future<bool> requestPermission({bool force = false}) async {
-    bool serviceEnabled;
-    LocationPermission permission;
-
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      // Location services are disabled.
-      return false;
-    }
-
-    // 1. First check if permission has ALREADY been granted at OS level
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.whileInUse ||
-        permission == LocationPermission.always) {
-      // Ensure disclosure flag is marked accepted since OS permission is active
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('location_disclosure_accepted', true);
-      return true;
-    }
-
-    if (!force) {
-      // 2. Guard against native popups if user has not accepted prominent disclosure
-      final prefs = await SharedPreferences.getInstance();
-      final isDisclosureAccepted =
-          prefs.getBool('location_disclosure_accepted') ?? false;
-      if (!isDisclosureAccepted) {
-        debugPrint(
-          '[LOC_WARN] LocationService: Prominent disclosure not yet accepted. Aborting permission request.',
-        );
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
         return false;
       }
-    }
 
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('location_disclosure_accepted', true);
+        return true;
+      }
+
+      if (!force) {
+        final prefs = await SharedPreferences.getInstance();
+        final isDisclosureAccepted =
+            prefs.getBool('location_disclosure_accepted') ?? false;
+        if (!isDisclosureAccepted) {
+          debugPrint(
+            '[LOC_WARN] LocationService: Prominent disclosure not yet accepted. Aborting permission request.',
+          );
+          return false;
+        }
+      }
+
       if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          return false;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
         return false;
       }
-    }
 
-    if (permission == LocationPermission.deniedForever) {
+      if (permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('location_disclosure_accepted', true);
+        return true;
+      }
+
+      return true;
+    } catch (e) {
+      debugPrint('[LOC_ERR] Exception during requestPermission: $e');
       return false;
     }
+  }
 
-    if (permission == LocationPermission.whileInUse ||
-        permission == LocationPermission.always) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('location_disclosure_accepted', true);
-      return true;
+  LocationSettings _buildLocationSettings({int distanceFilter = 0}) {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: distanceFilter,
+        forceLocationManager: true,
+        intervalDuration: const Duration(seconds: 5),
+      );
+    } else if (defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.macOS) {
+      return AppleSettings(
+        accuracy: LocationAccuracy.high,
+        activityType: ActivityType.fitness,
+        distanceFilter: distanceFilter,
+        pauseLocationUpdatesAutomatically: true,
+      );
+    } else {
+      return LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: distanceFilter,
+      );
     }
-
-    return true;
   }
 
   /// Gets the current instantaneous position.
@@ -87,16 +109,17 @@ class LocationService {
       if (!hasPermission) return null;
 
       return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
-        ),
+        locationSettings: _buildLocationSettings(),
       ).timeout(
         const Duration(seconds: 5),
       );
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (e) {
       debugPrint('[LOC_ERR] Failed to get current position: $e');
-      return null;
+      try {
+        return await Geolocator.getLastKnownPosition();
+      } catch (_) {
+        return null;
+      }
     }
   }
 
@@ -117,37 +140,36 @@ class LocationService {
         return;
       }
 
-      // Fetch and yield the current/initial position immediately to populate the UI instantly
+      // Fetch and yield initial position immediately
       try {
         final initialPosition = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.bestForNavigation,
-          ),
-        ).timeout(const Duration(seconds: 3));
+          locationSettings: _buildLocationSettings(),
+        ).timeout(const Duration(seconds: 4));
         yield initialPosition;
       } catch (e) {
         debugPrint('[LOC_TRACE] Failed to get initial position for stream: $e');
-        final lastKnown = await Geolocator.getLastKnownPosition();
-        if (lastKnown != null) {
-          yield lastKnown;
-        }
+        try {
+          final lastKnown = await Geolocator.getLastKnownPosition();
+          if (lastKnown != null) {
+            yield lastKnown;
+          }
+        } catch (_) {}
       }
 
       debugPrint(
         '[LOC_TRACE] Requesting continuous hardware location stream lock...',
       );
 
-      // Configured for Navigation profile (high density tracking, no distance filter during active SOS)
-      const locationSettings = LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 0,
-      );
+      final settings = _buildLocationSettings();
 
-      yield* Geolocator.getPositionStream(locationSettings: locationSettings)
-          .handleError((Object error) {
-        debugPrint('[LOC_ERR] Continuous stream error: $error');
-      });
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
+      try {
+        final stream = Geolocator.getPositionStream(locationSettings: settings);
+        await for (final pos in stream) {
+          yield pos;
+        }
+      } catch (e) {
+        debugPrint('[LOC_ERR] Stream loop exception: $e');
+      }
     } catch (e) {
       debugPrint('[LOC_ERR] Failed to initialize location stream: $e');
       yield null;

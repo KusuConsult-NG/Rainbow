@@ -1,6 +1,6 @@
-// ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
@@ -9,6 +9,19 @@ import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
 class IncidentHistoryScreen extends ConsumerWidget {
   const IncidentHistoryScreen({super.key});
+
+  Future<List<Map<String, dynamic>>> _fetchAlerts(String? userId) async {
+    try {
+      final response = await SupabaseConfig.client
+          .from('alerts')
+          .select('*')
+          .eq('reported_by', userId ?? '')
+          .order('created_at', ascending: false);
+      return (response as List<dynamic>).cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -21,10 +34,7 @@ class IncidentHistoryScreen extends ConsumerWidget {
         subtitle: 'HISTORICAL ARCHIVE',
       ),
       body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: SupabaseConfig.client
-            .from('alerts')
-            .select('*')
-            .order('created_at', ascending: false),
+        future: _fetchAlerts(user?.id),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -62,52 +72,117 @@ class IncidentHistoryScreen extends ConsumerWidget {
               final status = item['status'] as String? ?? 'PENDING';
               final desc = item['description'] as String? ?? 'No details provided';
 
-              return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceContainer,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.outline),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          type.toUpperCase(),
-                          style: GoogleFonts.outfit(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                        Chip(
-                          label: Text(
-                            status,
-                            style: GoogleFonts.outfit(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
+              final createdAt = DateTime.tryParse(item['created_at'] as String? ?? '') ?? DateTime.now();
+              final dateStr = '${createdAt.day.toString().padLeft(2, '0')} ${['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][createdAt.month]} ${createdAt.year} ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}';
+
+              return GestureDetector(
+                onTap: () {
+                  showModalBottomSheet(
+                    context: context,
+                    backgroundColor: AppColors.surface,
+                    builder: (ctx) => Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('INCIDENT DETAILS', style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold, fontSize: 16)),
+                          const SizedBox(height: 16),
+                          Text('Type: $type', style: GoogleFonts.inter(color: AppColors.textDim)),
+                          Text('Severity: $severity', style: GoogleFonts.inter(color: AppColors.textDim)),
+                          Text('Status: $status', style: GoogleFonts.inter(color: AppColors.textDim)),
+                          Text('Date: ${item['created_at'] ?? 'Unknown'}', style: GoogleFonts.inter(color: AppColors.textDim)),
+                          const SizedBox(height: 16),
+                          Text(desc, style: GoogleFonts.inter(color: AppColors.onBackground)),
+                          const SizedBox(height: 24),
+                          if (item['media_urls'] != null && (item['media_urls'] as List).isNotEmpty)
+                            ...[
+                              Text('Media:', style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                height: 80,
+                                child: ListView(
+                                  scrollDirection: Axis.horizontal,
+                                  children: (item['media_urls'] as List).map((url) => Padding(
+                                    padding: const EdgeInsets.only(right: 8.0),
+                                    child: Image.network(url.toString(), width: 80, height: 80, fit: BoxFit.cover),
+                                  )).toList(),
+                                ),
+                              ),
+                              const SizedBox(height: 24),
+                            ],
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                context.push('/dispatcher-chat', extra: item['id']);
+                              },
+                              icon: const Icon(Icons.chat),
+                              label: const Text('DISPATCHER CHAT'),
+                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
                             ),
                           ),
-                          backgroundColor: status == 'RESOLVED'
-                              ? AppColors.success
-                              : AppColors.warning,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      desc,
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        color: AppColors.onBackground,
+                        ],
                       ),
                     ),
-                  ],
+                  );
+                },
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceContainer,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.outline),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            type.toUpperCase(),
+                            style: GoogleFonts.outfit(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          Chip(
+                            label: Text(
+                              status,
+                              style: GoogleFonts.outfit(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                            backgroundColor: status == 'RESOLVED'
+                                ? AppColors.success
+                                : AppColors.warning,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        dateStr,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: AppColors.textDim,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        desc,
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          color: AppColors.onBackground,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               );
             },

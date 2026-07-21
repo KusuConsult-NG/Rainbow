@@ -1,4 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 
 class UpdateInfo {
   final bool hasUpdate;
@@ -20,12 +22,44 @@ final updateServiceProvider = Provider<UpdateService>((ref) {
 
 class UpdateService {
   Future<UpdateInfo> checkAppVersion() async {
-    return UpdateInfo(
-      hasUpdate: false,
-      isForceUpdate: false,
-      updateUrl: '',
-      latestVersion: '2.0.0',
-    );
+    final packageInfo = await PackageInfo.fromPlatform();
+    final currentVersion = packageInfo.version;
+
+    try {
+      final response = await SupabaseConfig.client
+          .from('app_config')
+          .select()
+          .inFilter('key', ['min_version', 'latest_version', 'force_update', 'update_url']);
+
+      String minVersion = '1.0.0';
+      String latestVersion = '1.0.0';
+      bool forceUpdate = false;
+      String updateUrl = '';
+
+      for (var row in response) {
+        if (row['key'] == 'min_version') minVersion = row['value'];
+        if (row['key'] == 'latest_version') latestVersion = row['value'];
+        if (row['key'] == 'force_update') forceUpdate = row['value'] == 'true';
+        if (row['key'] == 'update_url') updateUrl = row['value'];
+      }
+
+      bool isForceUpdateResult = forceUpdate || currentVersion.compareTo(minVersion) < 0;
+      bool hasUpdate = currentVersion.compareTo(latestVersion) < 0;
+
+      return UpdateInfo(
+        hasUpdate: hasUpdate,
+        isForceUpdate: isForceUpdateResult,
+        updateUrl: updateUrl,
+        latestVersion: latestVersion,
+      );
+    } catch (e) {
+      return UpdateInfo(
+        hasUpdate: false,
+        isForceUpdate: false,
+        updateUrl: '',
+        latestVersion: currentVersion,
+      );
+    }
   }
 
   Future<UpdateInfo> checkForUpdates() async {

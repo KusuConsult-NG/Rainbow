@@ -96,6 +96,7 @@ class AlertService {
         'severity': priority.name.toUpperCase(),
         'geo_lga': geoLga,
         'geo_ward': geoWard,
+        'geo_siec_ward': geoSiecWard,
         'geo_pu': geoPu,
       };
 

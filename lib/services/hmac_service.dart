@@ -1,8 +1,9 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class HmacService {
-  static const String _sharedSecret = "RAINBOW_PLATEAU_SECURE_HMAC_GATEWAY_KEY_2026";
+  static String get _sharedSecret => dotenv.env['HMAC_SECRET'] ?? 'RAINBOW_PLATEAU_SECURE_HMAC_GATEWAY_KEY_2026';
 
   /// Generates a unique HMAC signature for the given payload using a derived key
   static String generateSignature({
