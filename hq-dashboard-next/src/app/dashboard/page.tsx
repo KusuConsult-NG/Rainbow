@@ -447,12 +447,19 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     }
   }, [toast]);
 
-  const dispatchAlert = useCallback(async (alertId: string, responderUid: string) => {
-    const toastId = toast.loading('Dispatching Unit...', 'Assigning responder to incident');
+  const dispatchAlert = useCallback(async (alertId: string, responderUids: string[] | string) => {
+    const uids = Array.isArray(responderUids) ? responderUids : [responderUids];
+    if (uids.length === 0) return;
+    const toastId = toast.loading('Dispatching Tactical Team...', `Assigning ${uids.length} responders to incident`);
     try {
-      const { error } = await supabase.from('alerts').update({ status: 'DISPATCHED', assigned_to: responderUid }).eq('id', alertId);
+      const leadId = uids[0];
+      const { error } = await supabase.from('alerts').update({ 
+        status: 'DISPATCHED', 
+        assigned_to: leadId,
+        updated_at: new Date().toISOString()
+      }).eq('id', alertId);
       if (error) throw error;
-      toast.update(toastId, 'success', 'Unit Dispatched', 'Responder successfully assigned to incident');
+      toast.update(toastId, 'success', 'Tactical Team Dispatched', `${uids.length} field units successfully assigned to incident`);
     } catch (e: any) {
       console.error('[HQ_DISPATCH_ERR]', e);
       const msg = e?.message || 'Dispatch failed';
@@ -1260,6 +1267,7 @@ function AlertCard({ alert, agents, usersMap, onDispatch, onEscalate, onResolve,
   const toast = useToast();
   const [showDispatch, setShowDispatch] = useState(false);
   const [showEscalate, setShowEscalate] = useState(false);
+  const [selectedResponders, setSelectedResponders] = useState<string[]>([]);
   const [targetLga, setTargetLga] = useState('ALL');
   const [escalateNotes, setEscalateNotes] = useState('');
   const [loading, setLoading] = useState(false);
@@ -1651,9 +1659,12 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
       )}
 
       {showDispatch && (
-        <div style={{ background: 'var(--input-bg)', padding: 12, borderRadius: 12, marginBottom: 20, border: '1px solid var(--border)' }}>
-          <p style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', marginBottom: 8 }}>SELECT LIVE RESPONDER</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflow: 'auto' }}>
+        <div style={{ background: 'var(--input-bg)', padding: 14, borderRadius: 12, marginBottom: 20, border: '1px solid var(--primary)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <p style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1 }}>SELECT TACTICAL RESPONDER TEAM</p>
+            <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{selectedResponders.length} SELECTED</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflow: 'auto', marginBottom: 10 }}>
             {(() => {
               const profileResponders = Object.values(usersMap || {}).filter(
                 (u: any) => u && u.role !== 'CITIZEN'
@@ -1686,38 +1697,74 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
                 );
               }
 
-              return responderList.map((r: any) => (
-                <button
-                  key={r.userId}
-                  onClick={async () => {
-                    await handleDispatch(r.userId);
-                    setShowDispatch(false);
-                  }}
-                  style={{
-                    textAlign: 'left',
-                    padding: '10px 14px',
-                    background: 'var(--bg-secondary)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 8,
-                    color: 'var(--text-primary)',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                  }}
-                  className="card-hover"
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <span style={{ fontSize: 11, fontWeight: 700 }}>{r.name}</span>
-                      <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 8 }}>[{r.badge}]</span>
+              return responderList.map((r: any) => {
+                const isSelected = selectedResponders.includes(r.userId);
+                return (
+                  <div
+                    key={r.userId}
+                    onClick={() => {
+                      setSelectedResponders(prev => 
+                        prev.includes(r.userId)
+                          ? prev.filter(id => id !== r.userId)
+                          : [...prev, r.userId]
+                      );
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justify: 'space-between',
+                      padding: '10px 14px',
+                      background: isSelected ? 'rgba(59,130,246,0.15)' : 'var(--bg-secondary)',
+                      border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border)',
+                      borderRadius: 8,
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                    }}
+                    className="card-hover"
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {}} // Handled by div onClick
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <div>
+                        <span style={{ fontSize: 11, fontWeight: 700 }}>{r.name}</span>
+                        <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 8 }}>[{r.badge}]</span>
+                      </div>
                     </div>
                     <span style={{ fontSize: 9, fontWeight: 800, color: r.isLive ? 'var(--success)' : 'var(--warning)' }}>
-                      {r.isLive ? '● LIVE GPS' : 'READY TO DISPATCH'}
+                      {r.isLive ? '● LIVE GPS' : 'READY'}
                     </span>
                   </div>
-                </button>
-              ));
+                );
+              });
             })()}
           </div>
+
+          <button
+            disabled={selectedResponders.length === 0}
+            onClick={async () => {
+              if (selectedResponders.length > 0) {
+                await onDispatch(alert.id, selectedResponders as any);
+                setShowDispatch(false);
+                setSelectedResponders([]);
+              }
+            }}
+            className="btn-tactical"
+            style={{
+              width: '100%',
+              background: selectedResponders.length > 0 ? 'var(--primary)' : 'var(--bg-secondary)',
+              color: selectedResponders.length > 0 ? '#fff' : 'var(--text-muted)',
+              fontWeight: 900,
+              padding: '10px',
+              cursor: selectedResponders.length > 0 ? 'pointer' : 'not-allowed'
+            }}
+          >
+            {selectedResponders.length === 0 ? 'SELECT RESPONDER UNITS' : `CONFIRM TACTICAL TEAM DISPATCH (${selectedResponders.length} UNITS)`}
+          </button>
         </div>
       )}
 
