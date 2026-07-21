@@ -371,26 +371,23 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
                                 alert['assigned_to']?.toString() ?? '';
 
                             if (auth.tier == ResponderTier.lga) {
-                              final eligibleTiers = [
-                                'LGA',
-                                'WARD',
-                                'POLLING_UNIT',
-                              ];
-                              return eligibleTiers.contains(alertAssignedTo) &&
-                                  (assignedLgas.contains(alert['geo_lga']) ||
-                                      assignedLgas.contains('ALL'));
+                              return assignedLgas.contains(alert['geo_lga']) ||
+                                  assignedLgas.contains('ALL') ||
+                                  alert['geo_lga'] == null;
                             }
                             if (auth.tier == ResponderTier.ward) {
-                              final eligibleTiers = ['WARD', 'POLLING_UNIT'];
-                              return eligibleTiers.contains(alertAssignedTo) &&
-                                  (assignedWards.contains(alert['geo_ward']) ||
-                                      assignedWards.contains('ALL'));
+                              return assignedWards.contains(alert['geo_ward']) ||
+                                  assignedWards.contains('ALL') ||
+                                  assignedLgas.contains(alert['geo_lga']) ||
+                                  alert['geo_ward'] == null;
                             }
                             if (auth.tier == ResponderTier.pu) {
-                              final eligibleTiers = ['POLLING_UNIT'];
-                              return eligibleTiers.contains(alertAssignedTo) &&
-                                  (assignedPus.contains(alert['geo_pu']) ||
-                                      assignedPus.contains('ALL'));
+                              return assignedPus.contains(alert['geo_pu']) ||
+                                  assignedPus.contains('ALL') ||
+                                  assignedWards.contains(alert['geo_ward']) ||
+                                  assignedWards.contains('ALL') ||
+                                  assignedLgas.contains(alert['geo_lga']) ||
+                                  alert['geo_pu'] == null;
                             }
                             // HQ or special commands fall back to true
                             return true;
@@ -698,8 +695,9 @@ class _MissionCard extends ConsumerWidget {
                       const SizedBox(width: 8),
                       Text(
                         _formatTime(
-                          alert['reportedAt'] ??
+                          alert['created_at'] ??
                               alert['createdAt'] ??
+                              alert['reportedAt'] ??
                               alert['timestamp'],
                         ),
                         style: GoogleFonts.outfit(
@@ -846,14 +844,24 @@ class _MissionCard extends ConsumerWidget {
   }
 
   String _formatTime(dynamic timestamp) {
-    if (timestamp == null) return 'T-00:00';
-    if (timestamp is String) {
-      final dt = DateTime.tryParse(timestamp);
-      if (dt != null) {
-        return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')} HRS';
+    if (timestamp == null) return 'JUST NOW';
+    try {
+      DateTime? dt;
+      if (timestamp is String) {
+        dt = DateTime.tryParse(timestamp);
+      } else if (timestamp is DateTime) {
+        dt = timestamp;
       }
-    }
-    return 'RECENT';
+      if (dt != null) {
+        final local = dt.toLocal();
+        final hh = local.hour.toString().padLeft(2, '0');
+        final mm = local.minute.toString().padLeft(2, '0');
+        final months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        final monthStr = months[local.month - 1];
+        return '${local.day} $monthStr · $hh:$mm HRS';
+      }
+    } catch (_) {}
+    return 'JUST NOW';
   }
 }
 
