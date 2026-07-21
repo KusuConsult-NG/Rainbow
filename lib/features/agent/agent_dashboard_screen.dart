@@ -23,24 +23,50 @@ import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
 final alertsStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
   final auth = ref.watch(authProvider);
   final profile = auth.profile ?? {};
-  final role = profile['role'] as String? ?? '';
+  final role = (profile['role'] as String? ?? '').toUpperCase();
   final geoLga = profile['geo_lga'] as String?;
   final geoWard = profile['geo_ward'] as String?;
   final geoPu = profile['geo_pu'] as String?;
+  final userId = auth.user?.id;
 
-  final builder = SupabaseConfig.client
+  return SupabaseConfig.client
       .from('alerts')
-      .stream(primaryKey: ['id']);
+      .stream(primaryKey: ['id'])
+      .map((list) {
+    return list.where((alert) {
+      final aGeoLga = alert['geo_lga'] as String?;
+      final aGeoWard = alert['geo_ward'] as String?;
+      final aGeoPu = alert['geo_pu'] as String?;
+      final aAssignedTo = alert['assigned_to'] as String?;
 
-  if ((role == 'LGA_COMMAND' || role == 'LGA_OFFICER') && geoLga != null && geoLga != 'ALL') {
-    return builder.eq('geo_lga', geoLga);
-  } else if ((role == 'WARD_COMMAND' || role == 'WARD_OFFICER') && geoWard != null && geoWard != 'ALL') {
-    return builder.eq('geo_ward', geoWard);
-  } else if ((role == 'UNIT_COMMAND' || role == 'POLLING_UNIT_COMMAND' || role == 'AGENT' || role == 'RESPONDER') && geoPu != null && geoPu != 'ALL') {
-    return builder.eq('geo_pu', geoPu);
-  }
+      // 1. Directly assigned to officer -> ALWAYS SHOW
+      if (userId != null && aAssignedTo == userId) return true;
 
-  return builder;
+      // 2. State HQ Commanders -> ALWAYS SHOW ALL
+      if (role.contains('STATE') || role.contains('HQ') || role == 'ADMIN') return true;
+
+      // 3. LGA Commanders -> Show alerts matching LGA or unassigned
+      if (role.contains('LGA')) {
+        if (geoLga == null || geoLga == 'ALL') return true;
+        return aGeoLga == null || aGeoLga.toUpperCase() == geoLga.toUpperCase();
+      }
+
+      // 4. Ward Commanders -> Show alerts matching Ward/LGA
+      if (role.contains('WARD')) {
+        if (geoWard == null || geoWard == 'ALL') return true;
+        return aGeoWard == null || aGeoWard.toUpperCase() == geoWard.toUpperCase() ||
+               (aGeoLga != null && geoLga != null && aGeoLga.toUpperCase() == geoLga.toUpperCase());
+      }
+
+      // 5. PU / Beat Responders -> Show alerts in their PU, Ward, LGA, or unassigned general alerts
+      if (geoPu != null && aGeoPu != null && aGeoPu.toUpperCase() == geoPu.toUpperCase()) return true;
+      if (geoWard != null && aGeoWard != null && aGeoWard.toUpperCase() == geoWard.toUpperCase()) return true;
+      if (geoLga != null && aGeoLga != null && aGeoLga.toUpperCase() == geoLga.toUpperCase()) return true;
+      if (aGeoPu == null && aGeoWard == null && aGeoLga == null) return true;
+
+      return true;
+    }).toList();
+  });
 });
 
 /// Documentation for this public member.
