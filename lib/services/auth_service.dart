@@ -72,11 +72,16 @@ class AuthService {
   // ── AGENT PATH: Badge / Email Login ───────────────────────────────────────
 
   /// Authenticate agent with Badge ID / Email and Password
-  Future<bool> signInWithBadge(String email, String password) async {
+  Future<bool> signInWithBadge(String badgeOrEmail, String password) async {
     _lastAuthError = null;
+    final trimmed = badgeOrEmail.trim().toLowerCase();
+    final email = trimmed.contains('@')
+        ? trimmed
+        : '$trimmed@operationrainbow.plateau.gov.ng';
+
     try {
       final res = await SupabaseConfig.client.auth.signInWithPassword(
-        email: email.trim(),
+        email: email,
         password: password,
       );
       return res.session != null;
@@ -87,7 +92,11 @@ class AuthService {
   }
 
   Future<bool> signInWithAccessCode(String code) async {
-    return signInWithBadge('$code@rainbow.gov.ng', '12345Gg!');
+    final cleanCode = code.trim().toLowerCase();
+    if (cleanCode.contains('@')) {
+      return signInWithBadge(cleanCode, '12345Gg!');
+    }
+    return signInWithBadge('$cleanCode@operationrainbow.plateau.gov.ng', '12345Gg!');
   }
 
   static bool isDemoNumber(String phone) {
