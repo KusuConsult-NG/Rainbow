@@ -391,20 +391,22 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     };
   }, [user]);
 
-  const escalateAlert = useCallback(async (alertId: string, currentTier: string) => {
-    const next = currentTier === 'POLLING_UNIT' ? 'WARD' : currentTier === 'WARD' ? 'LGA' : 'HQ';
-    const toastId = toast.loading('Escalating Alert...', `Moving to ${next} tier`);
+  const escalateAlert = useCallback(async (alertId: string, targetLga: string = 'ALL', reason: string = '') => {
+    const lgaTarget = targetLga || 'ALL';
+    const toastId = toast.loading('Escalating Alert...', `Broadcasting to ${lgaTarget} LGAs`);
     try {
       const updateData: Record<string, any> = {
         severity: 'CRITICAL',
-        status: 'DISPATCHED',
+        status: 'ESCALATED',
+        geo_lga: lgaTarget,
+        updated_at: new Date().toISOString()
       };
       if (user?.id) {
         updateData.assigned_to = user.id;
       }
       const { error } = await supabase.from('alerts').update(updateData).eq('id', alertId);
       if (error) throw error;
-      toast.update(toastId, 'success', 'Alert Escalated', `Incident moved to ${next} command tier`);
+      toast.update(toastId, 'success', 'Alert Escalated', `Incident broadcasted to ${lgaTarget} LGA Commanders`);
     } catch (e: any) {
       console.error('[HQ_ESCALATE_ERR]', e);
       const msg = e?.message || 'Escalation failed';
@@ -1257,6 +1259,9 @@ function AlertCard({ alert, agents, usersMap, onDispatch, onEscalate, onResolve,
   const a = alert as any;
   const toast = useToast();
   const [showDispatch, setShowDispatch] = useState(false);
+  const [showEscalate, setShowEscalate] = useState(false);
+  const [targetLga, setTargetLga] = useState('ALL');
+  const [escalateNotes, setEscalateNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [triageLoading, setTriageLoading] = useState(false);
   const [triageError, setTriageError] = useState<string | null>(null);
@@ -1716,20 +1721,104 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
         </div>
       )}
 
+      {showEscalate && (
+        <div style={{ background: 'var(--input-bg)', padding: 14, borderRadius: 12, marginBottom: 20, border: '1px solid var(--warning)' }}>
+          <p style={{ fontSize: 10, fontWeight: 900, color: 'var(--warning)', marginBottom: 8, letterSpacing: 1 }}>ESCALATE / BROADCAST TO LGA COMMAND</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div>
+              <label style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: 4 }}>TARGET LGA JURISDICTION:</label>
+              <select
+                value={targetLga}
+                onChange={(e) => setTargetLga(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  color: 'var(--text-primary)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fontFamily: 'inherit'
+                }}
+              >
+                <option value="ALL">ALL LGAs (Statewide Emergency Broadcast)</option>
+                <option value="BARKIN LADI">BARKIN LADI LGA</option>
+                <option value="BASSA">BASSA LGA</option>
+                <option value="BOKKOS">BOKKOS LGA</option>
+                <option value="JOS EAST">JOS EAST LGA</option>
+                <option value="JOS NORTH">JOS NORTH LGA</option>
+                <option value="JOS SOUTH">JOS SOUTH LGA</option>
+                <option value="KANAM">KANAM LGA</option>
+                <option value="KANKE">KANKE LGA</option>
+                <option value="LANGTANG NORTH">LANGTANG NORTH LGA</option>
+                <option value="LANGTANG SOUTH">LANGTANG SOUTH LGA</option>
+                <option value="MANGU">MANGU LGA</option>
+                <option value="MIANGO">MIANGO LGA</option>
+                <option value="PANKSHIN">PANKSHIN LGA</option>
+                <option value="QUA'AN PAN">QUA'AN PAN LGA</option>
+                <option value="RIYOM">RIYOM LGA</option>
+                <option value="SHENDAM">SHENDAM LGA</option>
+                <option value="WASE">WASE LGA</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: 4 }}>TACTICAL DIRECTIVES / REASON:</label>
+              <input
+                value={escalateNotes}
+                onChange={(e) => setEscalateNotes(e.target.value)}
+                placeholder="e.g. Deploy tactical reinforcements immediately..."
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  color: 'var(--text-primary)',
+                  fontSize: 11,
+                  fontFamily: 'inherit'
+                }}
+              />
+            </div>
+
+            <button
+              onClick={async () => {
+                await onEscalate(alert.id, targetLga, escalateNotes);
+                setShowEscalate(false);
+              }}
+              className="btn-tactical"
+              style={{
+                width: '100%',
+                background: 'var(--warning)',
+                color: '#000',
+                fontWeight: 900,
+                padding: '10px',
+                marginTop: 4
+              }}
+            >
+              CONFIRM ESCALATION & BROADCAST
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 10 }}>
         {loading ? (
           <div style={{ display: 'flex', flex: 1, justifyContent: 'center', alignItems: 'center', padding: '12px 0' }}>
             <Loader2 size={20} color="var(--primary)" className="spin" />
             <span style={{ fontSize: 10, fontWeight: 900, marginLeft: 8, color: 'var(--text-muted)' }}>PROCESSING...</span>
           </div>
-        ) : !showDispatch ? (
+        ) : showDispatch ? (
+          <button onClick={() => setShowDispatch(false)} className="btn-tactical btn-secondary" style={{ width: '100%' }}>CANCEL DISPATCH</button>
+        ) : showEscalate ? (
+          <button onClick={() => setShowEscalate(false)} className="btn-tactical btn-secondary" style={{ width: '100%' }}>CANCEL ESCALATION</button>
+        ) : (
           <>
-            <button onClick={handleEscalate} className="btn-tactical" style={{ flex: 1, background: 'var(--warning-dim)', color: 'var(--warning)', border: '1px solid rgba(245,158,11,0.2)' }}>ESCALATE</button>
-            <button onClick={() => setShowDispatch(true)} className="btn-tactical" style={{ flex: 1, background: 'var(--primary-dim)', color: 'var(--primary)', border: '1px solid rgba(59,130,246,0.2)' }}>DISPATCH</button>
+            <button onClick={() => { setShowEscalate(true); setShowDispatch(false); }} className="btn-tactical" style={{ flex: 1, background: 'var(--warning-dim)', color: 'var(--warning)', border: '1px solid rgba(245,158,11,0.2)' }}>ESCALATE</button>
+            <button onClick={() => { setShowDispatch(true); setShowEscalate(false); }} className="btn-tactical" style={{ flex: 1, background: 'var(--primary-dim)', color: 'var(--primary)', border: '1px solid rgba(59,130,246,0.2)' }}>DISPATCH</button>
             <button onClick={handleResolve} className="btn-tactical" style={{ flex: 1, background: 'var(--success-dim)', color: 'var(--success)', border: '1px solid rgba(16,185,129,0.2)' }}>RESOLVE</button>
           </>
-        ) : (
-          <button onClick={() => setShowDispatch(false)} className="btn-tactical btn-secondary" style={{ width: '100%' }}>CANCEL DISPATCH</button>
         )}
       </div>
     </div>
