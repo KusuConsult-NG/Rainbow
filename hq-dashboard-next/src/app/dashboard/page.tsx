@@ -1391,13 +1391,16 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
     <div className="tactical-panel glass tactical-panel-hover fade-in" style={{ padding: 24, borderTop: `4px solid ${color}`, position: 'relative', overflow: 'hidden' }}>
       {isDuress && <div className="duress-pulse" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 40, opacity: 0.1, pointerEvents: 'none' }}></div>}
       
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 2, fontFamily: "'Outfit', sans-serif" }}>INCIDENT REPORT</span>
             {['DISPATCHED', 'ACKNOWLEDGED', 'ON_ROUTE', 'ON_SITE'].includes(a.status) && (
               <span style={{ fontSize: 8, fontWeight: 900, background: 'var(--success)', color: 'white', padding: '2px 6px', borderRadius: 4, boxShadow: 'var(--success-glow)' }}>UNIT {a.status}</span>
             )}
+            <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--primary)', marginLeft: 6 }}>
+              {alert.created_at ? new Date(alert.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'JUST NOW'}
+            </span>
           </div>
           <h3 style={{ fontSize: 16, fontWeight: 900, color: isDuress ? 'var(--duress)' : 'var(--text-primary)', fontFamily: "'Outfit', sans-serif" }}>{isDuress ? 'DURESS ALERT' : alert.type}</h3>
         </div>
@@ -1405,6 +1408,28 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
           <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', fontFamily: "'Inter', sans-serif" }}>{alert.assigned_to || 'PU'}</span>
         </div>
       </div>
+
+      {alert.citizen_feedback && (
+        <div style={{
+          background: alert.citizen_feedback === 'SAFE' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+          border: `1px solid ${alert.citizen_feedback === 'SAFE' ? 'var(--success)' : 'var(--danger)'}`,
+          padding: '10px 14px',
+          borderRadius: 10,
+          marginBottom: 16,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <span style={{ fontSize: 10, fontWeight: 900, color: alert.citizen_feedback === 'SAFE' ? 'var(--success)' : 'var(--danger)', letterSpacing: 0.5 }}>
+            CITIZEN STATUS: {alert.citizen_feedback === 'SAFE' ? "SAFE (CANCELLED SOS)" : alert.citizen_feedback === 'INJURED' ? "INJURED - URGENT MEDICAL AID REQUIRED" : "NEED IMMEDIATE ASSISTANCE"}
+          </span>
+          {alert.feedback_at && (
+            <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>
+              {new Date(alert.feedback_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
+        </div>
+      )}
 
       <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 20 }}>{alert.description}</p>
 
