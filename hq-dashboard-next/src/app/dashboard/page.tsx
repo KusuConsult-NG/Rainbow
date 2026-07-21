@@ -1648,21 +1648,70 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
       {showDispatch && (
         <div style={{ background: 'var(--input-bg)', padding: 12, borderRadius: 12, marginBottom: 20, border: '1px solid var(--border)' }}>
           <p style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', marginBottom: 8 }}>SELECT LIVE RESPONDER</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 150, overflow: 'auto' }}>
-            {agents.filter(ag => ag.status === 'PATROLLING' || !ag.status).map(agent => (
-              <button 
-                key={agent.id}
-                onClick={async () => { await handleDispatch(agent.user_id); setShowDispatch(false); }}
-                style={{ textAlign: 'left', padding: '10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', cursor: 'pointer', transition: 'all 0.2s' }}
-                className="card-hover"
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 11, fontWeight: 700 }}>{agent.displayName || agent.user_id.substring(0, 8)}</span>
-                  <span style={{ fontSize: 9, color: 'var(--success)' }}>ONLINE</span>
-                </div>
-              </button>
-            ))}
-            {agents.length === 0 && <p style={{ fontSize: 10, color: 'var(--text-dim)', textAlign: 'center', padding: 10 }}>NO RESPONDERS IN VICINITY</p>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflow: 'auto' }}>
+            {(() => {
+              const profileResponders = Object.values(usersMap || {}).filter(
+                (u: any) => u && u.role !== 'CITIZEN'
+              );
+
+              const responderList = profileResponders.length > 0
+                ? profileResponders.map((p: any) => {
+                    const telem = (agents || []).find((a: any) => a.user_id === p.id || a.id === p.id);
+                    return {
+                      userId: p.id,
+                      name: p.full_name || p.badge_number || `Officer ${p.id.substring(0, 6)}`,
+                      badge: p.badge_number || p.role || 'RESPONDER',
+                      status: telem?.status || 'PATROLLING',
+                      isLive: !!telem,
+                    };
+                  })
+                : (agents || []).map((a: any) => ({
+                    userId: a.user_id || a.id,
+                    name: a.displayName || a.name || `Unit ${(a.user_id || a.id).substring(0, 6)}`,
+                    badge: 'PATROL UNIT',
+                    status: a.status || 'PATROLLING',
+                    isLive: true,
+                  }));
+
+              if (responderList.length === 0) {
+                return (
+                  <p style={{ fontSize: 10, color: 'var(--text-dim)', textAlign: 'center', padding: 10 }}>
+                    NO REGISTERED RESPONDERS FOUND
+                  </p>
+                );
+              }
+
+              return responderList.map((r: any) => (
+                <button
+                  key={r.userId}
+                  onClick={async () => {
+                    await handleDispatch(r.userId);
+                    setShowDispatch(false);
+                  }}
+                  style={{
+                    textAlign: 'left',
+                    padding: '10px 14px',
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    color: 'var(--text-primary)',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                  className="card-hover"
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <span style={{ fontSize: 11, fontWeight: 700 }}>{r.name}</span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 8 }}>[{r.badge}]</span>
+                    </div>
+                    <span style={{ fontSize: 9, fontWeight: 800, color: r.isLive ? 'var(--success)' : 'var(--warning)' }}>
+                      {r.isLive ? '● LIVE GPS' : 'READY TO DISPATCH'}
+                    </span>
+                  </div>
+                </button>
+              ));
+            })()}
           </div>
         </div>
       )}
