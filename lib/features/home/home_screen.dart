@@ -18,6 +18,7 @@ import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
 import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
+import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/broadcast_hud.dart';
 import 'package:rainbow_app/features/home/widgets/voice_report_dialog.dart';
@@ -87,14 +88,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _triggerPanic({required bool silent}) async {
     await HapticFeedback.heavyImpact();
 
-    // Enforce location permission for emergency responder routing accuracy
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
+    final hasPermission = await LocationService().requestPermission(force: true);
+    if (!hasPermission) {
       if (mounted) {
         showDialog<void>(
           context: context,

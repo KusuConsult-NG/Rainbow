@@ -72,6 +72,9 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
     super.dispose();
   }
 
+  String _accumulatedText = '';
+  String _currentChunk = '';
+
   Future<void> _startListeningFlow() async {
     final lang = ref.read(languageProvider);
     setState(() {
@@ -96,8 +99,38 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
         onResult: (text) {
           if (!mounted) return;
           setState(() {
-            _transcription = text;
+            _currentChunk = text;
+            _transcription = _accumulatedText.isEmpty
+                ? _currentChunk
+                : '$_accumulatedText $_currentChunk';
           });
+        },
+        onStatusChange: (status) {
+          if (!mounted) return;
+          if ((status == 'done' || status == 'notListening') && _isListening) {
+            if (_currentChunk.isNotEmpty) {
+              _accumulatedText = _accumulatedText.isEmpty
+                  ? _currentChunk
+                  : '$_accumulatedText $_currentChunk';
+              _currentChunk = '';
+            }
+            // Auto-restart listening so user can keep talking
+            Future.delayed(const Duration(milliseconds: 300), () {
+              if (mounted && _isListening) {
+                SpeechService.instance.startListening(
+                  onResult: (text) {
+                    if (!mounted) return;
+                    setState(() {
+                      _currentChunk = text;
+                      _transcription = _accumulatedText.isEmpty
+                          ? _currentChunk
+                          : '$_accumulatedText $_currentChunk';
+                    });
+                  },
+                );
+              }
+            });
+          }
         },
       );
     } catch (e) {

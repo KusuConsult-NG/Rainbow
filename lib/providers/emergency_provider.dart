@@ -88,7 +88,7 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
     final duressPin = dotenv.env['DURESS_PIN'] ?? '9999';
 
     try {
-      if (pin == safePin || pin == '123456' || pin == '0000') {
+      if (pin == safePin) {
         if (state.alertId != null) {
           await SupabaseConfig.client
               .from('alerts')

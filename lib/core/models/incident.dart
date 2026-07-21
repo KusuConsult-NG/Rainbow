@@ -69,16 +69,15 @@ abstract class Incident with _$Incident {
   factory Incident.fromJson(Map<String, dynamic> json) =>
       _$IncidentFromJson(json);
 
-  // Helper for Firestore Timestamps
+  // Helper for Supabase Timestamps
   static DateTime? _timestampFromJson(dynamic timestamp) {
-    if (timestamp is Timestamp) return timestamp.toDate();
     if (timestamp is String) return DateTime.tryParse(timestamp);
     return null;
   }
 
   static dynamic _timestampToJson(DateTime? date) {
     if (date == null) return null;
-    return Timestamp.fromDate(date);
+    return date.toIso8601String();
   }
 }
 

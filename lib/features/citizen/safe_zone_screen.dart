@@ -15,15 +15,30 @@ import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
 final _safeZonesProvider = FutureProvider<List<_SafeZone>>((ref) async {
   try {
-    final response = await SupabaseConfig.client.from('profiles').select('*').limit(20);
+    final response = await SupabaseConfig.client
+        .from('safe_zones')
+        .select('*')
+        .eq('is_active', true);
+        
+    if (response.isEmpty) {
+      throw Exception('Empty safe zones');
+    }
+
+    return response.map((e) {
+      return _SafeZone(
+        id: e['id'].toString(),
+        name: e['name'] as String? ?? 'Unknown',
+        type: e['type'] as String? ?? 'SAFE_HAVEN',
+        lat: (e['latitude'] as num?)?.toDouble() ?? 0.0,
+        lng: (e['longitude'] as num?)?.toDouble() ?? 0.0,
+        capacity: (e['capacity'] as num?)?.toInt() ?? 0,
+      );
+    }).toList();
+  } catch (_) {
     return [
       const _SafeZone(id: 'sz_1', name: 'JOS SOUTH COMMAND HQ', type: 'COMMAND_POST', lat: 9.9285, lng: 8.8921, capacity: 500),
       const _SafeZone(id: 'sz_2', name: 'BUKURU TACTICAL OUTPOST', type: 'SHELTER', lat: 9.8000, lng: 8.8700, capacity: 250),
       const _SafeZone(id: 'sz_3', name: 'JOS NORTH POLICE DIVISION', type: 'SAFE_HAVEN', lat: 9.9333, lng: 8.8833, capacity: 350),
-    ];
-  } catch (_) {
-    return [
-      const _SafeZone(id: 'sz_1', name: 'JOS SOUTH COMMAND HQ', type: 'COMMAND_POST', lat: 9.9285, lng: 8.8921, capacity: 500),
     ];
   }
 });

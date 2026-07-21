@@ -112,21 +112,22 @@ bool onIosBackground(ServiceInstance service) {
 
 @pragma('vm:entry-point')
 Future<void> onStart(ServiceInstance service) async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  final battery = Battery();
-  final connectivity = Connectivity();
-
   try {
-    await SupabaseConfig.init();
-  } catch (_) {}
+    WidgetsFlutterBinding.ensureInitialized();
 
-  final prefs = await SharedPreferences.getInstance();
-  var modeStr = prefs.getString('trackingMode');
-  var currentUserId = prefs.getString('activeTrackingUserId');
-  var currentAlertId = prefs.getString('activeTrackingAlertId');
-  String? currentStatus = prefs.getString('responderStatus') ??
-      (modeStr == 'sos' ? 'EMERGENCY' : 'PATROLLING');
+    final battery = Battery();
+    final connectivity = Connectivity();
+
+    try {
+      await SupabaseConfig.init();
+    } catch (_) {}
+
+    final prefs = await SharedPreferences.getInstance();
+    var modeStr = prefs.getString('trackingMode');
+    var currentUserId = prefs.getString('activeTrackingUserId');
+    var currentAlertId = prefs.getString('activeTrackingAlertId');
+    String? currentStatus = prefs.getString('responderStatus') ??
+        (modeStr == 'sos' ? 'EMERGENCY' : 'PATROLLING');
 
   Position? lastPosition;
 
@@ -157,67 +158,73 @@ Future<void> onStart(ServiceInstance service) async {
       accuracy: LocationAccuracy.high,
       distanceFilter: distance,
       intervalDuration: interval,
-      foregroundNotificationConfig: ForegroundNotificationConfig(
-        notificationTitle: 'OPERATION RAINBOW',
-        notificationText: modeStr == 'sos'
-            ? 'EMERGENCY: LIVE TRANSMISSION'
-            : "RESPONDER: ${currentStatus ?? 'ONLINE'}",
-        enableWakeLock: true,
-      ),
+      forceLocationManager: true,
     );
 
-    positionStream =
-        Geolocator.getPositionStream(locationSettings: dynamicSettings)
-            .listen((pos) async {
-      final userId = currentUserId ?? 'UNKNOWN';
-      if (userId == 'UNKNOWN') return;
+    try {
+      positionStream = Geolocator.getPositionStream(
+        locationSettings: dynamicSettings,
+      ).listen(
+        (pos) async {
+          final userId = currentUserId ?? 'UNKNOWN';
+          if (userId == 'UNKNOWN') return;
 
-      if (lastPosition != null && modeStr != 'sos') {
-        final dist = Geolocator.distanceBetween(
-          lastPosition!.latitude,
-          lastPosition!.longitude,
-          pos.latitude,
-          pos.longitude,
-        );
-        if (dist < 5) return;
-      }
-      lastPosition = pos;
+          if (lastPosition != null && modeStr != 'sos') {
+            final dist = Geolocator.distanceBetween(
+              lastPosition!.latitude,
+              lastPosition!.longitude,
+              pos.latitude,
+              pos.longitude,
+            );
+            if (dist < 5) return;
+          }
+          lastPosition = pos;
 
-      try {
-        final batteryLevel = await battery.batteryLevel;
-        final conn = await connectivity.checkConnectivity();
+          try {
+            final batteryLevel = await battery.batteryLevel.catchError((_) => 100);
+            final conn = await connectivity.checkConnectivity().catchError((_) => [ConnectivityResult.none]);
 
-        final telemetryPayload = {
-          'user_id': userId,
-          'latitude': pos.latitude,
-          'longitude': pos.longitude,
-          'mode': modeStr ?? 'responder',
-          'status': modeStr == 'sos' ? 'EMERGENCY' : (currentStatus ?? 'PATROLLING'),
-          'battery': batteryLevel,
-          'network': conn.toString(),
-          'accuracy': pos.accuracy,
-          'speed': pos.speed,
-          'updated_at': DateTime.now().toIso8601String(),
-        };
+            final telemetryPayload = {
+              'user_id': userId,
+              'latitude': pos.latitude,
+              'longitude': pos.longitude,
+              'mode': modeStr ?? 'responder',
+              'status': modeStr == 'sos'
+                  ? 'EMERGENCY'
+                  : (currentStatus ?? 'PATROLLING'),
+              'battery': batteryLevel,
+              'network': conn.toString(),
+              'accuracy': pos.accuracy,
+              'speed': pos.speed,
+              'updated_at': DateTime.now().toIso8601String(),
+            };
 
-        await SupabaseConfig.client
-            .from('telemetry')
-            .upsert(telemetryPayload);
+            await SupabaseConfig.client
+                .from('telemetry')
+                .upsert(telemetryPayload);
 
-        if (service is AndroidServiceInstance) {
-          unawaited(
-            service.setForegroundNotificationInfo(
-              title: 'OPERATION RAINBOW',
-              content: modeStr == 'sos'
-                  ? 'SOS: ACTIVE TRANSMISSION'
-                  : "UNIT: ${currentStatus ?? 'ONLINE'}",
-            ),
-          );
-        }
-      } catch (e) {
-        debugPrint('[TELEMETRY_FAIL] $e');
-      }
-    });
+            if (service is AndroidServiceInstance) {
+              unawaited(
+                service.setForegroundNotificationInfo(
+                  title: 'OPERATION RAINBOW',
+                  content: modeStr == 'sos'
+                      ? 'SOS: ACTIVE TRANSMISSION'
+                      : "UNIT: ${currentStatus ?? 'ONLINE'}",
+                ),
+              );
+            }
+          } catch (e) {
+            debugPrint('[TELEMETRY_FAIL] $e');
+          }
+        },
+        onError: (Object err) {
+          debugPrint('[BG_LOC_ERR] Background stream error: $err');
+        },
+        cancelOnError: false,
+      );
+    } catch (e) {
+      debugPrint('[BG_LOC_ERR] Failed to start background position stream: $e');
+    }
   }
 
   service.on('updateMode').listen((event) {
@@ -236,4 +243,7 @@ Future<void> onStart(ServiceInstance service) async {
   });
 
   startTelemetry();
+  } catch (e) {
+    debugPrint('[BG_CRITICAL_ERR] Exception inside background service onStart: $e');
+  }
 }

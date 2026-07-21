@@ -24,7 +24,13 @@ class AuthService {
   String? get lastAuthError => _lastAuthError;
 
   /// Retrieves the current user ID
-  String? get currentUserId => SupabaseConfig.client.auth.currentUser?.id;
+  String? get currentUserId {
+    try {
+      return SupabaseConfig.client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
+  }
 
   // ── CITIZEN PATH: Phone Auth with Demo Bypass ───────────────────────────────
 
@@ -84,6 +90,13 @@ class AuthService {
     return signInWithBadge('$code@rainbow.gov.ng', '12345Gg!');
   }
 
+  static bool isDemoNumber(String phone) {
+    final clean = phone.trim().replaceAll(RegExp(r'[^0-9+]'), '');
+    return clean == '08000000000' ||
+        clean == '2348000000000' ||
+        clean == '+2348000000000';
+  }
+
   // ── TWO-STEP CITIZEN FLOW ──────────────────────────────────────────────────
 
   /// Step 1: Store phone number and trigger OTP send (or flag demo bypass).
@@ -94,13 +107,8 @@ class AuthService {
 
     debugPrint('[AUTH] verifyPhoneNumber: $cleanPhone');
 
-    final isDemoPhone = cleanPhone == '08000000000' ||
-        cleanPhone == '2348000000000' ||
-        cleanPhone == '+2348000000000';
-
-    if (isDemoPhone) {
-      // Demo bypass — OTP screen shows, verifyOTP() handles it
-      debugPrint('[AUTH] Demo phone — use OTP 123456');
+    if (isDemoNumber(cleanPhone)) {
+      debugPrint('[AUTH] Demo phone detected — use OTP 123456');
       return;
     }
 
@@ -126,11 +134,7 @@ class AuthService {
 
     debugPrint('[AUTH] verifyOTP: phone=$phone otp=$otp');
 
-    final isDemoPhone = phone == '08000000000' ||
-        phone == '2348000000000' ||
-        phone == '+2348000000000';
-
-    if (isDemoPhone) {
+    if (isDemoNumber(phone)) {
       // Demo citizen: only accept OTP 123456
       if (otp == '123456') {
         try {

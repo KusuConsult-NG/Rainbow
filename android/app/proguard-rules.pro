@@ -15,15 +15,9 @@
 -keep class io.flutter.plugins.urllauncher.** { *; }
 -dontwarn io.flutter.plugins.urllauncher.**
 
-# Firebase — keep all reflection-used classes
--keep class com.google.firebase.** { *; }
--keep class com.google.android.gms.** { *; }
--dontwarn com.google.firebase.**
--dontwarn com.google.android.gms.**
-
-# Firestore / Cloud Messaging
--keep class com.google.firestore.** { *; }
--dontwarn com.google.firestore.**
+# OneSignal Push Notifications
+-keep class com.onesignal.** { *; }
+-dontwarn com.onesignal.**
 
 # Geolocator plugin
 -keep class com.baseflow.geolocator.** { *; }
@@ -34,7 +28,6 @@
 -dontwarn com.baseflow.permissionhandler.**
 
 # Background service plugin
--keep class be.tramckrijte.workmanager.** { *; }
 -keep class id.flutter.flutter_background_service.** { *; }
 -dontwarn id.flutter.flutter_background_service.**
 
@@ -42,7 +35,7 @@
 -keep class dev.fluttercommunity.plus.connectivity.** { *; }
 -dontwarn dev.fluttercommunity.plus.connectivity.**
 
-# Google Maps / flutter_map (uses no native)
+# Google Maps / flutter_map
 -dontwarn org.openstreetmap.**
 
 # OkHttp (used by http package)
@@ -51,7 +44,7 @@
 -keep class okhttp3.** { *; }
 -keep class okio.** { *; }
 
-# Prevent stripping of Kotlin metadata (Kotlin reflection)
+# Prevent stripping of Kotlin metadata & annotations
 -keepattributes *Annotation*
 -keepattributes Signature
 -keepattributes InnerClasses

@@ -271,6 +271,11 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
                 setState(() => _showMap = !_showMap);
               },
             ),
+            if (profile['role'] == 'HQ_COMMAND' || profile['role'] == 'LGA_COMMAND')
+              IconButton(
+                icon: const Icon(Icons.campaign_rounded, color: Colors.white),
+                onPressed: () => context.push(AppRoutes.adminBroadcast),
+              ),
             IconButton(
               icon: const Icon(
                 Icons.power_settings_new_rounded,

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rainbow_app/core/constants/alert_categories.dart';
+import 'package:rainbow_app/features/agent/admin_broadcast_screen.dart';
 import 'package:rainbow_app/features/agent/agent_dashboard_screen.dart';
 import 'package:rainbow_app/features/agent/mission_intel_screen.dart';
 import 'package:rainbow_app/features/agent/mission_resolution_screen.dart';
@@ -166,6 +167,8 @@ class AppRoutes {
   /// Documentation for this public member.
   static const String incidentHistory = '/incident-history';
 
+  static const String adminBroadcast = '/admin-broadcast';
+
   /// Documentation for this public member.
   static const String settings = '/settings';
 
@@ -328,6 +331,10 @@ final appRouter = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.incidentHistory,
             pageBuilder: (c, s) => _slide(s, const IncidentHistoryScreen()),
+          ),
+          GoRoute(
+            path: AppRoutes.adminBroadcast,
+            pageBuilder: (c, s) => _slide(s, const AdminBroadcastScreen()),
           ),
           GoRoute(
             path: AppRoutes.settings,
