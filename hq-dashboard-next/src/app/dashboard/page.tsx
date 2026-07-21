@@ -395,7 +395,14 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     const next = currentTier === 'POLLING_UNIT' ? 'WARD' : currentTier === 'WARD' ? 'LGA' : 'HQ';
     const toastId = toast.loading('Escalating Alert...', `Moving to ${next} tier`);
     try {
-      const { error } = await supabase.from('alerts').update({ assigned_to: next }).eq('id', alertId);
+      const updateData: Record<string, any> = {
+        severity: 'CRITICAL',
+        status: 'DISPATCHED',
+      };
+      if (user?.id) {
+        updateData.assigned_to = user.id;
+      }
+      const { error } = await supabase.from('alerts').update(updateData).eq('id', alertId);
       if (error) throw error;
       toast.update(toastId, 'success', 'Alert Escalated', `Incident moved to ${next} command tier`);
     } catch (e: any) {
@@ -403,12 +410,19 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
       const msg = e?.message || 'Escalation failed';
       toast.update(toastId, 'error', 'Escalation Failed', msg);
     }
-  }, [toast]);
+  }, [toast, user]);
 
   const hqOverride = useCallback(async (alertId: string) => {
     const toastId = toast.loading('HQ Override...', 'Taking command of incident');
     try {
-      const { error } = await supabase.from('alerts').update({ assigned_to: 'HQ' }).eq('id', alertId);
+      const updateData: Record<string, any> = {
+        severity: 'CRITICAL',
+        status: 'IN_PROGRESS',
+      };
+      if (user?.id) {
+        updateData.assigned_to = user.id;
+      }
+      const { error } = await supabase.from('alerts').update(updateData).eq('id', alertId);
       if (error) throw error;
       toast.update(toastId, 'success', 'HQ Override Applied', 'Incident transferred to Command HQ');
     } catch (e: any) {
@@ -416,7 +430,7 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
       const msg = e?.message || 'Override failed';
       toast.update(toastId, 'error', 'Override Failed', msg);
     }
-  }, [toast]);
+  }, [toast, user]);
 
   const resolveAlert = useCallback(async (alertId: string) => {
     const toastId = toast.loading('Resolving Incident...', 'Marking incident as resolved');
