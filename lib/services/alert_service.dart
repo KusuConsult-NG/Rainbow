@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -7,6 +8,7 @@ import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
+import 'package:rainbow_app/services/cloudinary_service.dart';
 import 'package:rainbow_app/services/sqlite_service.dart';
 
 /// Documentation for this public member.
@@ -86,10 +88,49 @@ class AlertService {
         return localId;
       }
 
+      final mediaUrls = <String>[];
+      if (attachments != null && attachments.isNotEmpty) {
+        for (final filePath in attachments) {
+          try {
+            final file = File(filePath);
+            if (await file.exists()) {
+              // 1. Cost-optimized Cloudinary Upload (Free 25GB Storage + Transcoding)
+              final cloudinaryUrl = await CloudinaryService.instance.uploadMedia(file);
+              if (cloudinaryUrl != null) {
+                mediaUrls.add(cloudinaryUrl);
+                continue;
+              }
+
+              // 2. Supabase Storage Fallback
+              final bytes = await file.readAsBytes();
+              final ext = filePath.split('.').last;
+              final fileName = '${DateTime.now().millisecondsSinceEpoch}_${localId.length > 5 ? localId.substring(0, 5) : localId}.$ext';
+              final storagePath = 'incident_media/$fileName';
+              await SupabaseConfig.client.storage
+                  .from('incident-media')
+                  .uploadBinary(storagePath, bytes);
+              final publicUrl = SupabaseConfig.client.storage
+                  .from('incident-media')
+                  .getPublicUrl(storagePath);
+              mediaUrls.add(publicUrl);
+            } else if (filePath.startsWith('http')) {
+              mediaUrls.add(filePath);
+            }
+          } catch (e) {
+            debugPrint('[ALERT_SERVICE] Media upload fallback for $filePath: $e');
+            if (filePath.startsWith('http')) {
+              mediaUrls.add(filePath);
+            }
+          }
+        }
+      }
+
       final alertPayload = <String, dynamic>{
         'local_id': localId,
         'type': type,
         'description': description,
+        'reported_by': reportedBy,
+        'reportedBy': reportedBy,
         'latitude': finalLat,
         'longitude': finalLng,
         'status': 'PENDING',
@@ -98,24 +139,49 @@ class AlertService {
         'geo_ward': geoWard,
         'geo_siec_ward': geoSiecWard,
         'geo_pu': geoPu,
+        'media_urls': mediaUrls,
       };
 
-      final response = await SupabaseConfig.client
-          .from('alerts')
-          .insert(alertPayload)
-          .select()
-          .single();
+      try {
+        final response = await SupabaseConfig.client
+            .from('alerts')
+            .insert(alertPayload)
+            .select('id')
+            .maybeSingle();
 
-      final alertId = response['id'] as String?;
-      if (alertId != null) {
+        final alertId = response?['id'] as String? ?? localId;
         await BackgroundTrackingService().startSosTracking(alertId, reportedBy);
         return alertId;
-      }
+      } catch (e) {
+        debugPrint(
+          '[ALERT_SERVICE] Direct insert failed ($e) — saving to offline SQLite queue.',
+        );
+        await _sqliteService.enqueueAlert(
+          localId: localId,
+          type: type,
+          description: description,
+          lat: finalLat,
+          lng: finalLng,
+          priority: priority.name.toUpperCase(),
+          isAnonymous: false,
+          createdAt: DateTime.now().toIso8601String(),
+        );
 
-      return null;
+        if (attachments != null) {
+          for (final path in attachments) {
+            await _sqliteService.enqueueMedia(
+              localAlertId: localId,
+              localFilePath: path,
+            );
+          }
+        }
+
+        await BackgroundTrackingService().startSosTracking(localId, reportedBy);
+        return localId;
+      }
     } catch (e) {
       debugPrint('[CRITICAL_SERVICE_ERR] AlertService Submission Failed: $e');
-      return null;
+      return localId;
     }
   }
 

@@ -32,18 +32,18 @@ class ReportSuccessScreen extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: AppColors.success.withValues(alpha: 0.15),
+                  color: (isOffline ? AppColors.warning : AppColors.success).withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.check_circle_rounded,
+                child: Icon(
+                  isOffline ? Icons.cloud_off_rounded : Icons.check_circle_rounded,
                   size: 64,
-                  color: AppColors.success,
+                  color: isOffline ? AppColors.warning : AppColors.success,
                 ),
               ),
               const SizedBox(height: 24),
               Text(
-                'REPORT TRANSMITTED',
+                isOffline ? 'REPORT QUEUED LOCALLY' : 'REPORT TRANSMITTED',
                 style: GoogleFonts.outfit(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -72,7 +72,9 @@ class ReportSuccessScreen extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: AppColors.surfaceContainer,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppColors.success.withValues(alpha: 0.3)),
+                    border: Border.all(
+                      color: (isOffline ? AppColors.warning : AppColors.success).withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -80,28 +82,30 @@ class ReportSuccessScreen extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppColors.success.withValues(alpha: 0.15),
+                          color: (isOffline ? AppColors.warning : AppColors.success).withValues(alpha: 0.15),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(
-                          Icons.shield_rounded,
-                          color: AppColors.success,
+                        child: Icon(
+                          isOffline ? Icons.wifi_off_rounded : Icons.shield_rounded,
+                          color: isOffline ? AppColors.warning : AppColors.success,
                           size: 32,
                         ),
                       ),
                       const SizedBox(height: 14),
                       Text(
-                        'RECEIVED BY COMMAND CENTER',
+                        isOffline ? 'QUEUED IN OFFLINE STORAGE' : 'RECEIVED BY COMMAND CENTER',
                         style: GoogleFonts.outfit(
                           fontSize: 13,
                           fontWeight: FontWeight.w900,
-                          color: AppColors.success,
+                          color: isOffline ? AppColors.warning : AppColors.success,
                           letterSpacing: 1.5,
                         ),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Emergency Responders and Command HQ have received your geo-tagged incident report. Patrol units in your area have been notified.',
+                        isOffline
+                            ? 'Your incident report has been securely saved to your local offline queue. As soon as a cellular or Wi-Fi network connection is restored, it will automatically sync to Command HQ.'
+                            : 'Emergency Responders and Command HQ have received your geo-tagged incident report. Patrol units in your area have been notified.',
                         textAlign: TextAlign.center,
                         style: GoogleFonts.inter(
                           fontSize: 12,

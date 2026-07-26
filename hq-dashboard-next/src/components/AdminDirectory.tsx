@@ -1,13 +1,14 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Users, UserPlus, Trash2, Loader2, RefreshCw } from 'lucide-react';
-import { plateauTacticalMap, TacticalJurisdiction, TacticalWard } from '@/lib/tactical_mapping';
+import { Users, UserPlus, Trash2, Loader2, RefreshCw, Shield } from 'lucide-react';
+import { plateauTacticalMap, TacticalJurisdiction, TacticalWard, STATE_SECURITY_AGENCIES } from '@/lib/tactical_mapping';
 
 interface StaffRecord {
   id: string;
   email?: string;
   role?: string;
+  agency?: string;
   full_name?: string;
   phone?: string;
   created_at?: string;
@@ -18,15 +19,16 @@ interface StaffRecord {
 
 const ROLES = [
   { value: 'HQ_COMMAND', label: 'Tactical HQ (Statewide)' },
-  { value: 'LGA_COMMAND', label: 'LGA Command' },
-  { value: 'WARD_COMMAND', label: 'Ward Command' },
-  { value: 'UNIT_COMMAND', label: 'Unit Command (PU)' },
+  { value: 'LGA_COMMAND', label: 'LGA Sector Command' },
+  { value: 'WARD_COMMAND', label: 'District / Sub-District Command' },
+  { value: 'UNIT_COMMAND', label: 'Local Post Command' },
 ];
 
 export default function AdminDirectory() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('UNIT_COMMAND');
+  const [agency, setAgency] = useState('RAINBOW');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
 
@@ -67,6 +69,7 @@ export default function AdminDirectory() {
           data: {
             full_name: fullName,
             role,
+            agency,
             phone,
             geo_lga: (selectedLga as any)?.name || 'STATEWIDE HQ',
             geo_ward: selectedWard?.name || 'N/A',
@@ -151,7 +154,7 @@ export default function AdminDirectory() {
           </div>
 
           <div>
-            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Role</label>
+            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Command Role</label>
             <select
               className="input-tactical"
               style={{ width: '100%' }}
@@ -166,6 +169,22 @@ export default function AdminDirectory() {
             </select>
           </div>
 
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Security Agency Affiliation</label>
+            <select
+              className="input-tactical"
+              style={{ width: '100%' }}
+              value={agency}
+              onChange={(e) => setAgency(e.target.value)}
+            >
+              {STATE_SECURITY_AGENCIES.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.badge} {a.name} ({a.shortCode})
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div style={{ gridColumn: '1 / -1', marginTop: 8 }}>
             <button
               type="submit"
@@ -173,7 +192,7 @@ export default function AdminDirectory() {
               className="btn-tactical btn-primary"
               style={{ width: '100%', padding: '14px' }}
             >
-              {loading ? <Loader2 className="animate-spin" style={{ width: 16, height: 16 }} /> : 'Register Tactical Officer'}
+              {loading ? <Loader2 className="animate-spin" style={{ width: 16, height: 16 }} /> : 'Provision Security Personnel Account'}
             </button>
           </div>
         </form>
@@ -182,34 +201,42 @@ export default function AdminDirectory() {
       <div className="tactical-panel glass" style={{ padding: 24 }}>
         <h2 style={{ fontSize: 18, fontWeight: 900, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-primary)' }}>
           <Users style={{ width: 20, height: 20, color: 'var(--primary)' }} />
-          Active Personnel Directory ({staff.length})
+          Active Multi-Agency Personnel Directory ({staff.length})
         </h2>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {staff.map((s) => (
-            <div
-              key={s.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '16px 20px',
-                background: 'var(--input-bg)',
-                border: '1px solid var(--border)',
-                borderRadius: 14,
-              }}
-            >
-              <div>
-                <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{s.full_name || s.email || 'Officer'}</h4>
-                <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.email} | Role: {s.role}</p>
-                <p style={{ fontSize: 10, color: 'var(--text-dim)' }}>LGA: {s.geo_lga || 'HQ'} | Ward: {s.geo_ward || 'N/A'}</p>
-              </div>
+          {staff.map((s) => {
+            const ag = STATE_SECURITY_AGENCIES.find(a => a.id === (s.agency || 'RAINBOW')) || STATE_SECURITY_AGENCIES[0];
+            return (
+              <div
+                key={s.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '16px 20px',
+                  background: 'var(--input-bg)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 14,
+                }}
+              >
+                <div>
+                  <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span>{s.full_name || s.email || 'Officer'}</span>
+                    <span style={{ fontSize: 10, fontWeight: 900, background: ag.color + '22', color: ag.color, border: `1px solid ${ag.color}66`, padding: '2px 8px', borderRadius: 12 }}>
+                      {ag.badge} {ag.shortCode}
+                    </span>
+                  </h4>
+                  <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.email} | Role: {s.role}</p>
+                  <p style={{ fontSize: 10, color: 'var(--text-dim)' }}>Sector: {s.geo_lga || 'STATEWIDE HQ'} | District: {s.geo_ward || 'N/A'}</p>
+                </div>
 
-              <span style={{ fontSize: 10, fontWeight: 900, background: 'var(--primary-dim)', color: 'var(--primary)', padding: '4px 10px', borderRadius: 20 }}>
-                {s.role}
-              </span>
-            </div>
-          ))}
+                <span style={{ fontSize: 10, fontWeight: 900, background: 'var(--primary-dim)', color: 'var(--primary)', padding: '4px 10px', borderRadius: 20 }}>
+                  {s.role}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

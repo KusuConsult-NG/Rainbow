@@ -66,8 +66,13 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
 
-    final user = ref.read(authProvider).user;
+    final auth = ref.read(authProvider);
+    final user = auth.user;
     if (user == null) return;
+
+    final profile = auth.profile ?? {};
+    final fullName = profile['full_name'] as String? ?? profile['name'] as String? ?? (user.email?.split('@')[0] ?? 'User');
+    final role = (profile['role'] as String? ?? 'CITIZEN').toUpperCase();
 
     _controller.clear();
 
@@ -75,8 +80,8 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
       await SupabaseConfig.client.from('chat_messages').insert({
         'alert_id': widget.alertId,
         'sender_id': user.id,
-        'sender_name': 'Citizen',
-        'sender_role': 'CITIZEN',
+        'sender_name': fullName,
+        'sender_role': role,
         'message': text,
       });
     } catch (e) {
@@ -102,13 +107,13 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const lang = 'en';
+    final currentLang = ref.watch(languageProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: RainbowAppBar(
-        title: Translations.get('live_dispatch_channel', AppLanguage.english),
-        subtitle: '${Translations.get('alert_ref', AppLanguage.english)} #${widget.alertId.substring(0, 8)}',
+        title: Translations.get('live_dispatch_channel', currentLang),
+        subtitle: '${Translations.get('alert_ref', currentLang)} #${widget.alertId.length > 8 ? widget.alertId.substring(0, 8) : widget.alertId}',
       ),
       body: Column(
         children: [

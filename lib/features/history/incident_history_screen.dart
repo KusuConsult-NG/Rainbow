@@ -10,14 +10,37 @@ import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 class IncidentHistoryScreen extends ConsumerWidget {
   const IncidentHistoryScreen({super.key});
 
-  Future<List<Map<String, dynamic>>> _fetchAlerts(String? userId) async {
+  Future<List<Map<String, dynamic>>> _fetchAlerts(String? userId, bool isOfficer) async {
+    if (userId == null || userId.isEmpty) return [];
     try {
-      final response = await SupabaseConfig.client
-          .from('alerts')
-          .select('*')
-          .eq('reported_by', userId ?? '')
-          .order('created_at', ascending: false);
-      return (response as List<dynamic>).cast<Map<String, dynamic>>();
+      List<Map<String, dynamic>> results = [];
+
+      if (isOfficer) {
+        // Officers see alerts they reported OR are assigned to
+        final reported = await SupabaseConfig.client
+            .from('alerts')
+            .select('*')
+            .eq('reported_by', userId)
+            .order('created_at', ascending: false);
+        final assigned = await SupabaseConfig.client
+            .from('alerts')
+            .select('*')
+            .contains('assigned_responders', [userId])
+            .order('created_at', ascending: false);
+        final combined = [...(reported as List), ...(assigned as List)].cast<Map<String, dynamic>>();
+        // Deduplicate by id
+        final seen = <String>{};
+        results = combined.where((a) => seen.add(a['id'] as String? ?? '')).toList();
+      } else {
+        // Citizens only see their own reported alerts
+        final response = await SupabaseConfig.client
+            .from('alerts')
+            .select('*')
+            .eq('reported_by', userId)
+            .order('created_at', ascending: false);
+        results = (response as List<dynamic>).cast<Map<String, dynamic>>();
+      }
+      return results;
     } catch (_) {
       return [];
     }
@@ -25,7 +48,9 @@ class IncidentHistoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(authProvider).user;
+    final authState = ref.watch(authProvider);
+    final user = authState.user;
+    final auth = authState;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -34,7 +59,7 @@ class IncidentHistoryScreen extends ConsumerWidget {
         subtitle: 'HISTORICAL ARCHIVE',
       ),
       body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _fetchAlerts(user?.id),
+        future: _fetchAlerts(user?.id, auth.role == UserRole.responder),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());

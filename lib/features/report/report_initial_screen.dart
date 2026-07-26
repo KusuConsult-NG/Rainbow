@@ -15,7 +15,7 @@ class ReportInitialScreen extends StatelessWidget {
 
   void _proceed(BuildContext context, String filter) {
     unawaited(HapticFeedback.mediumImpact());
-    unawaited(context.push(AppRoutes.reportCategory));
+    unawaited(context.push(AppRoutes.reportCategory, extra: filter));
   }
 
   @override

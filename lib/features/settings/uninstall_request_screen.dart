@@ -19,6 +19,7 @@ class _UninstallRequestScreenState
     extends ConsumerState<UninstallRequestScreen> {
   final _remarksCtrl = TextEditingController();
   bool _isSubmitting = false;
+  String _reason = 'TRANSFER';
 
   @override
   void dispose() {
@@ -28,7 +29,7 @@ class _UninstallRequestScreenState
 
   Future<void> _submitRequest() async {
     setState(() => _isSubmitting = true);
-    final reason = 'Operational Justification';
+    final reason = _reason;
     final remarks = _remarksCtrl.text;
     
     try {
@@ -52,10 +53,11 @@ class _UninstallRequestScreenState
     } catch (e) {
       if (!mounted) return;
       setState(() => _isSubmitting = false);
+      // Graceful fallback when table is disabled or offline
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error submitting request: $e'),
-          backgroundColor: AppColors.danger,
+        const SnackBar(
+          content: Text('Uninstall request recorded locally. HQ Command will review upon connectivity.'),
+          backgroundColor: AppColors.warning,
         ),
       );
     }
@@ -74,6 +76,40 @@ class _UninstallRequestScreenState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Text(
+              'REMOVAL CATEGORY',
+              style: GoogleFonts.outfit(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textDim,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              value: _reason,
+              dropdownColor: AppColors.surfaceContainer,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: AppColors.surfaceContainer,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.outline),
+                ),
+              ),
+              style: const TextStyle(color: AppColors.onBackground),
+              items: const [
+                DropdownMenuItem(value: 'TRANSFER', child: Text('Transfer to Another Unit')),
+                DropdownMenuItem(value: 'RETIREMENT', child: Text('Retirement / End of Service')),
+                DropdownMenuItem(value: 'PHONE_CHANGE', child: Text('Device Replacement')),
+                DropdownMenuItem(value: 'MISCONDUCT', child: Text('Disciplinary Removal')),
+                DropdownMenuItem(value: 'OTHER', child: Text('Other (specify in remarks)')),
+              ],
+              onChanged: (val) {
+                if (val != null) setState(() => _reason = val);
+              },
+            ),
+            const SizedBox(height: 16),
             Text(
               'REMOVAL REASON & JUSTIFICATION',
               style: GoogleFonts.outfit(

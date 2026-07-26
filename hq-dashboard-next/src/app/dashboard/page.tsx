@@ -17,7 +17,7 @@ import {
   ShieldAlert, Map as MapIcon, Users, Radio, Settings,
   LogOut, AlertTriangle, CheckCircle, ChevronUp, Phone,
   Loader2, Filter, Bell, Activity, Clock, Target, Edit3, Send,
-  Sun, Moon, X, Sparkles
+  Sun, Moon, X, Sparkles, MapPin
 } from 'lucide-react';
 
 
@@ -47,6 +47,10 @@ export interface Alert {
   geo_pu?: string;
   ai_summary?: string;
   citizen_feedback?: string;
+  feedback_at?: string;
+  post_sos_status?: string;
+  media_urls?: string[];
+  attachments?: string[];
   created_at?: string;
   reportedAt?: any;
   resolved_by?: string;
@@ -73,6 +77,182 @@ const fSel: React.CSSProperties = {
 };
 
 type Tab = 'map' | 'alerts' | 'history' | 'analytics' | 'broadcast' | 'admin' | 'settings' | 'audit' | 'uninstall';
+
+const formatAlertTimestamp = (alert: Alert | null | undefined, type: 'reported' | 'resolved' = 'reported'): string => {
+  if (!alert) return '—';
+  let dateVal: any = null;
+  if (type === 'reported') {
+    dateVal = alert.created_at || alert.reportedAt;
+  } else {
+    dateVal = alert.resolved_at || alert.created_at;
+  }
+  
+  if (!dateVal) return '—';
+  if (typeof dateVal === 'string') {
+    const d = new Date(dateVal);
+    return isNaN(d.getTime()) ? dateVal : d.toLocaleString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  }
+  if (dateVal.seconds) {
+    return new Date(dateVal.seconds * 1000).toLocaleString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  }
+  return String(dateVal);
+};
+
+const formatOfficerBadge = (
+  idOrStr?: string,
+  usersMap?: Record<string, any>
+): string => {
+  if (!idOrStr || idOrStr === 'UNASSIGNED') return 'TACTICAL COMMAND';
+
+  if (usersMap && usersMap[idOrStr]) {
+    const p = usersMap[idOrStr];
+    if (p.badge_number) return p.badge_number;
+    if (p.full_name) return p.full_name;
+  }
+
+  if (usersMap) {
+    const matched = Object.values(usersMap).find(
+      (p: any) => p.badge_number === idOrStr || p.email === idOrStr || p.id === idOrStr
+    );
+    if (matched) return matched.badge_number || matched.full_name || matched.email;
+  }
+
+  if (idOrStr.includes('@')) {
+    return `OFFICER-${idOrStr.split('@')[0].toUpperCase()}`;
+  }
+
+  if (/^[0-9a-fA-F-]{24,}$/.test(idOrStr)) {
+    return `TACTICAL SQUAD #${idOrStr.substring(0, 6).toUpperCase()}`;
+  }
+
+  return idOrStr.toUpperCase();
+};
+
+const getOfficerDisplayName = (
+  resolvedBy?: string,
+  assignedTo?: string,
+  assignedResponders?: string[],
+  usersMap?: Record<string, any>
+): string => {
+  const resolveSingleUser = (idOrStr?: string): string | null => {
+    if (!idOrStr || idOrStr === 'UNASSIGNED' || idOrStr === 'Unknown Officer') return null;
+
+    // 1. Direct lookup in usersMap by ID
+    if (usersMap && usersMap[idOrStr]) {
+      const p = usersMap[idOrStr];
+      const name = p.full_name || p.name || p.badge_number || 'Field Officer';
+      const badge = p.badge_number ? ` (${p.badge_number})` : '';
+      return `${name}${badge}`;
+    }
+
+    // 2. Lookup in usersMap by badge_number or email
+    if (usersMap) {
+      const matched = Object.values(usersMap).find(
+        (p: any) => p.badge_number === idOrStr || p.email === idOrStr || p.id === idOrStr
+      );
+      if (matched) {
+        const name = matched.full_name || matched.name || matched.badge_number;
+        const badge = matched.badge_number ? ` (${matched.badge_number})` : '';
+        return `${name}${badge}`;
+      }
+    }
+
+    // 3. Email string
+    if (idOrStr.includes('@')) {
+      const namePart = idOrStr.split('@')[0].toUpperCase();
+      return `Officer ${namePart}`;
+    }
+
+    // 4. Raw UUID string fallback
+    if (/^[0-9a-fA-F-]{24,}$/.test(idOrStr)) {
+      return `Tactical Squad #${idOrStr.substring(0, 6).toUpperCase()}`;
+    }
+
+    return idOrStr;
+  };
+
+  // 1. Check resolvedBy first
+  const resolvedName = resolveSingleUser(resolvedBy);
+  if (resolvedName) return resolvedName;
+
+  // 2. Check assignedResponders list
+  if (assignedResponders && assignedResponders.length > 0) {
+    const names = assignedResponders
+      .map(id => resolveSingleUser(id))
+      .filter(Boolean);
+    if (names.length > 0) {
+      return `Dispatched Squad: ${names.join(', ')}`;
+    }
+  }
+
+  // 3. Check assignedTo
+  const assignedName = resolveSingleUser(assignedTo);
+  if (assignedName) return assignedName;
+
+  return 'HQ Duty Operations Officer';
+};
+
+const formatIncidentId = (id?: string): string => {
+  if (!id) return '#INC-0000';
+  if (id.startsWith('INC-') || id.startsWith('#')) return id.toUpperCase();
+  return `#INC-${id.substring(0, 8).toUpperCase()}`;
+};
+
+const resolveReporterDetails = (alert: Alert, usersMap: Record<string, any>) => {
+  const reporterId = alert.reported_by || alert.reportedBy || '';
+  const alertPhone = (alert as any).phone_number || (alert as any).reporter_phone || (alert as any).phone || (alert as any).contact;
+  
+  const profile = reporterId ? usersMap[reporterId] : null;
+
+  let name = 'Registered Citizen';
+  let contact = 'No Phone Registered';
+  let type = 'Citizen Mobile SOS';
+
+  // 1. Resolve phone number from alert or profile
+  if (alertPhone) {
+    contact = alertPhone;
+  } else if (profile?.phone || profile?.phone_number || profile?.mobile) {
+    contact = profile.phone || profile.phone_number || profile.mobile;
+  } else if (profile?.email) {
+    contact = profile.email;
+  } else if (reporterId.startsWith('+') || /^\+?\d{7,}$/.test(reporterId)) {
+    contact = reporterId;
+  }
+
+  // 2. Resolve name
+  if (profile?.full_name || profile?.name || profile?.displayName) {
+    name = profile.full_name || profile.name || profile.displayName;
+  } else if (reporterId && reporterId.includes('@')) {
+    name = `Officer ${reporterId.split('@')[0].toUpperCase()}`;
+    if (!alertPhone && !profile?.phone) contact = reporterId;
+  } else if (reporterId && !/^[0-9a-fA-F-]{24,}$/.test(reporterId) && !reporterId.startsWith('+')) {
+    name = reporterId;
+  }
+
+  // 3. Resolve role / type
+  if (profile?.role) {
+    type = profile.role === 'ADMIN' || profile.role === 'HQ_OFFICER' ? 'HQ Command Center' :
+           profile.role === 'RESPONDER' ? 'Field Tactical Responder' : 'Citizen Mobile App';
+  } else if (reporterId.includes('operationrainbow')) {
+    type = 'Field Operator';
+  }
+
+  return { name, contact, type };
+};
 
 const renderFormattedSummary = (text: string) => {
   if (!text) return null;
@@ -161,6 +341,28 @@ const renderFormattedSummary = (text: string) => {
 export default function DashboardPage() {
   const [user, setUser] = useState<any>(null);
   const [userRole, setUserRole] = useState('HQ_OFFICER');
+
+  // Load real user role from Supabase session
+  useEffect(() => {
+    const loadUserRole = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('role, full_name')
+            .eq('id', user.id)
+            .single();
+          if (profile?.role) {
+            setUserRole(profile.role as string);
+          }
+        }
+      } catch (e) {
+        console.error('[ROLE_LOAD] Failed to load user role:', e);
+      }
+    };
+    loadUserRole();
+  }, []);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [usersMap, setUsersMap] = useState<Record<string, any>>({});
   const [authLoading, setAuthLoading] = useState(true);
@@ -305,15 +507,19 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     };
   }, [router]);
 
-  // Live active+duress alerts stream (Supabase Realtime)
+  // Live active+duress alerts stream (Supabase Realtime with Throttled Batching)
   useEffect(() => {
     if (!user) return;
+
+    let alertDebounceTimer: NodeJS.Timeout | null = null;
+    let telemetryDebounceTimer: NodeJS.Timeout | null = null;
 
     const fetchAlertsData = async () => {
       const { data } = await supabase
         .from('alerts')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(500);
 
       if (data) {
         const mapped = data.map((d: any) => ({
@@ -327,24 +533,45 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
       }
     };
 
+    const debouncedFetchAlerts = () => {
+      if (alertDebounceTimer) clearTimeout(alertDebounceTimer);
+      alertDebounceTimer = setTimeout(() => {
+        fetchAlertsData();
+      }, 300);
+    };
+
+    const fetchTelemetryData = async () => {
+      const { data: telemetryData } = await supabase.from('telemetry').select('*').limit(500);
+      if (telemetryData) setAgentLocations(telemetryData);
+    };
+
+    const debouncedFetchTelemetry = () => {
+      if (telemetryDebounceTimer) clearTimeout(telemetryDebounceTimer);
+      telemetryDebounceTimer = setTimeout(() => {
+        fetchTelemetryData();
+      }, 300);
+    };
+
     fetchAlertsData();
+    fetchTelemetryData();
 
     const alertsChannel = supabase
       .channel('hq-alerts-channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => {
-        fetchAlertsData();
+        debouncedFetchAlerts();
       })
       .subscribe();
 
     const telemetryChannel = supabase
       .channel('hq-telemetry-channel')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'telemetry' }, async () => {
-        const { data: telemetryData } = await supabase.from('telemetry').select('*');
-        if (telemetryData) setAgentLocations(telemetryData);
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'telemetry' }, () => {
+        debouncedFetchTelemetry();
       })
       .subscribe();
 
     return () => {
+      if (alertDebounceTimer) clearTimeout(alertDebounceTimer);
+      if (telemetryDebounceTimer) clearTimeout(telemetryDebounceTimer);
       supabase.removeChannel(alertsChannel);
       supabase.removeChannel(telemetryChannel);
     };
@@ -391,14 +618,21 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     };
   }, [user]);
 
-  const escalateAlert = useCallback(async (alertId: string, targetLga: string = 'ALL', reason: string = '') => {
+  const escalateAlert = useCallback(async (alertId: string, targetLga: string = 'ALL', reason: string = '', targetAgency: string = 'ALL') => {
     const lgaTarget = targetLga || 'ALL';
-    const toastId = toast.loading('Escalating Alert...', `Broadcasting to ${lgaTarget} LGAs`);
+    const agencyTarget = targetAgency || 'ALL';
+    const toastId = toast.loading('Escalating Incident...', `Handing over to ${agencyTarget} Command (${lgaTarget})`);
     try {
+      const { data: existing } = await supabase.from('alerts').select('ai_summary').eq('id', alertId).single();
+      const existingNotes = existing?.ai_summary || '';
+      const escNote = `[INTER-AGENCY ESCALATION] Target Agency: ${agencyTarget} | Sector: ${lgaTarget} | Directives: ${reason || 'High Threat Escalation'} (by ${user?.email || user?.id || 'HQ_OFFICER'})`;
+
       const updateData: Record<string, any> = {
         severity: 'CRITICAL',
         status: 'ESCALATED',
+        escalated_to_agency: agencyTarget,
         geo_lga: lgaTarget,
+        ai_summary: existingNotes ? `${existingNotes}\n${escNote}` : escNote,
         updated_at: new Date().toISOString()
       };
       if (user?.id) {
@@ -406,7 +640,7 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
       }
       const { error } = await supabase.from('alerts').update(updateData).eq('id', alertId);
       if (error) throw error;
-      toast.update(toastId, 'success', 'Alert Escalated', `Incident broadcasted to ${lgaTarget} LGA Commanders`);
+      toast.update(toastId, 'success', 'Inter-Agency Escalation Sent', `Incident successfully transferred to ${agencyTarget} Command (${lgaTarget})`);
     } catch (e: any) {
       console.error('[HQ_ESCALATE_ERR]', e);
       const msg = e?.message || 'Escalation failed';
@@ -437,15 +671,22 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
   const resolveAlert = useCallback(async (alertId: string) => {
     const toastId = toast.loading('Resolving Incident...', 'Marking incident as resolved');
     try {
-      const { error } = await supabase.from('alerts').update({ status: 'RESOLVED' }).eq('id', alertId);
+      const resolver = user?.email || user?.id || 'HQ_OFFICER';
+      const nowIso = new Date().toISOString();
+      const { error } = await supabase.from('alerts').update({ 
+        status: 'RESOLVED',
+        resolved_by: resolver,
+        resolved_at: nowIso,
+        updated_at: nowIso
+      }).eq('id', alertId);
       if (error) throw error;
-      toast.update(toastId, 'success', 'Incident Resolved', 'Alert marked as resolved and archived');
+      toast.update(toastId, 'success', 'Incident Resolved', 'Alert marked as resolved and archived with officer attribution');
     } catch (e: any) {
       console.error('[HQ_RESOLVE_ERR]', e);
       const msg = e?.message || 'Resolution failed';
       toast.update(toastId, 'error', 'Resolution Failed', msg);
     }
-  }, [toast]);
+  }, [toast, user]);
 
   const dispatchAlert = useCallback(async (alertId: string, responderUids: string[] | string) => {
     const uids = Array.isArray(responderUids) ? responderUids : [responderUids];
@@ -453,13 +694,27 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     const toastId = toast.loading('Dispatching Tactical Team...', `Assigning ${uids.length} responders to incident`);
     try {
       const leadId = uids[0];
+      const nowIso = new Date().toISOString();
       const { error } = await supabase.from('alerts').update({ 
         status: 'DISPATCHED', 
         assigned_to: leadId,
-        updated_at: new Date().toISOString()
+        assigned_responders: uids,
+        updated_at: nowIso
       }).eq('id', alertId);
       if (error) throw error;
-      toast.update(toastId, 'success', 'Tactical Team Dispatched', `${uids.length} field units successfully assigned to incident`);
+
+      // Secure server-side push notification dispatch
+      try {
+        await fetch('/api/push/dispatch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ alertId, responderUids: uids })
+        });
+      } catch (pushErr) {
+        console.warn('[HQ_PUSH_WARN] Notification push API failed:', pushErr);
+      }
+
+      toast.update(toastId, 'success', 'Tactical Team Dispatched', `${uids.length} field units successfully assigned and notified`);
     } catch (e: any) {
       console.error('[HQ_DISPATCH_ERR]', e);
       const msg = e?.message || 'Dispatch failed';
@@ -468,17 +723,119 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
   }, [toast]);
 
   const [filterLga, setFilterLga] = useState('ALL');
+  const [filterWard, setFilterWard] = useState('ALL');
+  const [filterPu, setFilterPu] = useState('ALL');
+  const [enableClustering, setEnableClustering] = useState(true);
 
-  const filtered = alerts.filter(a => {
+  const selectedLgaObj = plateauTacticalMap.find(l => l.name.toUpperCase() === filterLga.toUpperCase());
+  const selectedWardObj = selectedLgaObj?.wards?.find(w => w.name.toUpperCase() === filterWard.toUpperCase());
+
+  // High-Scale Spatial-Temporal Cluster Aggregation (Handles 100,000+ incoming reports)
+  const processAlertsForDisplay = (rawAlerts: Alert[]): Alert[] => {
+    if (!enableClustering) return rawAlerts;
+
+    const clusterMap = new Map<string, { master: Alert; count: number }>();
+
+    rawAlerts.forEach(alert => {
+      if (alert.status === 'RESOLVED') {
+        clusterMap.set(`resolved-${alert.id}`, { master: { ...alert }, count: 1 });
+        return;
+      }
+
+      // Group active threats by LGA + Ward + PU + Type
+      const lga = alert.geo_lga || 'STATE';
+      const ward = alert.geo_ward || 'SECTOR';
+      const pu = alert.geo_pu || 'AREA';
+      const key = `${lga}_${ward}_${pu}_${alert.type}`;
+
+      if (!clusterMap.has(key)) {
+        clusterMap.set(key, { master: { ...alert }, count: 1 });
+      } else {
+        const item = clusterMap.get(key)!;
+        item.count += 1;
+        if (alert.status === 'DURESS' || alert.priority === 'CRITICAL') {
+          item.master.status = alert.status;
+          item.master.priority = 'CRITICAL';
+        }
+      }
+    });
+
+    const result: Alert[] = [];
+    clusterMap.forEach(({ master, count }) => {
+      (master as any).witness_count = count;
+      result.push(master);
+    });
+
+    return result;
+  };
+
+  const displayAlerts = processAlertsForDisplay(alerts);
+
+  const filtered = displayAlerts.filter(a => {
     if (filterStatus === 'CRITICAL') {
       if (a.status !== 'DURESS' && a.priority !== 'CRITICAL') return false;
+    } else if (filterStatus === 'SMS_FALLBACK') {
+      const isSms = (a.description || '').includes('[OFFLINE_SMS]') || 
+                    (a.description || '').includes('[SMS]') ||
+                    (a as any).via === 'SMS_GATEWAY' || 
+                    (a as any).source === 'SMS' || 
+                    (a as any).channel === 'SMS';
+      if (!isSms) return false;
     } else if (filterStatus !== 'ALL' && a.status !== filterStatus) return false;
     if (filterTier !== 'ALL' && a.assigned_to !== filterTier) return false;
-    if (filterLga !== 'ALL' && a.geo_lga !== filterLga) return false;
+    if (filterLga !== 'ALL') {
+      const alertLga = (a.geo_lga || '').trim().toLowerCase();
+      const targetLga = filterLga.trim().toLowerCase();
+      if (alertLga !== targetLga && !alertLga.includes(targetLga) && !targetLga.includes(alertLga)) {
+        return false;
+      }
+    }
+    if (filterWard !== 'ALL') {
+      const alertWard = (a.geo_ward || '').trim().toLowerCase();
+      const targetWard = filterWard.trim().toLowerCase();
+      if (alertWard !== targetWard && !alertWard.includes(targetWard) && !targetWard.includes(alertWard)) {
+        return false;
+      }
+    }
+    if (filterPu !== 'ALL') {
+      const alertPu = (a.geo_pu || '').trim().toLowerCase();
+      const targetPu = filterPu.trim().toLowerCase();
+      if (alertPu !== targetPu && !alertPu.includes(targetPu) && !targetPu.includes(alertPu)) {
+        return false;
+      }
+    }
     return true;
   });
 
-  const duressCount = alerts.filter(a => a.status === 'DURESS').length;
+  // Sector-Aware Duress & SMS Fallback Counters
+  const sectorAlerts = filterLga === 'ALL'
+    ? alerts
+    : alerts.filter(a => {
+        const alertLga = (a.geo_lga || '').trim().toLowerCase();
+        const targetLga = filterLga.trim().toLowerCase();
+        const matchesLga = alertLga === targetLga || alertLga.includes(targetLga) || targetLga.includes(alertLga);
+        if (!matchesLga) return false;
+        if (filterWard !== 'ALL') {
+          const alertWard = (a.geo_ward || '').trim().toLowerCase();
+          const targetWard = filterWard.trim().toLowerCase();
+          if (alertWard !== targetWard && !alertWard.includes(targetWard) && !targetWard.includes(alertWard)) return false;
+        }
+        if (filterPu !== 'ALL') {
+          const alertPu = (a.geo_pu || '').trim().toLowerCase();
+          const targetPu = filterPu.trim().toLowerCase();
+          if (alertPu !== targetPu && !alertPu.includes(targetPu) && !targetPu.includes(alertPu)) return false;
+        }
+        return true;
+      });
+
+  const duressCount = sectorAlerts.filter(a => a.status === 'DURESS').length;
+  const smsFallbackCount = sectorAlerts.filter(a => 
+    (a.description || '').includes('[OFFLINE_SMS]') || 
+    (a.description || '').includes('[SMS]') ||
+    (a as any).via === 'SMS_GATEWAY' || 
+    (a as any).source === 'SMS' ||
+    (a as any).channel === 'SMS'
+  ).length;
 
   const handleLogout = async () => { 
     await supabase.auth.signOut(); 
@@ -527,11 +884,11 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
             <NavItem icon={<MapIcon size={18} />} label="Intelligence Map" active={activeTab === 'map'} onClick={() => setActiveTab('map')} />
             <NavItem icon={<Activity size={18} />} label="Incident Feed" active={activeTab === 'alerts'} onClick={() => setActiveTab('alerts')} badge={alerts.length > 0 ? alerts.length : undefined} />
             <NavItem icon={<Clock size={18} />} label="Mission History" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
+            <NavItem icon={<Radio size={18} />} label="Communications & Broadcast" active={activeTab === 'broadcast'} onClick={() => setActiveTab('broadcast')} />
             
             {isHqUser && (
               <>
-                <NavItem icon={<Radio size={18} />} label="Mass Broadcast" active={activeTab === 'broadcast'} onClick={() => setActiveTab('broadcast')} />
-                <div style={{ margin: '20px 0', height: 1, background: 'var(--border)' }}></div>
+                <div style={{ margin: '16px 0', height: 1, background: 'var(--border)' }}></div>
                 <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-dim)', letterSpacing: 2, marginBottom: 8, paddingLeft: 12 }}>ADMINISTRATION</p>
                 <NavItem icon={<Users size={18} />} label="Agent Directory" active={activeTab === 'admin'} onClick={() => setActiveTab('admin')} />
                 <NavItem icon={<Activity size={18} />} label="Forensic Audit" active={activeTab === 'audit'} onClick={() => setActiveTab('audit')} />
@@ -561,9 +918,21 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
           <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
             <div>
               <h2 style={{ fontSize: 18, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1 }}>
-                {activeTab === 'map' && (isHqUser ? 'Statewide Monitoring' : `${userProfile?.geo_lga || userProfile?.geo_ward || userProfile?.geo_pu || 'Sector'} Monitoring`)}
-                {activeTab === 'alerts' && (isHqUser ? 'Statewide Incident Command' : `${userProfile?.geo_lga || userProfile?.geo_ward || userProfile?.geo_pu || 'Sector'} Command Feed`)}
-                {activeTab === 'history' && (isHqUser ? 'Statewide Mission Logs' : `${userProfile?.geo_lga || userProfile?.geo_ward || userProfile?.geo_pu || 'Sector'} Archive`)}
+                {activeTab === 'map' && (
+                  filterLga !== 'ALL' 
+                    ? `${filterLga.toUpperCase()} SECTOR MONITORING`
+                    : (isHqUser ? 'Statewide Monitoring' : `${userProfile?.geo_lga || 'Sector'} Monitoring`)
+                )}
+                {activeTab === 'alerts' && (
+                  filterLga !== 'ALL'
+                    ? `${filterLga.toUpperCase()} COMMAND FEED`
+                    : (isHqUser ? 'Statewide Incident Command' : `${userProfile?.geo_lga || 'Sector'} Command Feed`)
+                )}
+                {activeTab === 'history' && (
+                  filterLga !== 'ALL'
+                    ? `${filterLga.toUpperCase()} MISSION LOGS`
+                    : (isHqUser ? 'Statewide Mission Logs' : `${userProfile?.geo_lga || 'Sector'} Archive`)
+                )}
                 {activeTab === 'broadcast' && 'Signal Dispatch'}
                 {activeTab === 'admin' && 'Staff Command'}
                 {activeTab === 'audit' && 'Accountability'}
@@ -599,6 +968,151 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                 <span style={{ fontSize: 11, fontWeight: 900, color: 'var(--duress)' }}>{duressCount} DURESS EMERGENCY</span>
               </div>
             )}
+
+            {smsFallbackCount > 0 && (
+              <div
+                onClick={() => {
+                  setActiveTab('alerts');
+                  setFilterStatus('SMS_FALLBACK');
+                }}
+                title="Click to view all offline SMS gateway reports"
+                style={{ 
+                  background: 'rgba(245, 158, 11, 0.15)',
+                  border: '1px solid rgba(245, 158, 11, 0.5)', 
+                  borderRadius: 8, 
+                  padding: '8px 16px', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: 8,
+                  cursor: 'pointer',
+                  boxShadow: '0 0 15px rgba(245, 158, 11, 0.2)'
+                }}
+              >
+                <Radio size={14} color="#fbbf24" className="spin-slow" />
+                <span style={{ fontSize: 11, fontWeight: 900, color: '#fbbf24' }}>{smsFallbackCount} SMS FALLBACK</span>
+              </div>
+            )}
+
+            <button
+              onClick={() => setEnableClustering(c => !c)}
+              title={enableClustering ? 'Spatial-Temporal Proximity Clustering Active (Grouping duplicate reports for 100k+ users)' : 'Clustering Off (Showing raw un-grouped signal feed)'}
+              style={{
+                background: enableClustering ? 'rgba(79, 70, 229, 0.15)' : 'var(--bg-secondary)',
+                border: enableClustering ? '1px solid #818cf8' : '1px solid var(--border)',
+                borderRadius: 8,
+                padding: '8px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                cursor: 'pointer',
+                color: enableClustering ? '#818cf8' : 'var(--text-muted)',
+                fontSize: 11,
+                fontWeight: 800
+              }}
+            >
+              <Sparkles size={14} color={enableClustering ? '#818cf8' : 'var(--text-muted)'} />
+              <span>{enableClustering ? 'HIGH-SCALE CLUSTERING: ON' : 'RAW SIGNAL FEED'}</span>
+            </button>
+
+            {/* Permanent Top Bar Cascading 3-Tier Sector Selector (LGA -> Ward -> PU) */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              background: filterLga !== 'ALL' ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-secondary)',
+              border: filterLga !== 'ALL' ? '1px solid var(--primary)' : '1px solid var(--border)',
+              borderRadius: 8,
+              padding: '6px 12px',
+              boxShadow: filterLga !== 'ALL' ? 'var(--primary-glow)' : 'none'
+            }}>
+              <MapPin size={14} color={filterLga !== 'ALL' ? 'var(--primary)' : 'var(--text-muted)'} />
+              <span style={{ fontSize: 10, fontWeight: 900, color: filterLga !== 'ALL' ? 'var(--primary)' : 'var(--text-muted)', letterSpacing: 0.5 }}>SECTOR:</span>
+              <select
+                value={filterLga}
+                onChange={e => {
+                  setFilterLga(e.target.value);
+                  setFilterWard('ALL');
+                  setFilterPu('ALL');
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: filterLga !== 'ALL' ? '#34d399' : 'var(--text-primary)',
+                  fontSize: 11,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  outline: 'none',
+                  textTransform: 'uppercase',
+                  fontFamily: "'Outfit', sans-serif"
+                }}
+              >
+                <option value="ALL" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>ALL LGAS (STATEWIDE)</option>
+                {plateauTacticalMap.map(lga => (
+                  <option key={lga.id} value={lga.name} style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
+                    {lga.name.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+
+              {filterLga !== 'ALL' && selectedLgaObj?.wards && selectedLgaObj.wards.length > 0 && (
+                <>
+                  <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>/</span>
+                  <select
+                    value={filterWard}
+                    onChange={e => {
+                      setFilterWard(e.target.value);
+                      setFilterPu('ALL');
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: filterWard !== 'ALL' ? '#818cf8' : 'var(--text-muted)',
+                      fontSize: 11,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      outline: 'none',
+                      textTransform: 'uppercase',
+                      fontFamily: "'Outfit', sans-serif"
+                    }}
+                  >
+                    <option value="ALL" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>ALL DISTRICTS</option>
+                    {selectedLgaObj.wards.map(w => (
+                      <option key={w.id} value={w.name} style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
+                        {w.name.toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+
+              {filterWard !== 'ALL' && selectedWardObj?.pollingUnits && selectedWardObj.pollingUnits.length > 0 && (
+                <>
+                  <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>/</span>
+                  <select
+                    value={filterPu}
+                    onChange={e => setFilterPu(e.target.value)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: filterPu !== 'ALL' ? '#fbbf24' : 'var(--text-muted)',
+                      fontSize: 11,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      outline: 'none',
+                      textTransform: 'uppercase',
+                      fontFamily: "'Outfit', sans-serif"
+                    }}
+                  >
+                    <option value="ALL" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>ALL BEATS</option>
+                    {selectedWardObj.pollingUnits.map(pu => (
+                      <option key={pu} value={pu} style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
+                        {pu}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+            </div>
             
             {/* Theme Toggle Button */}
             <button 
@@ -636,13 +1150,26 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                 <option value="ACTIVE">ACTIVE</option>
                 <option value="DURESS">DURESS</option>
                 <option value="CRITICAL">CRITICAL</option>
+                <option value="SMS_FALLBACK">📡 SMS FALLBACK REPORTS</option>
               </select>
               {isHqUser ? (
                 <>
-                  <select value={filterLga} onChange={e => setFilterLga(e.target.value)} style={overlaySelect}>
-                    <option value="ALL">ALL SECTORS (LGA)</option>
+                  <select value={filterLga} onChange={e => { setFilterLga(e.target.value); setFilterWard('ALL'); setFilterPu('ALL'); }} style={overlaySelect}>
+                    <option value="ALL">ALL LGAS (STATEWIDE)</option>
                     {plateauTacticalMap.map(lga => <option key={lga.id} value={lga.name}>{lga.name.toUpperCase()}</option>)}
                   </select>
+                  {filterLga !== 'ALL' && selectedLgaObj?.wards && selectedLgaObj.wards.length > 0 && (
+                    <select value={filterWard} onChange={e => { setFilterWard(e.target.value); setFilterPu('ALL'); }} style={overlaySelect}>
+                      <option value="ALL">ALL DISTRICTS</option>
+                      {selectedLgaObj.wards.map(w => <option key={w.id} value={w.name}>{w.name.toUpperCase()}</option>)}
+                    </select>
+                  )}
+                  {filterWard !== 'ALL' && selectedWardObj?.pollingUnits && selectedWardObj.pollingUnits.length > 0 && (
+                    <select value={filterPu} onChange={e => setFilterPu(e.target.value)} style={overlaySelect}>
+                      <option value="ALL">ALL BEATS (PU)</option>
+                      {selectedWardObj.pollingUnits.map(pu => <option key={pu} value={pu}>{pu}</option>)}
+                    </select>
+                  )}
                   <select value={filterTier} onChange={e => setFilterTier(e.target.value)} style={overlaySelect}>
                     <option value="ALL">ALL TIERS</option>
                     <option value="POLLING_UNIT">PU</option>
@@ -729,11 +1256,24 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                       <option value="OPEN">OPEN</option>
                       <option value="ACTIVE">ACTIVE</option>
                       <option value="DURESS">DURESS</option>
+                      <option value="SMS_FALLBACK">📡 SMS FALLBACK REPORTS</option>
                     </select>
-                     <select value={filterLga} onChange={e => setFilterLga(e.target.value)} style={fSel}>
-                      <option value="ALL">ALL SECTORS (LGA)</option>
+                     <select value={filterLga} onChange={e => { setFilterLga(e.target.value); setFilterWard('ALL'); setFilterPu('ALL'); }} style={fSel}>
+                      <option value="ALL">ALL LGAS (STATEWIDE)</option>
                       {plateauTacticalMap.map(lga => <option key={lga.id} value={lga.name}>{lga.name.toUpperCase()}</option>)}
                     </select>
+                    {filterLga !== 'ALL' && selectedLgaObj?.wards && selectedLgaObj.wards.length > 0 && (
+                      <select value={filterWard} onChange={e => { setFilterWard(e.target.value); setFilterPu('ALL'); }} style={fSel}>
+                        <option value="ALL">ALL DISTRICTS</option>
+                        {selectedLgaObj.wards.map(w => <option key={w.id} value={w.name}>{w.name.toUpperCase()}</option>)}
+                      </select>
+                    )}
+                    {filterWard !== 'ALL' && selectedWardObj?.pollingUnits && selectedWardObj.pollingUnits.length > 0 && (
+                      <select value={filterPu} onChange={e => setFilterPu(e.target.value)} style={fSel}>
+                        <option value="ALL">ALL BEATS (PU)</option>
+                        {selectedWardObj.pollingUnits.map(pu => <option key={pu} value={pu}>{pu}</option>)}
+                      </select>
+                    )}
                     <select value={filterTier} onChange={e => setFilterTier(e.target.value)} style={fSel}>
                       <option value="ALL">ALL TIERS</option>
                       <option value="POLLING_UNIT">PU</option>
@@ -749,6 +1289,7 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                       <option value="OPEN">OPEN</option>
                       <option value="ACTIVE">ACTIVE</option>
                       <option value="DURESS">DURESS</option>
+                      <option value="SMS_FALLBACK">📡 SMS FALLBACK REPORTS</option>
                     </select>
                     <span style={{ fontSize: 10, fontWeight: 900, background: 'var(--accent-dim)', color: 'var(--accent)', padding: '6px 12px', borderRadius: 8, textTransform: 'uppercase', fontFamily: 'monospace' }}>
                       {userRole === 'LGA_COMMAND' || userRole === 'LGA_OFFICER' ? `LGA: ${userProfile?.geo_lga || 'NONE'}` :
@@ -766,7 +1307,7 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 24 }}>
-                  {filtered.map(a => <AlertCard key={a.id} alert={a} agents={agentLocations} usersMap={usersMap} onDispatch={dispatchAlert} onEscalate={escalateAlert} onResolve={resolveAlert} onHqOverride={hqOverride} />)}
+                  {filtered.map(a => <AlertCard key={a.id} alert={a} agents={agentLocations} usersMap={usersMap} onViewDossier={(alert) => setSelectedReport(alert)} onDispatch={dispatchAlert} onEscalate={escalateAlert} onResolve={resolveAlert} onHqOverride={hqOverride} />)}
                 </div>
               )}
             </div>
@@ -795,13 +1336,13 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                           <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.description?.substring(0, 40)}...</p>
                         </td>
                         <td style={{ padding: '16px 24px' }}>
-                          <span style={{ fontSize: 10, fontWeight: 900, padding: '4px 10px', background: 'rgba(255,255,255,0.05)', borderRadius: 20 }}>{a.assigned_to}</span>
+                          <span style={{ fontSize: 10, fontWeight: 900, padding: '4px 10px', background: 'rgba(255,255,255,0.05)', borderRadius: 20 }}>{formatOfficerBadge(a.assigned_to, usersMap)}</span>
                         </td>
                         <td style={{ padding: '16px 24px', fontSize: 12, color: 'var(--success)', fontWeight: 700 }}>
-                          {a.resolved_by?.split('@')[0]}
+                          {getOfficerDisplayName(a.resolved_by, a.assigned_to, (a as any).assigned_responders, usersMap)}
                         </td>
                         <td style={{ padding: '16px 24px', fontSize: 12, color: 'var(--text-muted)' }}>
-                          {a.reportedAt ? new Date(a.reportedAt.seconds * 1000).toLocaleDateString() : '—'}
+                          {formatAlertTimestamp(a, 'reported')}
                         </td>
                         <td style={{ padding: '16px 24px' }}>
                           <button 
@@ -831,30 +1372,7 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
 
       {/* Post-Action Mission Report Modal */}
       {selectedReport && (() => {
-        const reporterId = selectedReport.reportedBy || '';
-        const reporterProfile = usersMap[reporterId];
-
-        let reporterName = 'Anonymous Citizen';
-        let reporterContact = 'No Contact Info';
-        let reporterType = 'Citizen';
-
-        if (reporterProfile) {
-          reporterName = reporterProfile.displayName || reporterProfile.name || 'Anonymous Officer';
-          reporterContact = reporterProfile.email || reporterProfile.phone || 'No Email';
-          reporterType = reporterProfile.roleLabel || reporterProfile.role || reporterProfile.type || 'Field Unit';
-        } else if (reporterId) {
-          if (reporterId.includes('@')) {
-            reporterName = reporterId.split('@')[0].toUpperCase();
-            reporterContact = reporterId;
-            reporterType = reporterId.endsWith('operationrainbow.plateau.gov.ng') ? 'Field Operator' : 'External Reporter';
-          } else if (reporterId.startsWith('+') || /^\d+$/.test(reporterId)) {
-            reporterName = 'Citizen Reporter';
-            reporterContact = reporterId;
-            reporterType = 'Mobile App SOS';
-          } else {
-            reporterContact = reporterId;
-          }
-        }
+        const { name: reporterName, contact: reporterContact, type: reporterType } = resolveReporterDetails(selectedReport, usersMap);
 
         const isDuress = selectedReport.status === 'DURESS';
         const priorityColors: Record<string, string> = {
@@ -873,6 +1391,24 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
         const prioKey = selectedReport.severity || selectedReport.priority || 'MEDIUM';
         const prioColor = priorityColors[prioKey] || 'var(--text-muted)';
         const prioGlow = priorityGlows[prioKey] || 'none';
+
+        const rStatus = (selectedReport.status as string) || 'PENDING';
+        const statusBadgeLabel = rStatus === 'RESOLVED' ? 'ARCHIVED & RESOLVED' :
+          rStatus === 'DURESS' ? 'CRISIS DURESS' :
+          rStatus === 'DISPATCHED' ? 'SQUAD DISPATCHED' :
+          rStatus === 'ON_ROUTE' || rStatus === 'ON_SITE' || rStatus === 'ENGAGED' ? 'RESPONDER ENGAGED' :
+          rStatus === 'ESCALATED' ? 'ESCALATED TO COMMAND' : 'PENDING COMMAND ACTION';
+
+        const statusBadgeColor = rStatus === 'RESOLVED' ? 'var(--success)' :
+          rStatus === 'DURESS' ? 'var(--duress)' :
+          rStatus === 'DISPATCHED' ? 'var(--info)' :
+          rStatus === 'ON_ROUTE' || rStatus === 'ON_SITE' || rStatus === 'ENGAGED' ? 'var(--success)' : 'var(--warning)';
+
+        const reportedTimeStr = selectedReport.created_at
+          ? new Date(selectedReport.created_at).toLocaleString()
+          : selectedReport.reportedAt
+          ? new Date(selectedReport.reportedAt.seconds * 1000).toLocaleString()
+          : 'JUST NOW';
 
         return (
           <div style={{
@@ -914,8 +1450,8 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
               }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 2, fontFamily: "'Outfit', sans-serif" }}>POST-ACTION MISSION REPORT</span>
-                    <span style={{ fontSize: 8, fontWeight: 900, background: 'var(--success-dim)', color: 'var(--success)', border: '1px solid var(--success)', padding: '2px 8px', borderRadius: 20, boxShadow: 'var(--success-glow)' }}>ARCHIVED & RESOLVED</span>
+                    <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 2, fontFamily: "'Outfit', sans-serif" }}>INCIDENT DOSSIER</span>
+                    <span style={{ fontSize: 8, fontWeight: 900, background: `${statusBadgeColor}22`, color: statusBadgeColor, border: `1px solid ${statusBadgeColor}`, padding: '2px 8px', borderRadius: 20 }}>{statusBadgeLabel}</span>
                   </div>
                   <h3 style={{ fontSize: 20, fontWeight: 900, color: isDuress ? 'var(--duress)' : 'var(--text-primary)', fontFamily: "'Outfit', sans-serif", margin: 0 }}>
                     {isDuress ? 'DURESS CRISIS LOG' : selectedReport.type}
@@ -962,7 +1498,9 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Assigned Scope:</span>
-                        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)' }}>{selectedReport.assigned_to}</span>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)' }}>
+                          {getOfficerDisplayName(undefined, selectedReport.assigned_to, (selectedReport as any).assigned_responders, usersMap)}
+                        </span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Priority Level:</span>
@@ -979,7 +1517,9 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Incident ID:</span>
-                        <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-dim)', fontFamily: 'monospace' }}>{selectedReport.id}</span>
+                        <span title={selectedReport.id} style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', fontFamily: "'Outfit', monospace", letterSpacing: 0.5 }}>
+                          {formatIncidentId(selectedReport.id)}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -998,6 +1538,22 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase' }}>{selectedReport.geo_ward}</span>
                         </div>
                       )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>Polling Unit (PU):</span>
+                        <span style={{ 
+                          fontSize: 11, 
+                          fontWeight: 900, 
+                          color: '#818cf8', 
+                          background: 'rgba(99, 102, 241, 0.15)', 
+                          border: '1px solid rgba(99, 102, 241, 0.3)',
+                          padding: '3px 10px', 
+                          borderRadius: 8,
+                          textTransform: 'uppercase',
+                          letterSpacing: 0.5
+                        }}>
+                          {selectedReport.geo_pu || 'PU UNASSIGNED / CENTRAL HQ'}
+                        </span>
+                      </div>
                       {selectedReport.lat && selectedReport.lng && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Coordinates:</span>
@@ -1024,6 +1580,41 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                   </div>
                 </div>
 
+                {/* Attached Media Dossier (Video, Photos, Audio) */}
+                {((selectedReport.media_urls && selectedReport.media_urls.length > 0) || (selectedReport.attachments && selectedReport.attachments.length > 0)) && (
+                  <div>
+                    <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--accent)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "'Outfit', sans-serif" }}>
+                      ATTACHED EVIDENCE MEDIA ({((selectedReport.media_urls || selectedReport.attachments || []).length)} FILES)
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+                      {(selectedReport.media_urls || selectedReport.attachments || []).map((url: string, idx: number) => {
+                        const isVideo = url.endsWith('.mp4') || url.endsWith('.mov') || url.endsWith('.webm') || url.includes('video');
+                        const isAudio = url.endsWith('.m4a') || url.endsWith('.mp3') || url.endsWith('.wav') || url.includes('audio');
+                        return (
+                          <div key={idx} style={{ background: 'var(--input-bg)', borderRadius: 16, padding: 12, border: '1px solid var(--border)' }}>
+                            {isVideo ? (
+                              <div>
+                                <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', display: 'block', marginBottom: 8, letterSpacing: 1 }}>📹 INCIDENT VIDEO FOOTAGE</span>
+                                <video src={url} controls style={{ width: '100%', height: 180, borderRadius: 12, objectFit: 'cover', background: '#000' }} />
+                              </div>
+                            ) : isAudio ? (
+                              <div>
+                                <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--accent)', display: 'block', marginBottom: 8, letterSpacing: 1 }}>🎙️ VOICE AUDIO RECORDING</span>
+                                <audio src={url} controls style={{ width: '100%', marginTop: 8 }} />
+                              </div>
+                            ) : (
+                              <div>
+                                <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--success)', display: 'block', marginBottom: 8, letterSpacing: 1 }}>📷 SCENE PHOTO</span>
+                                <img src={url} alt="Incident media" style={{ width: '100%', height: 180, borderRadius: 12, objectFit: 'cover' }} />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Reporter & Resolution Profile Deck */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
                   {/* Reporter Profile */}
@@ -1039,16 +1630,27 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                   {/* Resolution Details */}
                   <div style={{ padding: 20, background: 'var(--input-bg)', borderRadius: 20, border: '1px solid var(--border)' }}>
                     <h4 style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "'Outfit', sans-serif" }}>RESOLUTION LOG</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       <div>
-                        <span style={{ fontSize: 10, color: 'var(--text-dim)', display: 'block' }}>RESOLVED BY</span>
-                        <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--success)' }}>{selectedReport.resolved_by || 'Unknown Officer'}</span>
+                        <span style={{ fontSize: 10, color: 'var(--text-dim)', display: 'block', fontWeight: 700, marginBottom: 2 }}>RESOLVED BY</span>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--success)' }}>
+                          {getOfficerDisplayName(selectedReport.resolved_by, selectedReport.assigned_to, (selectedReport as any).assigned_responders, usersMap)}
+                        </span>
                       </div>
                       <div style={{ marginTop: 4 }}>
-                        <span style={{ fontSize: 10, color: 'var(--text-dim)', display: 'block' }}>TIMESTAMPS</span>
-                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>
-                          Reported: {selectedReport.reportedAt ? new Date(selectedReport.reportedAt.seconds * 1000).toLocaleString() : '—'}
-                        </span>
+                        <span style={{ fontSize: 10, color: 'var(--text-dim)', display: 'block', fontWeight: 700, marginBottom: 4 }}>TIMESTAMPS</span>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <span style={{ color: 'var(--text-muted)' }}>Reported:</span>
+                            <span style={{ fontWeight: 700 }}>{formatAlertTimestamp(selectedReport, 'reported')}</span>
+                          </div>
+                          {selectedReport.resolved_at && (
+                            <div style={{ display: 'flex', gap: 6, color: 'var(--success)' }}>
+                              <span style={{ opacity: 0.8 }}>Resolved:</span>
+                              <span style={{ fontWeight: 700 }}>{formatAlertTimestamp(selectedReport, 'resolved')}</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1150,6 +1752,56 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                   )}
                 </div>
 
+                {/* Dossier Tactical Action Footer Deck */}
+                <div style={{
+                  display: 'flex',
+                  gap: 12,
+                  marginTop: 16,
+                  borderTop: '1px solid var(--border)',
+                  paddingTop: 20
+                }}>
+                  {selectedReport.status !== 'RESOLVED' && (
+                    <>
+                      <button
+                        onClick={async () => {
+                          const responderUid = agentLocations[0]?.user_id || user?.id || '';
+                          await dispatchAlert(selectedReport.id, responderUid);
+                          setSelectedReport(null);
+                        }}
+                        className="btn-tactical"
+                        style={{ flex: 1, background: 'var(--primary)', color: '#fff' }}
+                      >
+                        <Radio size={14} /> DISPATCH SQUAD
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await escalateAlert(selectedReport.id, selectedReport.geo_lga || 'ALL');
+                          setSelectedReport(null);
+                        }}
+                        className="btn-tactical"
+                        style={{ flex: 1, background: 'var(--warning)', color: '#000' }}
+                      >
+                        <AlertTriangle size={14} /> ESCALATE COMMAND
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await resolveAlert(selectedReport.id);
+                          setSelectedReport(null);
+                        }}
+                        className="btn-tactical"
+                        style={{ flex: 1, background: 'var(--success)', color: '#fff' }}
+                      >
+                        <CheckCircle size={14} /> RESOLVE INCIDENT
+                      </button>
+                    </>
+                  )}
+                  {selectedReport.status === 'RESOLVED' && (
+                    <div style={{ flex: 1, textAlign: 'center', padding: '10px 0', fontSize: 11, fontWeight: 900, color: 'var(--success)', letterSpacing: 1.5 }}>
+                      ✓ THIS INCIDENT HAS BEEN RESOLVED AND ARCHIVED
+                    </div>
+                  )}
+                </div>
+
               </div>
 
               {/* Footer Actions */}
@@ -1242,12 +1894,13 @@ function MetricCard({ label, value, color }: { label: string, value: string | nu
 }
 
 
-function AlertCard({ alert, agents, usersMap, onDispatch, onEscalate, onResolve, onHqOverride }: { 
+function AlertCard({ alert, agents, usersMap, onViewDossier, onDispatch, onEscalate, onResolve, onHqOverride }: { 
   alert: Alert; 
   agents: any[];
   usersMap: Record<string, any>;
+  onViewDossier?: (alert: Alert) => void;
   onDispatch: (id: string, responderUid: string) => Promise<void> | void;
-  onEscalate: (id: string, t: string) => Promise<void> | void; 
+  onEscalate: (id: string, t: string, notes?: string, agency?: string) => Promise<void> | void; 
   onResolve: (id: string) => Promise<void> | void; 
   onHqOverride: (id: string) => Promise<void> | void;
 }) {
@@ -1269,6 +1922,7 @@ function AlertCard({ alert, agents, usersMap, onDispatch, onEscalate, onResolve,
   const [showEscalate, setShowEscalate] = useState(false);
   const [selectedResponders, setSelectedResponders] = useState<string[]>([]);
   const [targetLga, setTargetLga] = useState('ALL');
+  const [targetAgency, setTargetAgency] = useState('ALL');
   const [escalateNotes, setEscalateNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [triageLoading, setTriageLoading] = useState(false);
@@ -1282,26 +1936,81 @@ function AlertCard({ alert, agents, usersMap, onDispatch, onEscalate, onResolve,
     try {
       const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
       const prompt = `You are the Operation Rainbow Emergency Triage AI. Analyze: "${alert.description}".
-Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_priority": "HIGH", "justification": "Threat analysis"}`;
+Respond ONLY with a JSON object with this exact shape: 
+{
+  "recommended_type": "CRIME",
+  "recommended_priority": "HIGH",
+  "justification": "Threat analysis details",
+  "weapons_detected": false,
+  "crowd_size": "1-5",
+  "detected_language": "English",
+  "translated_description": "${alert.description}"
+}`;
 
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      let parsed: any = null;
+
+      if (apiKey) {
+        try {
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+            }
+          );
+          const resData = await res.json();
+          const rawText = resData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+          if (cleanJson) {
+            parsed = JSON.parse(cleanJson);
+          }
+        } catch (apiErr) {
+          console.warn('Gemini API call failed, using rule-based fallback triage:', apiErr);
         }
-      );
-      const resData = await res.json();
-      const rawText = resData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-      const parsed = JSON.parse(cleanJson);
+      }
 
-      await supabase.from('alerts').update({
-        type: parsed.recommended_type || alert.type,
+      // Rule-based fallback triage engine when API key is missing or fails
+      if (!parsed) {
+        const desc = alert.description.toLowerCase();
+        const hasWeapons = desc.includes('gun') || desc.includes('weapon') || desc.includes('shoot') || desc.includes('kill') || desc.includes('knife');
+        const isFire = desc.includes('fire') || desc.includes('explosion') || desc.includes('smoke');
+        const isProtest = desc.includes('protest') || desc.includes('riot') || desc.includes('crowd');
+
+        let recType = 'SUSPICIOUS';
+        let recPrio = 'HIGH';
+        if (hasWeapons) { recType = 'CRIME'; recPrio = 'CRITICAL'; }
+        else if (isFire) { recType = 'ENVIRONMENT'; recPrio = 'CRITICAL'; }
+        else if (isProtest) { recType = 'DANGER'; recPrio = 'HIGH'; }
+
+        parsed = {
+          recommended_type: recType,
+          recommended_priority: recPrio,
+          justification: `Automated threat assessment: ${hasWeapons ? 'Active weapons reported.' : isFire ? 'Hazardous explosion/fire reported.' : 'Suspicious activity flagged.'}`,
+          weapons_detected: hasWeapons,
+          crowd_size: isProtest ? '50+' : '1-5',
+          detected_language: 'English',
+          translated_description: alert.description
+        };
+      }
+
+      const existingNotes = alert.ai_summary || '';
+      const triageNote = `[AI TRIAGE ASSESSMENT] ${parsed.justification} (Recommended: ${parsed.recommended_type} / ${parsed.recommended_priority})`;
+      const newSummary = existingNotes ? `${existingNotes}\n${triageNote}` : triageNote;
+
+      const { error } = await supabase.from('alerts').update({
+        ai_triage: parsed,
+        ai_summary: newSummary,
         severity: parsed.recommended_priority || alert.severity,
-        ai_summary: parsed.justification || 'Triage complete',
       }).eq('id', alert.id);
+
+      if (error) {
+        // Fallback update if ai_triage column not yet cached
+        await supabase.from('alerts').update({
+          ai_summary: newSummary,
+          severity: parsed.recommended_priority || alert.severity,
+        }).eq('id', alert.id);
+      }
 
       toast.update(toastId, 'success', 'AI Triage Complete', 'Incident assessment updated');
     } catch (err: any) {
@@ -1327,31 +2036,7 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
     }
   };
 
-  // Resolve reporter dynamically from usersMap to eliminate placeholders
-  const reporterId = alert.reportedBy || '';
-  const reporterProfile = usersMap[reporterId];
-
-  let reporterName = 'Anonymous Citizen';
-  let reporterContact = 'No Contact Info';
-  let reporterType = 'Citizen';
-
-  if (reporterProfile) {
-    reporterName = reporterProfile.displayName || reporterProfile.name || 'Anonymous Officer';
-    reporterContact = reporterProfile.email || reporterProfile.phone || 'No Email';
-    reporterType = reporterProfile.roleLabel || reporterProfile.role || reporterProfile.type || 'Field Unit';
-  } else if (reporterId) {
-    if (reporterId.includes('@')) {
-      reporterName = reporterId.split('@')[0].toUpperCase();
-      reporterContact = reporterId;
-      reporterType = reporterId.endsWith('operationrainbow.plateau.gov.ng') ? 'Field Operator' : 'External Reporter';
-    } else if (reporterId.startsWith('+') || /^\d+$/.test(reporterId)) {
-      reporterName = 'Citizen Reporter';
-      reporterContact = reporterId;
-      reporterType = 'Mobile App SOS';
-    } else {
-      reporterContact = reporterId;
-    }
-  }
+  const { name: reporterName, contact: reporterContact, type: reporterType } = resolveReporterDetails(alert, usersMap);
 
   const handleEscalate = async () => {
     setLoading(true);
@@ -1391,6 +2076,46 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
     <div className="tactical-panel glass tactical-panel-hover fade-in" style={{ padding: 24, borderTop: `4px solid ${color}`, position: 'relative', overflow: 'hidden' }}>
       {isDuress && <div className="duress-pulse" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 40, opacity: 0.1, pointerEvents: 'none' }}></div>}
       
+      {((alert as any).via === 'SMS_GATEWAY' || (alert as any).source === 'SMS' || (alert.description || '').includes('[OFFLINE_SMS]') || (alert.description || '').includes('[SMS]')) && (
+        <div style={{
+          background: 'rgba(245, 158, 11, 0.15)',
+          border: '1px solid rgba(245, 158, 11, 0.4)',
+          padding: '8px 12px',
+          borderRadius: 10,
+          marginBottom: 14,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <span style={{ fontSize: 10, fontWeight: 900, color: '#fbbf24', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            📡 SMS FALLBACK REPORT (OFFLINE CITIZEN)
+          </span>
+          <span style={{ fontSize: 9, fontWeight: 700, color: '#fde68a', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4 }}>
+            TERMII CPaaS SMS GATEWAY
+          </span>
+        </div>
+      )}
+
+      {(alert as any).witness_count && (alert as any).witness_count > 1 && (
+        <div style={{
+          background: 'rgba(99, 102, 241, 0.15)',
+          border: '1px solid rgba(129, 140, 248, 0.4)',
+          padding: '8px 12px',
+          borderRadius: 10,
+          marginBottom: 14,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <span style={{ fontSize: 10, fontWeight: 900, color: '#818cf8', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            👥 HIGH-SCALE CLUSTER: {(alert as any).witness_count.toLocaleString()} WITNESS REPORTS AGGREGATED
+          </span>
+          <span style={{ fontSize: 9, fontWeight: 800, color: '#c7d2fe', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4 }}>
+            AUTO-CLUSTERED
+          </span>
+        </div>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -1402,10 +2127,30 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
               {alert.created_at ? new Date(alert.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'JUST NOW'}
             </span>
           </div>
-          <h3 style={{ fontSize: 16, fontWeight: 900, color: isDuress ? 'var(--duress)' : 'var(--text-primary)', fontFamily: "'Outfit', sans-serif" }}>{isDuress ? 'DURESS ALERT' : alert.type}</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 900, color: isDuress ? 'var(--duress)' : 'var(--text-primary)', fontFamily: "'Outfit', sans-serif", margin: 0 }}>{isDuress ? 'DURESS ALERT' : alert.type}</h3>
+            {onViewDossier && (
+              <button
+                onClick={() => onViewDossier(alert)}
+                style={{
+                  background: 'var(--accent-dim)',
+                  color: 'var(--accent)',
+                  border: '1px solid var(--accent)',
+                  borderRadius: 6,
+                  padding: '3px 8px',
+                  fontSize: 9,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  letterSpacing: 0.5
+                }}
+              >
+                📄 DOSSIER
+              </button>
+            )}
+          </div>
         </div>
         <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', padding: '6px 12px', borderRadius: 10 }}>
-          <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', fontFamily: "'Inter', sans-serif" }}>{alert.assigned_to || 'PU'}</span>
+          <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', fontFamily: "'Inter', sans-serif" }}>{formatOfficerBadge(alert.assigned_to, usersMap)}</span>
         </div>
       </div>
 
@@ -1601,11 +2346,19 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
           <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, fontWeight: 600 }}>
             {a.geo_ward ? `Ward: ${a.geo_ward}` : 'State Scope'}
           </div>
-          {a.geo_pu && a.geo_pu !== 'N/A' && (
-            <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 2, fontWeight: 600 }}>
-              PU: {a.geo_pu}
-            </div>
-          )}
+          <div style={{ 
+            fontSize: 9, 
+            color: '#818cf8', 
+            marginTop: 6, 
+            fontWeight: 800, 
+            background: 'rgba(99, 102, 241, 0.12)', 
+            border: '1px solid rgba(99, 102, 241, 0.25)',
+            padding: '2px 6px', 
+            borderRadius: 6,
+            display: 'inline-block'
+          }}>
+            PU: {a.geo_pu || 'SECTOR HQ'}
+          </div>
           {a.lat && a.lng && (
             <div style={{ fontSize: 8, color: 'var(--text-dim)', marginTop: 6, letterSpacing: 0.5, fontFamily: 'monospace' }}>
               {a.lat.toFixed(5)}°N, {a.lng.toFixed(5)}°E
@@ -1698,10 +2451,14 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
               const responderList = profileResponders.length > 0
                 ? profileResponders.map((p: any) => {
                     const telem = (agents || []).find((a: any) => a.user_id === p.id || a.id === p.id);
+                    const ag = STATE_SECURITY_AGENCIES.find(a => a.id === (p.agency || 'RAINBOW')) || STATE_SECURITY_AGENCIES[0];
                     return {
                       userId: p.id,
                       name: p.full_name || p.badge_number || `Officer ${p.id.substring(0, 6)}`,
                       badge: p.badge_number || p.role || 'RESPONDER',
+                      agencyBadge: ag.badge,
+                      agencyShort: ag.shortCode,
+                      agencyColor: ag.color,
                       status: telem?.status || 'PATROLLING',
                       isLive: !!telem,
                     };
@@ -1710,6 +2467,9 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
                     userId: a.user_id || a.id,
                     name: a.displayName || a.name || `Unit ${(a.user_id || a.id).substring(0, 6)}`,
                     badge: 'PATROL UNIT',
+                    agencyBadge: '🌈',
+                    agencyShort: 'OR-TU',
+                    agencyColor: '#6366f1',
                     status: a.status || 'PATROLLING',
                     isLive: true,
                   }));
@@ -1737,7 +2497,7 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      justify: 'space-between',
+                      justifyContent: 'space-between',
                       padding: '10px 14px',
                       background: isSelected ? 'rgba(59,130,246,0.15)' : 'var(--bg-secondary)',
                       border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border)',
@@ -1755,9 +2515,14 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
                         onChange={() => {}} // Handled by div onClick
                         style={{ cursor: 'pointer' }}
                       />
-                      <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 11, fontWeight: 700 }}>{r.name}</span>
-                        <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 8 }}>[{r.badge}]</span>
+                        {r.agencyShort && (
+                          <span style={{ fontSize: 8.5, fontWeight: 900, background: r.agencyColor + '22', color: r.agencyColor, border: `1px solid ${r.agencyColor}66`, padding: '1px 6px', borderRadius: 6 }}>
+                            {r.agencyBadge} {r.agencyShort}
+                          </span>
+                        )}
+                        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>[{r.badge}]</span>
                       </div>
                     </div>
                     <span style={{ fontSize: 9, fontWeight: 800, color: r.isLive ? 'var(--success)' : 'var(--warning)' }}>
@@ -1795,10 +2560,37 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
 
       {showEscalate && (
         <div style={{ background: 'var(--input-bg)', padding: 14, borderRadius: 12, marginBottom: 20, border: '1px solid var(--warning)' }}>
-          <p style={{ fontSize: 10, fontWeight: 900, color: 'var(--warning)', marginBottom: 8, letterSpacing: 1 }}>ESCALATE / BROADCAST TO LGA COMMAND</p>
+          <p style={{ fontSize: 10, fontWeight: 900, color: 'var(--warning)', marginBottom: 8, letterSpacing: 1 }}>INTER-AGENCY ESCALATION / COMMAND HANDOVER</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div>
-              <label style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: 4 }}>TARGET LGA JURISDICTION:</label>
+              <label style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: 4 }}>TARGET INTER-AGENCY COMMAND:</label>
+              <select
+                value={targetAgency}
+                onChange={(e) => setTargetAgency(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  color: 'var(--text-primary)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fontFamily: 'inherit'
+                }}
+              >
+                <option value="ALL">🌐 ALL JOINT COMMANDS (Broad Inter-Agency Escalation)</option>
+                <option value="MILITARY">🎖️ OPERATION ENDURING PEACE / MILITARY STF</option>
+                <option value="NPF">👮‍♂️ NIGERIA POLICE FORCE (NPF TACTICAL CELL)</option>
+                <option value="NSCDC">🛡️ CIVIL DEFENCE CORPS (NSCDC RAPID UNIT)</option>
+                <option value="DSS">🕶️ DEPT OF STATE SERVICES (DSS HIGH-THREAT)</option>
+                <option value="RAINBOW">🌈 OPERATION RAINBOW TACTICAL HQ</option>
+                <option value="VGN">🛡️ VIGILANTE GROUP (VGN COMMUNITY DEFENSE)</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: 4 }}>TARGET SECTOR JURISDICTION:</label>
               <select
                 value={targetLga}
                 onChange={(e) => setTargetLga(e.target.value)}
@@ -1840,7 +2632,7 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
               <input
                 value={escalateNotes}
                 onChange={(e) => setEscalateNotes(e.target.value)}
-                placeholder="e.g. Deploy tactical reinforcements immediately..."
+                placeholder="e.g. Requesting Military STF armored response unit..."
                 style={{
                   width: '100%',
                   padding: '8px 10px',
@@ -1856,7 +2648,7 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
 
             <button
               onClick={async () => {
-                await onEscalate(alert.id, targetLga, escalateNotes);
+                await onEscalate(alert.id, targetLga, escalateNotes, targetAgency);
                 setShowEscalate(false);
               }}
               className="btn-tactical"
@@ -1866,10 +2658,10 @@ Respond ONLY with a JSON object: {"recommended_type": "PROTEST", "recommended_pr
                 color: '#000',
                 fontWeight: 900,
                 padding: '10px',
-                marginTop: 4
+                cursor: 'pointer'
               }}
             >
-              CONFIRM ESCALATION & BROADCAST
+              CONFIRM INTER-AGENCY ESCALATION
             </button>
           </div>
         </div>

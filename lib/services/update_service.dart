@@ -36,11 +36,11 @@ class UpdateService {
       bool forceUpdate = false;
       String updateUrl = '';
 
-      for (var row in response) {
-        if (row['key'] == 'min_version') minVersion = row['value'];
-        if (row['key'] == 'latest_version') latestVersion = row['value'];
-        if (row['key'] == 'force_update') forceUpdate = row['value'] == 'true';
-        if (row['key'] == 'update_url') updateUrl = row['value'];
+      for (final row in response) {
+        if (row['key'] == 'min_version') minVersion = row['value']?.toString() ?? '1.0.0';
+        if (row['key'] == 'latest_version') latestVersion = row['value']?.toString() ?? '1.0.0';
+        if (row['key'] == 'force_update') forceUpdate = row['value']?.toString() == 'true';
+        if (row['key'] == 'update_url') updateUrl = row['value']?.toString() ?? '';
       }
 
       bool isForceUpdateResult = forceUpdate || currentVersion.compareTo(minVersion) < 0;

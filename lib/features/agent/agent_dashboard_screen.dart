@@ -38,14 +38,18 @@ final alertsStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
       final aGeoWard = alert['geo_ward'] as String?;
       final aGeoPu = alert['geo_pu'] as String?;
       final aAssignedTo = alert['assigned_to'] as String?;
+      final aAssignedResponders = (alert['assigned_responders'] as List<dynamic>?)?.cast<String>() ?? [];
 
-      // 1. Directly assigned to officer -> ALWAYS SHOW
-      if (userId != null && aAssignedTo == userId) return true;
+      // 1. Directly assigned to officer or multi-unit squad -> ALWAYS SHOW
+      if (userId != null && (aAssignedTo == userId || aAssignedResponders.contains(userId))) return true;
+      if (aAssignedTo == 'HQ' || aAssignedTo == 'LGA' || aAssignedTo == 'WARD') {
+        if (role.contains(aAssignedTo!) || role.contains('HQ') || role == 'ADMIN') return true;
+      }
 
       // 2. State HQ Commanders -> ALWAYS SHOW ALL
       if (role.contains('STATE') || role.contains('HQ') || role == 'ADMIN') return true;
 
-      // 3. LGA Commanders -> Show alerts matching LGA or unassigned
+      // 3. LGA Commanders -> Show alerts matching LGA, unassigned, or escalated to LGA
       if (role.contains('LGA')) {
         if (geoLga == null || geoLga == 'ALL') return true;
         return aGeoLga == null || aGeoLga.toUpperCase() == geoLga.toUpperCase();
@@ -287,6 +291,33 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
             ],
           ),
           actions: [
+            IconButton(
+              icon: Icon(
+                TtsService.instance.outputMode == AudioOutputMode.speaker
+                    ? Icons.volume_up_rounded
+                    : Icons.phone_in_talk_rounded,
+                color: TtsService.instance.outputMode == AudioOutputMode.speaker
+                    ? AppColors.success
+                    : AppColors.warning,
+              ),
+              tooltip: TtsService.instance.outputMode == AudioOutputMode.speaker
+                  ? 'AUDIO: LOUDSPEAKER'
+                  : 'AUDIO: EARPIECE',
+              onPressed: () async {
+                await TtsService.instance.toggleAudioOutputMode();
+                if (mounted) setState(() {});
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    duration: const Duration(seconds: 2),
+                    backgroundColor: const Color(0xFF0F172A),
+                    content: Text(
+                      'TACTICAL AUDIO MODE: ${TtsService.instance.outputMode == AudioOutputMode.speaker ? "LOUDSPEAKER 🔊" : "STEALTH EARPIECE 🎧"}',
+                      style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                );
+              },
+            ),
             IconButton(
               icon: Icon(
                 _showMap ? Icons.view_headline_rounded : Icons.radar_rounded,
@@ -824,7 +855,7 @@ class _MissionCard extends ConsumerWidget {
                       IconButton(
                         tooltip: 'Secure Chat',
                         onPressed: () {
-                          context.push(AppRoutes.secureChat, extra: alert);
+                          unawaited(context.push(AppRoutes.secureChat, extra: alert));
                         },
                         icon: const Icon(Icons.chat_rounded, color: AppColors.accent, size: 20),
                         style: IconButton.styleFrom(
@@ -1350,16 +1381,12 @@ class _EscalationDialogState extends State<_EscalationDialog> {
           .maybeSingle();
 
       final oLga = profileRes?['geo_lga'] as String? ?? widget.alertDoc['geo_lga'];
-      final oWard = profileRes?['geo_ward'] as String? ?? widget.alertDoc['geo_ward'];
-
       final updatePayload = <String, dynamic>{
         'status': 'ESCALATED',
         'severity': targetTier == 'HQ' ? 'CRITICAL' : 'HIGH',
+        'assigned_to': targetTier,
         'updated_at': DateTime.now().toIso8601String(),
       };
-
-      if (oWard != null) updatePayload['geo_ward'] = oWard;
-      if (oLga != null) updatePayload['geo_lga'] = oLga;
 
       final existingSummary = widget.alertDoc['ai_summary'] as String? ?? '';
       final note = '[ESCALATED TO $targetTier COMMAND] Reason: $_selectedReason. Notes: ${_notesController.text.trim()} (by $userEmail)';
@@ -1419,13 +1446,18 @@ class _EscalateButton extends StatelessWidget {
               size: 20,
             ),
             const SizedBox(width: 8),
-            Text(
-              'ESCALATE TO HIGHER COMMAND',
-              style: GoogleFonts.outfit(
-                color: AppColors.error,
-                fontWeight: FontWeight.w900,
-                fontSize: 12,
-                letterSpacing: 1.5,
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  'ESCALATE TO HIGHER COMMAND',
+                  style: GoogleFonts.outfit(
+                    color: AppColors.error,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                    letterSpacing: 1.2,
+                  ),
+                ),
               ),
             ),
           ],
@@ -1614,24 +1646,35 @@ class _DispatchDialogState extends State<_DispatchDialog> {
   @override
   void initState() {
     super.initState();
-    _loadResponders();
+    unawaited(_loadResponders());
   }
 
   Future<void> _loadResponders() async {
     try {
       final res = await SupabaseConfig.client
           .from('profiles')
-          .select('id, full_name, badge_number, role, geo_lga, geo_ward')
-          .neq('role', 'CITIZEN');
+          .select('id, full_name, badge_number, role, geo_lga, geo_ward');
+
+      final rawList = List<Map<String, dynamic>>.from(res as List);
+      var filtered = rawList.where((r) {
+        final role = (r['role'] as String? ?? '').toUpperCase();
+        return role != 'CITIZEN' && role.isNotEmpty;
+      }).toList();
 
       if (mounted) {
         setState(() {
-          _responders = List<Map<String, dynamic>>.from(res as List);
+          _responders = filtered;
           _isLoading = false;
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+      debugPrint('[DISPATCH_LOAD_ERR] Failed to fetch responder profiles: $e');
+      if (mounted) {
+        setState(() {
+          _responders = [];
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -1654,6 +1697,7 @@ class _DispatchDialogState extends State<_DispatchDialog> {
         await SupabaseConfig.client.from('alerts').update({
           'status': 'DISPATCHED',
           'assigned_to': leadOfficerId,
+          'assigned_responders': _selectedResponderIds.toList(),
           'ai_summary': existingNotes.isEmpty ? dispatchNote : '$existingNotes\n$dispatchNote',
           'updated_at': DateTime.now().toIso8601String(),
         }).eq('id', alertId);
@@ -1661,14 +1705,22 @@ class _DispatchDialogState extends State<_DispatchDialog> {
 
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (mounted) setState(() => _isSubmitting = false);
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Dispatch failed: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: AppColors.surfaceLight,
+      backgroundColor: const Color(0xFF0F172A),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
         side: const BorderSide(color: AppColors.primary, width: 1.5),
@@ -1678,7 +1730,7 @@ class _DispatchDialogState extends State<_DispatchDialog> {
         style: GoogleFonts.outfit(
           fontSize: 16,
           fontWeight: FontWeight.w900,
-          color: AppColors.onPrimary,
+          color: Colors.white,
           letterSpacing: 1.2,
         ),
       ),
@@ -1694,14 +1746,14 @@ class _DispatchDialogState extends State<_DispatchDialog> {
             : _responders.isEmpty
                 ? Text(
                     'No registered officers available in database.',
-                    style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12),
+                    style: GoogleFonts.inter(color: const Color(0xFF94A3B8), fontSize: 12),
                   )
                 : Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'Select one or multiple active field officers to assign to this mission:',
-                        style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 11),
+                        'Select active field officers to assign to this mission squad:',
+                        style: GoogleFonts.inter(color: const Color(0xFFE2E8F0), fontSize: 11),
                       ),
                       const SizedBox(height: 12),
                       ConstrainedBox(
@@ -1718,18 +1770,18 @@ class _DispatchDialogState extends State<_DispatchDialog> {
                               value: isSel,
                               activeColor: AppColors.primary,
                               selected: isSel,
-                              selectedTileColor: AppColors.primary.withValues(alpha: 0.15),
+                              selectedTileColor: AppColors.primary.withValues(alpha: 0.25),
                               title: Text(
                                 (r['full_name'] as String? ?? 'Officer') +
                                     (r['badge_number'] != null ? ' [${r['badge_number']}]' : ''),
                                 style: GoogleFonts.outfit(
                                   fontWeight: FontWeight.bold,
-                                  color: AppColors.onPrimary,
+                                  color: Colors.white,
                                 ),
                               ),
                               subtitle: Text(
                                 'Role: ${r['role'] ?? 'RESPONDER'} · ${r['geo_lga'] ?? 'JOS'}',
-                                style: GoogleFonts.inter(fontSize: 10, color: AppColors.textDim),
+                                style: GoogleFonts.inter(fontSize: 10, color: const Color(0xFF94A3B8)),
                               ),
                               onChanged: (val) {
                                 setState(() {

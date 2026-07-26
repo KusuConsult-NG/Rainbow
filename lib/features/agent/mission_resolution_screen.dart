@@ -36,9 +36,16 @@ class _MissionResolutionScreenState
 
     try {
       final alertId = widget.alertData['id'] as String;
+      final user = SupabaseConfig.client.auth.currentUser;
+      final email = user?.email ?? 'OFFICER';
+      final existingNotes = widget.alertData['ai_summary'] as String? ?? '';
+      final debriefNote = '[RESOLVED DEBRIEF] $text (by $email)';
+
       await SupabaseConfig.client.from('alerts').update({
         'status': 'RESOLVED',
-        'citizen_feedback': text,
+        'resolved_by': email,
+        'resolved_at': DateTime.now().toIso8601String(),
+        'ai_summary': existingNotes.isEmpty ? debriefNote : '$existingNotes\n$debriefNote',
       }).eq('id', alertId);
 
       if (!mounted) return;

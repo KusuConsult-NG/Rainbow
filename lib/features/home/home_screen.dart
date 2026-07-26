@@ -144,11 +144,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // Silent SOS: submit a real background alert without leaving the home screen
       unawaited(() async {
         try {
+          final pos = await LocationService().getCurrentPosition(force: true);
           await ref.read(alertServiceProvider).submitAlert(
                 type: 'EMERGENCY - Silent SOS',
                 description: 'Silent distress signal activated by user.',
                 reportedBy:
                     ref.read(authProvider).user?.id ?? 'anonymous',
+                latitude: pos?.latitude,
+                longitude: pos?.longitude,
                 priority: AlertPriority.critical,
               );
           // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design

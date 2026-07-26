@@ -62,6 +62,7 @@ dependencies {
     // Core library desugaring — required for isCoreLibraryDesugaringEnabled
     // and fixes D8 nest-mate resolution for Java 17 plugin classes (url_launcher, etc.)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    implementation("androidx.core:core-ktx:1.13.1")
 }
 
 flutter {

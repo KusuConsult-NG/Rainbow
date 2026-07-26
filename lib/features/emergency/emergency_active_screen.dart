@@ -15,6 +15,7 @@ import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
 import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/shared/widgets/safety_feedback_dialog.dart';
 
 /// Documentation for this public member.
@@ -247,59 +248,74 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
   }
 
   Widget _buildStatusCard() {
+    final alertId = ref.watch(emergencyProvider).alertId;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: AppColors.glassSurface,
-      child: Column(
-        children: [
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 500),
-            child: _showMap
-                ? Column(
-                    key: const ValueKey('alerted'),
-                    children: [
-                      Text(
-                        'LOCATION BROADCASTING',
-                        style: GoogleFonts.outfit(
-                          color: AppColors.primary,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Operational teams are inbound to your position',
-                        style: GoogleFonts.outfit(
-                          color: AppColors.textSecondary,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  )
-                : Column(
-                    key: const ValueKey('signal'),
-                    children: [
-                      Text(
-                        'SIGNAL ESTABLISHED',
-                        style: GoogleFonts.outfit(
-                          color: AppColors.onBackground,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Establishing tactical data link...',
-                        style: GoogleFonts.outfit(
-                          color: AppColors.textSecondary,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-          ),
-        ],
+      child: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: alertId != null
+            ? SupabaseConfig.client
+                .from('alerts')
+                .stream(primaryKey: ['id'])
+                .eq('id', alertId)
+            : const Stream.empty(),
+        builder: (context, snapshot) {
+          var statusText = 'Establishing tactical data link...';
+          var statusTitle = 'SIGNAL ESTABLISHED';
+          var titleColor = AppColors.onBackground;
+
+          if (snapshot.hasData && snapshot.data!.isNotEmpty) {
+            final alert = snapshot.data!.first;
+            final status = (alert['status'] as String? ?? 'PENDING').toUpperCase();
+            if (status == 'DISPATCHED') {
+              statusTitle = 'SQUAD DISPATCHED';
+              statusText = 'Tactical team dispatched to your location';
+              titleColor = AppColors.accent;
+            } else if (status == 'ACKNOWLEDGED' || status == 'ON_ROUTE') {
+              statusTitle = 'RESPONDERS EN ROUTE';
+              statusText = 'Units en route to your position';
+              titleColor = AppColors.primary;
+            } else if (status == 'ON_SITE') {
+              statusTitle = 'RESPONDERS ON SITE';
+              statusText = 'Tactical team arrived at your location';
+              titleColor = AppColors.success;
+            } else if (status == 'RESOLVED') {
+              statusTitle = 'INCIDENT SECURED';
+              statusText = 'Emergency resolved and area secured';
+              titleColor = AppColors.success;
+            } else {
+              statusTitle = 'LOCATION BROADCASTING';
+              statusText = 'Alert transmitted · Command HQ triaging...';
+              titleColor = AppColors.primary;
+            }
+          } else if (_showMap) {
+            statusTitle = 'LOCATION BROADCASTING';
+            statusText = 'Emergency alert active · Command HQ notified';
+            titleColor = AppColors.primary;
+          }
+
+          return Column(
+            children: [
+              Text(
+                statusTitle,
+                style: GoogleFonts.outfit(
+                  color: titleColor,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                statusText,
+                style: GoogleFonts.outfit(
+                  color: AppColors.textSecondary,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

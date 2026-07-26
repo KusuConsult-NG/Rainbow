@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
+import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/speech_service.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
@@ -175,10 +176,30 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
       final auth = ref.read(authProvider);
       final userId = auth.user?.id ?? 'anonymous';
 
+      // Perform AI Triage Classification on recognized voice transcript
+      final lowerText = _transcription.toLowerCase();
+      var inferredType = 'INCIDENT - AI Voice Report';
+      var inferredPriority = AlertPriority.medium;
+
+      if (lowerText.contains('gun') || lowerText.contains('weapon') || lowerText.contains('shoot') || lowerText.contains('kill') || lowerText.contains('attack') || lowerText.contains('blood')) {
+        inferredType = 'CRIME - Active Threat / Weapon';
+        inferredPriority = AlertPriority.critical;
+      } else if (lowerText.contains('fire') || lowerText.contains('explosion') || lowerText.contains('bomb') || lowerText.contains('burn')) {
+        inferredType = 'ENVIRONMENT - Fire / Hazard';
+        inferredPriority = AlertPriority.critical;
+      } else if (lowerText.contains('suspicious') || lowerText.contains('stranger') || lowerText.contains('loitering') || lowerText.contains('prowler')) {
+        inferredType = 'SUSPICIOUS - Activity';
+        inferredPriority = AlertPriority.high;
+      } else if (lowerText.contains('riot') || lowerText.contains('protest') || lowerText.contains('crowd') || lowerText.contains('block')) {
+        inferredType = 'DANGER - Civil Unrest';
+        inferredPriority = AlertPriority.high;
+      }
+
       final alertId = await ref.read(alertServiceProvider).submitAlert(
-            type: 'AI_VOICE_REPORT',
-            description: _transcription,
+            type: inferredType,
+            description: '[AI VOICE TRIAGE] Recognized Speech: "$_transcription"',
             reportedBy: userId,
+            priority: inferredPriority,
           );
 
       if (!mounted) return;
