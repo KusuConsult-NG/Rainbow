@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
 import { supabase } from '@/lib/supabase';
+import LiveFeedViewer from '@/components/LiveFeedViewer';
+
 import {
   Shield, Users, FileText, AlertTriangle, CheckCircle,
   Clock, Send, Plus, RefreshCw, Eye, MapPin, Radio,
@@ -466,6 +468,9 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
           <div style={{ paddingTop: 12, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
             {incident.description}
           </div>
+
+          {/* WebRTC Live Stream Receiver */}
+          <LiveFeedViewer alertId={incident.id} />
 
           {/* Media */}
           {incident.media_urls && incident.media_urls.length > 0 && (

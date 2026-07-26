@@ -24,6 +24,14 @@
     <!-- Phone calls for emergency escalation -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
 
+    <!-- Camera & Audio for WebRTC Live Stream -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
+
     <!-- Declare hardware features as optional to maximize device compatibility (e.g., tablets, smartwatches) -->
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />

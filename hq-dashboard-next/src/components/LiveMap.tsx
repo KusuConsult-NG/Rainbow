@@ -20,6 +20,7 @@ export interface AgentLocation {
   user_id: string;
   lat: number;
   lng: number;
+  mode?: string;
   status?: 'PATROLLING' | 'BUSY' | 'EMERGENCY' | 'OFFLINE' | 'DURESS';
   displayName?: string;
   timestamp?: any;
@@ -287,15 +288,16 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
       if (!agent.lat || !agent.lng) return;
 
       const existing = agentMarkersRef.current.get(agent.user_id);
-      const isDuress = agent.status === 'DURESS';
+      const isDuress = agent.status === 'DURESS' || agent.status === 'EMERGENCY' || agent.mode === 'sos';
       const isOutOfBounds = agent.geo_integrity === 'OUT_OF_BOUNDS';
+      const isCitizenSos = agent.mode === 'sos' || agent.status === 'EMERGENCY' || isDuress;
       
       const color = isDuress || isOutOfBounds ? 'var(--duress)' : agent.status === 'BUSY' ? '#FFC107' : '#4CAF50';
       const anim = isDuress || isOutOfBounds ? 'animation:pulse-ring 1.2s infinite;' : '';
 
       // 1. Draw pulsing target-radar icon for Citizen Distress signals
       let html = `<div style="width:24px;height:24px;background:${color};border-radius:50%;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;${anim}"><div style="width:8px;height:8px;background:white;border-radius:50%;"></div></div>`;
-      if (isDuress && agent.displayName?.toUpperCase().includes('CITIZEN')) {
+      if (isCitizenSos) {
         html = `
           <div style="width:36px;height:36px;background:rgba(239, 68, 68, 0.15);border-radius:50%;border:2.5px dashed rgba(239, 68, 68, 0.65);display:flex;align-items:center;justify-content:center;animation:spin-radar 10s linear infinite;">
             <div style="width:24px;height:24px;background:rgb(239, 68, 68);border-radius:50%;border:2px solid white;box-shadow:0 0 15px rgb(239, 68, 68);display:flex;align-items:center;justify-content:center;animation:pulse-ring 1.2s infinite;">
@@ -305,7 +307,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
         `;
       }
 
-      const iconSize = isDuress && agent.displayName?.toUpperCase().includes('CITIZEN') ? 36 : 24;
+      const iconSize = isCitizenSos ? 36 : 24;
       const icon = L.divIcon({
         className: '',
         html: html,

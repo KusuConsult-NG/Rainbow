@@ -12,6 +12,10 @@ import Analytics from '@/components/Analytics';
 import UninstallRequests from '@/components/UninstallRequests';
 import AgencyPortal from '@/components/AgencyPortal';
 import IncidentReplayPanel from '@/components/IncidentReplayPanel';
+import LiveFeedViewer from '@/components/LiveFeedViewer';
+import TacticalSelect, { SelectOption } from '@/components/TacticalSelect';
+
+
 import { useToast } from '@/components/ToastProvider';
 import { plateauTacticalMap, TacticalJurisdiction, TacticalWard, STATE_SECURITY_AGENCIES } from '@/lib/tactical_mapping';
 import {
@@ -611,6 +615,7 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
           ...t,
           lat,
           lng,
+          mode: t.mode,
           displayName: profile.full_name || 'FIELD UNIT',
           status: t.status || 'PATROLLING',
           geo_integrity: (lat !== null && lng !== null)
@@ -963,17 +968,54 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     router.replace('/login'); 
   };
 
-  if (authLoading) return (
-    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-primary)' }}>
-      <Loader2 size={32} color="var(--accent)" className="spin" />
-    </div>
-  );
-  if (!user) return null;
-
   const isHqUser = userRole === 'HQ_OFFICER' || userRole === 'HQ_COMMAND' || userRole === 'ADMIN';
   const isAgencyLiaison = userRole.endsWith('_LIAISON');
   // Derive agency code from role: 'POLICE_LIAISON' -> 'POLICE'
   const userAgencyCode = isAgencyLiaison ? userRole.replace('_LIAISON', '') : undefined;
+
+  const lgaSelectOptions: SelectOption[] = [
+    { value: 'ALL', label: 'ALL LGAS (STATEWIDE)', badge: 'STATE' },
+    ...plateauTacticalMap.map(lga => ({
+      value: lga.name,
+      label: lga.name.toUpperCase(),
+      badge: 'LGA'
+    }))
+  ];
+
+  const wardSelectOptions: SelectOption[] = [
+    { value: 'ALL', label: 'ALL DISTRICTS', badge: 'ALL' },
+    ...(selectedLgaObj?.wards || []).map(w => ({
+      value: w.name,
+      label: w.name.toUpperCase(),
+      badge: 'WARD'
+    }))
+  ];
+
+  const puSelectOptions: SelectOption[] = [
+    { value: 'ALL', label: 'ALL BEATS (PU)', badge: 'ALL' },
+    ...(selectedWardObj?.pollingUnits || []).map(pu => ({
+      value: pu,
+      label: pu,
+      badge: 'PU'
+    }))
+  ];
+
+  const statusSelectOptions: SelectOption[] = [
+    { value: 'ALL', label: 'ALL STATUS' },
+    { value: 'OPEN', label: 'OPEN THREATS' },
+    { value: 'ACTIVE', label: 'ACTIVE INCIDENTS' },
+    { value: 'DURESS', label: 'DURESS EMERGENCY 🚨' },
+    { value: 'CRITICAL', label: 'CRITICAL HOTSPOTS' },
+    { value: 'SMS_FALLBACK', label: '📡 SMS FALLBACK' },
+  ];
+
+  const tierSelectOptions: SelectOption[] = [
+    { value: 'ALL', label: 'ALL TIERS' },
+    { value: 'POLLING_UNIT', label: 'POLLING UNIT (BEAT)', badge: 'PU' },
+    { value: 'WARD', label: 'WARD / DISTRICT', badge: 'WARD' },
+    { value: 'LGA', label: 'LGA COMMAND', badge: 'LGA' },
+    { value: 'HQ', label: 'STATEWIDE HQ', badge: 'HQ' },
+  ];
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: 'var(--bg-primary)', overflow: 'hidden', color: 'var(--text-primary)', padding: '16px', gap: '16px', boxSizing: 'border-box' }}>
@@ -1045,18 +1087,18 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
       </aside>
 
       <main className="tactical-panel glass" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-        <header style={{ padding: '0 24px', height: 72, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-            <div>
-              <h2 style={{ fontSize: 18, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1 }}>
+        <header style={{ padding: '0 24px', height: 72, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0, flexShrink: 1 }}>
+            <div style={{ minWidth: 0 }}>
+              <h2 style={{ fontSize: 15, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
                 {activeTab === 'map' && (
                   filterLga !== 'ALL' 
-                    ? `${filterLga.toUpperCase()} SECTOR MONITORING`
+                    ? `${filterLga.toUpperCase()} SECTOR`
                     : (isHqUser ? 'Statewide Monitoring' : `${userProfile?.geo_lga || 'Sector'} Monitoring`)
                 )}
                 {activeTab === 'alerts' && (
                   filterLga !== 'ALL'
-                    ? `${filterLga.toUpperCase()} COMMAND FEED`
+                    ? `${filterLga.toUpperCase()} FEED`
                     : (isHqUser ? 'Statewide Incident Command' : `${userProfile?.geo_lga || 'Sector'} Command Feed`)
                 )}
                 {activeTab === 'history' && (
@@ -1071,33 +1113,33 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                 {activeTab === 'agency' && 'Inter-Agency Command'}
               </h2>
             </div>
-            <div style={{ height: 24, width: 1, background: 'var(--border)' }}></div>
-            <div style={{ display: 'flex', gap: 16 }}>
-               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ height: 20, width: 1, background: 'var(--border)', flexShrink: 0 }}></div>
+            <div style={{ display: 'flex', gap: 12, flexShrink: 0 }}>
+               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--success)', boxShadow: 'var(--success-glow)' }} className="pulse-emerald"></div>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--success)' }}>LIVE UPLINK</span>
+                  <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--success)', letterSpacing: 0.5 }}>LIVE UPLINK</span>
                </div>
-               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Clock size={14} color="var(--text-muted)" />
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{timeString}</span>
+               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Clock size={13} color="var(--text-muted)" />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{timeString}</span>
                </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
             {duressCount > 0 && (
               <div className="pulse-crimson" style={{ 
                 background: 'var(--duress-dim)',
                 border: '1px solid var(--duress)', 
                 borderRadius: 8, 
-                padding: '8px 16px', 
+                padding: '6px 12px', 
                 display: 'flex', 
                 alignItems: 'center', 
-                gap: 8,
+                gap: 6,
                 boxShadow: 'var(--duress-glow)'
               }}>
-                <AlertTriangle size={14} color="var(--duress)" />
-                <span style={{ fontSize: 11, fontWeight: 900, color: 'var(--duress)' }}>{duressCount} DURESS EMERGENCY</span>
+                <AlertTriangle size={13} color="var(--duress)" />
+                <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--duress)' }}>{duressCount} DURESS</span>
               </div>
             )}
 
@@ -1112,149 +1154,49 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                   background: 'rgba(245, 158, 11, 0.15)',
                   border: '1px solid rgba(245, 158, 11, 0.5)', 
                   borderRadius: 8, 
-                  padding: '8px 16px', 
+                  padding: '6px 12px', 
                   display: 'flex', 
                   alignItems: 'center', 
-                  gap: 8,
+                  gap: 6,
                   cursor: 'pointer',
                   boxShadow: '0 0 15px rgba(245, 158, 11, 0.2)'
                 }}
               >
-                <Radio size={14} color="#fbbf24" className="spin-slow" />
-                <span style={{ fontSize: 11, fontWeight: 900, color: '#fbbf24' }}>{smsFallbackCount} SMS FALLBACK</span>
+                <Radio size={13} color="#fbbf24" className="spin-slow" />
+                <span style={{ fontSize: 10, fontWeight: 900, color: '#fbbf24' }}>{smsFallbackCount} SMS</span>
               </div>
             )}
 
             <button
               onClick={() => setEnableClustering(c => !c)}
-              title={enableClustering ? 'Spatial-Temporal Proximity Clustering Active (Grouping duplicate reports for 100k+ users)' : 'Clustering Off (Showing raw un-grouped signal feed)'}
+              title={enableClustering ? 'Spatial-Temporal Proximity Clustering Active' : 'Clustering Off'}
               style={{
                 background: enableClustering ? 'rgba(79, 70, 229, 0.15)' : 'var(--bg-secondary)',
                 border: enableClustering ? '1px solid #818cf8' : '1px solid var(--border)',
                 borderRadius: 8,
-                padding: '8px 14px',
+                padding: '6px 12px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
+                gap: 6,
                 cursor: 'pointer',
                 color: enableClustering ? '#818cf8' : 'var(--text-muted)',
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: 800
               }}
             >
-              <Sparkles size={14} color={enableClustering ? '#818cf8' : 'var(--text-muted)'} />
-              <span>{enableClustering ? 'HIGH-SCALE CLUSTERING: ON' : 'RAW SIGNAL FEED'}</span>
+              <Sparkles size={13} color={enableClustering ? '#818cf8' : 'var(--text-muted)'} />
+              <span>{enableClustering ? 'CLUSTERING: ON' : 'RAW FEED'}</span>
             </button>
 
-            {/* Permanent Top Bar Cascading 3-Tier Sector Selector (LGA -> Ward -> PU) */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: filterLga !== 'ALL' ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-secondary)',
-              border: filterLga !== 'ALL' ? '1px solid var(--primary)' : '1px solid var(--border)',
-              borderRadius: 8,
-              padding: '6px 12px',
-              boxShadow: filterLga !== 'ALL' ? 'var(--primary-glow)' : 'none'
-            }}>
-              <MapPin size={14} color={filterLga !== 'ALL' ? 'var(--primary)' : 'var(--text-muted)'} />
-              <span style={{ fontSize: 10, fontWeight: 900, color: filterLga !== 'ALL' ? 'var(--primary)' : 'var(--text-muted)', letterSpacing: 0.5 }}>SECTOR:</span>
-              <select
-                value={filterLga}
-                onChange={e => {
-                  setFilterLga(e.target.value);
-                  setFilterWard('ALL');
-                  setFilterPu('ALL');
-                }}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: filterLga !== 'ALL' ? '#34d399' : 'var(--text-primary)',
-                  fontSize: 11,
-                  fontWeight: 900,
-                  cursor: 'pointer',
-                  outline: 'none',
-                  textTransform: 'uppercase',
-                  fontFamily: "'Outfit', sans-serif"
-                }}
-              >
-                <option value="ALL" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>ALL LGAS (STATEWIDE)</option>
-                {plateauTacticalMap.map(lga => (
-                  <option key={lga.id} value={lga.name} style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
-                    {lga.name.toUpperCase()}
-                  </option>
-                ))}
-              </select>
-
-              {filterLga !== 'ALL' && selectedLgaObj?.wards && selectedLgaObj.wards.length > 0 && (
-                <>
-                  <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>/</span>
-                  <select
-                    value={filterWard}
-                    onChange={e => {
-                      setFilterWard(e.target.value);
-                      setFilterPu('ALL');
-                    }}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: filterWard !== 'ALL' ? '#818cf8' : 'var(--text-muted)',
-                      fontSize: 11,
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      outline: 'none',
-                      textTransform: 'uppercase',
-                      fontFamily: "'Outfit', sans-serif"
-                    }}
-                  >
-                    <option value="ALL" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>ALL DISTRICTS</option>
-                    {selectedLgaObj.wards.map(w => (
-                      <option key={w.id} value={w.name} style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
-                        {w.name.toUpperCase()}
-                      </option>
-                    ))}
-                  </select>
-                </>
-              )}
-
-              {filterWard !== 'ALL' && selectedWardObj?.pollingUnits && selectedWardObj.pollingUnits.length > 0 && (
-                <>
-                  <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>/</span>
-                  <select
-                    value={filterPu}
-                    onChange={e => setFilterPu(e.target.value)}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: filterPu !== 'ALL' ? '#fbbf24' : 'var(--text-muted)',
-                      fontSize: 11,
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      outline: 'none',
-                      textTransform: 'uppercase',
-                      fontFamily: "'Outfit', sans-serif"
-                    }}
-                  >
-                    <option value="ALL" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>ALL BEATS</option>
-                    {selectedWardObj.pollingUnits.map(pu => (
-                      <option key={pu} value={pu} style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
-                        {pu}
-                      </option>
-                    ))}
-                  </select>
-                </>
-              )}
-            </div>
-            
             {/* Theme Toggle Button */}
             <button 
               onClick={() => setTheme(t => t === 'light' ? 'dark' : 'light')}
               title={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
               className="btn-tactical btn-secondary"
               style={{
-                borderRadius: '50%',
-                width: 40,
-                height: 40,
+                borderRadius: 8,
+                width: 34,
+                height: 34,
                 padding: 0,
                 display: 'flex',
                 alignItems: 'center',
@@ -1262,53 +1204,71 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                 boxShadow: 'var(--shadow-sm)',
               }}
             >
-              {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+              {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
             </button>
 
-            <div style={{ textAlign: 'right' }}>
-              <p style={{ fontSize: 11, fontWeight: 900, color: 'var(--text-primary)' }}>{user.email?.split('@')[0].toUpperCase()}</p>
+            <div style={{ textAlign: 'right', paddingLeft: 4 }}>
+              <p style={{ fontSize: 10, fontWeight: 900, color: 'var(--text-primary)' }}>{user.email?.split('@')[0].toUpperCase()}</p>
               <p style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)' }}>{userRole.replace('_', ' ')}</p>
             </div>
           </div>
         </header>
 
         {activeTab === 'map' && (
-          <div style={{ position: 'absolute', top: 90, left: 24, zIndex: 1000, display: 'flex', gap: 12 }}>
-            <div className="glass" style={{ padding: '6px 12px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--text-muted)' }}>FILTER:</span>
-              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={overlaySelect}>
-                <option value="ALL">ALL STATUS</option>
-                <option value="OPEN">OPEN</option>
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="DURESS">DURESS</option>
-                <option value="CRITICAL">CRITICAL</option>
-                <option value="SMS_FALLBACK">📡 SMS FALLBACK REPORTS</option>
-              </select>
+          <div style={{ position: 'absolute', top: 86, left: 24, zIndex: 1000, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="glass" style={{ padding: '6px 10px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 8, border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 12px 32px rgba(0,0,0,0.4)', backdropFilter: 'blur(16px)' }}>
+              <Filter size={13} style={{ color: 'var(--text-muted)' }} />
+              <TacticalSelect
+                value={filterStatus}
+                options={statusSelectOptions}
+                onChange={v => setFilterStatus(v)}
+                accentColor="#f59e0b"
+                maxWidth={180}
+              />
               {isHqUser ? (
                 <>
-                  <select value={filterLga} onChange={e => { setFilterLga(e.target.value); setFilterWard('ALL'); setFilterPu('ALL'); }} style={overlaySelect}>
-                    <option value="ALL">ALL LGAS (STATEWIDE)</option>
-                    {plateauTacticalMap.map(lga => <option key={lga.id} value={lga.name}>{lga.name.toUpperCase()}</option>)}
-                  </select>
+                  <div style={{ width: 1, height: 16, background: 'var(--border)' }} />
+                  <TacticalSelect
+                    value={filterLga}
+                    options={lgaSelectOptions}
+                    onChange={v => { setFilterLga(v); setFilterWard('ALL'); setFilterPu('ALL'); }}
+                    accentColor="#34d399"
+                    maxWidth={190}
+                    icon={<MapPin size={13} />}
+                  />
                   {filterLga !== 'ALL' && selectedLgaObj?.wards && selectedLgaObj.wards.length > 0 && (
-                    <select value={filterWard} onChange={e => { setFilterWard(e.target.value); setFilterPu('ALL'); }} style={overlaySelect}>
-                      <option value="ALL">ALL DISTRICTS</option>
-                      {selectedLgaObj.wards.map(w => <option key={w.id} value={w.name}>{w.name.toUpperCase()}</option>)}
-                    </select>
+                    <>
+                      <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>/</span>
+                      <TacticalSelect
+                        value={filterWard}
+                        options={wardSelectOptions}
+                        onChange={v => { setFilterWard(v); setFilterPu('ALL'); }}
+                        accentColor="#818cf8"
+                        maxWidth={180}
+                      />
+                    </>
                   )}
                   {filterWard !== 'ALL' && selectedWardObj?.pollingUnits && selectedWardObj.pollingUnits.length > 0 && (
-                    <select value={filterPu} onChange={e => setFilterPu(e.target.value)} style={overlaySelect}>
-                      <option value="ALL">ALL BEATS (PU)</option>
-                      {selectedWardObj.pollingUnits.map(pu => <option key={pu} value={pu}>{pu}</option>)}
-                    </select>
+                    <>
+                      <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>/</span>
+                      <TacticalSelect
+                        value={filterPu}
+                        options={puSelectOptions}
+                        onChange={v => setFilterPu(v)}
+                        accentColor="#fbbf24"
+                        maxWidth={220}
+                        searchable
+                      />
+                    </>
                   )}
-                  <select value={filterTier} onChange={e => setFilterTier(e.target.value)} style={overlaySelect}>
-                    <option value="ALL">ALL TIERS</option>
-                    <option value="POLLING_UNIT">PU</option>
-                    <option value="WARD">WARD</option>
-                    <option value="LGA">LGA</option>
-                    <option value="HQ">HQ</option>
-                  </select>
+                  <div style={{ width: 1, height: 16, background: 'var(--border)' }} />
+                  <TacticalSelect
+                    value={filterTier}
+                    options={tierSelectOptions}
+                    onChange={v => setFilterTier(v)}
+                    accentColor="#38bdf8"
+                    maxWidth={160}
+                  />
                 </>
               ) : (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1720,6 +1680,9 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                     {selectedReport.description || 'No description provided.'}
                   </div>
                 </div>
+
+                {/* WebRTC Live Stream Receiver */}
+                <LiveFeedViewer alertId={selectedReport.id} />
 
                 {/* Attached Media Dossier (Video, Photos, Audio) */}
                 {((selectedReport.media_urls && selectedReport.media_urls.length > 0) || (selectedReport.attachments && selectedReport.attachments.length > 0)) && (

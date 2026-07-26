@@ -20,6 +20,8 @@ import 'package:rainbow_app/shared/widgets/safety_feedback_dialog.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
+import 'package:rainbow_app/services/live_stream_service.dart';
+
 
 /// Documentation for this public member.
 
@@ -70,14 +72,49 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
     );
   }
 
+  bool _isLiveStreaming = false;
+
   @override
   void dispose() {
     _tickTimer?.cancel();
     _cancelTimer?.cancel();
     _cancelController.dispose();
     _pulseController.dispose();
+    if (_isLiveStreaming) {
+      unawaited(LiveStreamService().stopStream());
+    }
     super.dispose();
   }
+
+  Future<void> _toggleLiveStream() async {
+    final alertId = ref.read(emergencyProvider).alertId;
+    if (alertId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Wait for SOS alert confirmation before streaming live.')),
+        );
+      }
+      return;
+    }
+    if (_isLiveStreaming) {
+      await LiveStreamService().stopStream(alertId);
+      if (mounted) setState(() => _isLiveStreaming = false);
+    } else {
+      final success = await LiveStreamService().startStream(alertId);
+      if (mounted) {
+        setState(() => _isLiveStreaming = success);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              success ? '🔴 LIVE STREAM BROADCASTING TO HQ' : 'Failed to start live stream',
+            ),
+            backgroundColor: success ? AppColors.danger : AppColors.surfaceContainerHighest,
+          ),
+        );
+      }
+    }
+  }
+
 
   Future<void> _captureEvidence() async {
     if (_isCapturingEvidence) return;
@@ -224,31 +261,59 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                   ),
                 ),
 
-                // Evidence capture button
+                // Action Buttons: Evidence Capture & Live Stream
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _isCapturingEvidence ? null : _captureEvidence,
-                      icon: _isCapturingEvidence
-                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange))
-                          : const Icon(Icons.camera_alt_rounded, size: 16, color: Colors.orange),
-                      label: Text(
-                        _isCapturingEvidence ? 'CAPTURING...' : 'CAPTURE EVIDENCE',
-                        style: GoogleFonts.outfit(
-                          color: Colors.orange,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 11,
-                          letterSpacing: 1.2,
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _isCapturingEvidence ? null : _captureEvidence,
+                          icon: _isCapturingEvidence
+                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange))
+                              : const Icon(Icons.camera_alt_rounded, size: 16, color: Colors.orange),
+                          label: Text(
+                            _isCapturingEvidence ? 'CAPTURING...' : 'PHOTO EVIDENCE',
+                            style: GoogleFonts.outfit(
+                              color: Colors.orange,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 10,
+                              letterSpacing: 1.0,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.orange, width: 1.5),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
                         ),
                       ),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Colors.orange, width: 1.5),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _toggleLiveStream,
+                          icon: Icon(
+                            _isLiveStreaming ? Icons.videocam_off_rounded : Icons.videocam_rounded,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                          label: Text(
+                            _isLiveStreaming ? 'STOP STREAM' : 'BROADCAST LIVE',
+                            style: GoogleFonts.outfit(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 10,
+                              letterSpacing: 1.0,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _isLiveStreaming ? AppColors.danger : AppColors.primary,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
                 // Dispatcher Chat button for citizen
