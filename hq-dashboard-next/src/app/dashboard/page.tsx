@@ -973,8 +973,6 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
       <Loader2 size={32} color="var(--accent)" className="spin" />
     </div>
   );
-  if (!user) return null;
-
   const isHqUser = userRole === 'HQ_OFFICER' || userRole === 'HQ_COMMAND' || userRole === 'ADMIN';
   const isAgencyLiaison = userRole.endsWith('_LIAISON');
   // Derive agency code from role: 'POLICE_LIAISON' -> 'POLICE'
@@ -989,22 +987,24 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     }))
   ];
 
+  const allWardsList: SelectOption[] = selectedLgaObj
+    ? selectedLgaObj.wards.map(w => ({ value: w.name, label: w.name.toUpperCase(), badge: selectedLgaObj.name.substring(0, 4).toUpperCase() }))
+    : plateauTacticalMap.flatMap(lga => lga.wards.map(w => ({ value: w.name, label: `${w.name.toUpperCase()} (${lga.name.toUpperCase()})`, badge: lga.name.substring(0, 4).toUpperCase() })));
+
   const wardSelectOptions: SelectOption[] = [
-    { value: 'ALL', label: 'ALL DISTRICTS', badge: 'ALL' },
-    ...(selectedLgaObj?.wards || []).map(w => ({
-      value: w.name,
-      label: w.name.toUpperCase(),
-      badge: 'WARD'
-    }))
+    { value: 'ALL', label: 'ALL WARDS / DISTRICTS', badge: 'ALL' },
+    ...allWardsList
   ];
+
+  const allPusList: SelectOption[] = selectedWardObj
+    ? selectedWardObj.pollingUnits.map(pu => ({ value: pu, label: pu, badge: 'PU' }))
+    : (selectedLgaObj
+        ? selectedLgaObj.wards.flatMap(w => w.pollingUnits.map(pu => ({ value: pu, label: pu, badge: w.name.substring(0, 4).toUpperCase() })))
+        : plateauTacticalMap.flatMap(l => l.wards.flatMap(w => w.pollingUnits.map(pu => ({ value: pu, label: pu, badge: l.name.substring(0, 4).toUpperCase() })))));
 
   const puSelectOptions: SelectOption[] = [
     { value: 'ALL', label: 'ALL BEATS (PU)', badge: 'ALL' },
-    ...(selectedWardObj?.pollingUnits || []).map(pu => ({
-      value: pu,
-      label: pu,
-      badge: 'PU'
-    }))
+    ...allPusList
   ];
 
   const statusSelectOptions: SelectOption[] = [
@@ -1223,69 +1223,91 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
 
         {activeTab === 'map' && (
           <div style={{ position: 'absolute', top: 86, left: 24, zIndex: 1000, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <div className="glass" style={{ padding: '6px 10px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 8, border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 12px 32px rgba(0,0,0,0.4)', backdropFilter: 'blur(16px)' }}>
+            <div className="glass" style={{ padding: '6px 10px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border)', boxShadow: '0 12px 32px rgba(0,0,0,0.3)', backdropFilter: 'blur(16px)' }}>
               <Filter size={13} style={{ color: 'var(--text-muted)' }} />
+              
+              {/* STATUS FILTER */}
               <TacticalSelect
                 value={filterStatus}
                 options={statusSelectOptions}
                 onChange={v => setFilterStatus(v)}
                 accentColor="#f59e0b"
-                maxWidth={180}
+                maxWidth={160}
               />
-              {isHqUser ? (
-                <>
-                  <div style={{ width: 1, height: 16, background: 'var(--border)' }} />
-                  <TacticalSelect
-                    value={filterLga}
-                    options={lgaSelectOptions}
-                    onChange={v => { setFilterLga(v); setFilterWard('ALL'); setFilterPu('ALL'); }}
-                    accentColor="#34d399"
-                    maxWidth={190}
-                    icon={<MapPin size={13} />}
-                  />
-                  {filterLga !== 'ALL' && selectedLgaObj?.wards && selectedLgaObj.wards.length > 0 && (
-                    <>
-                      <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>/</span>
-                      <TacticalSelect
-                        value={filterWard}
-                        options={wardSelectOptions}
-                        onChange={v => { setFilterWard(v); setFilterPu('ALL'); }}
-                        accentColor="#818cf8"
-                        maxWidth={180}
-                      />
-                    </>
-                  )}
-                  {filterWard !== 'ALL' && selectedWardObj?.pollingUnits && selectedWardObj.pollingUnits.length > 0 && (
-                    <>
-                      <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>/</span>
-                      <TacticalSelect
-                        value={filterPu}
-                        options={puSelectOptions}
-                        onChange={v => setFilterPu(v)}
-                        accentColor="#fbbf24"
-                        maxWidth={220}
-                        searchable
-                      />
-                    </>
-                  )}
-                  <div style={{ width: 1, height: 16, background: 'var(--border)' }} />
-                  <TacticalSelect
-                    value={filterTier}
-                    options={tierSelectOptions}
-                    onChange={v => setFilterTier(v)}
-                    accentColor="#38bdf8"
-                    maxWidth={160}
-                  />
-                </>
-              ) : (
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span style={{ fontSize: 9, fontWeight: 900, background: 'var(--accent-dim)', color: 'var(--accent)', padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase', fontFamily: 'monospace' }}>
-                    {userRole === 'LGA_COMMAND' || userRole === 'LGA_OFFICER' ? `LGA: ${userProfile?.geo_lga || 'NONE'}` :
-                     userRole === 'WARD_COMMAND' || userRole === 'WARD_OFFICER' ? `WARD: ${userProfile?.geo_ward || 'NONE'}` :
-                     `PU: ${userProfile?.geo_pu || 'NONE'}`}
-                  </span>
-                </div>
-              )}
+              
+              <div style={{ width: 1, height: 16, background: 'var(--border)' }} />
+
+              {/* LGA SELECTOR */}
+              <TacticalSelect
+                value={filterLga}
+                options={lgaSelectOptions}
+                onChange={v => {
+                  setFilterLga(v);
+                  setFilterWard('ALL');
+                  setFilterPu('ALL');
+                }}
+                accentColor="#34d399"
+                maxWidth={180}
+                icon={<MapPin size={13} />}
+                placeholder="LGA"
+              />
+
+              <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>/</span>
+
+              {/* WARD SELECTOR (ALWAYS VISIBLE) */}
+              <TacticalSelect
+                value={filterWard}
+                options={wardSelectOptions}
+                onChange={v => {
+                  setFilterWard(v);
+                  setFilterPu('ALL');
+                  if (v !== 'ALL') {
+                    const parentLga = plateauTacticalMap.find(l => l.wards.some(w => w.name === v));
+                    if (parentLga) setFilterLga(parentLga.name);
+                  }
+                }}
+                accentColor="#818cf8"
+                maxWidth={170}
+                placeholder="WARD"
+                searchable
+              />
+
+              <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>/</span>
+
+              {/* POLLING UNIT SELECTOR (ALWAYS VISIBLE) */}
+              <TacticalSelect
+                value={filterPu}
+                options={puSelectOptions}
+                onChange={v => {
+                  setFilterPu(v);
+                  if (v !== 'ALL') {
+                    for (const lga of plateauTacticalMap) {
+                      for (const ward of lga.wards) {
+                        if (ward.pollingUnits.includes(v)) {
+                          setFilterLga(lga.name);
+                          setFilterWard(ward.name);
+                          break;
+                        }
+                      }
+                    }
+                  }
+                }}
+                accentColor="#fbbf24"
+                maxWidth={210}
+                placeholder="BEAT (PU)"
+                searchable
+              />
+
+              <div style={{ width: 1, height: 16, background: 'var(--border)' }} />
+
+              {/* TIER SELECTOR */}
+              <TacticalSelect
+                value={filterTier}
+                options={tierSelectOptions}
+                onChange={v => setFilterTier(v)}
+                accentColor="#38bdf8"
+                maxWidth={140}
+              />
             </div>
           </div>
         )}
