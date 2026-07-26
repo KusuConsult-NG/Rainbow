@@ -25,8 +25,8 @@ class _AdminBroadcastScreenState extends State<AdminBroadcastScreen> {
       await SupabaseConfig.client.from('system_alerts').insert({
         'message': _messageCtrl.text.trim(),
         'severity': _severity,
-        'target_audience': _audience,
-        'expires_at': expiresAt,
+        'target_type': _audience,
+        'expires_at': expiresAt, // Column added by migration v2
       });
 
       if (mounted) {

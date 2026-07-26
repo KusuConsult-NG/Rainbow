@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
@@ -10,11 +10,12 @@ import MassBroadcast from '@/components/MassBroadcast';
 import SystemAlertListener from '@/components/SystemAlertListener';
 import Analytics from '@/components/Analytics';
 import UninstallRequests from '@/components/UninstallRequests';
+import AgencyPortal from '@/components/AgencyPortal';
 import IncidentReplayPanel from '@/components/IncidentReplayPanel';
 import { useToast } from '@/components/ToastProvider';
-import { plateauTacticalMap, TacticalJurisdiction, TacticalWard } from '@/lib/tactical_mapping';
+import { plateauTacticalMap, TacticalJurisdiction, TacticalWard, STATE_SECURITY_AGENCIES } from '@/lib/tactical_mapping';
 import {
-  ShieldAlert, Map as MapIcon, Users, Radio, Settings,
+  ShieldAlert, Shield, Map as MapIcon, Users, Radio, Settings,
   LogOut, AlertTriangle, CheckCircle, ChevronUp, Phone,
   Loader2, Filter, Bell, Activity, Clock, Target, Edit3, Send,
   Sun, Moon, X, Sparkles, MapPin
@@ -76,7 +77,7 @@ const fSel: React.CSSProperties = {
   fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif',
 };
 
-type Tab = 'map' | 'alerts' | 'history' | 'analytics' | 'broadcast' | 'admin' | 'settings' | 'audit' | 'uninstall';
+type Tab = 'map' | 'alerts' | 'history' | 'analytics' | 'broadcast' | 'admin' | 'settings' | 'audit' | 'uninstall' | 'agency';
 
 const formatAlertTimestamp = (alert: Alert | null | undefined, type: 'reported' | 'resolved' = 'reported'): string => {
   if (!alert) return '—';
@@ -355,6 +356,10 @@ export default function DashboardPage() {
             .single();
           if (profile?.role) {
             setUserRole(profile.role as string);
+              // Auto-navigate agency liaisons to their portal
+              if ((profile.role as string).endsWith('_LIAISON')) {
+                setActiveTab('agency');
+              }
           }
         }
       } catch (e) {
@@ -369,7 +374,30 @@ export default function DashboardPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [history, setHistory] = useState<Alert[]>([]);
   const [agentLocations, setAgentLocations] = useState<any[]>([]);
+  const agentPathsRef = useRef<Map<string, {lat: number; lng: number; timestamp: string}[]>>(new Map());
   const [activeTab, setActiveTab] = useState<Tab>('map');
+  const [unreadAgencyReports, setUnreadAgencyReports] = useState(0);
+
+  // Load unread agency report count for HQ notification badge
+  // Note: uses userRole directly since isHqUser is declared later in the component
+  useEffect(() => {
+    const hqRoles = ['HQ_OFFICER', 'HQ_COMMAND', 'ADMIN'];
+    if (!hqRoles.includes(userRole)) return;
+    const loadUnread = async () => {
+      const { count } = await supabase
+        .from('agency_action_reports')
+        .select('id', { count: 'exact', head: true })
+        .eq('read_by_hq', false);
+      setUnreadAgencyReports(count || 0);
+    };
+    loadUnread();
+    const channel = supabase
+      .channel('agency-reports-badge')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agency_action_reports' }, loadUnread)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [userRole]);
+
   const [filterTier, setFilterTier] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -542,7 +570,62 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
 
     const fetchTelemetryData = async () => {
       const { data: telemetryData } = await supabase.from('telemetry').select('*').limit(500);
-      if (telemetryData) setAgentLocations(telemetryData);
+      if (!telemetryData || telemetryData.length === 0) return;
+
+      // Enrich with profile names in one batch query
+      const userIds = telemetryData.map((t: any) => t.user_id);
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, role')
+        .in('id', userIds);
+
+      const profileMap: Record<string, { full_name?: string; role?: string }> = {};
+      (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
+
+      // Plateau State bounding polygon (approximate)
+      const plateauBounds = { minLat: 8.30, maxLat: 10.50, minLng: 8.30, maxLng: 10.80 };
+
+      const normalized = telemetryData.map((t: any) => {
+        const lat = t.latitude ?? t.lat ?? null;
+        const lng = t.longitude ?? t.lng ?? null;
+        const profile = profileMap[t.user_id] || {};
+
+        // Accumulate path history (cap at 30 points per agent)
+        if (lat !== null && lng !== null) {
+          const existing = agentPathsRef.current.get(t.user_id) || [];
+          const newPoint = { lat, lng, timestamp: t.updated_at || new Date().toISOString() };
+          // Only add if moved more than ~10m
+          const last = existing[existing.length - 1];
+          if (!last || Math.abs(last.lat - lat) > 0.0001 || Math.abs(last.lng - lng) > 0.0001) {
+            const updated = [...existing, newPoint].slice(-30);
+            agentPathsRef.current.set(t.user_id, updated);
+          }
+        }
+
+        // Geo-fencing: check if inside Plateau State bounds
+        const inBounds = lat !== null && lng !== null &&
+          lat >= plateauBounds.minLat && lat <= plateauBounds.maxLat &&
+          lng >= plateauBounds.minLng && lng <= plateauBounds.maxLng;
+
+        return {
+          ...t,
+          lat,
+          lng,
+          displayName: profile.full_name || 'FIELD UNIT',
+          status: t.status || 'PATROLLING',
+          geo_integrity: (lat !== null && lng !== null)
+            ? (inBounds ? 'IN_BOUNDS' : 'OUT_OF_BOUNDS')
+            : 'UNKNOWN',
+          path: agentPathsRef.current.get(t.user_id) || [],
+          telemetry: {
+            battery: t.battery ?? 100,
+            network: t.network ?? 'UNKNOWN',
+            accuracy: t.accuracy ?? 0,
+          },
+        };
+      });
+
+      setAgentLocations(normalized);
     };
 
     const debouncedFetchTelemetry = () => {
@@ -582,7 +665,10 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     if (!user) return;
 
     const fetchProfiles = async () => {
-      const { data } = await supabase.from('profiles').select('*');
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, full_name, role, lga, ward, sector_id')
+        .limit(1000);
       if (data) {
         const mapping: Record<string, any> = {};
         data.forEach((p: any) => {
@@ -595,56 +681,91 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     fetchProfiles();
   }, [user]);
 
-  // Live Agent Tracking (Supabase Realtime)
-  useEffect(() => {
-    if (!user) return;
-
-    const fetchLocations = async () => {
-      const { data } = await supabase.from('telemetry').select('*');
-      if (data) setAgentLocations(data);
-    };
-
-    fetchLocations();
-
-    const channel = supabase
-      .channel('hq-telemetry-tracking')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'telemetry' }, () => {
-        fetchLocations();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user]);
+  // NOTE: Live agent tracking is handled by the combined data useEffect above
+  // (hq-telemetry-channel). Duplicate subscription removed — BUG #11.
 
   const escalateAlert = useCallback(async (alertId: string, targetLga: string = 'ALL', reason: string = '', targetAgency: string = 'ALL') => {
     const lgaTarget = targetLga || 'ALL';
     const agencyTarget = targetAgency || 'ALL';
     const toastId = toast.loading('Escalating Incident...', `Handing over to ${agencyTarget} Command (${lgaTarget})`);
     try {
-      const { data: existing } = await supabase.from('alerts').select('ai_summary').eq('id', alertId).single();
+      const { data: existing } = await supabase
+        .from('alerts')
+        .select('ai_summary, escalation_log, geo_lga')
+        .eq('id', alertId)
+        .single();
       const existingNotes = existing?.ai_summary || '';
-      const escNote = `[INTER-AGENCY ESCALATION] Target Agency: ${agencyTarget} | Sector: ${lgaTarget} | Directives: ${reason || 'High Threat Escalation'} (by ${user?.email || user?.id || 'HQ_OFFICER'})`;
+      const existingLog = existing?.escalation_log || [];
+
+      // Resolve the target LGA commander UUID — do NOT use the HQ operator's own ID
+      let targetCommanderId: string | null = null;
+      let targetCommanderName = `${agencyTarget} Command`;
+      if (lgaTarget && lgaTarget !== 'ALL') {
+        const { data: commander } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .eq('role', 'LGA_COMMAND')
+          .eq('geo_lga', lgaTarget)
+          .limit(1)
+          .maybeSingle();
+        if (commander) {
+          targetCommanderId = commander.id;
+          targetCommanderName = commander.full_name || targetCommanderName;
+        }
+      }
+
+      const escNote = `[HQ ESCALATION → ${agencyTarget} | ${lgaTarget}] ${reason || 'High Threat Escalation'} (by ${user?.email || 'HQ_OFFICER'})`;
+      const logEntry = {
+        from_tier: 'HQ',
+        to_tier: lgaTarget,
+        to_agency: agencyTarget,
+        to_officer_id: targetCommanderId,
+        to_officer_name: targetCommanderName,
+        reason: reason || 'High Threat Escalation',
+        by_email: user?.email || 'HQ_OFFICER',
+        at: new Date().toISOString(),
+      };
 
       const updateData: Record<string, any> = {
         severity: 'CRITICAL',
         status: 'ESCALATED',
         escalated_to_agency: agencyTarget,
-        geo_lga: lgaTarget,
+        // IMPORTANT: Do NOT overwrite geo_lga — incident location must stay intact
+        escalation_log: [...existingLog, logEntry],
         ai_summary: existingNotes ? `${existingNotes}\n${escNote}` : escNote,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       };
-      if (user?.id) {
+
+      // Assign to the resolved commander UUID — NOT the HQ operator's own ID
+      if (targetCommanderId) {
+        updateData.assigned_to = targetCommanderId;
+      } else if (user?.id) {
+        // Fallback: assign to HQ operator only if no commander found
         updateData.assigned_to = user.id;
       }
+
       const { error } = await supabase.from('alerts').update(updateData).eq('id', alertId);
       if (error) throw error;
-      toast.update(toastId, 'success', 'Inter-Agency Escalation Sent', `Incident successfully transferred to ${agencyTarget} Command (${lgaTarget})`);
+
+      // Fire agency notification if a specific external agency was selected
+      if (agencyTarget !== 'ALL' && agencyTarget !== 'HQ') {
+        fetch('/api/notify-agency', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            alertId,
+            agency: agencyTarget,
+            targetLga: lgaTarget,
+            reason: reason || 'High Threat Escalation',
+            sentBy: user?.email || 'HQ_OFFICER',
+          }),
+        }).catch(err => console.warn('[HQ_AGENCY_NOTIFY_WARN]', err));
+      }
+
+      toast.update(toastId, 'success', 'Escalation Sent', `Handed off to ${targetCommanderName} (${agencyTarget})`);
     } catch (e: any) {
       console.error('[HQ_ESCALATE_ERR]', e);
-      const msg = e?.message || 'Escalation failed';
-      toast.update(toastId, 'error', 'Escalation Failed', msg);
+      toast.update(toastId, 'error', 'Escalation Failed', (e as any)?.message || 'Unknown error');
     }
   }, [toast, user]);
 
@@ -849,7 +970,10 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
   );
   if (!user) return null;
 
-  const isHqUser = userRole === 'HQ_OFFICER' || userRole === 'HQ_COMMAND';
+  const isHqUser = userRole === 'HQ_OFFICER' || userRole === 'HQ_COMMAND' || userRole === 'ADMIN';
+  const isAgencyLiaison = userRole.endsWith('_LIAISON');
+  // Derive agency code from role: 'POLICE_LIAISON' -> 'POLICE'
+  const userAgencyCode = isAgencyLiaison ? userRole.replace('_LIAISON', '') : undefined;
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: 'var(--bg-primary)', overflow: 'hidden', color: 'var(--text-primary)', padding: '16px', gap: '16px', boxSizing: 'border-box' }}>
@@ -885,6 +1009,13 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
             <NavItem icon={<Activity size={18} />} label="Incident Feed" active={activeTab === 'alerts'} onClick={() => setActiveTab('alerts')} badge={alerts.length > 0 ? alerts.length : undefined} />
             <NavItem icon={<Clock size={18} />} label="Mission History" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
             <NavItem icon={<Radio size={18} />} label="Communications & Broadcast" active={activeTab === 'broadcast'} onClick={() => setActiveTab('broadcast')} />
+            <NavItem
+              icon={<Shield size={18} />}
+              label="Inter-Agency Command"
+              active={activeTab === 'agency'}
+              onClick={() => setActiveTab('agency')}
+              badge={unreadAgencyReports > 0 ? unreadAgencyReports : undefined}
+            />
             
             {isHqUser && (
               <>
@@ -937,6 +1068,7 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                 {activeTab === 'admin' && 'Staff Command'}
                 {activeTab === 'audit' && 'Accountability'}
                 {activeTab === 'settings' && 'Platform Core'}
+                {activeTab === 'agency' && 'Inter-Agency Command'}
               </h2>
             </div>
             <div style={{ height: 24, width: 1, background: 'var(--border)' }}></div>
@@ -1367,6 +1499,15 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
           {activeTab === 'settings' && <SystemConfig />}
           {activeTab === 'audit' && <AuditLogs />}
           {activeTab === 'uninstall' && <UninstallRequests />}
+          {activeTab === 'agency' && (
+            <AgencyPortal
+              userRole={userRole}
+              userAgency={userAgencyCode}
+              isHq={isHqUser}
+              userEmail={user?.email || ''}
+              userId={user?.id || ''}
+            />
+          )}
         </div>
       </main>
 
@@ -2176,9 +2317,65 @@ Respond ONLY with a JSON object with this exact shape:
         </div>
       )}
 
-      <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 20 }}>{alert.description}</p>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: alert.media_urls && alert.media_urls.length > 0 ? 12 : 20 }}>{alert.description}</p>
 
-      {/* AI Triage Panel */}
+      {/* Evidence Media Thumbnails — Phase 7 */}
+      {alert.media_urls && alert.media_urls.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1.5, marginBottom: 8, fontFamily: "'Outfit', sans-serif" }}>
+            EVIDENCE ({alert.media_urls.length} FILE{alert.media_urls.length > 1 ? 'S' : ''})
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {alert.media_urls.slice(0, 6).map((url: string, idx: number) => {
+              const u = url.toLowerCase();
+              const isVideo = u.includes('/video/') || u.endsWith('.mp4') || u.endsWith('.mov') || u.endsWith('.webm');
+              const isAudio = u.includes('/raw/') || u.endsWith('.m4a') || u.endsWith('.mp3') || u.endsWith('.wav');
+              return (
+                <div
+                  key={idx}
+                  onClick={() => window.open(url, '_blank')}
+                  title={isVideo ? 'Click to open video' : isAudio ? 'Click to play audio' : 'Click to view image'}
+                  style={{
+                    width: 72, height: 72, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', flexShrink: 0,
+                    background: 'var(--input-bg)', border: '1px solid var(--border)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+                  }}
+                >
+                  {isVideo ? (
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 24 }}>▶</div>
+                      <div style={{ fontSize: 8, color: 'var(--text-muted)', marginTop: 2 }}>VIDEO</div>
+                    </div>
+                  ) : isAudio ? (
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 24 }}>🎵</div>
+                      <div style={{ fontSize: 8, color: 'var(--text-muted)', marginTop: 2 }}>AUDIO</div>
+                    </div>
+                  ) : (
+                    <img
+                      src={url}
+                      alt={`Evidence ${idx + 1}`}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  )}
+                  {idx === 5 && alert.media_urls!.length > 6 && (
+                    <div style={{
+                      position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 13, fontWeight: 900, color: 'white',
+                    }}>
+                      +{alert.media_urls!.length - 6}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+
       <div style={{
         background: 'var(--input-bg)',
         border: '1px solid var(--border)',

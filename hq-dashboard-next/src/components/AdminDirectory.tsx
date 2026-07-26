@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Users, UserPlus, Trash2, Loader2, RefreshCw, Shield } from 'lucide-react';
 import { plateauTacticalMap, TacticalJurisdiction, TacticalWard, STATE_SECURITY_AGENCIES } from '@/lib/tactical_mapping';
+import AgencyAccessManager from '@/components/AgencyAccessManager';
+
 
 interface StaffRecord {
   id: string;
@@ -238,6 +240,11 @@ export default function AdminDirectory() {
             );
           })}
         </div>
+      </div>
+
+      {/* ── Agency Liaison Access ───────────────────────────────────────── */}
+      <div style={{ marginTop: 32, borderTop: '1px solid var(--border)', paddingTop: 24 }}>
+        <AgencyAccessManager />
       </div>
     </div>
   );

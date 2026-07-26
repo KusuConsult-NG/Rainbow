@@ -192,10 +192,14 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         _ => AlertPriority.medium,
       };
 
-      final mediaPaths = _attachedFiles.map((f) => f.path).toList();
-      if (_recordedAudioPath != null && !mediaPaths.contains(_recordedAudioPath)) {
-        mediaPaths.add(_recordedAudioPath!);
-      }
+      // Build the combined list of all media: attached files + optional audio
+      final allMediaFiles = [
+        ..._attachedFiles,
+        if (_recordedAudioPath != null) File(_recordedAudioPath!),
+      ];
+
+      // submitAlert handles its own Cloudinary upload for instant-submit path
+      final attachmentPaths = allMediaFiles.map((f) => f.path).toList();
 
       final alertId = await ref.read(alertServiceProvider).submitAlert(
             type: '${widget.categoryInfo.label} - ${widget.subType}',
@@ -204,7 +208,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             priority: priority,
             latitude: _shareLocation ? lat : null,
             longitude: _shareLocation ? lng : null,
-            attachments: mediaPaths,
+            attachments: attachmentPaths,
             geoLga: _manualOverride ? _selectedLga?.name : null,
             geoWard: _manualOverride ? _selectedWard?.name : null,
             geoSiecWard: _manualOverride ? _selectedSiecWard?.name : null,
@@ -212,10 +216,12 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             syncStatus: isOffline ? 'QUEUED' : 'COMPLETED',
           );
 
-      if (alertId != null && _attachedFiles.isNotEmpty) {
+      // If there are media files that weren't uploaded inline, queue them now.
+      // queueMediaUpload now correctly handles List<File> (BUG #15 fix).
+      if (alertId != null && allMediaFiles.isNotEmpty) {
         await ref.read(syncServiceProvider).queueMediaUpload(
               alertId: alertId,
-              files: _attachedFiles,
+              files: allMediaFiles, // Pass File objects directly
               userId: userId,
             );
       }

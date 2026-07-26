@@ -80,7 +80,6 @@ class LocationService {
       return AndroidSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: distanceFilter,
-        forceLocationManager: true,
         intervalDuration: const Duration(seconds: 5),
       );
     } else if (defaultTargetPlatform == TargetPlatform.iOS ||
@@ -89,7 +88,7 @@ class LocationService {
         accuracy: LocationAccuracy.high,
         activityType: ActivityType.fitness,
         distanceFilter: distanceFilter,
-        pauseLocationUpdatesAutomatically: true,
+        pauseLocationUpdatesAutomatically: false,
       );
     } else {
       return LocationSettings(

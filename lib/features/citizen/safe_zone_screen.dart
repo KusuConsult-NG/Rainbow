@@ -45,11 +45,22 @@ final _safeZonesProvider = FutureProvider<List<_SafeZone>>((ref) async {
 
 // Firestore-driven active threat alert geolocations
 final _activeAlertsProvider = StreamProvider<List<LatLng>>((ref) {
+  final cutoff = DateTime.now().subtract(const Duration(hours: 24));
   return SupabaseConfig.client
       .from('alerts')
       .stream(primaryKey: ['id'])
       .map((list) {
         return list
+            .where((data) {
+              // Only show active/escalated alerts from last 24 hours — BUG #13
+              final status = (data['status'] as String? ?? '').toUpperCase();
+              final isActive = status == 'ACTIVE' || status == 'ESCALATED';
+              final createdRaw = data['created_at'] as String?;
+              final isRecent = createdRaw == null
+                  ? true
+                  : DateTime.tryParse(createdRaw)?.isAfter(cutoff) ?? true;
+              return isActive && isRecent;
+            })
             .map((data) {
               final lat = (data['latitude'] ?? data['lat']) as double?;
               final lng = (data['longitude'] ?? data['lng']) as double?;
