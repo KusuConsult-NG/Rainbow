@@ -930,6 +930,33 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     return true;
   });
 
+  const norm = (str?: string) => (str || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const isMatchingLocation = (target: string, value?: string) => {
+    if (!target || target === 'ALL') return true;
+    if (!value) return false;
+    const nTarget = norm(target);
+    const nValue = norm(value);
+    if (nTarget === nValue) return true;
+    if (nValue.includes(nTarget) || nTarget.includes(nValue)) return true;
+    // Strip (BEAT-...) suffixes for clean name comparison
+    const cleanTarget = norm(target.replace(/\s*\([^)]+\)/g, ''));
+    const cleanValue = norm(value.replace(/\s*\([^)]+\)/g, ''));
+    if (cleanTarget && cleanValue && (cleanTarget.includes(cleanValue) || cleanValue.includes(cleanTarget))) return true;
+    return false;
+  };
+
+  const formatPuOption = (puRaw: string, defaultBadge?: string): SelectOption => {
+    const match = puRaw.match(/^(.*?)(?:\s*\((BEAT-[^)]+)\))?$/);
+    const labelName = match && match[1] ? match[1].trim() : puRaw;
+    const beatCode = match && match[2] ? match[2].trim() : undefined;
+    return {
+      value: puRaw,
+      label: labelName,
+      badge: beatCode ? beatCode.split('-').pop() : (defaultBadge || 'PU')
+    };
+  };
+
   // Sector-Aware Duress & SMS Fallback Counters
   const sectorAlerts = alerts.filter(a => {
     const aLga = a.geo_lga || (a as any).lga;
@@ -965,33 +992,6 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
   const isAgencyLiaison = userRole.endsWith('_LIAISON');
   // Derive agency code from role: 'POLICE_LIAISON' -> 'POLICE'
   const userAgencyCode = isAgencyLiaison ? userRole.replace('_LIAISON', '') : undefined;
-
-  const norm = (str?: string) => (str || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-
-  const isMatchingLocation = (target: string, value?: string) => {
-    if (!target || target === 'ALL') return true;
-    if (!value) return false;
-    const nTarget = norm(target);
-    const nValue = norm(value);
-    if (nTarget === nValue) return true;
-    if (nValue.includes(nTarget) || nTarget.includes(nValue)) return true;
-    // Strip (BEAT-...) suffixes for clean name comparison
-    const cleanTarget = norm(target.replace(/\s*\([^)]+\)/g, ''));
-    const cleanValue = norm(value.replace(/\s*\([^)]+\)/g, ''));
-    if (cleanTarget && cleanValue && (cleanTarget.includes(cleanValue) || cleanValue.includes(cleanTarget))) return true;
-    return false;
-  };
-
-  const formatPuOption = (puRaw: string, defaultBadge?: string): SelectOption => {
-    const match = puRaw.match(/^(.*?)(?:\s*\((BEAT-[^)]+)\))?$/);
-    const labelName = match && match[1] ? match[1].trim() : puRaw;
-    const beatCode = match && match[2] ? match[2].trim() : undefined;
-    return {
-      value: puRaw,
-      label: labelName,
-      badge: beatCode ? beatCode.split('-').pop() : (defaultBadge || 'PU')
-    };
-  };
 
   const lgaSelectOptions: SelectOption[] = [
     { value: 'ALL', label: 'ALL LGAS (STATEWIDE)', badge: 'STATE' },

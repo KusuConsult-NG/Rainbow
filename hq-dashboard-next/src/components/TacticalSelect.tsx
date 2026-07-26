@@ -217,11 +217,11 @@ export default function TacticalSelect({
                 No matching options
               </div>
             ) : (
-              filteredOptions.map((opt) => {
+              filteredOptions.map((opt, idx) => {
                 const isSelected = opt.value === value;
                 return (
                   <button
-                    key={opt.value}
+                    key={`${opt.value}-${idx}`}
                     type="button"
                     onClick={() => {
                       onChange(opt.value);
