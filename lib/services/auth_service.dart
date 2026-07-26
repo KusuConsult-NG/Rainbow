@@ -2,6 +2,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/services/secure_storage_service.dart';
@@ -45,9 +46,15 @@ class AuthService {
         cleanPhone == '2348000000000' ||
         cleanPhone == '+2348000000000') {
       try {
+        final demoEmail = dotenv.env['DEMO_CITIZEN_EMAIL'];
+        final demoPass  = dotenv.env['DEMO_CITIZEN_PASS'];
+        if (demoEmail == null || demoPass == null) {
+          _lastAuthError = 'DEMO_CITIZEN_EMAIL / DEMO_CITIZEN_PASS not configured in .env';
+          return false;
+        }
         final res = await SupabaseConfig.client.auth.signInWithPassword(
-          email: 'citizen-test@operationrainbow.plateau.gov.ng',
-          password: '12345Gg!',
+          email: demoEmail,
+          password: demoPass,
         );
         return res.session != null;
       } catch (e) {
@@ -93,10 +100,15 @@ class AuthService {
 
   Future<bool> signInWithAccessCode(String code) async {
     final cleanCode = code.trim().toLowerCase();
-    if (cleanCode.contains('@')) {
-      return signInWithBadge(cleanCode, '12345Gg!');
+    final agentPass = dotenv.env['AGENT_DEFAULT_PASS'] ?? '';
+    if (agentPass.isEmpty) {
+      _lastAuthError = 'AGENT_DEFAULT_PASS not configured in .env';
+      return false;
     }
-    return signInWithBadge('$cleanCode@operationrainbow.plateau.gov.ng', '12345Gg!');
+    if (cleanCode.contains('@')) {
+      return signInWithBadge(cleanCode, agentPass);
+    }
+    return signInWithBadge('$cleanCode@operationrainbow.plateau.gov.ng', agentPass);
   }
 
   static bool isDemoNumber(String phone) {
@@ -147,9 +159,15 @@ class AuthService {
       // Demo citizen: only accept OTP 123456
       if (otp == '123456') {
         try {
+          final demoEmail = dotenv.env['DEMO_CITIZEN_EMAIL'];
+          final demoPass  = dotenv.env['DEMO_CITIZEN_PASS'];
+          if (demoEmail == null || demoPass == null) {
+            _lastAuthError = 'DEMO_CITIZEN_EMAIL / DEMO_CITIZEN_PASS not configured in .env';
+            return false;
+          }
           final res = await SupabaseConfig.client.auth.signInWithPassword(
-            email: 'citizen-test@operationrainbow.plateau.gov.ng',
-            password: '12345Gg!',
+            email: demoEmail,
+            password: demoPass,
           );
           if (res.session != null) {
             _pendingPhone = null;

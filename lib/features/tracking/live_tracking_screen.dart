@@ -53,6 +53,7 @@ class LiveTrackingScreen extends ConsumerStatefulWidget {
 
 class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
   LatLng? _currentPos;
+  bool _locationDenied = false;
   StreamSubscription<Position?>? _sub;
 
   @override
@@ -64,13 +65,19 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
   Future<void> _startPosStream() async {
     try {
       _sub = LocationService().streamLocation().listen((pos) {
-        if (!mounted || pos == null) return;
+        if (!mounted) return;
+        if (pos == null) {
+          setState(() => _locationDenied = true);
+          return;
+        }
         setState(() {
+          _locationDenied = false;
           _currentPos = LatLng(pos.latitude, pos.longitude);
         });
       });
     } catch (e) {
       debugPrint('[TRACKING_ERR] Location stream failed: $e');
+      if (mounted) setState(() => _locationDenied = true);
     }
   }
 
@@ -133,12 +140,12 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Battery: ${telemetry['battery_level'] != null ? "${telemetry['battery_level']}%" : "Unknown"}',
+              'Battery: ${telemetry['battery'] != null ? "${telemetry['battery']}%" : "Unknown"}',
               style: GoogleFonts.inter(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 8),
             Text(
-              'Last Updated: ${telemetry['timestamp'] ?? 'Unknown'}',
+              'Last Updated: ${telemetry['updated_at'] ?? 'Unknown'}',
               style: GoogleFonts.inter(color: AppColors.textDim),
             ),
           ],
@@ -158,7 +165,35 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
         title: 'TACTICAL MAP',
         subtitle: 'LIVE COMMAND FEED',
       ),
-      body: _currentPos == null
+      body: _locationDenied
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.location_off_rounded, color: AppColors.danger, size: 64),
+                    const SizedBox(height: 16),
+                    Text(
+                      'LOCATION ACCESS DENIED',
+                      style: GoogleFonts.outfit(
+                        color: AppColors.danger,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Enable location in device Settings to use the tactical map.',
+                      style: GoogleFonts.inter(color: AppColors.textSecondary, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : _currentPos == null
           ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : Stack(
               children: [

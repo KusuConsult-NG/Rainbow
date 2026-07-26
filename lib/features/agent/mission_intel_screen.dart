@@ -1,8 +1,9 @@
-// ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
@@ -10,18 +11,21 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
+import 'package:rainbow_app/services/cloudinary_service.dart';
+import 'package:rainbow_app/services/sync_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class MissionIntelScreen extends ConsumerStatefulWidget {
   const MissionIntelScreen({required this.alertData, super.key});
-
   final Map<String, dynamic> alertData;
-
   @override
   ConsumerState<MissionIntelScreen> createState() => _MissionIntelScreenState();
 }
 
 class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
   late Map<String, dynamic> alertData;
+  final ImagePicker _picker = ImagePicker();
+  bool _isUploading = false;
 
   @override
   void initState() {
@@ -34,16 +38,93 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
     if (alertId != null) {
       try {
         await SupabaseConfig.client.from('alerts').update({'status': newStatus}).eq('id', alertId);
-        setState(() {
-          alertData['status'] = newStatus;
-        });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Status updated to $newStatus')));
-        }
+        setState(() { alertData['status'] = newStatus; });
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Status updated to $newStatus')));
       } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    }
+  }
+
+  Future<void> _attachEvidence() async {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surfaceContainerHigh,
+      builder: (BuildContext ctx) {
+        return SafeArea(
+          child: Wrap(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: AppColors.primary),
+                title: const Text('Camera Photo', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickAndUploadMedia(ImageSource.camera, false);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: AppColors.primary),
+                title: const Text('Gallery Photo', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickAndUploadMedia(ImageSource.gallery, false);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.videocam, color: AppColors.primary),
+                title: const Text('Record Video', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickAndUploadMedia(ImageSource.camera, true);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _pickAndUploadMedia(ImageSource source, bool isVideo) async {
+    try {
+      XFile? file;
+      if (isVideo) {
+        file = await _picker.pickVideo(source: source);
+      } else {
+        file = await _picker.pickImage(source: source);
+      }
+
+      if (file == null) return;
+
+      setState(() => _isUploading = true);
+
+      final url = await CloudinaryService.instance.uploadMedia(File(file.path));
+      if (url != null) {
+        final alertId = alertData['id'];
+        final existingMedia = (alertData['media_urls'] as List<dynamic>?)?.cast<String>() ?? [];
+        final newMediaUrls = [...existingMedia, url];
+
+        await SupabaseConfig.client.from('alerts').update({'media_urls': newMediaUrls}).eq('id', alertId);
+        
+        setState(() {
+          alertData['media_urls'] = newMediaUrls;
+          _isUploading = false;
+        });
+        
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Evidence uploaded successfully'), backgroundColor: AppColors.success),
+          );
         }
+      } else {
+        throw Exception("Failed to get URL from Cloudinary");
+      }
+    } catch (e) {
+      setState(() => _isUploading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed: $e'), backgroundColor: AppColors.error),
+        );
       }
     }
   }
@@ -56,77 +137,30 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
     final lat = (alertData['latitude'] as num?)?.toDouble();
     final lng = (alertData['longitude'] as num?)?.toDouble();
     final alertId = alertData['id'] as String?;
-    
     final mediaUrls = (alertData['media_urls'] as List<dynamic>?)?.cast<String>() ?? [];
-    
     final authState = ref.watch(authProvider);
     final isAgent = authState.role == UserRole.responder;
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const RainbowAppBar(
-        title: 'TACTICAL MISSION INTEL',
-        subtitle: 'INCIDENT DATA DOSSIER',
-      ),
+      appBar: const RainbowAppBar(title: 'TACTICAL MISSION INTEL', subtitle: 'INCIDENT DATA DOSSIER'),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              type.toUpperCase(),
-              style: GoogleFonts.outfit(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: AppColors.primary,
-              ),
-            ),
+            Text(type.toUpperCase(), style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.primary)),
             const SizedBox(height: 8),
-            Text(
-              'SEVERITY: $severity',
-              style: GoogleFonts.outfit(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: AppColors.warning,
-                letterSpacing: 1.5,
-              ),
-            ),
+            Text('SEVERITY: $severity', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.warning, letterSpacing: 1.5)),
             const SizedBox(height: 16),
             if (lat != null && lng != null) ...[
-              SizedBox(
-                height: 200,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: RainbowMap(
-                    center: LatLng(lat, lng),
-                    markers: [
-                      Marker(
-                        point: LatLng(lat, lng),
-                        child: const Icon(Icons.location_on, color: AppColors.danger),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              SizedBox(height: 200, child: ClipRRect(borderRadius: BorderRadius.circular(16), child: RainbowMap(center: LatLng(lat, lng), markers: [Marker(point: LatLng(lat, lng), child: const Icon(Icons.location_on, color: AppColors.danger))]))),
               const SizedBox(height: 16),
             ],
-            Text(
-              desc,
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                color: AppColors.onBackground,
-              ),
-            ),
+            Text(desc, style: GoogleFonts.inter(fontSize: 14, color: AppColors.onBackground)),
             const SizedBox(height: 24),
             if (mediaUrls.isNotEmpty) ...[
-              Text(
-                'EVIDENCE ACQUIRED',
-                style: GoogleFonts.outfit(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textDim,
-                ),
-              ),
+              Text('EVIDENCE ACQUIRED', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textDim)),
               const SizedBox(height: 8),
               SizedBox(
                 height: 120,
@@ -135,31 +169,53 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
                   itemCount: mediaUrls.length,
                   itemBuilder: (context, index) {
                     final url = mediaUrls[index];
-                    final isImage = url.toLowerCase().endsWith('.png') ||
-                        url.toLowerCase().endsWith('.jpg') ||
-                        url.toLowerCase().endsWith('.jpeg');
-                    return Container(
-                      width: 120,
-                      margin: const EdgeInsets.only(right: 8),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceContainer,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.outline),
+                    final urlLower = url.toLowerCase();
+                    final isVideo = urlLower.contains('/video/') || urlLower.endsWith('.mp4') || urlLower.endsWith('.mov');
+                    final isAudio = urlLower.contains('/raw/') || urlLower.endsWith('.m4a') || urlLower.endsWith('.mp3') || urlLower.endsWith('.wav');
+                    final isImage = !isVideo && !isAudio;
+                    
+                    return GestureDetector(
+                      onTap: () {
+                        if (isAudio) {
+                          launchUrl(Uri.parse(url));
+                        } else {
+                          showDialog(
+                            context: context,
+                            builder: (context) => Dialog(
+                              backgroundColor: Colors.black,
+                              child: isVideo
+                                ? const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 64))
+                                : InteractiveViewer(child: Image.network(url)),
+                            ),
+                          );
+                        }
+                      },
+                      child: Container(
+                        width: 120,
+                        margin: const EdgeInsets.only(right: 8),
+                        decoration: BoxDecoration(color: AppColors.surfaceContainer, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.outline)),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: isImage
+                              ? Image.network(url, fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: AppColors.textDim))
+                              : isVideo
+                                  ? Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        const Center(child: Icon(Icons.movie, color: AppColors.primary, size: 40)),
+                                        const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 32)),
+                                      ],
+                                    )
+                                  : Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        const Icon(Icons.mic, color: AppColors.primary, size: 32),
+                                        const SizedBox(height: 8),
+                                        Text('TAP TO PLAY', style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textDim)),
+                                      ],
+                                    ),
+                        ),
                       ),
-                      child: isImage
-                          ? ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: Image.network(
-                                url,
-                                fit: BoxFit.cover,
-                                errorBuilder: (c, e, s) => const Icon(
-                                    Icons.broken_image,
-                                    color: AppColors.textDim),
-                              ),
-                            )
-                          : const Center(
-                              child: Icon(Icons.movie,
-                                  color: AppColors.primary, size: 40)),
                     );
                   },
                 ),
@@ -167,36 +223,13 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
               const SizedBox(height: 24),
             ],
             if (isAgent) ...[
-              Text(
-                'TACTICAL STATUS',
-                style: GoogleFonts.outfit(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textDim,
-                ),
-              ),
+              Text('TACTICAL STATUS', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textDim)),
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () => _updateStatus('RESOLVED'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.success,
-                      ),
-                      child: const Text('RESOLVE', style: TextStyle(color: Colors.white)),
-                    ),
-                  ),
+                  Expanded(child: ElevatedButton(onPressed: () => _updateStatus('RESOLVED'), style: ElevatedButton.styleFrom(backgroundColor: AppColors.success), child: const Text('RESOLVE', style: TextStyle(color: Colors.white)))),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () => _updateStatus('DISPATCHED'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.warning,
-                      ),
-                      child: const Text('DISPATCH', style: TextStyle(color: Colors.black)),
-                    ),
-                  ),
+                  Expanded(child: ElevatedButton(onPressed: () => _updateStatus('DISPATCHED'), style: ElevatedButton.styleFrom(backgroundColor: AppColors.warning), child: const Text('DISPATCH', style: TextStyle(color: Colors.black)))),
                 ],
               ),
               const SizedBox(height: 24),
@@ -207,23 +240,26 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
                 child: ElevatedButton.icon(
                   onPressed: () => context.push('/dispatcher-chat?alertId=$alertId'),
                   icon: const Icon(Icons.chat, color: Colors.white),
-                  label: Text(
-                    'DISPATCHER CHAT',
-                    style: GoogleFonts.outfit(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
+                  label: Text('DISPATCHER CHAT', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white)),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, padding: const EdgeInsets.symmetric(vertical: 16)),
                 ),
               ),
             ],
           ],
         ),
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _isUploading ? null : _attachEvidence,
+        backgroundColor: AppColors.warning,
+        icon: _isUploading
+            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+            : const Icon(Icons.attach_file, color: Colors.black),
+        label: Text(
+          _isUploading ? 'UPLOADING...' : 'ATTACH EVIDENCE',
+          style: GoogleFonts.outfit(color: Colors.black, fontWeight: FontWeight.bold),
+        ),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 }

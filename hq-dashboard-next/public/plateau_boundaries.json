@@ -1,43 +1,22 @@
 {
   "type": "FeatureCollection",
   "features": [
-    {
-      "type": "Feature",
-      "properties": {
-        "lga": "Jos North",
-        "state": "Plateau"
-      },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [
-          [
-            [8.85, 9.95],
-            [8.95, 9.95],
-            [8.95, 9.85],
-            [8.85, 9.85],
-            [8.85, 9.95]
-          ]
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "lga": "Jos South",
-        "state": "Plateau"
-      },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [
-          [
-            [8.80, 9.85],
-            [8.95, 9.85],
-            [8.95, 9.70],
-            [8.80, 9.70],
-            [8.80, 9.85]
-          ]
-        ]
-      }
-    }
+    { "type": "Feature", "properties": { "lga": "Jos North", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[8.85,9.98],[9.00,9.98],[9.00,9.85],[8.85,9.85],[8.85,9.98]]] } },
+    { "type": "Feature", "properties": { "lga": "Jos South", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[8.82,9.85],[9.00,9.85],[9.00,9.70],[8.82,9.70],[8.82,9.85]]] } },
+    { "type": "Feature", "properties": { "lga": "Jos East", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[9.00,9.98],[9.20,9.98],[9.20,9.75],[9.00,9.75],[9.00,9.98]]] } },
+    { "type": "Feature", "properties": { "lga": "Barkin Ladi", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[8.90,9.72],[9.10,9.72],[9.10,9.55],[8.90,9.55],[8.90,9.72]]] } },
+    { "type": "Feature", "properties": { "lga": "Bassa", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[8.50,9.85],[8.85,9.85],[8.85,9.65],[8.50,9.65],[8.50,9.85]]] } },
+    { "type": "Feature", "properties": { "lga": "Bokkos", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[8.78,9.55],[9.05,9.55],[9.05,9.30],[8.78,9.30],[8.78,9.55]]] } },
+    { "type": "Feature", "properties": { "lga": "Kanam", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[9.20,9.80],[9.75,9.80],[9.75,9.40],[9.20,9.40],[9.20,9.80]]] } },
+    { "type": "Feature", "properties": { "lga": "Kanke", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[9.10,9.40],[9.60,9.40],[9.60,9.10],[9.10,9.10],[9.10,9.40]]] } },
+    { "type": "Feature", "properties": { "lga": "Langtang North", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[9.20,9.05],[9.60,9.05],[9.60,8.75],[9.20,8.75],[9.20,9.05]]] } },
+    { "type": "Feature", "properties": { "lga": "Langtang South", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[9.05,8.75],[9.50,8.75],[9.50,8.45],[9.05,8.45],[9.05,8.75]]] } },
+    { "type": "Feature", "properties": { "lga": "Mangu", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[9.00,9.72],[9.30,9.72],[9.30,9.45],[9.00,9.45],[9.00,9.72]]] } },
+    { "type": "Feature", "properties": { "lga": "Mikang", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[8.90,9.25],[9.25,9.25],[9.25,8.95],[8.90,8.95],[8.90,9.25]]] } },
+    { "type": "Feature", "properties": { "lga": "Pankshin", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[9.30,9.40],[9.75,9.40],[9.75,9.05],[9.30,9.05],[9.30,9.40]]] } },
+    { "type": "Feature", "properties": { "lga": "Qua'an Pan", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[9.45,9.10],[9.85,9.10],[9.85,8.75],[9.45,8.75],[9.45,9.10]]] } },
+    { "type": "Feature", "properties": { "lga": "Riyom", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[8.65,9.65],[8.90,9.65],[8.90,9.40],[8.65,9.40],[8.65,9.65]]] } },
+    { "type": "Feature", "properties": { "lga": "Shendam", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[9.50,9.10],[9.95,9.10],[9.95,8.60],[9.50,8.60],[9.50,9.10]]] } },
+    { "type": "Feature", "properties": { "lga": "Wase", "state": "Plateau" }, "geometry": { "type": "Polygon", "coordinates": [[[9.80,9.70],[10.40,9.70],[10.40,9.00],[9.80,9.00],[9.80,9.70]]] } }
   ]
 }

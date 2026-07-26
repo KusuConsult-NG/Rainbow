@@ -20,9 +20,9 @@ final broadcastProvider = StreamProvider<List<BroadcastAlert>>((ref) {
         id: d['id'] as String? ?? '',
         message: d['message'] as String? ?? '',
         severity: d['severity'] as String? ?? 'MEDIUM',
-        targetAudience: d['target_audience'] as String? ?? 'ALL',
+        targetAudience: d['target_type'] as String? ?? 'ALL',
         createdAt: DateTime.tryParse(d['created_at'] as String? ?? '') ?? DateTime.now(),
-        expiresAt: DateTime.tryParse(d['expires_at'] as String? ?? '') ?? DateTime.now().add(const Duration(hours: 24)),
+        expiresAt: DateTime.tryParse(d['expires_at'] as String? ?? ''),
       );
     }).where((alert) {
       // Filter by audience relevance

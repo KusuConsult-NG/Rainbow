@@ -17,6 +17,9 @@ import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/shared/widgets/safety_feedback_dialog.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import 'package:rainbow_app/services/cloudinary_service.dart';
 
 /// Documentation for this public member.
 
@@ -37,6 +40,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
   Timer? _cancelTimer;
 
   bool _showMap = false;
+  bool _isCapturingEvidence = false;
 
   @override
   void initState() {
@@ -73,6 +77,64 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
     _cancelController.dispose();
     _pulseController.dispose();
     super.dispose();
+  }
+
+  Future<void> _captureEvidence() async {
+    if (_isCapturingEvidence) return;
+    setState(() => _isCapturingEvidence = true);
+    try {
+      final picker = ImagePicker();
+      final XFile? photo = await picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 60,
+        preferredCameraDevice: CameraDevice.rear,
+      );
+      if (photo == null) {
+        setState(() => _isCapturingEvidence = false);
+        return;
+      }
+      final alertId = ref.read(emergencyProvider).alertId;
+      if (alertId == null) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('SOS not yet confirmed — evidence saved locally')),
+        );
+        setState(() => _isCapturingEvidence = false);
+        return;
+      }
+      // Upload in background — do not await, just fire and forget with error handling
+      unawaited(
+        CloudinaryService.instance.uploadMedia(File(photo.path)).then((url) async {
+          if (url == null) return;
+          try {
+            final alertData = await SupabaseConfig.client
+                .from('alerts')
+                .select('media_urls')
+                .eq('id', alertId)
+                .single();
+            final existing = (alertData['media_urls'] as List<dynamic>?)?.cast<String>() ?? [];
+            await SupabaseConfig.client.from('alerts').update({
+              'media_urls': [...existing, url],
+              'updated_at': DateTime.now().toIso8601String(),
+            }).eq('id', alertId);
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('📷 Evidence captured and sent to HQ'),
+                  backgroundColor: Colors.green,
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            }
+          } catch (e) {
+            debugPrint('[SOS_EVIDENCE_ERR] Failed to attach evidence: $e');
+          }
+        }),
+      );
+    } catch (e) {
+      debugPrint('[SOS_CAPTURE_ERR] $e');
+    } finally {
+      if (mounted) setState(() => _isCapturingEvidence = false);
+    }
   }
 
   void _startCancel() {
@@ -162,6 +224,33 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                   ),
                 ),
 
+                // Evidence capture button
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _isCapturingEvidence ? null : _captureEvidence,
+                      icon: _isCapturingEvidence
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange))
+                          : const Icon(Icons.camera_alt_rounded, size: 16, color: Colors.orange),
+                      label: Text(
+                        _isCapturingEvidence ? 'CAPTURING...' : 'CAPTURE EVIDENCE',
+                        style: GoogleFonts.outfit(
+                          color: Colors.orange,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 11,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.orange, width: 1.5),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                ),
                 // Dispatcher Chat button for citizen
                 Padding(
                   padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),

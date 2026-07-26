@@ -62,7 +62,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final user = SupabaseConfig.client.auth.currentUser;
     if (user == null) return;
     final profile = ref.read(authProvider).profile ?? {};
-    final contacts = List<String>.from(profile['emergency_contacts'] ?? []);
+    final contacts = ((profile['emergency_contacts'] as List<dynamic>?) ?? [])
+        .map((e) => e.toString())
+        .toList();
     if (!contacts.contains(contact)) {
       contacts.add(contact);
       await SupabaseConfig.client
@@ -76,7 +78,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final user = SupabaseConfig.client.auth.currentUser;
     if (user == null) return;
     final profile = ref.read(authProvider).profile ?? {};
-    final contacts = List<String>.from(profile['emergency_contacts'] ?? []);
+    final contacts = ((profile['emergency_contacts'] as List<dynamic>?) ?? [])
+        .map((e) => e.toString())
+        .toList();
     if (contacts.contains(contact)) {
       contacts.remove(contact);
       await SupabaseConfig.client
@@ -163,7 +167,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final profile = auth.profile ?? {};
     final fullName = profile['full_name'] as String? ?? 'Citizen User';
     final pushEnabled = profile['push_enabled'] as bool? ?? true;
-    final contacts = List<String>.from(profile['emergency_contacts'] ?? []);
+    final contacts = ((profile['emergency_contacts'] as List<dynamic>?) ?? [])
+        .map((e) => e.toString())
+        .toList();
 
     return Scaffold(
       backgroundColor: AppColors.background,

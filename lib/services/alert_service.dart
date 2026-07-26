@@ -219,6 +219,7 @@ class AlertService {
           }
         } catch (e) {
           debugPrint('[SYNC_ERR] Alert sync failed for $localId: $e');
+          await _sqliteService.updateSyncStatus(localId, 'FAILED');
         }
       }
     } catch (e) {

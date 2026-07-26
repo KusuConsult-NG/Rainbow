@@ -68,7 +68,10 @@ final alertsStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
       if (geoLga != null && aGeoLga != null && aGeoLga.toUpperCase() == geoLga.toUpperCase()) return true;
       if (aGeoPu == null && aGeoWard == null && aGeoLga == null) return true;
 
-      return true;
+      // No matching rule — don't show this alert to avoid delivering all
+      // statewide data to every field device. The build-level filteredAlerts
+      // handles any edge cases for assigned-to-me alerts.
+      return false;
     }).toList();
   });
 });
@@ -763,6 +766,59 @@ class _MissionCard extends ConsumerWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  // Media evidence thumbnails — Phase 7
+                  Builder(builder: (context) {
+                    final rawMediaUrls = alert['media_urls'] as List<dynamic>?;
+                    final mediaUrls = rawMediaUrls?.cast<String>() ?? [];
+                    if (mediaUrls.isEmpty) return const SizedBox.shrink();
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 12),
+                        Text(
+                          'EVIDENCE (${mediaUrls.length} FILE${mediaUrls.length > 1 ? 'S' : ''})',
+                          style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w900, color: AppColors.textDim, letterSpacing: 1),
+                        ),
+                        const SizedBox(height: 6),
+                        SizedBox(
+                          height: 80,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: mediaUrls.length,
+                            itemBuilder: (ctx, i) {
+                              final url = mediaUrls[i];
+                              final urlLower = url.toLowerCase();
+                              final isVideo = urlLower.contains('/video/') || urlLower.endsWith('.mp4') || urlLower.endsWith('.mov');
+                              final isAudio = urlLower.endsWith('.m4a') || urlLower.endsWith('.mp3') || urlLower.endsWith('.wav');
+                              return GestureDetector(
+                                onTap: () => showDialog(context: ctx, builder: (_) => Dialog(
+                                  backgroundColor: Colors.black,
+                                  child: isVideo
+                                      ? const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 64))
+                                      : isAudio
+                                          ? const Center(child: Icon(Icons.audiotrack, color: Colors.white, size: 64))
+                                          : InteractiveViewer(child: Image.network(url)),
+                                )),
+                                child: Container(
+                                  width: 80,
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(color: AppColors.surfaceContainer, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.outline)),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: isVideo
+                                        ? const Center(child: Icon(Icons.play_circle_outline, color: AppColors.primary, size: 32))
+                                        : isAudio
+                                            ? const Center(child: Icon(Icons.audiotrack, color: AppColors.primary, size: 32))
+                                            : Image.network(url, fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: AppColors.textDim)),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    );
+                  }),
                   const SizedBox(height: 16),
                   Row(
                     children: [
@@ -1161,6 +1217,9 @@ class _EscalationDialogState extends State<_EscalationDialog> {
   final _notesController = TextEditingController();
   String _selectedReason = 'Tactical Resource Exhaustion';
   bool _isSubmitting = false;
+  Map<String, dynamic>? _targetCommander; // resolved officer to escalate to
+  List<Map<String, dynamic>> _availableCommanders = [];
+  bool _loadingCommanders = true;
 
   final List<String> _presets = [
     'Tactical Resource Exhaustion',
@@ -1169,6 +1228,49 @@ class _EscalationDialogState extends State<_EscalationDialog> {
     'Communications Failure',
     'Other',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadTargetCommanders());
+  }
+
+  Future<void> _loadTargetCommanders() async {
+    var targetTier = 'WARD';
+    if (widget.assignedTier == 'WARD') targetTier = 'LGA';
+    if (widget.assignedTier == 'LGA') targetTier = 'HQ';
+
+    // Map tier to role string
+    final roleMap = {'WARD': 'WARD_COMMAND', 'LGA': 'LGA_COMMAND', 'HQ': 'HQ_COMMAND'};
+    final targetRole = roleMap[targetTier] ?? 'HQ_COMMAND';
+
+    try {
+      // Get the alert's geo_lga to find commanders in the right area
+      final alertLga = widget.alertDoc['geo_lga'] as String?;
+      var query = SupabaseConfig.client
+          .from('profiles')
+          .select('id, full_name, role, geo_lga, geo_ward')
+          .eq('role', targetRole);
+
+      // For ward/LGA tier, narrow to same LGA
+      if (alertLga != null && targetTier != 'HQ') {
+        query = query.eq('geo_lga', alertLga);
+      }
+
+      final res = await query.limit(20);
+      final commanders = List<Map<String, dynamic>>.from(res as List);
+      if (mounted) {
+        setState(() {
+          _availableCommanders = commanders;
+          _targetCommander = commanders.isNotEmpty ? commanders.first : null;
+          _loadingCommanders = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('[ESCALATION_LOAD_ERR] $e');
+      if (mounted) setState(() => _loadingCommanders = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -1225,6 +1327,37 @@ class _EscalationDialogState extends State<_EscalationDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (_loadingCommanders)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 16),
+                  child: LinearProgressIndicator(),
+                )
+              else if (_availableCommanders.isNotEmpty) ...[
+                Text('ESCALATE TO', style: GoogleFonts.outfit(color: AppColors.textSecondary, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<Map<String, dynamic>>(
+                  value: _targetCommander,
+                  dropdownColor: AppColors.surfaceContainerHigh,
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: AppColors.surface,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: AppColors.outline)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: AppColors.outline)),
+                  ),
+                  style: GoogleFonts.outfit(color: AppColors.onBackground, fontSize: 13),
+                  items: _availableCommanders.map((c) {
+                    final name = c['full_name'] as String? ?? 'Officer';
+                    final lga = c['geo_lga'] as String? ?? '';
+                    return DropdownMenuItem<Map<String, dynamic>>(
+                      value: c,
+                      child: Text('$name${lga.isNotEmpty ? ' ($lga)' : ''}'),
+                    );
+                  }).toList(),
+                  onChanged: (val) { if (val != null) setState(() => _targetCommander = val); },
+                ),
+                const SizedBox(height: 16),
+              ],
               Text(
                 'PRIMARY REASON',
                 style: GoogleFonts.outfit(
@@ -1374,23 +1507,46 @@ class _EscalationDialogState extends State<_EscalationDialog> {
       final user = SupabaseConfig.client.auth.currentUser;
       final userEmail = user?.email ?? 'STAFF';
 
-      final profileRes = await SupabaseConfig.client
-          .from('profiles')
-          .select('geo_lga, geo_ward')
-          .eq('id', user?.id ?? '')
+      // Resolve the target: use selected commander UUID, fall back to tier string
+      final targetCommanderId = _targetCommander?['id'] as String?;
+      final targetCommanderName = _targetCommander?['full_name'] as String? ?? targetTier;
+
+      // Build structured escalation log entry
+      final escalationEntry = {
+        'from_tier': widget.assignedTier,
+        'to_tier': targetTier,
+        'to_officer_id': targetCommanderId,
+        'to_officer_name': targetCommanderName,
+        'reason': _selectedReason,
+        'notes': _notesController.text.trim(),
+        'by_email': userEmail,
+        'by_id': user?.id,
+        'at': DateTime.now().toIso8601String(),
+      };
+
+      // Read existing escalation_log
+      final existing = await SupabaseConfig.client
+          .from('alerts')
+          .select('escalation_log, ai_summary')
+          .eq('id', alertId ?? '')
           .maybeSingle();
 
-      final oLga = profileRes?['geo_lga'] as String? ?? widget.alertDoc['geo_lga'];
+      final existingLog = (existing?['escalation_log'] as List<dynamic>?) ?? [];
+      final newLog = [...existingLog, escalationEntry];
+
+      final existingSummary = existing?['ai_summary'] as String? ?? '';
+      final note = '[ESCALATED TO $targetTier — $targetCommanderName] Reason: $_selectedReason. ${_notesController.text.trim()} (by $userEmail)';
+
       final updatePayload = <String, dynamic>{
         'status': 'ESCALATED',
         'severity': targetTier == 'HQ' ? 'CRITICAL' : 'HIGH',
-        'assigned_to': targetTier,
+        // Write UUID if we have a specific officer, else fall back to tier string
+        'assigned_to': targetCommanderId ?? targetTier,
+        'escalated_to_agency': targetTier, // tier label for filtering
+        'escalation_log': newLog,
+        'ai_summary': existingSummary.isEmpty ? note : '$existingSummary\n$note',
         'updated_at': DateTime.now().toIso8601String(),
       };
-
-      final existingSummary = widget.alertDoc['ai_summary'] as String? ?? '';
-      final note = '[ESCALATED TO $targetTier COMMAND] Reason: $_selectedReason. Notes: ${_notesController.text.trim()} (by $userEmail)';
-      updatePayload['ai_summary'] = existingSummary.isEmpty ? note : '$existingSummary\n$note';
 
       if (alertId != null) {
         await SupabaseConfig.client
@@ -1399,17 +1555,12 @@ class _EscalationDialogState extends State<_EscalationDialog> {
             .eq('id', alertId);
       }
 
-      if (mounted) {
-        Navigator.pop(context, true);
-      }
+      if (mounted) Navigator.pop(context, true);
     } catch (e) {
       debugPrint('[ESCALATION_ERROR] Failed to escalate: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Escalation failed: $e'),
-            backgroundColor: AppColors.error,
-          ),
+          SnackBar(content: Text('Escalation failed: $e'), backgroundColor: AppColors.error),
         );
         setState(() => _isSubmitting = false);
       }

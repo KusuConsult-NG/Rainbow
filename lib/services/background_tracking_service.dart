@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/widgets.dart';
@@ -130,7 +131,11 @@ Future<void> onStart(ServiceInstance service) async {
 
     try {
       await SupabaseConfig.init();
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[BG_SUPABASE_FAIL] Cannot connect to Supabase: $e — background service aborting.');
+      service.stopSelf();
+      return;
+    }
 
     final prefs = await SharedPreferences.getInstance();
     var modeStr = prefs.getString('trackingMode');
@@ -164,12 +169,21 @@ Future<void> onStart(ServiceInstance service) async {
         : const Duration(seconds: 15);
     final distance = modeStr == 'sos' ? 0 : 10;
 
-    final dynamicSettings = AndroidSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: distance,
-      intervalDuration: interval,
-      forceLocationManager: true,
-    );
+    final LocationSettings dynamicSettings;
+    if (Platform.isIOS) {
+      dynamicSettings = AppleSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: distance,
+        activityType: ActivityType.fitness,
+        pauseLocationUpdatesAutomatically: false,
+      );
+    } else {
+      dynamicSettings = AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: distance,
+        intervalDuration: interval,
+      );
+    }
 
     try {
       positionStream = Geolocator.getPositionStream(
