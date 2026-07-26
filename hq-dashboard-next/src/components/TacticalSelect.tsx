@@ -90,16 +90,16 @@ export default function TacticalSelect({
           justifyContent: 'space-between',
           gap: 8,
           padding: '7px 12px',
-          background: isOpen ? 'var(--bg-tertiary, #1e293b)' : 'var(--bg-secondary, #0f172a)',
-          border: `1px solid ${isOpen ? accentColor : 'var(--border, rgba(255,255,255,0.12))'}`,
+          background: 'var(--input-bg, rgba(15, 23, 42, 0.6))',
+          border: `1px solid ${isOpen ? accentColor : 'var(--border, rgba(148, 163, 184, 0.3))'}`,
           borderRadius: 10,
-          color: 'var(--text-primary, #f8fafc)',
+          color: 'var(--text-primary)',
           fontSize: 11,
           fontWeight: 800,
           cursor: 'pointer',
           outline: 'none',
           transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-          boxShadow: isOpen ? `0 0 12px ${accentColor}33` : '0 2px 4px rgba(0,0,0,0.1)',
+          boxShadow: isOpen ? `0 0 12px ${accentColor}33` : 'var(--shadow-sm)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
@@ -139,7 +139,7 @@ export default function TacticalSelect({
             style={{
               transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
               transition: 'transform 0.2s ease',
-              color: 'var(--text-muted, #94a3b8)',
+              color: 'var(--text-muted)',
             }}
           />
         </div>
@@ -156,12 +156,12 @@ export default function TacticalSelect({
             zIndex: 9999,
             minWidth: 220,
             maxHeight: 280,
-            background: 'rgba(15, 23, 42, 0.98)',
+            background: 'var(--bg-secondary, #1e293b)',
             backdropFilter: 'blur(16px)',
             WebkitBackdropFilter: 'blur(16px)',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
+            border: '1px solid var(--border, rgba(148, 163, 184, 0.3))',
             borderRadius: 12,
-            boxShadow: '0 20px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.35), var(--shadow-md)',
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
@@ -173,14 +173,14 @@ export default function TacticalSelect({
             <div
               style={{
                 padding: '8px 10px',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                borderBottom: '1px solid var(--border)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                background: 'rgba(0, 0, 0, 0.2)',
+                background: 'var(--input-bg)',
               }}
             >
-              <Search size={12} style={{ color: 'var(--text-muted, #94a3b8)', flexShrink: 0 }} />
+              <Search size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
               <input
                 ref={searchInputRef}
                 type="text"
@@ -192,7 +192,7 @@ export default function TacticalSelect({
                   background: 'transparent',
                   border: 'none',
                   outline: 'none',
-                  color: 'white',
+                  color: 'var(--text-primary)',
                   fontSize: 11,
                   fontFamily: 'inherit',
                   fontWeight: 600,
@@ -202,7 +202,7 @@ export default function TacticalSelect({
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 2 }}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2 }}
                 >
                   <X size={12} />
                 </button>
@@ -213,7 +213,7 @@ export default function TacticalSelect({
           {/* Options List */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '4px' }}>
             {filteredOptions.length === 0 ? (
-              <div style={{ padding: '12px 10px', fontSize: 11, color: '#94a3b8', textAlign: 'center' }}>
+              <div style={{ padding: '12px 10px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
                 No matching options
               </div>
             ) : (
@@ -238,7 +238,7 @@ export default function TacticalSelect({
                       borderRadius: 8,
                       background: isSelected ? `${accentColor}22` : 'transparent',
                       border: 'none',
-                      color: isSelected ? accentColor : 'var(--text-primary, #f8fafc)',
+                      color: isSelected ? accentColor : 'var(--text-primary)',
                       fontSize: 11,
                       fontWeight: isSelected ? 800 : 600,
                       cursor: 'pointer',
@@ -246,7 +246,7 @@ export default function TacticalSelect({
                       outline: 'none',
                     }}
                     onMouseEnter={(e) => {
-                      if (!isSelected) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
+                      if (!isSelected) e.currentTarget.style.background = 'var(--input-bg)';
                     }}
                     onMouseLeave={(e) => {
                       if (!isSelected) e.currentTarget.style.background = 'transparent';
@@ -271,8 +271,8 @@ export default function TacticalSelect({
                             fontWeight: 800,
                             padding: '1px 5px',
                             borderRadius: 4,
-                            background: 'rgba(255, 255, 255, 0.08)',
-                            color: '#94a3b8',
+                            background: 'var(--input-bg)',
+                            color: 'var(--text-muted)',
                           }}
                         >
                           {opt.badge}
