@@ -968,6 +968,13 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     router.replace('/login'); 
   };
 
+  if (authLoading) return (
+    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-primary)' }}>
+      <Loader2 size={32} color="var(--accent)" className="spin" />
+    </div>
+  );
+  if (!user) return null;
+
   const isHqUser = userRole === 'HQ_OFFICER' || userRole === 'HQ_COMMAND' || userRole === 'ADMIN';
   const isAgencyLiaison = userRole.endsWith('_LIAISON');
   // Derive agency code from role: 'POLICE_LIAISON' -> 'POLICE'
@@ -1208,7 +1215,7 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
             </button>
 
             <div style={{ textAlign: 'right', paddingLeft: 4 }}>
-              <p style={{ fontSize: 10, fontWeight: 900, color: 'var(--text-primary)' }}>{user.email?.split('@')[0].toUpperCase()}</p>
+              <p style={{ fontSize: 10, fontWeight: 900, color: 'var(--text-primary)' }}>{(user?.email || 'HQ').split('@')[0].toUpperCase()}</p>
               <p style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)' }}>{userRole.replace('_', ' ')}</p>
             </div>
           </div>
