@@ -57,26 +57,51 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   // Plateau State Tactical Bounds
   const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.50, 10.80]];
 
-  // Polling check to ensure both Leaflet (L) and MarkerCluster are loaded on window
+  // Dynamic script loader for Leaflet & MarkerCluster (prevents React JSX script tag warnings)
   useEffect(() => {
-    const isLeafletReady = () => {
+    let isMounted = true;
+
+    const isReady = () => {
       const L = (window as any).L;
       return L && typeof L.markerClusterGroup === 'function';
     };
 
-    if (isLeafletReady()) {
+    if (isReady()) {
       setLeafletLoaded(true);
       return;
     }
 
-    const interval = setInterval(() => {
-      if (isLeafletReady()) {
-        setLeafletLoaded(true);
-        clearInterval(interval);
+    const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
+      const existing = document.querySelector(`script[src="${src}"]`);
+      if (existing) {
+        resolve();
+        return;
       }
-    }, 100);
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = () => resolve();
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
 
-    return () => clearInterval(interval);
+    const initScripts = async () => {
+      try {
+        if (!(window as any).L) {
+          await loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
+        }
+        if (typeof (window as any).L?.markerClusterGroup !== 'function') {
+          await loadScript('https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js');
+        }
+        if (isMounted && isReady()) {
+          setLeafletLoaded(true);
+        }
+      } catch (err) {
+        console.error('Failed to load Leaflet scripts:', err);
+      }
+    };
+
+    initScripts();
+    return () => { isMounted = false; };
   }, []);
 
   useEffect(() => {
