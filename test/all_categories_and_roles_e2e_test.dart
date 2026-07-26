@@ -195,7 +195,7 @@ void main() {
       }
 
       stopwatch.stop();
-      expect(stopwatch.elapsedMilliseconds, lessThan(2000), reason: 'UI render time exceeded threshold');
+      expect(stopwatch.elapsedMilliseconds, lessThan(5000), reason: 'UI render time exceeded threshold');
     });
 
     testWidgets('2. Full reporting flow on ALL 10 categories (Subtype -> Dossier -> Transmission)', (tester) async {

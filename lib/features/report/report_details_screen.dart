@@ -192,6 +192,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         _ => AlertPriority.medium,
       };
 
+      final mediaPaths = _attachedFiles.map((f) => f.path).toList();
+      if (_recordedAudioPath != null && !mediaPaths.contains(_recordedAudioPath)) {
+        mediaPaths.add(_recordedAudioPath!);
+      }
+
       final alertId = await ref.read(alertServiceProvider).submitAlert(
             type: '${widget.categoryInfo.label} - ${widget.subType}',
             description: desc,
@@ -199,6 +204,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             priority: priority,
             latitude: _shareLocation ? lat : null,
             longitude: _shareLocation ? lng : null,
+            attachments: mediaPaths,
             geoLga: _manualOverride ? _selectedLga?.name : null,
             geoWard: _manualOverride ? _selectedWard?.name : null,
             geoSiecWard: _manualOverride ? _selectedSiecWard?.name : null,
@@ -374,7 +380,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'VOICE NOTE ATTACHED (TRANSCRIBING...)',
+                          'VOICE NOTE ATTACHED & ENCRYPTED',
                           style: GoogleFonts.outfit(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,

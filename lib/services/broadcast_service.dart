@@ -7,6 +7,10 @@ final broadcastProvider = StreamProvider<List<BroadcastAlert>>((ref) {
   final auth = ref.watch(authProvider);
   if (auth.user == null) return Stream.value([]);
 
+  // Determine which audiences this user can receive
+  final isAgent = auth.role == UserRole.responder;
+  final audienceFilter = isAgent ? ['ALL', 'AGENTS'] : ['ALL', 'CITIZENS'];
+
   return SupabaseConfig.client
       .from('system_alerts')
       .stream(primaryKey: ['id'])
@@ -20,6 +24,12 @@ final broadcastProvider = StreamProvider<List<BroadcastAlert>>((ref) {
         createdAt: DateTime.tryParse(d['created_at'] as String? ?? '') ?? DateTime.now(),
         expiresAt: DateTime.tryParse(d['expires_at'] as String? ?? '') ?? DateTime.now().add(const Duration(hours: 24)),
       );
-    }).where((alert) => alert.expiresAt == null || alert.expiresAt!.isAfter(DateTime.now())).toList();
+    }).where((alert) {
+      // Filter by audience relevance
+      final matchesAudience = audienceFilter.contains(alert.targetAudience);
+      // Filter by expiry
+      final notExpired = alert.expiresAt == null || alert.expiresAt!.isAfter(DateTime.now());
+      return matchesAudience && notExpired;
+    }).toList();
   });
 });

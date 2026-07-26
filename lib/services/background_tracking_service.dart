@@ -49,6 +49,11 @@ class BackgroundTrackingService {
   /// Starts persistent tracking for a responder.
   Future<void> startResponderTracking(String userId) async {
     try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('trackingMode', 'responder');
       await prefs.setString('activeTrackingUserId', userId);
@@ -68,6 +73,11 @@ class BackgroundTrackingService {
   /// Starts transient tracking for a citizen SOS event.
   Future<void> startSosTracking(String alertId, String userId) async {
     try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('trackingMode', 'sos');
       await prefs.setString('activeTrackingAlertId', alertId);

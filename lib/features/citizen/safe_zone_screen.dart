@@ -102,9 +102,9 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
         final dLat = point.latitude - threat.latitude;
         final dLng = point.longitude - threat.longitude;
         final distSq = dLat * dLat + dLng * dLng;
-        if (distSq < 0.000025) { // within ~500m
-          final dist = dLat * dLat + dLng * dLng;
-          score += (0.000025 - dist) * 10000;
+        const threshold = 0.000025; // ~500m radius
+        if (distSq < threshold) {
+          score += (threshold - distSq) * 100000;
         }
       }
     }
@@ -146,6 +146,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
 
     final end = LatLng(zone.lat, zone.lng);
     final paths = await _fetchRoutes(userPos, end);
+
     if (paths.isEmpty) {
       setState(() => _isCalculatingRoute = false);
       return;
@@ -153,6 +154,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
 
     List<LatLng>? bestPath;
     double lowestScore = double.infinity;
+
     for (final p in paths) {
       final score = _calculateRouteThreatScore(p, threats);
       if (score < lowestScore) {
@@ -168,7 +170,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
           final dLat = point.latitude - threat.latitude;
           final dLng = point.longitude - threat.longitude;
           final distSq = dLat * dLat + dLng * dLng;
-          if (distSq < 0.00000625) { // within ~250m
+          if (distSq < 0.00000625) {
             warning = true;
             break;
           }
@@ -191,11 +193,20 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
   IconData _iconForType(String type) {
     switch (type.toUpperCase()) {
       case 'HOSPITAL':
+      case 'MEDICAL':
         return Icons.local_hospital_rounded;
       case 'POLICE':
         return Icons.local_police_rounded;
       case 'MILITARY':
+      case 'COMMAND_HQ':
+      case 'COMMAND_POST':
         return Icons.security_rounded;
+      case 'OUTPOST':
+        return Icons.radar_rounded;
+      case 'SHELTER':
+      case 'SAFE_POINT':
+      case 'SAFE_HAVEN':
+        return Icons.shield_rounded;
       default:
         return Icons.shield_rounded;
     }

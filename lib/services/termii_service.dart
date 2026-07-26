@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -44,9 +45,11 @@ class TermiiService {
 
     try {
       if (_apiKey.contains('MOCK')) {
+        debugPrint('[TERMII_SMS] SIMULATED DISPATCH (MOCK_KEY): SMS to $to: "$message"');
         await Future<void>.delayed(const Duration(milliseconds: 800));
         return true;
       }
+      debugPrint('[TERMII_SMS] DISPATCHING LIVE SMS to $to via Termii CPaaS API...');
 
       final response = await http.post(
         Uri.parse(_baseUrl),

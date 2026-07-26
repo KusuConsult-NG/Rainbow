@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
@@ -12,6 +13,11 @@ final pushNotificationServiceProvider = Provider<PushNotificationService>((ref) 
 class PushNotificationService {
   PushNotificationService(this._authService);
   final AuthService _authService;
+
+  static GlobalKey<NavigatorState>? _navigatorKey;
+  static void setNavigatorKey(GlobalKey<NavigatorState> key) {
+    _navigatorKey = key;
+  }
 
   static const String _oneSignalAppId = '885be8b2-5f31-4627-a618-685f54dd266a';
 
@@ -58,6 +64,18 @@ class PushNotificationService {
 
       OneSignal.Notifications.addClickListener((event) {
         debugPrint('[ONESIGNAL_CLICK] Notification clicked: ${event.notification.title}');
+        // Navigate to mission intel if this is a dispatch notification
+        final data = event.notification.additionalData;
+        if (data != null) {
+          final alertId = data['alertId'] as String?;
+          final type = data['type'] as String?;
+          if (alertId != null && (type == 'DISPATCH' || type == 'ALERT')) {
+            _navigatorKey?.currentState?.pushNamed(
+              '/mission-intel',
+              arguments: {'alertId': alertId},
+            );
+          }
+        }
       });
     } catch (e) {
       debugPrint('[ONESIGNAL_ERR] OneSignal push notification init failed: $e');

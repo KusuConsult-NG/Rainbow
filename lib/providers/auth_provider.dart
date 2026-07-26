@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
@@ -120,6 +121,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
     initAuth();
   }
 
+  StreamSubscription<AuthState>? _authSubscription;
+
   void initAuth() {
     Future.delayed(const Duration(seconds: 5), () {
       if (mounted && state.isLoading) {
@@ -128,7 +131,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
       }
     });
 
-    SupabaseConfig.client.auth.onAuthStateChange.listen((data) async {
+    _authSubscription = SupabaseConfig.client.auth.onAuthStateChange.map((data) {
+      return data;
+    }).asyncMap((data) async {
       final session = data.session;
       final user = session?.user;
       if (user == null) {
@@ -136,7 +141,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
       } else {
         await resolveRole(user);
       }
-    });
+      return state;
+    }).listen((_) {});
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
   }
 
   /// Documentation for this public member.

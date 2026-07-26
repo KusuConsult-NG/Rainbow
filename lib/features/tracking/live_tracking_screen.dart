@@ -13,7 +13,29 @@ import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 import 'package:rainbow_app/services/location_service.dart';
 
 final respondersStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
-  return SupabaseConfig.client.from('telemetry').stream(primaryKey: ['user_id']);
+  // Stream telemetry, then enrich with profile names
+  return SupabaseConfig.client.from('telemetry').stream(primaryKey: ['user_id']).asyncMap(
+    (telemetryList) async {
+      if (telemetryList.isEmpty) return <Map<String, dynamic>>[];
+      final userIds = telemetryList.map((t) => t['user_id'] as String).toList();
+      try {
+        final profiles = await SupabaseConfig.client
+            .from('profiles')
+            .select('id, full_name, role')
+            .inFilter('id', userIds);
+        final nameMap = <String, String>{};
+        for (final p in profiles as List) {
+          nameMap[p['id'] as String] = p['full_name'] as String? ?? 'Officer';
+        }
+        return telemetryList.map((t) => {
+          ...t,
+          'officer_name': nameMap[t['user_id'] as String] ?? 'Unknown Officer',
+        }).toList();
+      } catch (_) {
+        return telemetryList;
+      }
+    },
+  );
 });
 
 final alertsMapStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
@@ -96,8 +118,13 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              'User ID: ${telemetry['user_id'] ?? 'Unknown'}',
-              style: GoogleFonts.inter(color: AppColors.textSecondary),
+              telemetry['officer_name'] as String? ?? 'Unknown Officer',
+              style: GoogleFonts.inter(color: AppColors.onBackground, fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'ID: ${(telemetry['user_id'] as String? ?? '').substring(0, 8)}...',
+              style: GoogleFonts.inter(color: AppColors.textSecondary, fontSize: 12),
             ),
             const SizedBox(height: 8),
             Text(

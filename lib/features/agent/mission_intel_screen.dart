@@ -59,9 +59,8 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
     
     final mediaUrls = (alertData['media_urls'] as List<dynamic>?)?.cast<String>() ?? [];
     
-    final user = ref.watch(authProvider).user;
-    final role = user?.userMetadata?['role'] as String? ?? '';
-    final isAgent = role == 'agent' || role == 'command';
+    final authState = ref.watch(authProvider);
+    final isAgent = authState.role == UserRole.responder;
 
     return Scaffold(
       backgroundColor: AppColors.background,

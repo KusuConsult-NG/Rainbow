@@ -5,9 +5,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 const ONESIGNAL_APP_ID = Deno.env.get("ONESIGNAL_APP_ID") || "885be8b2-5f31-4627-a618-685f54dd266a";
-const ONESIGNAL_REST_API_KEY =
-  Deno.env.get("ONESIGNAL_REST_API_KEY") ||
-  "os_v2_app_rbn6rms7gfdcpjqynbpvjxjgnimvyuzlhkxe36nxbisp7qaxnoqml67czqs6gmmxvs7j3rbzmplqr7ucsijpw4zyvmkphyufoi6f4pa";
+const ONESIGNAL_REST_API_KEY = Deno.env.get("ONESIGNAL_REST_API_KEY") || "";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -61,6 +59,14 @@ serve(async (req) => {
     const category = record.category || "EMERGENCY";
     const severity = record.severity || "CRITICAL";
     const lga = record.geo_lga || "PLATEAU STATE";
+
+    if (!ONESIGNAL_REST_API_KEY) {
+      console.warn('[NOTIFY_ALERT] ONESIGNAL_REST_API_KEY not configured in Supabase secrets.');
+      return new Response(JSON.stringify({ success: false, error: 'Push key not configured' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     // Prepare OneSignal Push Notification Body
     const notificationBody = {
