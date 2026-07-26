@@ -931,25 +931,16 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
   });
 
   // Sector-Aware Duress & SMS Fallback Counters
-  const sectorAlerts = filterLga === 'ALL'
-    ? alerts
-    : alerts.filter(a => {
-        const alertLga = (a.geo_lga || '').trim().toLowerCase();
-        const targetLga = filterLga.trim().toLowerCase();
-        const matchesLga = alertLga === targetLga || alertLga.includes(targetLga) || targetLga.includes(alertLga);
-        if (!matchesLga) return false;
-        if (filterWard !== 'ALL') {
-          const alertWard = (a.geo_ward || '').trim().toLowerCase();
-          const targetWard = filterWard.trim().toLowerCase();
-          if (alertWard !== targetWard && !alertWard.includes(targetWard) && !targetWard.includes(alertWard)) return false;
-        }
-        if (filterPu !== 'ALL') {
-          const alertPu = (a.geo_pu || '').trim().toLowerCase();
-          const targetPu = filterPu.trim().toLowerCase();
-          if (alertPu !== targetPu && !alertPu.includes(targetPu) && !targetPu.includes(alertPu)) return false;
-        }
-        return true;
-      });
+  const sectorAlerts = alerts.filter(a => {
+    const aLga = a.geo_lga || (a as any).lga;
+    const aWard = a.geo_ward || (a as any).ward;
+    const aPu = a.geo_pu || (a as any).pu || (a as any).polling_unit;
+    
+    if (!isMatchingLocation(filterLga, aLga)) return false;
+    if (!isMatchingLocation(filterWard, aWard)) return false;
+    if (!isMatchingLocation(filterPu, aPu)) return false;
+    return true;
+  });
 
   const duressCount = sectorAlerts.filter(a => a.status === 'DURESS').length;
   const smsFallbackCount = sectorAlerts.filter(a => 
@@ -977,6 +968,31 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
 
   const norm = (str?: string) => (str || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 
+  const isMatchingLocation = (target: string, value?: string) => {
+    if (!target || target === 'ALL') return true;
+    if (!value) return false;
+    const nTarget = norm(target);
+    const nValue = norm(value);
+    if (nTarget === nValue) return true;
+    if (nValue.includes(nTarget) || nTarget.includes(nValue)) return true;
+    // Strip (BEAT-...) suffixes for clean name comparison
+    const cleanTarget = norm(target.replace(/\s*\([^)]+\)/g, ''));
+    const cleanValue = norm(value.replace(/\s*\([^)]+\)/g, ''));
+    if (cleanTarget && cleanValue && (cleanTarget.includes(cleanValue) || cleanValue.includes(cleanTarget))) return true;
+    return false;
+  };
+
+  const formatPuOption = (puRaw: string, defaultBadge?: string): SelectOption => {
+    const match = puRaw.match(/^(.*?)(?:\s*\((BEAT-[^)]+)\))?$/);
+    const labelName = match && match[1] ? match[1].trim() : puRaw;
+    const beatCode = match && match[2] ? match[2].trim() : undefined;
+    return {
+      value: puRaw,
+      label: labelName,
+      badge: beatCode ? beatCode.split('-').pop() : (defaultBadge || 'PU')
+    };
+  };
+
   const lgaSelectOptions: SelectOption[] = [
     { value: 'ALL', label: 'ALL LGAS (STATEWIDE)', badge: 'STATE' },
     ...plateauTacticalMap.map(lga => ({
@@ -986,11 +1002,11 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     }))
   ];
 
-  const selectedLgaObj = plateauTacticalMap.find(l => norm(l.name) === norm(filterLga));
+  const selectedLgaObj = plateauTacticalMap.find(l => isMatchingLocation(filterLga, l.name));
   
   const selectedWardObj = selectedLgaObj
-    ? selectedLgaObj.wards.find(w => norm(w.name) === norm(filterWard))
-    : plateauTacticalMap.flatMap(l => l.wards).find(w => norm(w.name) === norm(filterWard));
+    ? selectedLgaObj.wards.find(w => isMatchingLocation(filterWard, w.name))
+    : plateauTacticalMap.flatMap(l => l.wards).find(w => isMatchingLocation(filterWard, w.name));
 
   // Build full Wards list (from static tactical map + live alerts)
   const mapWards: SelectOption[] = selectedLgaObj
@@ -1029,22 +1045,10 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
 
   // Build full Polling Units list (from static tactical map + live alerts)
   const mapPus: SelectOption[] = selectedWardObj
-    ? selectedWardObj.pollingUnits.map(pu => ({
-        value: pu,
-        label: pu,
-        badge: 'PU'
-      }))
+    ? selectedWardObj.pollingUnits.map(pu => formatPuOption(pu, 'PU'))
     : (selectedLgaObj
-        ? selectedLgaObj.wards.flatMap(w => w.pollingUnits.map(pu => ({
-            value: pu,
-            label: pu,
-            badge: w.name.substring(0, 4).toUpperCase()
-          })))
-        : plateauTacticalMap.flatMap(l => l.wards.flatMap(w => w.pollingUnits.map(pu => ({
-            value: pu,
-            label: pu,
-            badge: l.name.substring(0, 4).toUpperCase()
-          })))));
+        ? selectedLgaObj.wards.flatMap(w => w.pollingUnits.map(pu => formatPuOption(pu, w.name.substring(0, 4).toUpperCase())))
+        : plateauTacticalMap.flatMap(l => l.wards.flatMap(w => w.pollingUnits.map(pu => formatPuOption(pu, l.name.substring(0, 4).toUpperCase())))));
 
   const alertPus: SelectOption[] = [];
   const seenPuVals = new Set(mapPus.map(p => norm(p.value)));
@@ -1053,11 +1057,7 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     const puName = a.geo_pu || (a as any).pu || (a as any).polling_unit;
     if (puName && !seenPuVals.has(norm(puName))) {
       seenPuVals.add(norm(puName));
-      alertPus.push({
-        value: puName,
-        label: puName,
-        badge: 'LIVE'
-      });
+      alertPus.push(formatPuOption(puName, 'LIVE'));
     }
   });
 
