@@ -63,7 +63,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
 
     const isReady = () => {
       const L = (window as any).L;
-      return L && typeof L.markerClusterGroup === 'function';
+      return !!L;
     };
 
     if (isReady()) {
@@ -90,7 +90,11 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
           await loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
         }
         if (typeof (window as any).L?.markerClusterGroup !== 'function') {
-          await loadScript('https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js');
+          try {
+            await loadScript('https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js');
+          } catch (e) {
+            console.warn('MarkerCluster optional script failed to load, falling back to LayerGroup');
+          }
         }
         if (isMounted && isReady()) {
           setLeafletLoaded(true);
@@ -113,7 +117,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
     const map = Leaflet.map(mapRef.current!, {
       center: [9.9167, 8.8917],
       zoom: 9,
-      minZoom: 8,
+      minZoom: 7,
       maxBounds: Leaflet.latLngBounds(plateauBounds[0], plateauBounds[1]),
       zoomControl: false,
     });
@@ -122,10 +126,18 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
 
     const tileUrl = theme === 'dark'
       ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
+      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 
-    const tileLayer = Leaflet.tileLayer(tileUrl, { attribution: '© CARTO' }).addTo(map);
+    const tileLayer = Leaflet.tileLayer(tileUrl, {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
     tileLayerRef.current = tileLayer;
+
+    // Force map to adjust size to container after render
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 250);
 
     // Fetch and draw Geo-Boundaries
     fetch('/plateau_boundaries.json')
@@ -255,18 +267,20 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
 
-    const incidentCluster = L.markerClusterGroup({
-      showCoverageOnHover: false,
-      spiderfyOnMaxZoom: true,
-      iconCreateFunction: (cluster: any) => {
-        const count = cluster.getChildCount();
-        return L.divIcon({
-          html: `<div style="background:var(--duress);color:white;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;border:3px solid white;box-shadow:0 0 15px var(--duress)">${count}</div>`,
-          className: '',
-          iconSize: [30, 30]
-        });
-      }
-    });
+    const incidentCluster = typeof L.markerClusterGroup === 'function'
+      ? L.markerClusterGroup({
+          showCoverageOnHover: false,
+          spiderfyOnMaxZoom: true,
+          iconCreateFunction: (cluster: any) => {
+            const count = cluster.getChildCount();
+            return L.divIcon({
+              html: `<div style="background:var(--duress);color:white;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;border:3px solid white;box-shadow:0 0 15px var(--duress)">${count}</div>`,
+              className: '',
+              iconSize: [30, 30]
+            });
+          }
+        })
+      : L.layerGroup();
 
     alerts.forEach(alert => {
       if (!alert.lat || !alert.lng) return;
