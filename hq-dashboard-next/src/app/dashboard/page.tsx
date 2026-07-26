@@ -853,9 +853,6 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
   const [filterPu, setFilterPu] = useState('ALL');
   const [enableClustering, setEnableClustering] = useState(true);
 
-  const selectedLgaObj = plateauTacticalMap.find(l => l.name.toUpperCase() === filterLga.toUpperCase());
-  const selectedWardObj = selectedLgaObj?.wards?.find(w => w.name.toUpperCase() === filterWard.toUpperCase());
-
   // High-Scale Spatial-Temporal Cluster Aggregation (Handles 100,000+ incoming reports)
   const processAlertsForDisplay = (rawAlerts: Alert[]): Alert[] => {
     if (!enableClustering) return rawAlerts;
@@ -978,6 +975,8 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
   // Derive agency code from role: 'POLICE_LIAISON' -> 'POLICE'
   const userAgencyCode = isAgencyLiaison ? userRole.replace('_LIAISON', '') : undefined;
 
+  const norm = (str?: string) => (str || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+
   const lgaSelectOptions: SelectOption[] = [
     { value: 'ALL', label: 'ALL LGAS (STATEWIDE)', badge: 'STATE' },
     ...plateauTacticalMap.map(lga => ({
@@ -987,24 +986,85 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
     }))
   ];
 
-  const allWardsList: SelectOption[] = selectedLgaObj
-    ? selectedLgaObj.wards.map(w => ({ value: w.name, label: w.name.toUpperCase(), badge: selectedLgaObj.name.substring(0, 4).toUpperCase() }))
-    : plateauTacticalMap.flatMap(lga => lga.wards.map(w => ({ value: w.name, label: `${w.name.toUpperCase()} (${lga.name.toUpperCase()})`, badge: lga.name.substring(0, 4).toUpperCase() })));
+  const selectedLgaObj = plateauTacticalMap.find(l => norm(l.name) === norm(filterLga));
+  
+  const selectedWardObj = selectedLgaObj
+    ? selectedLgaObj.wards.find(w => norm(w.name) === norm(filterWard))
+    : plateauTacticalMap.flatMap(l => l.wards).find(w => norm(w.name) === norm(filterWard));
+
+  // Build full Wards list (from static tactical map + live alerts)
+  const mapWards: SelectOption[] = selectedLgaObj
+    ? selectedLgaObj.wards.map(w => ({
+        value: w.name,
+        label: w.name.toUpperCase(),
+        badge: selectedLgaObj.name.substring(0, 4).toUpperCase()
+      }))
+    : plateauTacticalMap.flatMap(lga => lga.wards.map(w => ({
+        value: w.name,
+        label: `${w.name.toUpperCase()} (${lga.name.toUpperCase()})`,
+        badge: lga.name.substring(0, 4).toUpperCase()
+      })));
+
+  // Extract extra wards from live alerts that might not be in static map
+  const alertWards: SelectOption[] = [];
+  const seenWardVals = new Set(mapWards.map(w => norm(w.value)));
+  
+  alerts.forEach(a => {
+    const wName = a.geo_ward || (a as any).ward;
+    if (wName && !seenWardVals.has(norm(wName))) {
+      seenWardVals.add(norm(wName));
+      alertWards.push({
+        value: wName,
+        label: wName.toUpperCase(),
+        badge: 'LIVE'
+      });
+    }
+  });
 
   const wardSelectOptions: SelectOption[] = [
     { value: 'ALL', label: 'ALL WARDS / DISTRICTS', badge: 'ALL' },
-    ...allWardsList
+    ...mapWards,
+    ...alertWards
   ];
 
-  const allPusList: SelectOption[] = selectedWardObj
-    ? selectedWardObj.pollingUnits.map(pu => ({ value: pu, label: pu, badge: 'PU' }))
+  // Build full Polling Units list (from static tactical map + live alerts)
+  const mapPus: SelectOption[] = selectedWardObj
+    ? selectedWardObj.pollingUnits.map(pu => ({
+        value: pu,
+        label: pu,
+        badge: 'PU'
+      }))
     : (selectedLgaObj
-        ? selectedLgaObj.wards.flatMap(w => w.pollingUnits.map(pu => ({ value: pu, label: pu, badge: w.name.substring(0, 4).toUpperCase() })))
-        : plateauTacticalMap.flatMap(l => l.wards.flatMap(w => w.pollingUnits.map(pu => ({ value: pu, label: pu, badge: l.name.substring(0, 4).toUpperCase() })))));
+        ? selectedLgaObj.wards.flatMap(w => w.pollingUnits.map(pu => ({
+            value: pu,
+            label: pu,
+            badge: w.name.substring(0, 4).toUpperCase()
+          })))
+        : plateauTacticalMap.flatMap(l => l.wards.flatMap(w => w.pollingUnits.map(pu => ({
+            value: pu,
+            label: pu,
+            badge: l.name.substring(0, 4).toUpperCase()
+          })))));
+
+  const alertPus: SelectOption[] = [];
+  const seenPuVals = new Set(mapPus.map(p => norm(p.value)));
+  
+  alerts.forEach(a => {
+    const puName = a.geo_pu || (a as any).pu || (a as any).polling_unit;
+    if (puName && !seenPuVals.has(norm(puName))) {
+      seenPuVals.add(norm(puName));
+      alertPus.push({
+        value: puName,
+        label: puName,
+        badge: 'LIVE'
+      });
+    }
+  });
 
   const puSelectOptions: SelectOption[] = [
     { value: 'ALL', label: 'ALL BEATS (PU)', badge: 'ALL' },
-    ...allPusList
+    ...mapPus,
+    ...alertPus
   ];
 
   const statusSelectOptions: SelectOption[] = [
