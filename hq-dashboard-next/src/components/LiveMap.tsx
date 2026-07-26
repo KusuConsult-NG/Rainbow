@@ -260,30 +260,60 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
     tileLayerRef.current.setUrl(tileUrl);
   }, [theme]);
 
+  // Global action handlers for popup buttons
   useEffect(() => {
-    if (!mapInstanceRef.current) return;
+    (window as any)._hqResolve = (id: string) => {
+      if (typeof onResolve === 'function') {
+        onResolve(id);
+      }
+    };
+
+    (window as any)._hqShowDispatch = (id: string) => {
+      if (typeof onEscalate === 'function') {
+        onEscalate(id, 'DISPATCH');
+      }
+    };
+
+    return () => {
+      delete (window as any)._hqResolve;
+      delete (window as any)._hqShowDispatch;
+    };
+  }, [onResolve, onEscalate]);
+
+  const alertMarkersRef = useRef<Map<string, any>>(new Map());
+  const clusterGroupRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current) return;
     const { map, L } = mapInstanceRef.current;
 
-    markersRef.current.forEach(m => m.remove());
-    markersRef.current = [];
+    // Ensure single cluster group instance
+    if (!clusterGroupRef.current) {
+      clusterGroupRef.current = typeof L.markerClusterGroup === 'function'
+        ? L.markerClusterGroup({
+            showCoverageOnHover: false,
+            spiderfyOnMaxZoom: true,
+            iconCreateFunction: (cluster: any) => {
+              const count = cluster.getChildCount();
+              return L.divIcon({
+                html: `<div style="background:var(--duress);color:white;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;border:3px solid white;box-shadow:0 0 15px var(--duress)">${count}</div>`,
+                className: '',
+                iconSize: [30, 30]
+              });
+            }
+          })
+        : L.layerGroup();
 
-    const incidentCluster = typeof L.markerClusterGroup === 'function'
-      ? L.markerClusterGroup({
-          showCoverageOnHover: false,
-          spiderfyOnMaxZoom: true,
-          iconCreateFunction: (cluster: any) => {
-            const count = cluster.getChildCount();
-            return L.divIcon({
-              html: `<div style="background:var(--duress);color:white;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;border:3px solid white;box-shadow:0 0 15px var(--duress)">${count}</div>`,
-              className: '',
-              iconSize: [30, 30]
-            });
-          }
-        })
-      : L.layerGroup();
+      map.addLayer(clusterGroupRef.current);
+    }
+
+    const clusterGroup = clusterGroupRef.current;
+    const currentIds = new Set<string>();
 
     alerts.forEach(alert => {
       if (!alert.lat || !alert.lng) return;
+      currentIds.add(alert.id);
+
       const isDuress = alert.status === 'DURESS';
       const statusColors: any = {
         'OPEN': '#FF9800', 'ACTIVE': '#FF9800', 'DISPATCHED': '#2196F3', 'ACKNOWLEDGED': '#4CAF50',
@@ -291,7 +321,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
       };
 
       const color = statusColors[alert.status] || '#FF9800';
-      const size = isDuress ? 48 : 32;
+      const size = isDuress ? 44 : 30;
 
       const icon = L.divIcon({
         className: '',
@@ -300,24 +330,43 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
         iconAnchor: [size / 2, size / 2],
       });
 
-      const marker = L.marker([alert.lat, alert.lng], { icon });
-      marker.bindPopup(`
-        <div style="font-family:Inter,sans-serif;min-width:200px;padding:4px;color:var(--text-primary)">
-          <strong style="color:${color};font-size:14px">${alert.type || 'EMERGENCY'}</strong>
-          <div style="margin:4px 0; font-size:10px; font-weight:800; color:var(--text-muted)">STATUS: ${alert.status}</div>
-          <p style="font-size:11px;color:var(--text-secondary);margin:8px 0">${alert.description || 'No details'}</p>
-          <div style="display:flex;gap:6px;margin-top:12px">
-            <button onclick="window._hqResolve('${alert.id}')" style="flex:1;padding:8px;background:#4CAF50;color:white;border:none;border-radius:4px;font-size:10px;font-weight:800;cursor:pointer">RESOLVE</button>
-            ${(alert.status === 'OPEN' || alert.status === 'ACTIVE') ? `<button onclick="window._hqShowDispatch('${alert.id}')" style="flex:1;padding:8px;background:var(--primary);color:white;border:none;border-radius:4px;font-size:10px;font-weight:800;cursor:pointer">DISPATCH</button>` : ''}
+      const popupContent = `
+        <div style="font-family:'Outfit','Inter',sans-serif;min-width:210px;padding:6px 4px;color:#0f172a">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <strong style="color:${color};font-size:13px;font-weight:900;text-transform:uppercase">${alert.type || 'EMERGENCY'}</strong>
+            <span style="font-size:9px;font-weight:900;background:${color}22;color:${color};padding:2px 6px;border-radius:4px;border:1px solid ${color}44">${alert.status}</span>
+          </div>
+          <p style="font-size:11px;color:#475569;margin:6px 0;line-height:1.4">${alert.description || 'No additional details'}</p>
+          <div style="display:flex;gap:6px;margin-top:10px">
+            <button onclick="window._hqResolve('${alert.id}')" style="flex:1;padding:6px 10px;background:#059669;color:white;border:none;border-radius:6px;font-size:10px;font-weight:800;cursor:pointer">RESOLVE</button>
+            ${(alert.status === 'OPEN' || alert.status === 'ACTIVE') ? `<button onclick="window._hqShowDispatch('${alert.id}')" style="flex:1;padding:6px 10px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:10px;font-weight:800;cursor:pointer">DISPATCH</button>` : ''}
           </div>
         </div>
-      `);
-      incidentCluster.addLayer(marker);
+      `;
+
+      const existingMarker = alertMarkersRef.current.get(alert.id);
+      if (existingMarker) {
+        existingMarker.setLatLng([alert.lat, alert.lng]);
+        existingMarker.setIcon(icon);
+        if (existingMarker.getPopup()) {
+          existingMarker.getPopup().setContent(popupContent);
+        }
+      } else {
+        const marker = L.marker([alert.lat, alert.lng], { icon });
+        marker.bindPopup(popupContent, { closeButton: true, autoClose: false, closeOnClick: false });
+        clusterGroup.addLayer(marker);
+        alertMarkersRef.current.set(alert.id, marker);
+      }
     });
 
-    map.addLayer(incidentCluster);
-    markersRef.current.push(incidentCluster);
-  }, [alerts]);
+    // Remove old markers that no longer exist
+    alertMarkersRef.current.forEach((marker, id) => {
+      if (!currentIds.has(id)) {
+        clusterGroup.removeLayer(marker);
+        alertMarkersRef.current.delete(id);
+      }
+    });
+  }, [alerts, mapReady]);
 
   useEffect(() => {
     if (!mapInstanceRef.current) return;
