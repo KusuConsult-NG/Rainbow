@@ -91,7 +91,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final hasPermission = await LocationService().requestPermission(force: true);
     if (!hasPermission) {
       if (mounted) {
-        showDialog<void>(
+        unawaited(showDialog<void>(
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
@@ -134,7 +134,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ],
           ),
-        );
+        ));
       }
       return;
     }
@@ -616,7 +616,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 return GestureDetector(
                                   onTapDown: (_) => HapticFeedback.mediumImpact(),
                                   onTap: () {
-                                    VoiceReportDialog.show(context);
+                                    unawaited(VoiceReportDialog.show(context));
                                   },
                                   child: Stack(
                                     alignment: Alignment.center,

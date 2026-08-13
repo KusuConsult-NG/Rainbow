@@ -358,7 +358,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                       child: GestureDetector(
                         onTap: () {
                           setState(() => _selected = zone);
-                          _calculateSafeRoute(LatLng(pos.latitude, pos.longitude), zone, threats);
+                          unawaited(_calculateSafeRoute(LatLng(pos.latitude, pos.longitude), zone, threats));
                         },
                         child: Container(
                           decoration: BoxDecoration(
