@@ -133,7 +133,7 @@ Future<void> onStart(ServiceInstance service) async {
       await SupabaseConfig.init();
     } catch (e) {
       debugPrint('[BG_SUPABASE_FAIL] Cannot connect to Supabase: $e — background service aborting.');
-      service.stopSelf();
+      unawaited(service.stopSelf());
       return;
     }
 

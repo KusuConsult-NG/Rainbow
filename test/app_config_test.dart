@@ -26,7 +26,7 @@ void main() {
     test('missing required keys are reported, not hidden', () {
       expect(
         AppConfig.missingRequiredKeys(),
-        containsAll<String>(['SAFE_PIN', 'DURESS_PIN', 'HMAC_SECRET']),
+        containsAll(['SAFE_PIN', 'DURESS_PIN', 'HMAC_SECRET']),
       );
     });
 
