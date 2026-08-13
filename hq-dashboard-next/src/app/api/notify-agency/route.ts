@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdmin, requireRole, COMMAND_ROLES } from '@/lib/supabase-server';
+import { serverEnv } from '@/lib/env';
 
 // Agency liaison contacts — configure per deployment
 // In production, move these to Supabase config table or environment variables
@@ -31,13 +32,19 @@ const AGENCY_CONTACTS: Record<string, { phone: string; webhook?: string }> = {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as {
-      alertId: string;
-      agency: string;
-      targetLga: string;
-      reason: string;
-      sentBy: string;
-    };
+    // Authorise BEFORE any work. Unauthenticated callers could previously trigger
+    // real SMS to Police/Army/DSS liaison numbers with attacker-controlled text.
+    const auth = await requireRole(COMMAND_ROLES);
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
+
+    let body: { alertId?: string; agency?: string; targetLga?: string; reason?: string; sentBy?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Malformed JSON body' }, { status: 400 });
+    }
 
     const { alertId, agency, targetLga, reason, sentBy } = body;
 
@@ -45,15 +52,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'alertId and agency are required' }, { status: 400 });
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // Reject unknown agencies instead of silently returning success:true / SKIPPED.
+    if (!Object.prototype.hasOwnProperty.call(AGENCY_CONTACTS, agency.toUpperCase())) {
+      return NextResponse.json(
+        { error: `Unknown agency '${agency}'. Expected one of: ${Object.keys(AGENCY_CONTACTS).join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    const supabase = getSupabaseAdmin();
 
     const results: { method: string; status: string; detail?: string }[] = [];
 
     // ── 1. SMS via Termii ──────────────────────────────────────────────────
     const agencyContact = AGENCY_CONTACTS[agency.toUpperCase()];
-    const termiiKey = process.env.TERMII_API_KEY;
+    const { termiiApiKey: termiiKey, termiiSenderId, webhookSecret } = serverEnv();
     const senderPhone = agencyContact?.phone;
 
     if (termiiKey && senderPhone) {
@@ -63,7 +76,7 @@ export async function POST(req: NextRequest) {
         `Sector: ${targetLga}`,
         `Alert ID: ${alertId.slice(0, 8).toUpperCase()}`,
         `Reason: ${reason}`,
-        `Raised by: ${sentBy}`,
+        `Raised by: ${sentBy ?? auth.userId}`,
         `Time: ${new Date().toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}`,
         ``,
         `Immediate coordination required. Contact HQ on command channel.`,
@@ -75,7 +88,7 @@ export async function POST(req: NextRequest) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             to: senderPhone,
-            from: process.env.TERMII_SENDER_ID || 'RainbowHQ',
+            from: termiiSenderId,
             sms: smsBody,
             type: 'plain',
             api_key: termiiKey,
@@ -101,14 +114,14 @@ export async function POST(req: NextRequest) {
       try {
         const webhookRes = await fetch(webhookUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Rainbow-Auth': process.env.RAINBOW_WEBHOOK_SECRET || '' },
+          headers: { 'Content-Type': 'application/json', 'X-Rainbow-Auth': webhookSecret },
           body: JSON.stringify({
             event: 'INTER_AGENCY_ESCALATION',
             alert_id: alertId,
             agency,
             target_lga: targetLga,
             reason,
-            sent_by: sentBy,
+            sent_by: sentBy ?? auth.userId,
             timestamp: new Date().toISOString(),
           }),
         });

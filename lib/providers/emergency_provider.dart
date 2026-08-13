@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:developer' as dev;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:rainbow_app/core/config/app_config.dart';
 import 'package:rainbow_app/core/models/emergency_state.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
@@ -41,7 +41,7 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
       }
 
       await ref.read(termiiServiceProvider).sendEmergencyAlert(
-            dotenv.env['SOS_PHONE'] ?? '0800RAINBOWHQ',
+            AppConfig.sosPhone,
             'SOS [CRITICAL]: User $userId triggered panic! '
             'L/KL: $locationText. Dispatch immediately.',
           );
@@ -84,8 +84,19 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
   }
 
   Future<bool> verifyCancellation(String pin) async {
-    final safePin = dotenv.env['SAFE_PIN'] ?? '0000';
-    final duressPin = dotenv.env['DURESS_PIN'] ?? '9999';
+    // No fallbacks. These previously defaulted to '0000'/'9999', which are
+    // published in this repository — a captor who had read it would know that
+    // 9999 signals duress. Unconfigured now means "reject", not "use 9999".
+    final safePin = AppConfig.safePin;
+    final duressPin = AppConfig.duressPin;
+
+    if (safePin == null || duressPin == null) {
+      dev.log(
+        'Emergency PINs unconfigured — cancellation rejected. See AppConfig.validate().',
+        name: 'CONFIG_ERR',
+      );
+      return false;
+    }
 
     try {
       if (pin == safePin) {
