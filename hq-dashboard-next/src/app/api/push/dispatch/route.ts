@@ -1,18 +1,33 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { getSupabaseAdmin, requireRole, COMMAND_ROLES } from '@/lib/supabase-server';
+import { serverEnv } from '@/lib/env';
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const { alertId, responderUids } = body;
+    // Authorise BEFORE any work. This route previously ran its full dispatch logic
+    // for completely unauthenticated callers.
+    const auth = await requireRole(COMMAND_ROLES);
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
+
+    // Parse separately so malformed JSON is a 400, not a 500 echoing the parser message.
+    let body: { alertId?: unknown; responderUids?: unknown };
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Malformed JSON body' }, { status: 400 });
+    }
+
+    const { alertId, responderUids } = body as { alertId?: string; responderUids?: string[] };
 
     if (!alertId || !responderUids || !Array.isArray(responderUids) || responderUids.length === 0) {
       return NextResponse.json({ error: 'Invalid payload: alertId and responderUids array required' }, { status: 400 });
     }
+
+    // Client constructed here, not at module scope — a module-scope createClient()
+    // with missing env crashed `next build` during page-data collection.
+    const supabase = getSupabaseAdmin();
 
     // 1. Fetch OneSignal Player IDs for target officer profiles
     const { data: profiles, error: dbErr } = await supabase
@@ -38,10 +53,9 @@ export async function POST(request: Request) {
     }
 
     // 2. Dispatch push notification via OneSignal REST API
-    const oneSignalAppId = process.env.ONESIGNAL_APP_ID || '885be8b2-5f31-4627-a618-685f54dd266a';
-    const oneSignalRestKey = process.env.ONESIGNAL_REST_API_KEY || process.env.NEXT_PUBLIC_ONESIGNAL_REST_API_KEY || '';
+    const { oneSignalAppId, oneSignalRestKey } = serverEnv();
 
-    if (!oneSignalRestKey) {
+    if (!oneSignalAppId || !oneSignalRestKey) {
       console.warn('[PUSH_API_WARN] OneSignal REST API Key not configured. Push skipped.');
       return NextResponse.json({ 
         success: true, 

@@ -31,56 +31,78 @@ import 'package:rainbow_app/providers/navigation_provider.dart';
 import 'package:rainbow_app/shared/widgets/global_navigation_shell.dart';
 
 // Transition Helpers
-String? _getRedirectResult(
-  AuthState auth,
-  bool splashFinished,
-  GoRouterState state,
-) {
+
+/// Pure redirect decision for the whole app.
+///
+/// Deliberately takes primitives rather than `AuthState`/`GoRouterState` so it can
+/// be unit-tested with no Flutter binding, no Supabase session and no device — see
+/// `test/router_redirect_test.dart`. This function encodes every navigation rule in
+/// the app; it was previously private and untestable, and two shipped bugs lived
+/// here (see the comments on the `role unresolved` branch).
+///
+/// Returns the path to redirect to, or `null` to stay put.
+String? computeRedirect({
+  required bool isLoading,
+  required bool isAuthenticated,
+  required UserRole role,
+  required bool hasOnboarded,
+  required bool isDeactivated,
+  required String? resolutionError,
+  required bool splashFinished,
+  required String location,
+}) {
   // 0. Always wait for auth to finish resolving before redirecting
-  if (auth.isLoading) return null;
+  if (isLoading) return null;
 
   // 1. Splash Logic (Wait for visual completion)
   if (!splashFinished) return AppRoutes.splash;
 
-  final loggingIn = state.matchedLocation == AppRoutes.login;
-  final onSplash = state.matchedLocation == AppRoutes.splash;
+  final loggingIn = location == AppRoutes.login;
+  final onSplash = location == AppRoutes.splash;
 
   // 2. Auth Logic
-  if (auth.user != null && auth.profile?['status'] == 'deactivated') {
-    return state.matchedLocation == AppRoutes.uninstallRequest
+  if (isAuthenticated && isDeactivated) {
+    return location == AppRoutes.uninstallRequest
         ? null
         : AppRoutes.uninstallRequest;
   }
 
-  if (auth.user == null) {
+  if (!isAuthenticated) {
     return loggingIn ? null : AppRoutes.login;
   }
 
   // 3. Post-Login Role & Onboarding Resolution
   if (loggingIn || onSplash) {
-    if (auth.role == UserRole.responder) {
+    if (role == UserRole.responder) {
       return AppRoutes.agentDashboard;
-    } else if (auth.role == UserRole.citizen) {
-      return auth.hasOnboarded
-          ? AppRoutes.home
-          : AppRoutes.onboardingPermissions;
+    } else if (role == UserRole.citizen) {
+      return hasOnboarded ? AppRoutes.home : AppRoutes.onboardingPermissions;
     } else {
-      // role still unknown (e.g. claims not yet fetched) — wait on splash
-      return splashFinished ? AppRoutes.login : null;
+      // Authenticated, but the role has not resolved yet.
+      //
+      // This used to `return AppRoutes.login`, which logged real users out
+      // mid-session: the 5s safety timeout in AuthNotifier clears `isLoading`
+      // while `role` is still unknown, so any profile fetch slower than 5s
+      // (routine on a rural network) bounced an authenticated commander to the
+      // login screen before snapping them to the dashboard.
+      //
+      // Distinguish transient from terminal:
+      //   - still resolving   -> hold on splash; the router re-runs on settle.
+      //   - resolution failed -> send to login so the user can retry / re-auth.
+      if (resolutionError != null) {
+        return loggingIn ? null : AppRoutes.login;
+      }
+      return onSplash ? null : AppRoutes.splash;
     }
   }
 
   // 4. Role-Based Navigation Guard
-  if (auth.role == UserRole.citizen) {
-    if (state.matchedLocation == AppRoutes.agentDashboard) {
-      return AppRoutes.home;
-    }
+  if (role == UserRole.citizen && location == AppRoutes.agentDashboard) {
+    return AppRoutes.home;
   }
 
-  if (auth.role == UserRole.responder) {
-    if (state.matchedLocation == AppRoutes.home) {
-      return AppRoutes.agentDashboard;
-    }
+  if (role == UserRole.responder && location == AppRoutes.home) {
+    return AppRoutes.agentDashboard;
   }
 
   return null;
@@ -213,7 +235,16 @@ final appRouter = Provider<GoRouter>((ref) {
         '🧭 [ROUTER] Redirect check: path=${state.matchedLocation}, auth=${auth.user?.id}, splashFinished=$splashFinished, role=${auth.role}',
       );
 
-      final result = _getRedirectResult(auth, splashFinished, state);
+      final result = computeRedirect(
+        isLoading: auth.isLoading,
+        isAuthenticated: auth.user != null,
+        role: auth.role,
+        hasOnboarded: auth.hasOnboarded,
+        isDeactivated: auth.profile?['status'] == 'deactivated',
+        resolutionError: auth.resolutionError,
+        splashFinished: splashFinished,
+        location: state.matchedLocation,
+      );
       debugPrint('🧭 [ROUTER] Redirect result: $result');
       return result;
     },

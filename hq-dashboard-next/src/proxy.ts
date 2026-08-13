@@ -17,13 +17,16 @@ export async function proxy(request: NextRequest) {
 
   // Protect /dashboard and all sub-routes
   if (pathname.startsWith('/dashboard')) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://wpffwoblxuogemxcqpep.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_9ufgK7BJ8Zy8x7-K133NRQ_8myILNuw';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
-    let response = NextResponse.next({ request });
+    // Fail closed: without config we cannot verify anyone, so admit no one.
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('[PROXY] Supabase env not configured — denying /dashboard access.');
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
 
-    // Allow session cookie fallback for local development or direct authentication
-    const hasSessionCookie = request.cookies.get('__session')?.value === 'true';
+    const response = NextResponse.next({ request });
 
     const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
@@ -38,15 +41,17 @@ export async function proxy(request: NextRequest) {
       },
     });
 
+    // Only a real, server-verified Supabase session grants access. The previous
+    // `|| hasSessionCookie` fallback trusted an unsigned, client-writable cookie
+    // (`document.cookie = '__session=true'`), so anyone could reach the command
+    // dashboard by setting one line in devtools.
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user || hasSessionCookie) {
+      if (user) {
         return response;
       }
-    } catch (_) {
-      if (hasSessionCookie) {
-        return response;
-      }
+    } catch (err) {
+      console.error('[PROXY] Session verification failed — failing closed.', err);
     }
 
     return NextResponse.redirect(new URL('/login', request.url));
