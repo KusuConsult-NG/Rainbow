@@ -6,18 +6,22 @@
 
 ## Executive summary
 
-The system does not currently meet a deployable security bar. Four findings are
-**critical** and, in combination, mean the entire production database — including
-citizen PII and live GPS telemetry of victims and officers — is readable and
-writable by anyone on the internet, with no credentials required.
+The system does not currently meet a deployable security bar. Five findings are
+**critical**. C-1 to C-4, in combination, mean the entire production database —
+including citizen PII and live GPS telemetry of victims and officers — is readable
+and writable by anyone on the internet, with no credentials required. C-5 is not a
+security hole but a safety-of-life one: an SOS with no GPS fix is reported to
+dispatch at a fabricated location.
 
 This is a public-safety / emergency-response system handling location data for
 people in danger. **Recommendation: treat the current Supabase project as
-compromised, rotate all keys, and do not deploy until C-1 through C-4 are fixed.**
+compromised, rotate all keys, and do not deploy until C-1 through C-4 are fixed.
+C-5 needs an operational decision before it can be fixed correctly — see that
+section.**
 
 | Severity | Count |
 |---|---|
-| Critical | 4 |
+| Critical | 5 |
 | High | 8 |
 | Medium | 10 |
 
@@ -198,6 +202,74 @@ agency silently yields `SKIPPED` + `200 success:true`). Do not let the middlewar
 blanket-skip `/api`.
 
 ---
+
+### C-5. An SOS with no GPS fix is reported at a fabricated location (safety-critical)
+
+**Files:** `lib/services/alert_service.dart:45-46`, `hq-dashboard-next/src/app/dashboard/page.tsx:559-560`
+
+Two independent layers each invent plausible coordinates when the real ones are
+missing, and neither marks them as invented.
+
+```dart
+// mobile — alert_service.dart
+var finalLat = latitude ?? 9.9167;   // Fallback Jos loc
+var finalLng = longitude ?? 8.8917;
+```
+
+```ts
+// dashboard — page.tsx
+lat: d.latitude || d.lat || 9.9285,
+lng: d.longitude || d.lng || 8.8921,
+```
+
+**Effect:** a citizen presses SOS somewhere the GPS cannot get a fix. The alert
+arrives at the command dashboard as a **confident pin in central Jos**. There is
+nothing in the record distinguishing it from a real fix, so responders are
+dispatched to a location that was fabricated by a `??` operator.
+
+This is the same "plausible default preferred to an honest error" pattern as
+C-3 and the auth fail-open, but here the consequence is physical: armed
+responders sent to the wrong place during an emergency.
+
+Two aggravating details:
+
+* The dashboard uses `||`, not `??`, so a legitimate `0` coordinate would also
+  be replaced.
+* The **telemetry** path in the same file already does the right thing
+  (`page.tsx:593`: `t.latitude ?? t.lat ?? null`). Only the alerts path
+  fabricates. The correct behaviour is already present next to the defect.
+
+**Why this was not fixed in this pass.** Removing the fallback alone makes the
+problem worse, not better. `LiveMap.tsx:314` skips any alert without
+coordinates (`if (!alert.lat || !alert.lng) return;`), and `sectorAlerts`
+(`page.tsx:961`) feeds only counters — there is no list view. Alerts reach HQ
+*through the map*, so a null-coordinate alert would become **invisible**: a
+silently dropped emergency, which is worse than a wrong pin.
+
+A correct fix therefore needs a decision about how unlocated alerts are
+surfaced to dispatch. That is an operational question about the dispatch
+workflow, not a code question. Options, roughly in order of preference:
+
+1. **Distinct marker at jurisdiction centroid.** Mobile sends
+   `latitude`/`longitude` as null plus `geo_lga`/`geo_ward`; the dashboard plots
+   at the LGA or ward centroid with a visually distinct "LOCATION UNVERIFIED"
+   marker and popup. Stays visible to dispatch, removes the false precision, and
+   degrades to the accuracy actually available.
+2. **Separate unlocated-alerts panel.** Stop plotting entirely; add a persistent
+   panel that cannot be missed. Most honest, but it is new UI.
+3. **Description marker only.** Prefix with `[LOCATION_UNVERIFIED]`, following
+   the existing `[OFFLINE_SMS]`/`[SMS]` convention already used by
+   `smsFallbackCount`. Smallest change, but a dispatcher may still act on the pin.
+
+Note that option 1 requires the offline queue to accept null coordinates:
+`offline_queue` currently declares `lat REAL NOT NULL, lng REAL NOT NULL`
+(`sqlite_service.dart:34-35`), so it needs a schema version bump and an
+`onUpgrade` path.
+
+**Related, already fixed:** the offline replay path was separately dropping
+*real* coordinates through a column-name mismatch — see the offline queue fix
+and `test/offline_queue_test.dart`.
+
 
 ## HIGH
 
