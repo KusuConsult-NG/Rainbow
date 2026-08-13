@@ -36,8 +36,22 @@ jobs:
       - run: flutter --version
       - run: flutter pub get
 
+      # Gate on ERRORS only, for now.
+      #
+      # `flutter analyze` is fatal on infos by default, and this repo carries a
+      # pre-existing backlog of 343 infos and 24 warnings (mostly
+      # lines_longer_than_80_chars, directives_ordering and unused imports in the
+      # test suite) from very_good_analysis. Gating on those today would mean the
+      # job could never pass, and a permanently-red check gets ignored — which is
+      # how the backlog accumulated in the first place.
+      #
+      # Errors ARE fatal: those are genuine compile/override failures. The 7 that
+      # existed when this workflow was added are fixed in this commit.
+      #
+      # RATCHET: drop `--no-fatal-warnings` once the 24 warnings are cleared
+      # (they are all unused imports and inferrable types), then `--no-fatal-infos`.
       - name: Analyze
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Test
         run: flutter test

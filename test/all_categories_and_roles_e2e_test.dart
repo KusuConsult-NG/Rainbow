@@ -44,13 +44,13 @@ class FakeSyncService implements SyncService {
   @override
   ValueNotifier<bool> get isSyncing => ValueNotifier<bool>(false);
   @override
-  Future<void> queueMediaUpload({
+  Future<List<String>> queueMediaUpload({
     required String alertId,
     String? filePath,
     String? mediaType,
     List<dynamic>? files,
     String? userId,
-  }) async {}
+  }) async => <String>[];
 }
 
 class FakeAlertService implements AlertService {

@@ -2535,7 +2535,7 @@ Respond ONLY with a JSON object with this exact shape:
                       TRANSLATION ({triage.detected_language.toUpperCase()} ➔ ENGLISH)
                     </span>
                     <p style={{ fontSize: 11.5, color: 'var(--text-primary)', margin: '4px 0 0 0', fontStyle: 'italic', lineHeight: 1.4, background: 'var(--input-bg)', border: '1px solid var(--border)', padding: 8, borderRadius: 8 }}>
-                      "{triage.translated_description}"
+                      &ldquo;{triage.translated_description}&rdquo;
                     </p>
                   </div>
                 )}
@@ -2869,7 +2869,7 @@ Respond ONLY with a JSON object with this exact shape:
                 <option value="MANGU">MANGU LGA</option>
                 <option value="MIANGO">MIANGO LGA</option>
                 <option value="PANKSHIN">PANKSHIN LGA</option>
-                <option value="QUA'AN PAN">QUA'AN PAN LGA</option>
+                <option value="QUA'AN PAN">QUA&apos;AN PAN LGA</option>
                 <option value="RIYOM">RIYOM LGA</option>
                 <option value="SHENDAM">SHENDAM LGA</option>
                 <option value="WASE">WASE LGA</option>
