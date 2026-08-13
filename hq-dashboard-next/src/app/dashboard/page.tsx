@@ -556,8 +556,14 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
       if (data) {
         const mapped = data.map((d: any) => ({
           ...d,
-          lat: d.latitude || d.lat || 9.9285,
-          lng: d.longitude || d.lng || 8.8921,
+          // Do NOT invent coordinates. This used to fall back to
+          // (9.9285, 8.8921) — central Jos — so an alert with no GPS fix
+          // rendered as a confident pin and responders were dispatched to a
+          // location produced by a `||` operator. `??` rather than `||` so a
+          // legitimate 0 is preserved. See E2E_AUDIT_REPORT.md C-5.
+          // The telemetry path below already does this correctly.
+          lat: d.latitude ?? d.lat ?? null,
+          lng: d.longitude ?? d.lng ?? null,
           priority: d.severity || 'HIGH',
         }));
         setAlerts(mapped as Alert[]);
@@ -1380,8 +1386,20 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                 <div style={{ padding: '20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h3 style={{ fontSize: 12, fontWeight: 900, color: 'var(--accent)', letterSpacing: 1.5 }}>SITUATIONAL FEED</h3>
-                    <div style={{ background: 'var(--accent-dim)', padding: '4px 10px', borderRadius: 20 }}>
-                      <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--accent)' }}>{filtered.length} UNITS</span>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      {filtered.some(a => a.lat == null || a.lng == null) && (
+                        // How many alerts in view have no map pin. Without this
+                        // the map silently under-reports the situation.
+                        <div title="Alerts with no GPS fix are listed below but cannot be plotted"
+                             style={{ background: 'var(--warning)', padding: '4px 8px', borderRadius: 20 }}>
+                          <span style={{ fontSize: 10, fontWeight: 900, color: '#0f172a' }}>
+                            {filtered.filter(a => a.lat == null || a.lng == null).length} UNLOCATED
+                          </span>
+                        </div>
+                      )}
+                      <div style={{ background: 'var(--accent-dim)', padding: '4px 10px', borderRadius: 20 }}>
+                        <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--accent)' }}>{filtered.length} UNITS</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1412,6 +1430,18 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
                           <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-dim)' }}>{a.geo_lga?.toUpperCase()}</span>
                           <button onClick={() => setActiveTab('alerts')} style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 10, fontWeight: 900, cursor: 'pointer' }}>ENGAGE ›</button>
                         </div>
+                        {(a.lat == null || a.lng == null) && (
+                          // No GPS fix: this alert has no pin on the map. Say so
+                          // explicitly rather than letting a dispatcher assume
+                          // the absence of a marker means the absence of an
+                          // incident.
+                          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, background: 'var(--warning-dim, rgba(251,191,36,0.12))', border: '1px solid var(--warning)', borderRadius: 8, padding: '5px 8px' }}>
+                            <AlertTriangle size={11} color="var(--warning)" />
+                            <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--warning)', letterSpacing: 0.4 }}>
+                              NO GPS FIX — NOT ON MAP{a.geo_ward ? ` · ${a.geo_ward.toUpperCase()}` : ''}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

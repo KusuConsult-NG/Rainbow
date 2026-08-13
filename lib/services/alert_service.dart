@@ -42,11 +42,18 @@ class AlertService {
     String? geoPu,
     String syncStatus = 'COMPLETED',
   }) async {
-    var finalLat = latitude ?? 9.9167; // Fallback Jos loc
-    var finalLng = longitude ?? 8.8917;
+    // Coordinates stay NULL when there is no real fix.
+    //
+    // This previously defaulted to (9.9167, 8.8917) — the centre of Jos — so an
+    // SOS raised where the GPS could not get a lock reached the command
+    // dashboard as a confident pin, indistinguishable from a real position, and
+    // responders were dispatched to a location produced by a `??` operator.
+    // A missing location must read as missing. See E2E_AUDIT_REPORT.md C-5.
+    double? finalLat = latitude;
+    double? finalLng = longitude;
 
     try {
-      if (latitude == null || longitude == null) {
+      if (finalLat == null || finalLng == null) {
         final pos = await LocationService().getCurrentPosition(force: true);
         if (pos != null) {
           finalLat = pos.latitude;
@@ -55,6 +62,14 @@ class AlertService {
       }
     } catch (e) {
       debugPrint('[SYS_ERR] AlertService: Error resolving location: $e');
+    }
+
+    if (finalLat == null || finalLng == null) {
+      debugPrint(
+        '[ALERT_SERVICE] No GPS fix for $type alert — submitting WITHOUT '
+        'coordinates. HQ surfaces these in the unlocated-alerts panel; '
+        'jurisdiction (geo_lga/geo_ward/geo_pu) is still attached.',
+      );
     }
 
     final localId = 'OFFLINE_${DateTime.now().millisecondsSinceEpoch}';

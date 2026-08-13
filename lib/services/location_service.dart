@@ -68,7 +68,13 @@ class LocationService {
         return true;
       }
 
-      return true;
+      // Any remaining state — notably LocationPermission.unableToDetermine —
+      // means permission was NOT confirmed. This used to `return true`, so the
+      // service reported access it did not have; callers then attempted a fix,
+      // failed, and (before C-5 was fixed) fell back to a fabricated location.
+      // Fail closed: an unconfirmed permission is not a granted one.
+      debugPrint('[LOC_WARN] Permission state unresolved ($permission) — treating as denied.');
+      return false;
     } catch (e) {
       debugPrint('[LOC_ERR] Exception during requestPermission: $e');
       return false;

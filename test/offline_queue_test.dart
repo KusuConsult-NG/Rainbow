@@ -7,6 +7,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/sqlite_service.dart';
+import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -17,6 +18,88 @@ void main() {
   setUpAll(() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
+  });
+
+  // A queued alert is an UNSENT EMERGENCY. The v1 -> v2 migration rebuilds the
+  // table to drop NOT NULL from lat/lng, so it must carry existing rows across
+  // rather than silently dropping them.
+  group('v1 -> v2 schema migration', () {
+    test('pending alerts survive the upgrade', () async {
+      final dir = await databaseFactory.getDatabasesPath();
+      final path = p.join(dir, 'rainbow_offline.db');
+      await databaseFactory.deleteDatabase(path);
+
+      // Build a v1 database by hand: lat/lng NOT NULL, no onUpgrade.
+      final v1 = await databaseFactory.openDatabase(
+        path,
+        options: OpenDatabaseOptions(
+          version: 1,
+          onCreate: (db, _) async {
+            await db.execute('''
+              CREATE TABLE offline_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                local_id TEXT UNIQUE NOT NULL,
+                type TEXT NOT NULL,
+                description TEXT,
+                lat REAL NOT NULL,
+                lng REAL NOT NULL,
+                priority TEXT NOT NULL,
+                is_anonymous INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                sync_status TEXT NOT NULL
+              )
+            ''');
+            await db.execute('''
+              CREATE TABLE offline_media (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                local_alert_id TEXT NOT NULL,
+                local_file_path TEXT NOT NULL,
+                remote_storage_path TEXT,
+                upload_status TEXT NOT NULL
+              )
+            ''');
+          },
+        ),
+      );
+      await v1.insert('offline_queue', {
+        'local_id': 'LEGACY_SOS_1',
+        'type': 'SOS',
+        'description': 'Queued before the upgrade',
+        'lat': 9.8965,
+        'lng': 8.8583,
+        'priority': 'CRITICAL',
+        'is_anonymous': 0,
+        'created_at': '2026-08-13T14:00:00.000Z',
+        'sync_status': 'PENDING',
+      });
+      await v1.close();
+
+      // Opening through SqliteService triggers the v2 migration.
+      final pending = await SqliteService().getPendingAlerts();
+      final legacy = pending.where((r) => r['local_id'] == 'LEGACY_SOS_1');
+
+      expect(legacy, isNotEmpty,
+          reason: 'the migration must not drop unsent emergencies');
+      expect(legacy.first['lat'], closeTo(9.8965, 0.000001));
+      expect(legacy.first['description'], 'Queued before the upgrade');
+
+      // ...and the new nullable column now accepts a null fix.
+      await SqliteService().enqueueAlert(
+        localId: 'POST_UPGRADE_NO_FIX',
+        type: 'SOS',
+        description: 'no gps',
+        lat: null,
+        lng: null,
+        priority: 'HIGH',
+        isAnonymous: false,
+        createdAt: '2026-08-13T15:00:00.000Z',
+      );
+      final after = await SqliteService().getPendingAlerts();
+      expect(
+        after.firstWhere((r) => r['local_id'] == 'POST_UPGRADE_NO_FIX')['lat'],
+        isNull,
+      );
+    });
   });
 
   group('offline queue round-trip', () {
@@ -122,6 +205,36 @@ void main() {
         isNotEmpty,
         reason: 'a failed sync must be retried, not silently lost',
       );
+    });
+
+    // REGRESSION (C-5): submitAlert used to default missing coordinates to
+    // (9.9167, 8.8917) — the centre of Jos — so an SOS with no GPS fix reached
+    // HQ as a confident pin and responders were dispatched to a location
+    // invented by a `??` operator. A missing location must stay missing.
+    test('REGRESSION: an alert with no GPS fix queues WITHOUT coordinates',
+        () async {
+      await sqlite.enqueueAlert(
+        localId: 'OFFLINE_NO_FIX',
+        type: 'SOS',
+        description: 'No GPS lock available',
+        lat: null,
+        lng: null,
+        priority: 'CRITICAL',
+        isAnonymous: false,
+        createdAt: '2026-08-13T14:00:00.000Z',
+      );
+
+      final row = (await sqlite.getPendingAlerts())
+          .firstWhere((r) => r['local_id'] == 'OFFLINE_NO_FIX');
+      expect(row['lat'], isNull);
+      expect(row['lng'], isNull);
+
+      final payload = AlertService.buildOfflineSyncPayload(row);
+      expect(payload['latitude'], isNull,
+          reason: 'must not invent a location for an unlocated SOS');
+      expect(payload['longitude'], isNull);
+      // Jos centre, the old fabricated fallback.
+      expect(payload['latitude'], isNot(closeTo(9.9167, 0.01)));
     });
 
     test('queued media is associated with its alert', () async {
