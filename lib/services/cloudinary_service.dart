@@ -1,25 +1,42 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:rainbow_app/core/config/app_config.dart';
 
-/// Service handling cost-optimized media uploads directly to Cloudinary.
-/// Configured with live account credentials for Operation Rainbow.
+/// Cost-optimised media uploads to Cloudinary using an UNSIGNED upload preset.
+///
+/// The previous implementation attempted a signed upload first, using an API key
+/// and secret read from `.env`. That path was dead code — `CLOUDINARY_API_SECRET`
+/// defaulted to `''`, so the SHA-1 signature was always wrong, every signed
+/// upload was rejected, and it silently fell through to the unsigned preset
+/// anyway. It was also unsafe by construction: `.env` is bundled as a Flutter
+/// asset, so any secret placed there ships inside the APK. Signed uploads must be
+/// brokered by a server that holds the secret.
 class CloudinaryService {
   CloudinaryService._privateConstructor();
   static final CloudinaryService instance = CloudinaryService._privateConstructor();
 
-  // Cloudinary credentials loaded from .env (never hardcode secrets in source)
-  String get cloudName => dotenv.env['CLOUDINARY_CLOUD_NAME'] ?? 'prroorhv';
-  String get apiKey => dotenv.env['CLOUDINARY_API_KEY'] ?? '439918347355179';
-  String get apiSecret => dotenv.env['CLOUDINARY_API_SECRET'] ?? '';
-  String get uploadPreset => dotenv.env['CLOUDINARY_UPLOAD_PRESET'] ?? 'rainbow_incident_media';
+  // No hardcoded fallbacks: an unconfigured upload must fail visibly, not
+  // silently target someone else's Cloudinary account.
+  String? get cloudName => AppConfig.cloudinaryCloudName;
+  String? get uploadPreset => AppConfig.cloudinaryUploadPreset;
 
-  /// Uploads a local file (image, video, or audio) to Cloudinary and returns the public HTTPS URL.
+  /// Uploads a local file (image, video, or audio) and returns the public HTTPS URL.
+  ///
+  /// Returns `null` on any failure, including missing configuration.
   Future<String?> uploadMedia(File file) async {
+    final cloud = cloudName;
+    final preset = uploadPreset;
+    if (cloud == null || preset == null) {
+      debugPrint(
+        '[CLOUDINARY_CONFIG_ERR] CLOUDINARY_CLOUD_NAME / CLOUDINARY_UPLOAD_PRESET '
+        'not configured — upload skipped.',
+      );
+      return null;
+    }
+
     try {
       final isVideo = file.path.endsWith('.mp4') ||
           file.path.endsWith('.mov') ||
@@ -28,52 +45,32 @@ class CloudinaryService {
           file.path.endsWith('.wav');
 
       final resourceType = isVideo ? 'video' : 'image';
-      final url = Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/$resourceType/upload');
-      final timestamp = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
-      final folder = 'operation_rainbow_incidents';
+      final url = Uri.parse(
+        'https://api.cloudinary.com/v1_1/$cloud/$resourceType/upload',
+      );
+      const folder = 'operation_rainbow_incidents';
 
-      // Generate SHA-1 Signature for Signed Cloudinary Upload
-      final toSign = 'folder=$folder&timestamp=$timestamp$apiSecret';
-      final signature = sha1.convert(utf8.encode(toSign)).toString();
-
-      // 1. Try Signed Upload using API Key & Secret
-      var request = http.MultipartRequest('POST', url)
-        ..fields['api_key'] = apiKey
-        ..fields['timestamp'] = timestamp
-        ..fields['signature'] = signature
+      final request = http.MultipartRequest('POST', url)
+        ..fields['upload_preset'] = preset
         ..fields['folder'] = folder
         ..files.add(await http.MultipartFile.fromPath('file', file.path));
 
-      var streamedResponse = await request.send();
-      var response = await http.Response.fromStream(streamedResponse);
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final secureUrl = data['secure_url'] as String?;
-        debugPrint('[CLOUDINARY_SIGNED_UPLOAD] Upload successful: $secureUrl');
+        debugPrint('[CLOUDINARY_UPLOAD] Upload successful: $secureUrl');
         return secureUrl;
       }
 
-      debugPrint('[CLOUDINARY_SIGNED_ERR] Signed upload status ${response.statusCode}, trying unsigned preset...');
-
-      // 2. Fallback to Unsigned Preset Upload
-      request = http.MultipartRequest('POST', url)
-        ..fields['upload_preset'] = uploadPreset
-        ..fields['folder'] = folder
-        ..files.add(await http.MultipartFile.fromPath('file', file.path));
-
-      streamedResponse = await request.send();
-      response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final secureUrl = data['secure_url'] as String?;
-        debugPrint('[CLOUDINARY_UNSIGNED_UPLOAD] Upload successful: $secureUrl');
-        return secureUrl;
-      } else {
-        debugPrint('[CLOUDINARY_UPLOAD_ERR] Cloudinary returned ${response.statusCode}: ${response.body}');
-        return null;
-      }
+      debugPrint(
+        '[CLOUDINARY_UPLOAD_ERR] Cloudinary returned '
+        '${response.statusCode}: ${response.body}',
+      );
+      return null;
+      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (e) {
       debugPrint('[CLOUDINARY_UPLOAD_ERR] Exception uploading to Cloudinary: $e');
       return null;

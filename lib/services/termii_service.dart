@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:rainbow_app/core/config/app_config.dart';
 
 /// Documentation for this public member.
 
@@ -19,11 +19,15 @@ final termiiServiceProvider = Provider<TermiiService>((ref) {
 class TermiiService {
   /// Documentation for this public member.
   TermiiService();
-  // Replace with actual API key and Sender ID when configured
-  static String get _apiKey {
-    if (!dotenv.isInitialized) return 'MOCK_TERMII_API_KEY';
-    return dotenv.env['TERMII_API_KEY'] ?? 'MOCK_TERMII_API_KEY';
-  }
+  /// Termii API key, or `null` when unconfigured.
+  ///
+  /// A null key puts the service in explicit simulation mode rather than
+  /// pretending a magic 'MOCK_...' string is a credential. Callers can inspect
+  /// [isSimulated] instead of string-matching on the key.
+  static String? get _apiKey => AppConfig.termiiApiKey;
+
+  /// True when no Termii key is configured, so no SMS will actually be sent.
+  static bool get isSimulated => AppConfig.termiiApiKey == null;
 
   static const String _senderId = 'N-Alert';
   static const String _baseUrl = 'https://api.ng.termii.com/api/sms/send';
@@ -39,13 +43,13 @@ class TermiiService {
       'from': _senderId,
       'sms': message,
       'type': 'plain',
-      'api_key': _apiKey,
+      'api_key': _apiKey ?? '',
       'channel': 'dnd',
     };
 
     try {
-      if (_apiKey.contains('MOCK')) {
-        debugPrint('[TERMII_SMS] SIMULATED DISPATCH (MOCK_KEY): SMS to $to: "$message"');
+      if (isSimulated) {
+        debugPrint('[TERMII_SMS] SIMULATED DISPATCH (no TERMII_API_KEY): SMS to $to: "$message"');
         await Future<void>.delayed(const Duration(milliseconds: 800));
         return true;
       }
