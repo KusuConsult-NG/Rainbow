@@ -185,6 +185,36 @@ class AlertService {
     }
   }
 
+  /// Builds the Supabase `alerts` payload for one row of the local offline queue.
+  ///
+  /// Extracted as a pure function so the offline SOS replay path can be tested
+  /// without a network or a Supabase session — see `test/offline_queue_test.dart`.
+  ///
+  /// REGRESSION GUARD: this previously read `row['latitude']` and
+  /// `row['longitude']`, but the SQLite schema stores those columns as `lat` and
+  /// `lng` (see SqliteService._initDb and enqueueAlert). Both lookups therefore
+  /// returned null, and **every alert queued while offline reached HQ with no
+  /// coordinates** — in exactly the no-signal scenario the offline queue exists
+  /// to serve.
+  ///
+  /// `created_at` is carried across from the queue rather than defaulting to
+  /// NOW() at insert time, so an incident raised at 14:00 and synced at 18:00 is
+  /// recorded at 14:00.
+  static Map<String, dynamic> buildOfflineSyncPayload(
+    Map<String, dynamic> row,
+  ) {
+    return <String, dynamic>{
+      'local_id': row['local_id'],
+      'type': row['type'],
+      'description': row['description'],
+      'latitude': row['lat'],
+      'longitude': row['lng'],
+      'severity': row['priority'],
+      'status': 'PENDING',
+      if (row['created_at'] != null) 'created_at': row['created_at'],
+    };
+  }
+
   /// Replays pending alerts once connectivity is restored.
   Future<Map<String, String>> flushOfflineQueue() async {
     final mappings = <String, String>{};
@@ -196,15 +226,7 @@ class AlertService {
       for (final row in offlineQueue) {
         final localId = row['local_id'] as String;
         try {
-          final payload = <String, dynamic>{
-            'local_id': localId,
-            'type': row['type'],
-            'description': row['description'],
-            'latitude': row['latitude'],
-            'longitude': row['longitude'],
-            'severity': row['priority'],
-            'status': 'PENDING',
-          };
+          final payload = buildOfflineSyncPayload(row);
 
           final response = await SupabaseConfig.client
               .from('alerts')

@@ -60,6 +60,9 @@ dev_dependencies:
   freezed: any
   json_serializable: any
   riverpod_generator: any
+  # Real SQLite engine for tests — without it sqflite throws
+  # "databaseFactory not initialized" and the offline queue cannot be tested.
+  sqflite_common_ffi: ^2.3.3
   riverpod_lint: ^2.6.5
   very_good_analysis: ^10.1.0
 
