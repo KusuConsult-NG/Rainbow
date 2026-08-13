@@ -154,7 +154,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   @override
   void dispose() {
-    _authSubscription?.cancel();
+    unawaited(_authSubscription?.cancel());
     super.dispose();
   }
 
