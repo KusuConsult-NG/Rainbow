@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -102,7 +103,7 @@ class IncidentHistoryScreen extends ConsumerWidget {
 
               return GestureDetector(
                 onTap: () {
-                  showModalBottomSheet(
+                  unawaited(showModalBottomSheet<void>(
                     context: context,
                     backgroundColor: AppColors.surface,
                     builder: (ctx) => Padding(
@@ -141,7 +142,7 @@ class IncidentHistoryScreen extends ConsumerWidget {
                             child: ElevatedButton.icon(
                               onPressed: () {
                                 Navigator.pop(ctx);
-                                context.push('/dispatcher-chat', extra: item['id']);
+                                unawaited(context.push('/dispatcher-chat', extra: item['id']));
                               },
                               icon: const Icon(Icons.chat),
                               label: const Text('DISPATCHER CHAT'),
@@ -151,7 +152,7 @@ class IncidentHistoryScreen extends ConsumerWidget {
                         ],
                       ),
                     ),
-                  );
+                  ));
                 },
                 child: Container(
                   margin: const EdgeInsets.only(bottom: 12),

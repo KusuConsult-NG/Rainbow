@@ -130,14 +130,19 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
           '?overview=full&geometries=geojson&alternatives=true');
       final res = await http.get(url).timeout(const Duration(seconds: 5));
       if (res.statusCode != 200) return [];
-      final data = jsonDecode(res.body);
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
       final routes = data['routes'] as List<dynamic>? ?? [];
       final List<List<LatLng>> paths = [];
-      for (final r in routes) {
-        final coordinates = r['geometry']['coordinates'] as List<dynamic>? ?? [];
+      for (final r in routes.cast<Map<String, dynamic>>()) {
+        final geometry = r['geometry'] as Map<String, dynamic>? ?? const {};
+        final coordinates = geometry['coordinates'] as List<dynamic>? ?? [];
         final List<LatLng> path = coordinates.map((c) {
           final coords = c as List<dynamic>;
-          return LatLng(coords[1].toDouble(), coords[0].toDouble());
+          // GeoJSON is [lng, lat]; values arrive as num (int or double).
+          return LatLng(
+            (coords[1] as num).toDouble(),
+            (coords[0] as num).toDouble(),
+          );
         }).toList();
         paths.add(path);
       }
