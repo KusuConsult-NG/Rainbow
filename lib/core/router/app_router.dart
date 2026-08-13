@@ -105,6 +105,19 @@ String? computeRedirect({
     return AppRoutes.agentDashboard;
   }
 
+  // An unresolved role must not linger on a role-gated screen. The two guards
+  // above only fire for a KNOWN role, so before this an authenticated user whose
+  // role had not resolved could sit on /agent-dashboard or /home with no check
+  // applied at all. Park them on splash until the role lands.
+  //
+  // Deliberately limited to the role-gated routes: parking on splash from every
+  // location would throw away in-progress work (a half-filled incident report)
+  // for a state that is normally transient.
+  if (role == UserRole.unknown &&
+      (location == AppRoutes.home || location == AppRoutes.agentDashboard)) {
+    return AppRoutes.splash;
+  }
+
   return null;
 }
 
