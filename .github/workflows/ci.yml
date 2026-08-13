@@ -1,0 +1,141 @@
+name: CI
+
+# Nothing enforced build/lint/tests before this workflow existed, which is how a
+# hard `next build` failure and a service_role key in the public client bundle
+# both reached the default branch. Each job below maps to a finding in
+# E2E_AUDIT_REPORT.md.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile:
+    name: Flutter — analyze & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # pubspec.yaml declares `.env` as a Flutter ASSET, so the file must exist
+      # or `flutter test` fails with "asset not found" before running anything.
+      # The example file carries no real values — tests must not need secrets.
+      - name: Provision .env from template
+        run: cp .env.example .env
+
+      - run: flutter --version
+      - run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+  web:
+    name: HQ dashboard — typecheck, lint, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hq-dashboard-next
+    env:
+      # Placeholders only. The build must not depend on real credentials, and the
+      # secret-scan step below proves none are baked into the client bundle.
+      NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder_anon_key
+      SUPABASE_SERVICE_ROLE_KEY: placeholder_service_role_key_CI_SENTINEL
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: hq-dashboard-next/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint
+
+      # Regression guard for H-1: a module-scope createClient() with missing env
+      # crashed page-data collection. `next dev` compiles lazily and never caught it.
+      - name: Build
+        run: npx next build
+
+      # Regression guard for C-1 (critical): the Supabase service_role key was
+      # emitted into a client chunk loaded by the PUBLIC /login page.
+      - name: Scan client bundle for leaked secrets
+        run: |
+          set -euo pipefail
+          echo "Scanning .next/static for server-side secrets..."
+          FAIL=0
+
+          # Patterns must match KEY MATERIAL, not the literal prefix. A bare
+          # 'sb_secret' matches @supabase/supabase-js's own key-type check
+          # (`e.startsWith("sb_secret_")`) and fires on every clean build.
+          # Verified: these catch the real leak
+          #   ***REMOVED-SECRET***
+          # and do not match the library's prefix code.
+          for PATTERN in \
+            'sb_secret_[A-Za-z0-9_-]{16,}' \
+            'eyJhbGciOi[A-Za-z0-9_-]{20,}' \
+            'CI_SENTINEL' \
+            'SUPABASE_SERVICE_ROLE_KEY'
+          do
+            if grep -rlE "$PATTERN" .next/static/ 2>/dev/null; then
+              echo "::error::/$PATTERN/ matched in the client bundle — a server secret is being shipped to browsers."
+              FAIL=1
+            fi
+          done
+
+          if [ "$FAIL" -ne 0 ]; then exit 1; fi
+          echo "OK: no server secrets in client bundle."
+
+      # Regression guard for H-2: demo credentials were rendered on the public
+      # login page. They must be compiled out of production builds.
+      - name: Assert demo credentials absent from production bundle
+        run: |
+          set -euo pipefail
+          if grep -rl '12345Gg' .next/static/ 2>/dev/null; then
+            echo "::error::Demo password found in production client bundle."
+            exit 1
+          fi
+          echo "OK: no demo credentials in bundle."
+
+  rls:
+    name: Supabase — RLS anon-access probe
+    runs-on: ubuntu-latest
+    # Only runs where the staging credentials are available. Fails the build if
+    # anon can read or write any sensitive table (finding C-3).
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: hq-dashboard-next/package-lock.json
+
+      - run: npm ci
+        working-directory: hq-dashboard-next
+
+      - name: Probe anonymous access
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+        run: node scripts/verify_rls.js
