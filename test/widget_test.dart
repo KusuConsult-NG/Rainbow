@@ -19,6 +19,7 @@ import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/navigation_provider.dart';
 import 'package:rainbow_app/services/push_notification_service.dart';
 import 'package:rainbow_app/services/sync_service.dart';
+import 'package:rainbow_app/services/update_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class FakePushNotificationService implements PushNotificationService {
@@ -37,6 +38,21 @@ class FakeSyncService implements SyncService {
   ValueNotifier<bool> get isSyncing => ValueNotifier<bool>(false);
 }
 
+/// Avoids the real version check, which hits PackageInfo and the network.
+class FakeUpdateService implements UpdateService {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+  @override
+  Future<UpdateInfo> checkForUpdates() async => UpdateInfo(
+        hasUpdate: false,
+        isForceUpdate: false,
+        updateUrl: '',
+        latestVersion: '1.0.0',
+      );
+  @override
+  Future<UpdateInfo> checkAppVersion() async => checkForUpdates();
+}
+
 /// Skips the real Supabase auth subscription; state is supplied directly.
 class FakeAuthNotifier extends AuthNotifier {
   FakeAuthNotifier(AuthState initialState) {
@@ -53,6 +69,7 @@ Widget _bootApp({required AuthState auth, required bool splashFinished}) {
       pushNotificationServiceProvider
           .overrideWithValue(FakePushNotificationService()),
       syncServiceProvider.overrideWithValue(FakeSyncService()),
+      updateServiceProvider.overrideWithValue(FakeUpdateService()),
       splashFinishedProvider.overrideWith((ref) => splashFinished),
     ],
     child: const RainbowApp(),
@@ -64,16 +81,29 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  // Note: pump(), never pumpAndSettle(). SplashScreen runs a repeating pulse
-  // animation, so pumpAndSettle would never return.
+  // Two timers are started by the real app shell and must be drained before the
+  // test ends, or flutter_test fails it with "Pending timers":
+  //   * SplashScreen's Timer.periodic(800ms), which cancels itself on the 4th
+  //     tick (splash_screen.dart:59-69)
+  //   * UpdateCheckListener's 1200ms delay before its version check
+  //     (update_check_listener.dart:38)
+  //
+  // pumpAndSettle cannot be used — SplashScreen also runs a repeating pulse
+  // animation, so it would never return. Pump in fixed steps instead.
+  Future<void> drainStartupTimers(WidgetTester tester) async {
+    for (var i = 0; i < 7; i++) {
+      await tester.pump(const Duration(milliseconds: 800));
+    }
+  }
   testWidgets('app boots without throwing', (tester) async {
     await tester.pumpWidget(
       _bootApp(auth: AuthState(isLoading: true), splashFinished: false),
     );
     await tester.pump();
-
     expect(find.byType(MaterialApp), findsOneWidget);
     expect(tester.takeException(), isNull);
+
+    await drainStartupTimers(tester);
   });
 
   // Exercises the real GoRouter redirect wiring end to end, rather than calling
@@ -85,7 +115,7 @@ void main() {
       _bootApp(auth: AuthState(isLoading: false), splashFinished: true),
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
+    await drainStartupTimers(tester);
 
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(find.byType(SplashScreen), findsNothing);
