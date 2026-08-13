@@ -24,7 +24,7 @@ final respondersStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref
             .select('id, full_name, role')
             .inFilter('id', userIds);
         final nameMap = <String, String>{};
-        for (final p in profiles as List) {
+        for (final p in (profiles as List).cast<Map<String, dynamic>>()) {
           nameMap[p['id'] as String] = p['full_name'] as String? ?? 'Officer';
         }
         return telemetryList.map((t) => {

@@ -36,32 +36,22 @@ jobs:
       - run: flutter --version
       - run: flutter pub get
 
-      # ── Analyze: REPORT-ONLY for now ──────────────────────────────────────
+      # ── Analyze: BLOCKING on errors ───────────────────────────────────────
       #
-      # `flutter analyze` reports 823 issues on this codebase: 41 errors, 60
-      # warnings, 722 infos.
+      # This was `continue-on-error: true` while the codebase carried 39
+      # error-severity findings. Those are now all cleared, so the gate is real:
+      # any new error-severity lint fails the build.
       #
-      # The 41 "errors" are NOT compile failures. analysis_options.yaml promotes
-      # three lint rules to error severity:
-      #     unawaited_futures: error
-      #     discarded_futures: error
-      #     avoid_dynamic_calls: error
-      # so they are style/discipline findings spread across ~12 feature screens
-      # (settings, home, safe_zone, live_tracking, mission_intel, ...). The code
-      # compiles and runs.
+      # `analysis_options.yaml` promotes three rules to error severity —
+      # unawaited_futures, discarded_futures, avoid_dynamic_calls — so this
+      # guards against fire-and-forget futures and untyped dynamic access
+      # creeping back in.
       #
-      # Clearing them means touching a dozen untested UI files, which is its own
-      # PR. Until then this step reports the debt without blocking — a step that
-      # can never go green just trains everyone to ignore the whole workflow.
-      #
-      # `flutter test` below IS blocking: it is the check that verifies behaviour
-      # rather than style, and it was being skipped entirely while analyze failed
-      # first.
-      #
-      # RATCHET: clear the 41 errors, then drop `continue-on-error`. Then the
-      # warnings, then `--no-fatal-infos`. Tracked in E2E_AUDIT_REPORT.md.
-      - name: Analyze (report-only)
-        continue-on-error: true
+      # Infos and warnings stay non-fatal: 755 infos and 54 warnings remain
+      # (line length, directive ordering, unused imports in the test suite).
+      # RATCHET: clear the 54 warnings, then drop `--no-fatal-warnings`; then
+      # the infos, then `--no-fatal-infos`.
+      - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Test

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -34,7 +35,7 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
   }
 
   Future<void> _updateStatus(String newStatus) async {
-    final alertId = alertData['id'];
+    final alertId = alertData['id'] as String?;
     if (alertId != null) {
       try {
         await SupabaseConfig.client.from('alerts').update({'status': newStatus}).eq('id', alertId);
@@ -47,7 +48,7 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
   }
 
   Future<void> _attachEvidence() async {
-    showModalBottomSheet(
+    unawaited(showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.surfaceContainerHigh,
       builder: (BuildContext ctx) {
@@ -59,7 +60,7 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
                 title: const Text('Camera Photo', style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _pickAndUploadMedia(ImageSource.camera, false);
+                  unawaited(_pickAndUploadMedia(ImageSource.camera, false));
                 },
               ),
               ListTile(
@@ -67,7 +68,7 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
                 title: const Text('Gallery Photo', style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _pickAndUploadMedia(ImageSource.gallery, false);
+                  unawaited(_pickAndUploadMedia(ImageSource.gallery, false));
                 },
               ),
               ListTile(
@@ -75,14 +76,14 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
                 title: const Text('Record Video', style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _pickAndUploadMedia(ImageSource.camera, true);
+                  unawaited(_pickAndUploadMedia(ImageSource.camera, true));
                 },
               ),
             ],
           ),
         );
       },
-    );
+    ));
   }
 
   Future<void> _pickAndUploadMedia(ImageSource source, bool isVideo) async {
@@ -100,7 +101,15 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
 
       final url = await CloudinaryService.instance.uploadMedia(File(file.path));
       if (url != null) {
-        final alertId = alertData['id'];
+        final alertId = alertData['id'] as String?;
+        if (alertId == null) {
+          // Without an id the .eq('id', null) filter matches nothing, so the
+          // upload would silently fail to attach while the UI still reported
+          // "Evidence uploaded successfully". Fail into the catch below, which
+          // clears the spinner and surfaces the error, as the Cloudinary
+          // failure path already does.
+          throw Exception('Alert has no id — cannot attach evidence');
+        }
         final existingMedia = (alertData['media_urls'] as List<dynamic>?)?.cast<String>() ?? [];
         final newMediaUrls = [...existingMedia, url];
 
@@ -177,9 +186,9 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
                     return GestureDetector(
                       onTap: () {
                         if (isAudio) {
-                          launchUrl(Uri.parse(url));
+                          unawaited(launchUrl(Uri.parse(url)));
                         } else {
-                          showDialog(
+                          unawaited(showDialog<void>(
                             context: context,
                             builder: (context) => Dialog(
                               backgroundColor: Colors.black,
@@ -187,7 +196,7 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
                                 ? const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 64))
                                 : InteractiveViewer(child: Image.network(url)),
                             ),
-                          );
+                          ));
                         }
                       },
                       child: Container(
