@@ -105,21 +105,16 @@ void main() {
       expect(await service.requestPermission(force: true), isFalse);
     });
 
-    // CHARACTERISATION, not an endorsement. `unableToDetermine` falls through
-    // every branch to the trailing `return true` at location_service.dart:71, so
-    // the service reports permission it has not actually confirmed.
-    //
-    // Left as-is deliberately: on the platforms that report this state, trying
-    // and failing may serve an SOS better than refusing outright. This test
-    // exists so the behaviour is a recorded decision rather than an accident.
-    // Flagged for review — see the PR discussion.
-    test('CHARACTERISATION: unableToDetermine currently reports success',
-        () async {
+    // REGRESSION: `unableToDetermine` used to fall through to a trailing
+    // `return true`, so the service reported permission it had not confirmed.
+    // Callers then attempted a fix, failed, and fell back to a fabricated
+    // location (C-5). An unconfirmed permission is not a granted one.
+    test('REGRESSION: unableToDetermine fails closed', () async {
       when(() => geo.isLocationServiceEnabled()).thenAnswer((_) async => true);
       when(() => geo.checkPermission())
           .thenAnswer((_) async => LocationPermission.unableToDetermine);
 
-      expect(await service.requestPermission(force: true), isTrue);
+      expect(await service.requestPermission(force: true), isFalse);
     });
   });
 

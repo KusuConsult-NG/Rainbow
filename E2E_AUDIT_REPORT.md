@@ -247,32 +247,37 @@ Two aggravating details:
   (`page.tsx:593`: `t.latitude ?? t.lat ?? null`). Only the alerts path
   fabricates. The correct behaviour is already present next to the defect.
 
-**Why this was not fixed in this pass.** Removing the fallback alone makes the
-problem worse, not better. `LiveMap.tsx:314` skips any alert without
-coordinates (`if (!alert.lat || !alert.lng) return;`), and `sectorAlerts`
-(`page.tsx:961`) feeds only counters — there is no list view. Alerts reach HQ
-*through the map*, so a null-coordinate alert would become **invisible**: a
-silently dropped emergency, which is worse than a wrong pin.
+**FIXED** — and one claim in the original write-up of this finding was wrong.
 
-A correct fix therefore needs a decision about how unlocated alerts are
-surfaced to dispatch. That is an operational question about the dispatch
-workflow, not a code question. Options, roughly in order of preference:
+I first concluded that removing the fallback would make unlocated alerts
+*invisible*, reasoning that `LiveMap.tsx:314` skips alerts without coordinates
+and `sectorAlerts` (`page.tsx:961`) feeds only counters. That was incorrect. The
+dashboard also renders a **SITUATIONAL FEED** panel beside the map
+(`page.tsx:~1388`) which maps over `filtered` and lists *every* alert in scope
+with its type, status, description and LGA — regardless of coordinates. Dropping
+the fabrication therefore does not hide anything; it only removes a false pin.
 
-1. **Distinct marker at jurisdiction centroid.** Mobile sends
-   `latitude`/`longitude` as null plus `geo_lga`/`geo_ward`; the dashboard plots
-   at the LGA or ward centroid with a visually distinct "LOCATION UNVERIFIED"
-   marker and popup. Stays visible to dispatch, removes the false precision, and
-   degrades to the accuracy actually available.
-2. **Separate unlocated-alerts panel.** Stop plotting entirely; add a persistent
-   panel that cannot be missed. Most honest, but it is new UI.
-3. **Description marker only.** Prefix with `[LOCATION_UNVERIFIED]`, following
-   the existing `[OFFLINE_SMS]`/`[SMS]` convention already used by
-   `smsFallbackCount`. Smallest change, but a dispatcher may still act on the pin.
+The fix accordingly needed no new UI:
 
-Note that option 1 requires the offline queue to accept null coordinates:
-`offline_queue` currently declares `lat REAL NOT NULL, lng REAL NOT NULL`
-(`sqlite_service.dart:34-35`), so it needs a schema version bump and an
-`onUpgrade` path.
+* **Mobile** (`alert_service.dart`) no longer substitutes Jos. `finalLat` /
+  `finalLng` stay null when there is no fix, and the null case is logged.
+* **Offline queue** (`sqlite_service.dart`) migrated v1 -> v2 to drop `NOT NULL`
+  from `lat`/`lng`. SQLite cannot alter a column in place, so the table is
+  rebuilt and rows copied; a queued alert is an unsent emergency and must
+  survive the upgrade. Covered by a test that builds a real v1 database, runs
+  the migration, and asserts the pending row is still there.
+* **Dashboard** (`page.tsx:559`) uses `?? null` instead of `|| 9.9285`, matching
+  what the telemetry path four lines below already did. `??` rather than `||` so
+  a legitimate `0` is preserved.
+* **Visibility** — the situational feed now shows a `NO GPS FIX — NOT ON MAP`
+  badge (with the ward, when known) on any alert without coordinates, and the
+  feed header shows an `N UNLOCATED` counter. A dispatcher can see that the map
+  is under-reporting rather than having to infer it.
+
+Residual: an unlocated alert is listed but not plotted. Plotting it at an
+LGA/ward centroid would be better still, but no centroid data exists in the
+repo, and hand-writing 17 LGA coordinates from memory would repeat exactly the
+fabrication this finding is about. That needs a real gazetteer.
 
 **Related, already fixed:** the offline replay path was separately dropping
 *real* coordinates through a column-name mismatch — see the offline queue fix
