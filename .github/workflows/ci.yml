@@ -131,6 +131,22 @@ jobs:
           fi
           echo "OK: no demo credentials in bundle."
 
+  rls-migration:
+    name: Supabase — RLS migration correctness
+    runs-on: ubuntu-latest
+    # Needs no credentials and touches no real data: it replays the migration
+    # history into a throwaway PostgreSQL and asserts behaviour. This is the
+    # gate that says the migration is CORRECT; the probe below says a live
+    # database is actually locked down. They answer different questions.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL 16
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-16
+      - name: Verify the RLS migration against a real PostgreSQL
+        run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_rls_migration.sh
+
   rls:
     name: Supabase — RLS anon-access probe
     runs-on: ubuntu-latest

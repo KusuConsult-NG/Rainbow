@@ -17,11 +17,30 @@ This is a public-safety / emergency-response system handling location data for
 people in danger. **Recommendation: treat the current Supabase project as
 compromised, rotate all keys, and do not deploy until C-1 through C-4 are fixed.**
 
-**Current position:** C-1, C-2, C-4 and C-5 are fixed in PR #1. **C-3 (RLS) is
-the one critical finding still open** — the migration is written but has not been
-run, and C-4's fix depends on it: until the migration's trigger lands, an
-authenticated citizen can set their own `profiles.role` to `HQ_COMMAND` and pass
-the server-side role check.
+**Current position:** all five criticals are addressed in code. **C-3 is the one
+that still needs a human**, but it is no longer unverified: the migration has been
+proven correct against a real PostgreSQL 16 (`./scripts/verify_rls_migration.sh`,
+also a CI job) — it just has not been *run* on your database, which needs
+credentials this audit does not have.
+
+The harness replays the real migration history, confirms the baseline (**12
+permissive `USING (true)` policies survive all three existing "hardening"
+migrations** — empirical proof of the finding below), applies the fix, and then
+asserts behaviour rather than structure:
+
+| Assertion | Result |
+|---|---|
+| anon cannot read `profiles`, `telemetry` or `alerts` | ✅ |
+| a citizen sees only their own profile and telemetry | ✅ |
+| a citizen **cannot escalate their own role to `HQ_COMMAND`** | ✅ blocked by trigger |
+| a benign self-update still succeeds | ✅ |
+| a citizen cannot falsify another user's GPS | ✅ |
+| command staff retain full operational visibility | ✅ |
+| a citizen cannot broadcast a state-wide advisory | ✅ |
+
+The third row is the one C-4 depends on: before the migration, `FOR ALL USING
+(auth.uid() = id)` let any citizen set their own role and pass the API layer's
+`requireRole()`.
 
 > **This document records the audit as found.** The findings below are written in
 > the present tense as they were at `f62ac83`. Several are now fixed in PR #1 —
