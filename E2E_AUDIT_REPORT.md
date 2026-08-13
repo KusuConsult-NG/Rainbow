@@ -15,9 +15,13 @@ dispatch at a fabricated location.
 
 This is a public-safety / emergency-response system handling location data for
 people in danger. **Recommendation: treat the current Supabase project as
-compromised, rotate all keys, and do not deploy until C-1 through C-4 are fixed.
-C-5 needs an operational decision before it can be fixed correctly — see that
-section.**
+compromised, rotate all keys, and do not deploy until C-1 through C-4 are fixed.**
+
+**Current position:** C-1, C-2, C-4 and C-5 are fixed in PR #1. **C-3 (RLS) is
+the one critical finding still open** — the migration is written but has not been
+run, and C-4's fix depends on it: until the migration's trigger lands, an
+authenticated citizen can set their own `profiles.role` to `HQ_COMMAND` and pass
+the server-side role check.
 
 > **This document records the audit as found.** The findings below are written in
 > the present tense as they were at `f62ac83`. Several are now fixed in PR #1 —
@@ -491,24 +495,31 @@ injection point. Bundle these locally (`leaflet` is already a dependency).
 
 ## Status as of PR #1
 
-Everything below was re-verified in CI, not asserted.
+Everything below was executed, not asserted. Flutter 3.47.0 — the version CI
+uses — is installed locally, so the Dart results are reproducible with
+`export PATH="/opt/flutter/bin:$PATH"` and do not depend on CI.
 
 ### Now executed (was "not run")
 
 | Check | Result |
 |---|---|
-| `flutter analyze` | 823 issues: 41 errors, 60 warnings, 722 infos — **report-only gate** (see below) |
-| `flutter test` | ✅ **73 passed, 1 skipped** |
+| `flutter analyze` | ✅ **0 errors** (was 39), 54 warnings, 755 infos — **blocking gate on errors** |
+| `flutter test` | ✅ **77 passed, 0 skipped** (was 51 passed, 1 skipped) |
 | `tsc --noEmit` | ✅ pass |
 | `eslint` | ✅ **0 errors**, 15 warnings (was 21 errors) |
-| `next build` | ✅ pass |
+| `next build` | ✅ pass (previously failed outright) |
 | Client bundle secret scan | ✅ no service_role key, no demo password |
 | `/dashboard` + forged cookie | ✅ 307 → /login (was 200) |
 | Unauthenticated API POST | ✅ 401 (was 200, executed) |
 | RLS anon probe | ⏸ not run — needs `STAGING_SUPABASE_*` secrets |
 
-The earlier claim that the mobile suite could not be run is **superseded**: CI now
-compiles and tests it on every push.
+The original claim that the mobile suite could not be run is **superseded**.
+
+> **A note on CI.** GitHub Actions has been unable to allocate runners since
+> ~15:16Z on the audit date — every job fails in seconds with `runner_id: 0`, no
+> steps, and logs returning 404. The red checks on PR #1 carry no information
+> about the diff. Everything in the table above was therefore verified locally
+> against the same toolchain versions CI uses.
 
 ### Finding status
 
@@ -518,7 +529,7 @@ compiles and tests it on every push.
 | C-2 | forged `__session` cookie bypass | ✅ fixed, verified by probe |
 | C-3 | RLS `USING (true)` | ⚠️ **migration written, NOT RUN** |
 | C-4 | unauthenticated API routes | ⚠️ fixed in code, **depends on C-3** |
-| C-5 | SOS reported at fabricated location | ⛔ **needs an operational decision** |
+| C-5 | SOS reported at fabricated location | ✅ fixed, both layers + schema migration |
 | H-1 | `next build` failed | ✅ fixed |
 | H-2 | demo password on public login page | ✅ fixed |
 | H-4 | hardcoded HMAC fallback secret | ✅ fixed — now throws |
@@ -528,8 +539,14 @@ compiles and tests it on every push.
 | M-4 | no CI | ✅ `.github/workflows/ci.yml` |
 | M-8 | ESLint errors | ✅ 21 → 0 (11 hooks rules downgraded to warn, TODO) |
 | M-9 | 500 on malformed JSON | ✅ 400 |
-| H-3, H-6, H-7 | `.env` in APK, committed secrets, RBAC source | ⏳ open |
-| M-1, M-3, M-5, M-6, M-7, M-10 | skipped smoke test, shallow E2E, deploy.sh, committed node_modules, dead Firebase stack, CDN | ⏳ open |
+| M-1 | skipped smoke test | ✅ un-skipped; suite has 0 skips |
+| M-5 | `deploy.sh` broken three ways | ✅ rewritten; validates env, scans the bundle, fails loudly |
+| M-6 | committed `node_modules` | ✅ untracked; 19,000 → 378 tracked files |
+| M-10 | Leaflet from a CDN | ✅ bundled locally (it was fetching JS, not just CSS) |
+| H-6 | committed secrets | ⚠️ removed from the tree; **still in git history** |
+| H-7 | role source user-writable | ⚠️ fixed by the C-3 migration's trigger — **lands when C-3 is run** |
+| H-3 | `.env` bundled into the APK | ⏳ open — needs SMS/upload moved behind authenticated endpoints |
+| M-3, M-7 | shallow tier E2E, dead Firebase stack | ⏳ open |
 
 ### Found only after the audit, by adding coverage
 
