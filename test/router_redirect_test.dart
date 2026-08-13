@@ -94,10 +94,25 @@ void main() {
       expect(result, isNull, reason: 'already on splash — stay put');
     });
 
-    test('unresolved role from another route is parked on splash', () {
+    // The role guards below only fire for a KNOWN role, so an unresolved role
+    // used to sit on a role-gated screen with no check applied at all.
+    test('unresolved role is parked on splash from a role-gated screen', () {
       expect(
         redirect(role: UserRole.unknown, location: AppRoutes.home),
         AppRoutes.splash,
+      );
+      expect(
+        redirect(role: UserRole.unknown, location: AppRoutes.agentDashboard),
+        AppRoutes.splash,
+      );
+    });
+
+    // ...but parking from everywhere would discard in-progress work, e.g. a
+    // half-filled incident report, for a state that is normally transient.
+    test('unresolved role does NOT disturb a non-role-gated screen', () {
+      expect(
+        redirect(role: UserRole.unknown, location: AppRoutes.reportDetails),
+        isNull,
       );
     });
 
