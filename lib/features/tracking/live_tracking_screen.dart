@@ -59,7 +59,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
   @override
   void initState() {
     super.initState();
-    _startPosStream();
+    unawaited(_startPosStream());
   }
 
   Future<void> _startPosStream() async {
@@ -102,7 +102,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
   }
 
   void _showResponderDetails(Map<String, dynamic> telemetry) {
-    showModalBottomSheet(
+    unawaited(showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
@@ -151,7 +151,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
           ],
         ),
       ),
-    );
+    ));
   }
 
   @override

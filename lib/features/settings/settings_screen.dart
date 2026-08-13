@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -22,7 +23,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadLanguage();
+    unawaited(_loadLanguage());
   }
 
   Future<void> _loadLanguage() async {
@@ -46,7 +47,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await SupabaseConfig.client
         .from('profiles')
         .update({'full_name': newName}).eq('id', user.id);
-    ref.read(authProvider.notifier).refreshProfile();
+    unawaited(ref.read(authProvider.notifier).refreshProfile());
   }
 
   Future<void> _updatePushEnabled(bool enabled) async {
@@ -55,7 +56,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await SupabaseConfig.client
         .from('profiles')
         .update({'push_enabled': enabled}).eq('id', user.id);
-    ref.read(authProvider.notifier).refreshProfile();
+    unawaited(ref.read(authProvider.notifier).refreshProfile());
   }
   
   Future<void> _addEmergencyContact(String contact) async {
@@ -70,7 +71,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       await SupabaseConfig.client
           .from('profiles')
           .update({'emergency_contacts': contacts}).eq('id', user.id);
-      ref.read(authProvider.notifier).refreshProfile();
+      unawaited(ref.read(authProvider.notifier).refreshProfile());
     }
   }
 
@@ -86,13 +87,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       await SupabaseConfig.client
           .from('profiles')
           .update({'emergency_contacts': contacts}).eq('id', user.id);
-      ref.read(authProvider.notifier).refreshProfile();
+      unawaited(ref.read(authProvider.notifier).refreshProfile());
     }
   }
 
   void _showEditNameDialog(String currentName) {
     final controller = TextEditingController(text: currentName);
-    showDialog(
+    unawaited(showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceContainer,
@@ -113,7 +114,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ElevatedButton(
             onPressed: () {
               if (controller.text.trim().isNotEmpty) {
-                _updateFullName(controller.text.trim());
+                unawaited(_updateFullName(controller.text.trim()));
               }
               Navigator.pop(ctx);
             },
@@ -122,12 +123,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ],
       ),
-    );
+    ));
   }
 
   void _showAddContactDialog() {
     final controller = TextEditingController();
-    showDialog(
+    unawaited(showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceContainer,
@@ -149,7 +150,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ElevatedButton(
             onPressed: () {
               if (controller.text.trim().isNotEmpty) {
-                _addEmergencyContact(controller.text.trim());
+                unawaited(_addEmergencyContact(controller.text.trim()));
               }
               Navigator.pop(ctx);
             },
@@ -158,7 +159,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ],
       ),
-    );
+    ));
   }
 
   @override
@@ -263,7 +264,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 DropdownMenuItem(value: 'HA', child: Text('Hausa')),
               ],
               onChanged: (val) {
-                if (val != null) _setLanguage(val);
+                if (val != null) unawaited(_setLanguage(val));
               },
             ),
           ),
