@@ -6,22 +6,36 @@
 
 ## Executive summary
 
-The system does not currently meet a deployable security bar. Five findings are
+The system does not currently meet a deployable security bar. Six findings are
 **critical**. C-1 to C-4, in combination, mean the entire production database —
 including citizen PII and live GPS telemetry of victims and officers — is readable
 and writable by anyone on the internet, with no credentials required. C-5 is not a
 security hole but a safety-of-life one: an SOS with no GPS fix is reported to
-dispatch at a fabricated location.
+dispatch at a fabricated location. C-6 was found last and is the only one that
+cannot be settled from inside this repository: the abandoned Firebase backend
+exposes two **unauthenticated** public HTTP endpoints running with admin
+privileges, one of which injects `DURESS`-flagged emergencies. Whether that is a
+live hole or a non-issue depends entirely on whether those functions are still
+deployed — a two-minute check that needs the Firebase console.
 
 This is a public-safety / emergency-response system handling location data for
 people in danger. **Recommendation: treat the current Supabase project as
 compromised, rotate all keys, and do not deploy until C-1 through C-4 are fixed.**
 
-**Current position:** all five criticals are addressed in code. **C-3 is the one
-that still needs a human**, but it is no longer unverified: the migration has been
-proven correct against a real PostgreSQL 16 (`./scripts/verify_rls_migration.sh`,
-also a CI job) — it just has not been *run* on your database, which needs
-credentials this audit does not have.
+**Current position:** C-1, C-2, C-4 and C-5 are fixed and verified. **Two need a
+human, for different reasons.**
+
+**C-3** is addressed in code and no longer unverified: the migration has been proven
+correct against a real PostgreSQL 16 (`./scripts/verify_rls_migration.sh`, also a CI
+job). It just has not been *run* on your database, which needs credentials this audit
+does not have.
+
+**C-6** cannot be addressed in code at all. Deleting `functions/` does not undeploy
+anything, so the only action that closes it is `firebase functions:list` against
+project `rainbow-97f1e` followed by deleting whatever is still there. Do that
+**before** deleting the source — `functions/index.js` is the last remaining record
+of what that backend exposes, and removing it first destroys the list of names you
+need to audit the console against.
 
 The harness replays the real migration history, confirms the baseline (**12
 permissive `USING (true)` policies survive all three existing "hardening"
@@ -49,7 +63,7 @@ The third row is the one C-4 depends on: before the migration, `FOR ALL USING
 
 | Severity | Count |
 |---|---|
-| Critical | 5 |
+| Critical | 6 |
 | High | 8 |
 | Medium | 10 |
 
@@ -306,6 +320,97 @@ fabrication this finding is about. That needs a real gazetteer.
 *real* coordinates through a column-name mismatch — see the offline queue fix
 and `test/offline_queue_test.dart`.
 
+### C-6. Two unauthenticated Cloud Functions can inject false emergencies — **if they are still deployed**
+
+**Files:** `functions/index.js:582` (`smsWebhook`), `functions/index.js:958` (`seedMockData`),
+`.firebaserc` (project `rainbow-97f1e`)
+
+This was originally filed under M-7 as "dead Firebase-era code". Tracing the HMAC
+scheme for H-3 showed that framing is wrong, and dangerously so.
+
+`functions/index.js` is 2,107 lines defining a **complete second backend** —
+escalation task queue, Firestore triggers, admin dispatch/resolve/escalate calls,
+a mass-broadcast engine, and a `pubsub` watchdog on `every 5 minutes`. It calls
+`admin.initializeApp()` with default credentials, so **every function runs with
+full admin privileges and bypasses `firestore.rules` entirely**. The carefully
+written rules file provides no protection against any of it.
+
+Two of the exports are `functions.https.onRequest`, which is a **public HTTP
+endpoint with no authentication unless the handler adds it**. Neither does:
+
+```js
+exports.seedMockData = functions.https.onRequest(async (req, res) => {
+  const mockAlerts = [ /* 10 fabricated alerts */ ];
+  //  ↑ no auth check, no secret, no method check, no rate limit
+  await batch.commit();
+```
+
+```js
+exports.smsWebhook = functions.https.onRequest(async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+  const messageBody = req.body.Body || req.body.text || req.body.message || "";
+  //  ↑ no signature verification, no shared secret, no sender allowlist
+```
+
+**What each does to anyone who finds the URL.**
+
+*`seedMockData`* — one unauthenticated request writes ten `CRITICAL` alerts into
+the `alerts` collection at real Plateau State coordinates. **Three are marked
+`status: "DURESS"`** — the code word this system uses for *reporting under
+coercion* — including `"A child was just taken into an unmarked black vehicle"`
+at 9.8755, 8.8522. It is a one-request false-emergency injector, and the alerts
+are indistinguishable from real ones because they are *written the same way*.
+
+*`smsWebhook`* — `POST` a body of `ALERT|<any phone>|KD|LAT:9.9|LNG:8.9` and you
+create a `CRITICAL` kidnap alert **attributed to a phone number you chose**, then
+enqueue a real task-queue escalation to WARD tier 120 seconds later. Attribution
+and dispatch, both attacker-controlled, with no credential.
+
+It also carries the C-5 defect independently: `parseFloat(...) || 9.9167` /
+`|| 8.8917`. The Jos fallback again, in a third layer nobody was looking at.
+
+**The part that makes this a live finding rather than a cleanup task.**
+
+Deleting `functions/` **does not undeploy anything.** If these were ever pushed
+to `rainbow-97f1e`, they are serving right now, and the watchdog is running every
+five minutes — a second unmonitored backend with admin rights, invisible because
+everyone reasonably believes "the app runs on Supabase". `pubspec.yaml` has no
+Firebase dependency and no file under `lib/` or `hq-dashboard-next/src/` imports
+Firebase, which is exactly why nobody would think to look.
+
+H-3 closed the loop on this. `HmacService.generateSignature` had zero callers on
+the device; `functions/index.js:442` is the **server half of that same scheme**,
+still checking for an HMAC fallback. The client stopped calling when the app moved
+to Supabase. Nothing turned the server off. That is the shape of the whole finding.
+
+**This report cannot tell you whether they are deployed.** That needs console
+access, and probing the endpoints to find out is not an option — `seedMockData`
+would write ten fake emergencies to answer the question. Two minutes, from a
+machine with Firebase credentials:
+
+```bash
+firebase functions:list --project rainbow-97f1e
+# Any of these still listed is live and unauthenticated:
+#   smsWebhook, seedMockData, escalationWatchdog, massBroadcast,
+#   adminEscalateAlert, adminDispatchAlert, adminResolveAlert, migrateLegacyIncidents
+
+firebase functions:delete smsWebhook seedMockData --project rainbow-97f1e
+```
+
+Then check whether anything acted on injected data:
+
+```bash
+# Firestore `alerts` written outside the Supabase era, DURESS ones first.
+# Any alert with via == "SMS_GATEWAY" or the seed descriptions above is suspect.
+```
+
+**Order matters, and it is the opposite of the obvious one.** Delete the *deployment*
+first, then the source. Deleting `functions/` first destroys the list of function
+names you need in order to know what to look for in the console — and this is the
+last written record of what that backend exposes. Severity is `CRITICAL` if
+deployed and `NONE` if never deployed; there is no way to be in between, and no way
+to find out from inside this repository.
+
 
 ## HIGH
 
@@ -517,6 +622,33 @@ it validates nothing about the current system.
 authoritative. Ambiguity here caused the split-brain security model (Firestore rules are
 carefully written while the live Supabase RLS is wide open).
 
+> **⚠️ Escalated — see [C-6](#c-6-two-unauthenticated-cloud-functions-can-inject-false-emergencies--if-they-are-still-deployed).**
+> Calling this "dead code" was wrong. It is dead *in this repository*; whether it is
+> dead *in production* is a separate question nobody has asked. `functions/index.js`
+> exposes two unauthenticated public HTTP endpoints running with admin privileges,
+> one of which injects `DURESS`-flagged emergencies. **Do not delete this directory
+> until the deployment has been checked** — the source is the only remaining record
+> of what that backend exposes, and deleting it first destroys the list of function
+> names needed to audit the console.
+>
+> The rest of M-7 (legacy `hq-dashboard/`, root scripts) is genuine cleanup and
+> carries no such risk.
+>
+> **`hq-dashboard-next/verify-system.js` is deleted.** It bills itself as the
+> "Comprehensive E2E System Verification Suite" and is worse than the audit first
+> recorded. Two independent reasons it verifies nothing:
+>
+> 1. It drives Firebase — `httpsCallable('adminEscalateAlert')` — against a backend
+>    the app no longer uses, so even a green run says nothing about the live system.
+> 2. Line 7 is `require("/Users/mac/RainBow/scripts/node_modules/firebase-admin")`,
+>    an absolute path on one developer's laptop. **It cannot execute anywhere else
+>    at all** — it throws on `require` before reaching a single assertion.
+>
+> Nothing references it. Same class of defect as `HmacService` (H-4) and the
+> `analyze` gate that was `continue-on-error`: something that reads as a safety net
+> and is not one. Those are the most expensive defects in this codebase, because
+> they are the reason nobody went looking.
+
 ### M-8. 21 ESLint errors
 ```
   9  react-hooks/set-state-in-effect   [error]
@@ -625,7 +757,9 @@ The original claim that the mobile suite could not be run is **superseded**.
 | H-6 | committed secrets | ⚠️ removed from the tree; **still in git history** |
 | H-7 | role source user-writable | ⚠️ fixed by the C-3 migration's trigger — **lands when C-3 is run** |
 | H-3 | `.env` bundled into the APK | ✅ server secrets removed + 2 CI gates; **shared PIN constants remain** |
-| M-3, M-7 | shallow tier E2E, dead Firebase stack | ⏳ open |
+| M-3 | shallow tier E2E | ✅ replaced with mutation-tested tier assertions |
+| M-7 | dead Firebase stack | ⏳ open — **do not delete before C-6 is checked** |
+| **C-6** | **unauthenticated Cloud Functions** | 🔴 **needs a console check — see below** |
 | — | per-user server-verified duress PIN | ⏳ open — product change, see H-3 |
 
 ### Found only after the audit, by adding coverage
@@ -656,6 +790,10 @@ clear the warnings, drop `--no-fatal-warnings`; then the infos, then
 
 ### Still requires someone with production access
 
+0. **`firebase functions:list --project rainbow-97f1e`** — do this first; it is two
+   minutes and it is the only way to settle C-6. If `smsWebhook` or `seedMockData`
+   is listed, an unauthenticated stranger can inject `DURESS`-flagged emergencies
+   into your alert store today. Delete the deployment before deleting `functions/`.
 1. **Rotate credentials** — service_role, Firebase, Cloudinary, Termii, and the
    `HQ-001`/`HQ-002`/`COMMANDER-TEST` passwords. The code holes are shut; the
    leaked credentials are still live.
