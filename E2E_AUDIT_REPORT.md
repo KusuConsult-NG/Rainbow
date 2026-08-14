@@ -754,11 +754,36 @@ uses — is installed locally, so the Dart results are reproducible with
 
 The original claim that the mobile suite could not be run is **superseded**.
 
-> **A note on CI.** GitHub Actions has been unable to allocate runners since
-> ~15:16Z on the audit date — every job fails in seconds with `runner_id: 0`, no
-> steps, and logs returning 404. The red checks on PR #1 carry no information
-> about the diff. Everything in the table above was therefore verified locally
-> against the same toolchain versions CI uses.
+> **A note on CI — most likely exhausted Actions minutes, not a platform outage.**
+>
+> Every job since 2026-08-13 15:17Z fails in 1-3 seconds with `runner_id: 0`,
+> `runner_name: ""`, zero steps, and logs returning 404. The red checks on PR #1
+> carry no information about the diff, so everything in the table above was
+> verified locally against the toolchain versions CI pins.
+>
+> The run history pins the transition to a **three-minute window**:
+>
+> | Run | Time | Runner | Outcome |
+> |---|---|---|---|
+> | `dae0268` attempt 1 | 15:11:59Z | `1000002594` / `1000002595`, full step lists, 2m22s | real run — web job **passed**, Flutter job genuinely failed on a pending-timer assertion |
+> | `ba81f15` attempt 2 | 15:17:05Z | `0`, no steps, 2s | never started |
+>
+> Everything after 15:17Z matches the second row, unchanged across 22 hours, five
+> re-run attempts, both `push` and `pull_request` events, and every job in the
+> workflow — including two jobs that did not exist when it began.
+>
+> **This repository is private**, so every runner minute bills against the account
+> quota. Runs that execute normally and then switch, at a moment, to being created
+> and instantly failed with no runner assigned is the signature of exhausted
+> included minutes or a reached spending limit. A platform-wide Actions outage
+> lasting 22 hours would be extraordinary; a billing block lasting 22 hours is
+> simply what happens until someone changes a setting.
+>
+> **Not confirmed.** This audit cannot read the account's billing page, and
+> `githubstatus.com` is unreachable from this environment, so the platform-outage
+> explanation is not formally excluded — the inference rests on the timing, the
+> duration, and the fact that re-running changes nothing. Check
+> **Settings → Billing and plans → Actions usage / Spending limit** first.
 
 ### Finding status
 
