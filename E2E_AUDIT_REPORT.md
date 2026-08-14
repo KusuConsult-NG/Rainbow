@@ -338,17 +338,64 @@ the unauthenticated page. Combined with C-3 these are working command-level logi
 `NODE_ENV !== 'production'` at minimum. Rotate all three passwords. Enforce a password
 policy and MFA for command accounts.
 
-### H-3. `.env` is bundled into the shipped mobile binary
+### H-3. `.env` is bundled into the shipped mobile binary — ✅ fixed
 
 `pubspec.yaml:69` lists `.env` under `flutter: assets:`. Flutter assets are stored
-verbatim in the APK/IPA and extract with `unzip`. Every secret in `.env` is therefore
+verbatim in the APK/IPA and extract with `unzip`. Every secret in `.env` was therefore
 public: `TERMII_API_KEY`, `CLOUDINARY_API_SECRET`, `HMAC_SECRET`, `DEMO_CITIZEN_PASS`,
 `AGENT_DEFAULT_PASS`, `DURESS_PIN`, `SAFE_PIN`.
 
-**Fix:** Remove server-side secrets from the app. Proxy SMS (Termii) and media uploads
-through authenticated backend endpoints. Keep only genuinely public values (Supabase URL
-and anon key) in the client. `DURESS_PIN`/`SAFE_PIN` must be per-user and server-verified,
-not a build-time constant shared by every install.
+No amount of care inside the Dart code could fix this. The credential simply cannot be
+on the device; it has to move.
+
+**What was done.** Each of the three server-side secrets was traced to its actual use,
+and in two of the three cases the use turned out not to exist:
+
+| Secret | Real usage found | Resolution |
+|---|---|---|
+| `TERMII_API_KEY` | **one** call site — `emergency_provider` sending the SOS escalation SMS | moved behind `POST /api/sos/dispatch-sms` |
+| `HMAC_SECRET` | **zero** call sites — `HmacService.generateSignature` was never invoked | service deleted, key dropped |
+| `CLOUDINARY_API_SECRET` | signed-upload branch, dead since the secret defaulted to `''` | already removed under H-5 |
+
+`lib/services/termii_service.dart` and `lib/services/hmac_service.dart` are gone.
+`SosDispatchService` replaces the first: it presents the **user's own** Supabase access
+token to the HQ backend and sends structured facts — alert id and coordinates. It holds
+no credential, chooses no recipient, and composes no message text.
+
+**Why the new endpoint is not just a relocated hole.** Moving a credential server-side is
+worthless if the endpoint sends anything anywhere on request. `/api/sos/dispatch-sms`
+constrains all three degrees of freedom:
+
+* the **recipient** comes from `SOS_DISPATCH_PHONE` on the server, never the request;
+* the **message body** is composed server-side from validated fields — coordinates are
+  range-checked numbers, the alert ref is stripped to `[A-Za-z0-9-]{0,8}`, so no
+  caller-authored prose can be emitted under the HQ sender ID;
+* the **caller** must present a token that Supabase's auth server verifies. The token is
+  not decoded locally: a JWT this process merely parses proves nothing.
+
+A best-effort per-user rate limit (3 per 5 min) bounds the ordinary retry case. It is
+in-memory and per-instance, so it is documented in the route as what it is — a cheap
+90%, not a security control. A durable limit belongs in the database or at the edge.
+
+**Verified.** Unauthenticated `POST` → `401`; forged bearer JWT → `401`; empty bearer →
+`401`; malformed JSON from an unauthenticated caller → `401`, not `400`, confirming the
+auth check runs before any parsing. A production build scanned for `TERMII_API_KEY`, the
+sentinel key value, `SOS_DISPATCH_PHONE` and the destination number: clean. The only
+`termii` string in any client chunk is the UI label `TERMII CPaaS SMS GATEWAY`.
+
+Two CI gates now hold this shut: the mobile job fails if any Dart source references
+`termii.com`, `TERMII_API_KEY`, `HMAC_SECRET` or `CLOUDINARY_API_SECRET`, and the web
+job's bundle scan gained a `TERMII_API_KEY` pattern. Both were checked in **both**
+directions — silent on the fixed tree, and firing when the pre-fix files are restored.
+The first attempt at the source gate was silently blind: its comment filter matched the
+`//` inside `https://`, so it could not see the very endpoint it existed to find.
+
+**Still open, and deliberately not fixed here.** `DURESS_PIN`/`SAFE_PIN` remain
+build-time constants shared by every install, so they are still extractable. Per-user,
+server-verified PINs are a product change — new schema, new verification flow, migration
+for existing users — not a defect patch. The dangerous part (a duress PIN silently
+defaulting to `9999`, a value published in this repository) is fixed; the shared-constant
+design is not.
 
 ### H-4. Hardcoded HMAC shared secret
 
@@ -361,6 +408,19 @@ malicious client regardless.
 
 **Fix:** Remove the fallback and fail closed. Re-scope what HMAC is meant to protect; if
 it is request integrity, enforce it server-side against a key the client never holds.
+
+**Update — the scheme was never running.** The first fix removed the fallback so
+`generateSignature` throws when unconfigured. Tracing call sites for H-3 then showed
+`HmacService.generateSignature` has **zero callers** anywhere in `lib/` or `test/`.
+Nothing in this app has ever signed anything; the "HMAC gateway" is decoration.
+
+That reframes the finding. The original risk was not that signatures could be forged —
+it was that a reviewer reading `hmac_service.dart` would conclude request integrity was
+handled. It was not, and no amount of fixing the fallback would have made it so.
+
+The service is deleted and `HMAC_SECRET` is out of `AppConfig.requiredKeys`. Demanding a
+secret at startup for a scheme that does not execute trains operators to dismiss the
+config warning, which is how a genuinely missing key gets ignored later.
 
 ### H-5. Cloudinary credentials hardcoded; signed-upload path is dead
 
@@ -551,7 +611,7 @@ The original claim that the mobile suite could not be run is **superseded**.
 | C-5 | SOS reported at fabricated location | ✅ fixed, both layers + schema migration |
 | H-1 | `next build` failed | ✅ fixed |
 | H-2 | demo password on public login page | ✅ fixed |
-| H-4 | hardcoded HMAC fallback secret | ✅ fixed — now throws |
+| H-4 | hardcoded HMAC fallback secret | ✅ fixed — service had **zero callers**, deleted |
 | H-5 | Cloudinary dead signed-upload path | ✅ removed |
 | H-8 | fresh clone cannot build | ✅ `.env.example` added for both apps |
 | M-2 | no mocking framework | ✅ `mocktail` + `sqflite_common_ffi` added |
@@ -564,8 +624,9 @@ The original claim that the mobile suite could not be run is **superseded**.
 | M-10 | Leaflet from a CDN | ✅ bundled locally (it was fetching JS, not just CSS) |
 | H-6 | committed secrets | ⚠️ removed from the tree; **still in git history** |
 | H-7 | role source user-writable | ⚠️ fixed by the C-3 migration's trigger — **lands when C-3 is run** |
-| H-3 | `.env` bundled into the APK | ⏳ open — needs SMS/upload moved behind authenticated endpoints |
+| H-3 | `.env` bundled into the APK | ✅ server secrets removed + 2 CI gates; **shared PIN constants remain** |
 | M-3, M-7 | shallow tier E2E, dead Firebase stack | ⏳ open |
+| — | per-user server-verified duress PIN | ⏳ open — product change, see H-3 |
 
 ### Found only after the audit, by adding coverage
 
@@ -580,14 +641,18 @@ Two defects that static review missed and running the code caught:
 Both came from adding *positive-path* coverage. The pre-existing tests passed
 only through error branches, which is why neither showed up sooner.
 
-### Why `flutter analyze` is a report-only gate
+### `flutter analyze` is now a blocking gate
 
 `analysis_options.yaml` promotes three lint rules to error severity
-(`unawaited_futures`, `discarded_futures`, `avoid_dynamic_calls`), producing 41
-"errors" that are style findings, not compile failures, spread across ~12 feature
-screens. A gate that can never pass gets ignored, so `analyze` reports while
-`flutter test` blocks. Ratchet documented in the workflow: clear the errors, drop
-`continue-on-error`, then the warnings, then `--no-fatal-infos`.
+(`unawaited_futures`, `discarded_futures`, `avoid_dynamic_calls`). Those produced
+39 error-severity findings across ~12 feature screens, so the job originally ran
+`continue-on-error` — a gate that can never pass gets ignored.
+
+All 39 are cleared and `continue-on-error` is gone: any new error-severity lint
+now fails the build. Infos and warnings stay non-fatal (830 remain: line length,
+directive ordering, unused test imports). Ratchet documented in the workflow:
+clear the warnings, drop `--no-fatal-warnings`; then the infos, then
+`--no-fatal-infos`.
 
 ### Still requires someone with production access
 

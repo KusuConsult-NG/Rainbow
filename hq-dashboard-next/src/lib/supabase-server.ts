@@ -70,5 +70,44 @@ export async function requireRole(allowedRoles: string[]): Promise<Authorised | 
   return { ok: true, userId: user.id, role };
 }
 
+/**
+ * Authenticate a NON-BROWSER caller carrying a Supabase access token as
+ * `Authorization: Bearer <jwt>`.
+ *
+ * The mobile app is not a cookie client — it holds a Supabase session in the
+ * Flutter SDK — so `requireRole()` above (which reads request cookies) can never
+ * authorise it. Without this, the only way for the app to reach a privileged
+ * backend operation was to hold the provider credential itself, which is exactly
+ * what put `TERMII_API_KEY` inside the shipped APK (finding H-3).
+ *
+ * The token is verified by Supabase's auth server, not decoded locally: a JWT
+ * this process merely parses proves nothing.
+ *
+ * No role check here on purpose. The routes that use it are ones ANY authenticated
+ * citizen is entitled to invoke (raising their own SOS). Authorisation for those
+ * comes from the route constraining WHAT can be done, not from the caller's rank.
+ */
+export async function requireUser(req: Request): Promise<Authorised | Unauthorised> {
+  const header = req.headers.get('authorization') ?? '';
+  const token = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : '';
+  if (!token) {
+    return { ok: false, status: 401, error: 'Authentication required' };
+  }
+
+  const admin = getSupabaseAdmin();
+  const { data: { user }, error } = await admin.auth.getUser(token);
+  if (error || !user) {
+    return { ok: false, status: 401, error: 'Authentication required' };
+  }
+
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  return { ok: true, userId: user.id, role: (profile?.role as string | undefined) ?? '' };
+}
+
 /** Roles permitted to trigger outbound dispatch / inter-agency escalation. */
 export const COMMAND_ROLES = ['HQ_COMMAND', 'HQ_OFFICER', 'ADMIN', 'LGA_COMMAND'];

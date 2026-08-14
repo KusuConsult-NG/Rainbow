@@ -36,6 +36,36 @@ jobs:
       - run: flutter --version
       - run: flutter pub get
 
+      # Regression guard for H-3. `.env` is a Flutter ASSET, so it ships verbatim
+      # in the APK and extracts with `unzip`. The Termii credential lived there
+      # until it was moved behind /api/sos/dispatch-sms. Nothing in the app may
+      # talk to an SMS provider directly again, because doing so requires putting
+      # the key back on the device.
+      - name: Assert no SMS provider credential on the device
+        run: |
+          set -uo pipefail
+          # Comment lines are excluded: this file and several source files explain
+          # WHY these names are gone, and a gate that fires on its own rationale
+          # gets deleted rather than fixed.
+          #
+          # The exclusion is anchored to `<path>:<line>:` because an unanchored
+          # `//` also matches the `://` inside a URL — which silently made the
+          # endpoint check blind to `https://api.ng.termii.com`, the exact string
+          # it exists to find. Verified both ways before committing.
+          scan() { grep -rnE "$1" $2 2>/dev/null | grep -vE '^[^:]*:[0-9]+:[[:space:]]*(//|#)'; }
+
+          FAIL=0
+          if scan 'termii\.com' 'lib/'; then
+            echo "::error::Dart source calls the Termii API directly — that requires shipping TERMII_API_KEY inside the APK (H-3). Use SosDispatchService."
+            FAIL=1
+          fi
+          if scan 'TERMII_API_KEY|CLOUDINARY_API_SECRET|HMAC_SECRET' 'lib/ .env.example'; then
+            echo "::error::A server-side secret is referenced by mobile code or its env template. Secrets belong behind an authenticated backend endpoint (H-3)."
+            FAIL=1
+          fi
+          if [ "$FAIL" -ne 0 ]; then exit 1; fi
+          echo "OK: no SMS provider credential is reachable from the handset."
+
       # ── Analyze: BLOCKING on errors ───────────────────────────────────────
       #
       # This was `continue-on-error: true` while the codebase carried 39
@@ -69,6 +99,9 @@ jobs:
       NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
       NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder_anon_key
       SUPABASE_SERVICE_ROLE_KEY: placeholder_service_role_key_CI_SENTINEL
+      # The SMS credential relocated here from the mobile app (H-3). The scan
+      # below proves it does not reach a browser chunk on the way.
+      TERMII_API_KEY: placeholder_termii_key_CI_SENTINEL
     steps:
       - uses: actions/checkout@v4
 
@@ -109,7 +142,8 @@ jobs:
             'sb_secret_[A-Za-z0-9_-]{16,}' \
             'eyJhbGciOi[A-Za-z0-9_-]{20,}' \
             'CI_SENTINEL' \
-            'SUPABASE_SERVICE_ROLE_KEY'
+            'SUPABASE_SERVICE_ROLE_KEY' \
+            'TERMII_API_KEY'
           do
             if grep -rlE "$PATTERN" .next/static/ 2>/dev/null; then
               echo "::error::/$PATTERN/ matched in the client bundle — a server secret is being shipped to browsers."

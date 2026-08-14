@@ -19,23 +19,28 @@ void main() {
       expect(AppConfig.hasEmergencyPins, isFalse);
     });
 
-    test('REGRESSION: HMAC secret never falls back to a constant', () {
-      expect(AppConfig.hmacSecret, isNull);
-    });
-
     test('missing required keys are reported, not hidden', () {
       expect(
         AppConfig.missingRequiredKeys(),
-        containsAll(['SAFE_PIN', 'DURESS_PIN', 'HMAC_SECRET']),
+        containsAll(['SAFE_PIN', 'DURESS_PIN']),
       );
+    });
+
+    // H-3: the SMS credential moved to the backend, so nothing should be asking
+    // the handset for it. If TERMII_API_KEY or HMAC_SECRET ever reappears in
+    // requiredKeys, a secret has been reintroduced into a bundled asset.
+    test('REGRESSION: no server-side secret is required on the device', () {
+      expect(AppConfig.requiredKeys, isNot(contains('TERMII_API_KEY')));
+      expect(AppConfig.requiredKeys, isNot(contains('HMAC_SECRET')));
+      expect(AppConfig.requiredKeys, isNot(contains('CLOUDINARY_API_SECRET')));
     });
 
     test('pin pad falls back to a sane length when unconfigured', () {
       expect(AppConfig.pinEntryLength, 4);
     });
 
-    test('non-safety-critical defaults are still allowed', () {
-      expect(AppConfig.sosPhone, isNotEmpty);
+    test('HQ API base URL is null when unconfigured', () {
+      expect(AppConfig.hqApiBaseUrl, isNull);
     });
   });
 }
