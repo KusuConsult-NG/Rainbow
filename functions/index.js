@@ -579,8 +579,35 @@ exports.createAlert = functions.https.onCall(async (data, context) => {
 // ============================================================
 // 3. OFFLINE SMS WEBHOOK
 // ============================================================
+//
+// AUDIT C-6. `functions.https.onRequest` is a PUBLIC HTTP endpoint with no
+// authentication unless the handler adds it. This one did not: anyone who found
+// the URL could POST `ALERT|<any phone>|KD|LAT:..|LNG:..` and create a CRITICAL
+// kidnap alert attributed to a phone number of their choosing, then have it
+// escalated to WARD tier 120 seconds later. Attribution and dispatch, both
+// attacker-controlled, with no credential.
+//
+// The guard below closes that for anything deployed FROM NOW ON. It does not
+// help an already-deployed copy — source changes do not reach a live function
+// until someone redeploys. Closing C-6 means deleting the DEPLOYMENT:
+//   firebase functions:list --project rainbow-97f1e
+// See E2E_AUDIT_REPORT.md C-6 for the full procedure and why the source must
+// not be deleted first.
+//
+// Fails closed when RAINBOW_SMS_GATEWAY_SECRET is unset, because an SMS gateway
+// that accepts unauthenticated emergency reports is worse than one that is off.
 exports.smsWebhook = functions.https.onRequest(async (req, res) => {
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+
+  const gatewaySecret = process.env.RAINBOW_SMS_GATEWAY_SECRET || "";
+  if (!gatewaySecret) {
+    console.error('[SMS_WEBHOOK] RAINBOW_SMS_GATEWAY_SECRET is not configured — refusing.');
+    return res.status(503).send('Gateway not configured.');
+  }
+  if (req.get('X-Rainbow-Gateway-Auth') !== gatewaySecret) {
+    console.warn('[SMS_WEBHOOK] Rejected a request with a missing or wrong gateway secret.');
+    return res.status(401).send('Unauthorized');
+  }
 
   const messageBody = req.body.Body || req.body.text || req.body.message || "";
   if (!messageBody.startsWith("ALERT|")) return res.status(200).send('Format ignored.');
@@ -589,8 +616,21 @@ exports.smsWebhook = functions.https.onRequest(async (req, res) => {
     const segments = messageBody.split('|');
     const reporterPhone = segments[1];
     const typeCode = segments[2];
-    const lat = parseFloat(segments[3]?.replace('LAT:', '')) || 9.9167;
-    const lng = parseFloat(segments[4]?.replace('LNG:', '')) || 8.8917;
+    // AUDIT C-5, third occurrence. `|| 9.9167` / `|| 8.8917` is the central-Jos
+    // fallback: an SMS that carried no usable position produced a CONFIDENT PIN
+    // in central Jos, indistinguishable from a real fix, and responders were
+    // dispatched to a location produced by a `||` operator. The `||` also
+    // replaced a legitimate coordinate of exactly 0.
+    //
+    // Null instead. A dispatcher who can see "no position" can ask; one looking
+    // at a wrong pin cannot know to.
+    const parseCoord = (segment, prefix, limit) => {
+      const value = parseFloat(String(segment ?? '').replace(prefix, ''));
+      if (!Number.isFinite(value) || Math.abs(value) > limit) return null;
+      return value;
+    };
+    const lat = parseCoord(segments[3], 'LAT:', 90);
+    const lng = parseCoord(segments[4], 'LNG:', 180);
 
     const typeMap = { 'KD': 'Kidnap', 'FR': 'Fire', 'DA': 'Drug abuse', 'CM': 'Attack', 'OT': 'Other' };
     const alertType = typeMap[typeCode] || 'Unknown';
@@ -955,7 +995,31 @@ exports.agentUpdateMissionStatus = functions.https.onCall(async (data, context) 
   });
 });
 
+// AUDIT C-6. A PUBLIC, UNAUTHENTICATED HTTP endpoint that writes ten CRITICAL
+// alerts at real Plateau State coordinates — three of them flagged `DURESS`, the
+// code word this system uses for reporting under coercion. One request from
+// anyone who found the URL was a false-emergency injector, and the rows are
+// indistinguishable from real ones because they are written the same way.
+//
+// Kept as an export rather than deleted so the source still names it: auditing
+// `firebase functions:list --project rainbow-97f1e` requires knowing what to
+// look for. It now refuses in every configuration except an explicitly-flagged
+// non-production one. As with smsWebhook, this protects future deploys only —
+// an already-deployed copy is unchanged until it is deleted from the project.
 exports.seedMockData = functions.https.onRequest(async (req, res) => {
+  const seedSecret = process.env.RAINBOW_SEED_SECRET || "";
+  const seedingEnabled = process.env.RAINBOW_ALLOW_SEED === "true";
+
+  if (!seedingEnabled || !seedSecret) {
+    console.error('[SEED] Refused — seeding is disabled unless RAINBOW_ALLOW_SEED=true and RAINBOW_SEED_SECRET is set.');
+    return res.status(403).send('Seeding is disabled.');
+  }
+  if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+  if (req.get('X-Rainbow-Seed-Auth') !== seedSecret) {
+    console.warn('[SEED] Rejected a request with a missing or wrong seed secret.');
+    return res.status(401).send('Unauthorized');
+  }
+
   const mockAlerts = [
     { type: "Kidnap - Attempted Kidnap", description: "Suspicious individuals monitoring school bus route near Mangu.", lat: 9.5133, lng: 9.0967, reportedBy: "+2348001112222", status: "OPEN", priority: "CRITICAL", assigned_to: "WARD", reportedAt: admin.firestore.FieldValue.serverTimestamp() },
     { type: "Fire - Bush Fire", description: "Large bush fire spreading towards residential area in Jos South.", lat: 9.7716, lng: 8.8681, reportedBy: "anonymous", status: "OPEN", priority: "CRITICAL", assigned_to: "LGA", reportedAt: admin.firestore.FieldValue.serverTimestamp() },

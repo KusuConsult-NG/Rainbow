@@ -411,6 +411,34 @@ last written record of what that backend exposes. Severity is `CRITICAL` if
 deployed and `NONE` if never deployed; there is no way to be in between, and no way
 to find out from inside this repository.
 
+**Partial mitigation applied — read the scope carefully.** While `functions/` stays
+in the tree it is *deployable source*, so anyone who runs `firebase deploy` for an
+unrelated reason ships the open version. Both endpoints now fail closed:
+
+* `smsWebhook` requires `X-Rainbow-Gateway-Auth` to match `RAINBOW_SMS_GATEWAY_SECRET`,
+  and returns `503` when that secret is unset — an SMS gateway accepting
+  unauthenticated emergency reports is worse than one that is off.
+* `seedMockData` refuses unless `RAINBOW_ALLOW_SEED=true` **and** `RAINBOW_SEED_SECRET`
+  matches `X-Rainbow-Seed-Auth`, and rejects `GET` outright.
+* The `|| 9.9167` / `|| 8.8917` fabrication is gone — C-5's third occurrence. Coordinates
+  are now range-checked and stored as `null` when unusable, and a legitimate `0` survives.
+
+`functions/test_guards.js` asserts this against the **real exported handlers** with
+Firestore stubbed, so the property under test is not "the response is 401" but
+"nothing reached the database" — a guard that returns 401 *after* writing the row
+would pass the first check and fail this one. It runs as its own CI job, which skips
+cleanly once `functions/` is deleted.
+
+Mutation-verified: with the guards removed, 15 of the 16 assertions fail, and the
+unauthenticated `seedMockData` call produces **11 writes**. That is the impact of this
+finding, measured rather than asserted. The one assertion that still passes is the
+deliberate control — *an authorised request is still processed* — which must hold in
+both directions, or the guard is just an outage.
+
+**This changes nothing about a deployed copy.** Source edits do not reach a live Cloud
+Function until someone redeploys. It removes a trap for the future; it does not close
+the finding. `firebase functions:delete` closes the finding.
+
 
 ## HIGH
 
