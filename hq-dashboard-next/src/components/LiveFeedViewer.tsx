@@ -244,7 +244,7 @@ export default function LiveFeedViewer({ alertId }: Props) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
                 <Video size={28} style={{ color: '#475569' }} />
-                <span style={{ fontSize: '11px', color: '#94a3b8' }}>Click "CONNECT LIVE FEED" when field unit broadcasts video</span>
+                <span style={{ fontSize: '11px', color: '#94a3b8' }}>Click &ldquo;CONNECT LIVE FEED&rdquo; when field unit broadcasts video</span>
               </div>
             )}
           </div>

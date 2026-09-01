@@ -9,6 +9,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/app.dart';
+import 'package:rainbow_app/core/config/app_config.dart';
 import 'package:rainbow_app/core/providers/tactical_provider_observer.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
@@ -87,10 +88,16 @@ void main() {
     try {
       debugPrint('🚀 [MAIN] Loading .env...');
       await dotenv.load().timeout(const Duration(seconds: 3));
-      debugPrint('🚀 [MAIN] .env Loaded.');
+      debugPrint('🚀 [MAIN] .env Loaded. keys=${dotenv.env.length}');
     } catch (e) {
       debugPrint('⚠️ [MAIN] .env load warning: $e');
     }
+
+    // Report configuration state explicitly. The load above is intentionally
+    // non-fatal, which means a missing .env used to leave the app running with
+    // every fallback silently active. validate() makes that visible in logs and
+    // throws in debug builds so it cannot reach a tester unnoticed.
+    AppConfig.validate();
 
     // Force orientation lock for security HUD consistency
     await SystemChrome.setPreferredOrientations([

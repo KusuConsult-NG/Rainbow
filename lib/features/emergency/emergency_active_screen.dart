@@ -4,12 +4,12 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:rainbow_app/core/config/app_config.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
@@ -712,7 +712,8 @@ class _TacticalPinVerificationState
 
   @override
   Widget build(BuildContext context) {
-    final pinLength = dotenv.env['SAFE_PIN']?.length ?? 4;
+    // Length spans BOTH pins so a duress PIN longer than the safe PIN stays enterable.
+    final pinLength = AppConfig.pinEntryLength;
     final horizontalMargin = pinLength > 4 ? 8.0 : 16.0;
 
     return BackdropFilter(
@@ -822,16 +823,18 @@ class _TacticalPinVerificationState
   }
 
   Widget _buildKey(int number) {
-    final pinLength = dotenv.env['SAFE_PIN']?.length ?? 4;
+    final pinLength = AppConfig.pinEntryLength;
     return GestureDetector(
       onTap: () async {
         unawaited(HapticFeedback.lightImpact());
         final currentPin = pin + number.toString();
         
-        final safePin = dotenv.env['SAFE_PIN'];
-        final duressPin = dotenv.env['DURESS_PIN'];
+        final safePin = AppConfig.safePin;
+        final duressPin = AppConfig.duressPin;
 
-        if (safePin == null && duressPin == null) {
+        // Fail loudly when unconfigured; the provider no longer silently
+        // falls back to the publicly-known '0000'/'9999' constants.
+        if (!AppConfig.hasEmergencyPins) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Error: No PIN configured in environment.')),
           );

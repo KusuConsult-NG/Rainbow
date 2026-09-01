@@ -57,7 +57,18 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   // Plateau State Tactical Bounds
   const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.50, 10.80]];
 
-  // Dynamic script loader for Leaflet & MarkerCluster (prevents React JSX script tag warnings)
+  // Leaflet is loaded from the LOCAL package, not a CDN.
+  //
+  // This previously did `loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js')`,
+  // which made the command dashboard's map — the only surface through which HQ
+  // sees incoming alerts — hard-dependent on unpkg being reachable at runtime.
+  // On a restricted government network, or during an unpkg outage, the map did
+  // not degrade: it never initialised. There was also no SRI, so an unpkg
+  // compromise meant arbitrary JS inside the command dashboard.
+  //
+  // `leaflet` was already a dependency, so this was fetching over the network
+  // something the bundle already contained. Imports stay dynamic and inside the
+  // effect because Leaflet touches `window` and must not run during SSR.
   useEffect(() => {
     let isMounted = true;
 
@@ -71,36 +82,26 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
       return;
     }
 
-    const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
-      const existing = document.querySelector(`script[src="${src}"]`);
-      if (existing) {
-        resolve();
-        return;
-      }
-      const s = document.createElement('script');
-      s.src = src;
-      s.onload = () => resolve();
-      s.onerror = reject;
-      document.head.appendChild(s);
-    });
-
     const initScripts = async () => {
       try {
         if (!(window as any).L) {
-          await loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
+          const leaflet = await import('leaflet');
+          // The markercluster plugin augments the global `L`, and the rest of
+          // this component reads `window.L`, so keep that contract.
+          (window as any).L = leaflet.default ?? leaflet;
         }
         if (typeof (window as any).L?.markerClusterGroup !== 'function') {
           try {
-            await loadScript('https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js');
+            await import('leaflet.markercluster');
           } catch (e) {
-            console.warn('MarkerCluster optional script failed to load, falling back to LayerGroup');
+            console.warn('MarkerCluster failed to load, falling back to LayerGroup', e);
           }
         }
         if (isMounted && isReady()) {
           setLeafletLoaded(true);
         }
       } catch (err) {
-        console.error('Failed to load Leaflet scripts:', err);
+        console.error('Failed to initialise Leaflet:', err);
       }
     };
 

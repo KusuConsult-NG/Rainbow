@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -7,7 +8,7 @@ final languageProvider = StateNotifierProvider<LanguageNotifier, String>((ref) {
 
 class LanguageNotifier extends StateNotifier<String> {
   LanguageNotifier() : super('EN') {
-    _loadLanguage();
+    unawaited(_loadLanguage());
   }
 
   Future<void> _loadLanguage() async {

@@ -24,11 +24,11 @@ class PushNotificationService {
   Future<void> initialize() async {
     try {
       if (kDebugMode) {
-        OneSignal.Debug.setLogLevel(OSLogLevel.verbose);
+        unawaited(OneSignal.Debug.setLogLevel(OSLogLevel.verbose));
       }
 
       // Initialize OneSignal SDK
-      OneSignal.initialize(_oneSignalAppId);
+      unawaited(OneSignal.initialize(_oneSignalAppId));
 
       // Prompt for push notification permissions
       await OneSignal.Notifications.requestPermission(true);

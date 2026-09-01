@@ -92,16 +92,16 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
   void _toggleListening() {
     final speechService = SpeechService.instance;
     if (_isListening) {
-      speechService.stopListening();
+      unawaited(speechService.stopListening());
       setState(() => _isListening = false);
     } else {
       setState(() => _isListening = true);
-      speechService.startListening(onResult: (text) {
+      unawaited(speechService.startListening(onResult: (text) {
         setState(() {
           _controller.text = text;
           _isListening = false;
         });
-      });
+      }));
     }
   }
 

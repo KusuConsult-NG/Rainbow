@@ -46,6 +46,7 @@ class AuthState {
     this.profile,
     this.hasOnboarded = false,
     this.isLoading = true,
+    this.resolutionError,
   });
 
   /// Documentation for this public member.
@@ -69,6 +70,10 @@ class AuthState {
   /// Documentation for this public member.
   final bool isLoading;
 
+  /// Non-null when role resolution failed. The router treats this as
+  /// "authenticated but role unknown" rather than silently downgrading the user.
+  final String? resolutionError;
+
   /// Documentation for this public member.
 
   AuthState copyWith({
@@ -79,6 +84,7 @@ class AuthState {
     Map<String, dynamic>? profile,
     bool? hasOnboarded,
     bool? isLoading,
+    String? resolutionError,
   }) {
     return AuthState(
       user: user ?? this.user,
@@ -88,6 +94,7 @@ class AuthState {
       profile: profile ?? this.profile,
       hasOnboarded: hasOnboarded ?? this.hasOnboarded,
       isLoading: isLoading ?? this.isLoading,
+      resolutionError: resolutionError ?? this.resolutionError,
     );
   }
 
@@ -147,7 +154,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   @override
   void dispose() {
-    _authSubscription?.cancel();
+    unawaited(_authSubscription?.cancel());
     super.dispose();
   }
 
@@ -200,15 +207,27 @@ class AuthNotifier extends StateNotifier<AuthState> {
       state = AuthState(
         user: user,
         role: role,
+        resolutionError: null,
         tier: tier,
         jurisdiction: jurisdiction,
         profile: profile,
         hasOnboarded: hasOnboarded,
         isLoading: false,
       );
-    } catch (e) {
-      debugPrint('[AUTH] Profile resolution failed: $e');
-      state = state.copyWith(isLoading: false, role: UserRole.citizen);
+    } catch (e, st) {
+      // Do NOT default to citizen here. This previously demoted an HQ/LGA
+      // commander to the citizen UI whenever the profile query failed (flaky
+      // rural network, RLS denial, timeout) — and because `hasOnboarded` stays
+      // false through copyWith, the router then pushed them into the first-run
+      // onboarding wizard mid-incident. Surface the failure instead so the UI
+      // can offer a retry and the operator knows their role is unresolved.
+      debugPrint('[AUTH] Profile resolution FAILED for uid=${user.id}: $e');
+      debugPrint('[AUTH] stack: $st');
+      state = state.copyWith(
+        isLoading: false,
+        role: UserRole.unknown,
+        resolutionError: e.toString(),
+      );
     }
   }
 

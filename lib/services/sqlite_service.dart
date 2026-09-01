@@ -23,7 +23,11 @@ class SqliteService {
 
     return openDatabase(
       pathString,
-      version: 1,
+      // v2: lat/lng became nullable. An SOS raised with no GPS fix must be
+      // queued WITHOUT coordinates rather than with invented ones — see
+      // E2E_AUDIT_REPORT.md C-5.
+      version: 2,
+      onUpgrade: _upgrade,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE offline_queue (
@@ -31,8 +35,8 @@ class SqliteService {
             local_id TEXT UNIQUE NOT NULL,
             type TEXT NOT NULL,
             description TEXT,
-            lat REAL NOT NULL,
-            lng REAL NOT NULL,
+            lat REAL,
+            lng REAL,
             priority TEXT NOT NULL,
             is_anonymous INTEGER NOT NULL,
             created_at TEXT NOT NULL,
@@ -53,12 +57,47 @@ class SqliteService {
     );
   }
 
+  /// v1 -> v2: drop NOT NULL from offline_queue.lat/lng.
+  ///
+  /// SQLite has no `ALTER COLUMN`, so the table is rebuilt and rows copied.
+  /// Queued alerts are unsent emergencies — they must survive the upgrade.
+  Future<void> _upgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.transaction((txn) async {
+        await txn.execute('ALTER TABLE offline_queue RENAME TO offline_queue_v1');
+        await txn.execute('''
+          CREATE TABLE offline_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            local_id TEXT UNIQUE NOT NULL,
+            type TEXT NOT NULL,
+            description TEXT,
+            lat REAL,
+            lng REAL,
+            priority TEXT NOT NULL,
+            is_anonymous INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            sync_status TEXT NOT NULL
+          )
+        ''');
+        await txn.execute('''
+          INSERT INTO offline_queue
+            (id, local_id, type, description, lat, lng, priority,
+             is_anonymous, created_at, sync_status)
+          SELECT id, local_id, type, description, lat, lng, priority,
+                 is_anonymous, created_at, sync_status
+          FROM offline_queue_v1
+        ''');
+        await txn.execute('DROP TABLE offline_queue_v1');
+      });
+    }
+  }
+
   Future<int> enqueueAlert({
     required String localId,
     required String type,
     required String description,
-    required double lat,
-    required double lng,
+    required double? lat,
+    required double? lng,
     required String priority,
     required bool isAnonymous,
     required String createdAt,
