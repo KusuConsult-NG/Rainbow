@@ -233,12 +233,36 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/build_rls_dryrun.py
-          if ! git diff --quiet -- scripts/rls_production_dryrun.sql; then
-            echo "::error::scripts/rls_production_dryrun.sql is stale. Run: python3 scripts/build_rls_dryrun.py"
-            git diff -- scripts/rls_production_dryrun.sql | head -40
+          python3 scripts/build_rls_inventory.py
+          if ! git diff --quiet -- scripts/rls_production_dryrun.sql scripts/rls_inventory.sql; then
+            echo "::error::A generated SQL script is stale. Run: python3 scripts/build_rls_dryrun.py && python3 scripts/build_rls_inventory.py"
+            git diff -- scripts/rls_production_dryrun.sql scripts/rls_inventory.sql | head -60
             exit 1
           fi
-          echo "OK: the dry-run script matches the migration."
+          echo "OK: both generated scripts match the migrations."
+
+      # The inventory's "is this policy ours?" list is extracted from the
+      # migration files. A hand-written version was tried first and was
+      # substantially wrong — it invented names and missed real ones, which would
+      # label real policies as hand-created and could lead to dropping policies
+      # the application depends on. Assert the extractor still finds them.
+      - name: Assert the inventory knows the real policy names
+        run: |
+          set -euo pipefail
+          for NAME in alerts_select_own_or_staff profiles_select_self_or_staff \
+                      telemetry_select_self_or_staff safe_zones_read uninstall_read_own_or_staff; do
+            grep -q "'$NAME'" scripts/rls_inventory.sql || {
+              echo "::error::$NAME is created by a migration but missing from the inventory's known list."
+              exit 1
+            }
+          done
+          # And that the comment-stripping still works: 'has' came from
+          # "-- CREATE POLICY has no IF NOT EXISTS" in phase3.
+          if grep -q "^    'has'," scripts/rls_inventory.sql; then
+            echo "::error::'has' leaked in from a comment — the extractor is not stripping comments."
+            exit 1
+          fi
+          echo "OK: the inventory's known-policy list looks sane."
 
       # The generated file must contain no top-level transaction control of its
       # own beyond the wrapper's single BEGIN/ROLLBACK.
