@@ -64,7 +64,7 @@ The third row is the one C-4 depends on: before the migration, `FOR ALL USING
 | Severity | Count |
 |---|---|
 | Critical | 6 |
-| High | 8 |
+| High | 9 |
 | Medium | 10 |
 
 ### What was actually executed (not just read)
@@ -581,6 +581,26 @@ the unsigned preset with strict folder/size/format/moderation limits and rotate 
 **Fix:** Delete these files, rotate the credentials, and purge them from git history
 (`git filter-repo`). Add a secret-scanning pre-commit hook and enable GitHub secret scanning.
 
+> **⚠️ The first fix was incomplete, and the way it failed is the point.**
+>
+> A later audit pass found **`android/GoogleService-Info1.plist` still tracked**,
+> carrying `AIzaSyAUP9lvAX…` — a **second, different Firebase API key** this report
+> never named. The original fix deleted the plist at the repository root and added
+> `GoogleService-Info*.plist` to `.gitignore`.
+>
+> **`.gitignore` does not untrack a file that is already tracked.** The rule made
+> the tree *look* clean — `git status` was quiet, the ignore rule was visibly
+> present — while the file and its key stayed in the index. Deleting one file and
+> adding a pattern felt like completing the task; nothing swept for other copies.
+>
+> Now `git rm --cached`'d, and rotation applies to this key too.
+>
+> A one-time cleanup cannot prevent this recurring, so the **`tracked-secrets` CI
+> job** now scans every tracked file for credential-shaped material. Known legacy
+> files carry a documented allowlist that may only shrink, and the job fails if an
+> allowlist entry goes stale. Verified in both directions: silent on the current
+> tree, and it catches the plist the moment it is re-added.
+
 ### H-7. No server-side RBAC
 
 Role resolution in `src/app/dashboard/page.tsx` (lines 350-370, 515) happens **client-side
@@ -600,6 +620,54 @@ role, and back it with RLS so a forged client cannot read data its role disallow
 **Fix:** Commit `.env.example` documenting all 12 referenced keys
 (`AGENT_DEFAULT_PASS`, `CLOUDINARY_*`, `DEMO_CITIZEN_*`, `DURESS_PIN`, `HMAC_SECRET`,
 `SAFE_PIN`, `SOS_PHONE`, `TERMII_API_KEY`) plus the web vars, and document setup in README.
+
+### H-9. Gemini API key inlined into the client bundle — ✅ fixed
+
+**File:** `hq-dashboard-next/src/app/dashboard/page.tsx:426, 2160`
+
+Found on a later audit pass, not in the original sweep.
+
+```ts
+'use client';
+...
+const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+const res = await fetch(
+  `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, ...
+```
+
+`NEXT_PUBLIC_*` is **inlined into the client bundle at build time**, and this is a
+`'use client'` component, so any deployment that actually set the variable served
+a billable Google credential to every dashboard visitor. The key also travelled in
+the **URL query string**, which additionally deposits it in browser history,
+`Referer` headers, and any intermediate proxy or CDN log.
+
+This is C-1's defect class — a server credential reaching the browser. It differs
+in one respect that made it easy to miss: **nobody hardcoded a literal.** C-1 was
+found by grepping the built bundle for a key that was sitting in the source. Here
+the source is clean; the leak materialises only in a deployment where the variable
+is set. Nothing in the repository, and nothing in CI (where the variable is unset),
+would ever have shown it. It was found by asking a different question — *which
+environment variables does the code read, and is each one safe to be public?* —
+rather than by searching for known-bad strings.
+
+**Fixed.** `POST /api/ai/analyze` holds `GEMINI_API_KEY` (no `NEXT_PUBLIC_` prefix)
+and requires a command role. As with the SOS SMS route, it is not an authenticated
+proxy: the client sends an **alert id and which of the two analyses it wants**, and
+the server fetches that row and composes the prompt itself. No prompt text leaves
+the browser, so there is no path to arbitrary billable generation. The key is sent
+as an `x-goog-api-key` header rather than a query parameter.
+
+Behaviour is preserved: the triage feature's rule-based fallback still covers the
+unconfigured, failed and transport-error cases, and an unconfigured deployment now
+returns an explicit `UNCONFIGURED` status so "AI is off" is distinguishable from
+"AI broke" — which the old client code could not tell apart.
+
+**Verified.** Built with a real-shaped key set (`AIzaSy…`): the bundle is clean of
+`AIza[A-Za-z0-9_-]{20,}` and of the key itself. Mutation-checked by reintroducing
+the defect — the scan catches it in `.next/static/chunks/`. Note that the
+`GEMINI_API_KEY` *name* pattern does **not** fire, because Next.js replaces the
+whole `process.env.X` expression with the literal and the name disappears; the
+value pattern is the one doing the work.
 
 ---
 
@@ -807,9 +875,10 @@ The original claim that the mobile suite could not be run is **superseded**.
 | M-5 | `deploy.sh` broken three ways | ✅ rewritten; validates env, scans the bundle, fails loudly |
 | M-6 | committed `node_modules` | ✅ untracked; 19,000 → 378 tracked files |
 | M-10 | Leaflet from a CDN | ✅ bundled locally (it was fetching JS, not just CSS) |
-| H-6 | committed secrets | ⚠️ removed from the tree; **still in git history** |
+| H-6 | committed secrets | ⚠️ **first fix was incomplete** — a 2nd Firebase key was still tracked; now untracked + `tracked-secrets` CI gate. **All still in git history** |
 | H-7 | role source user-writable | ⚠️ fixed by the C-3 migration's trigger — **lands when C-3 is run** |
 | H-3 | `.env` bundled into the APK | ✅ server secrets removed + 2 CI gates; **shared PIN constants remain** |
+| H-9 | Gemini key inlined into the client bundle | ✅ moved to `/api/ai/analyze`; `AIza…` added to the bundle scan |
 | M-3 | shallow tier E2E | ✅ replaced with mutation-tested tier assertions |
 | M-7 | dead Firebase stack | ⏳ open — **do not delete before C-6 is checked** |
 | **C-6** | **unauthenticated Cloud Functions** | 🔴 **needs a console check — see below** |

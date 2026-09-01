@@ -51,6 +51,10 @@ export function serverEnv() {
     // NOT client-supplied: /api/sos/dispatch-sms would otherwise be an
     // authenticated open SMS relay billed to this Termii account.
     sosDispatchPhone: process.env.SOS_DISPATCH_PHONE ?? '',
+    // NOT NEXT_PUBLIC_. It was, and `NEXT_PUBLIC_*` is inlined into the client
+    // bundle, so any deployment that set it served the Gemini key to every
+    // dashboard visitor. Read only by /api/ai/analyze.
+    geminiApiKey: process.env.GEMINI_API_KEY ?? '',
     oneSignalAppId: process.env.ONESIGNAL_APP_ID ?? '',
     oneSignalRestKey: process.env.ONESIGNAL_REST_API_KEY ?? '',
     webhookSecret: process.env.RAINBOW_WEBHOOK_SECRET ?? '',

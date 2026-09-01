@@ -143,7 +143,9 @@ jobs:
             'eyJhbGciOi[A-Za-z0-9_-]{20,}' \
             'CI_SENTINEL' \
             'SUPABASE_SERVICE_ROLE_KEY' \
-            'TERMII_API_KEY'
+            'TERMII_API_KEY' \
+            'GEMINI_API_KEY' \
+            'AIza[A-Za-z0-9_-]{20,}'
           do
             if grep -rlE "$PATTERN" .next/static/ 2>/dev/null; then
               echo "::error::/$PATTERN/ matched in the client bundle — a server secret is being shipped to browsers."
@@ -164,6 +166,58 @@ jobs:
             exit 1
           fi
           echo "OK: no demo credentials in bundle."
+
+  tracked-secrets:
+    name: Repo — no credential material in tracked files
+    runs-on: ubuntu-latest
+    # Added after an audit pass found `android/GoogleService-Info1.plist` still
+    # tracked, carrying a Firebase API key, MONTHS after H-6 supposedly removed
+    # the committed secrets. The H-6 fix deleted one plist at the repo root and
+    # added `GoogleService-Info*.plist` to .gitignore — but **.gitignore does not
+    # untrack a file that is already tracked**, and nobody swept for other copies.
+    #
+    # A one-time cleanup cannot prevent that. A gate can.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan every tracked file for credential material
+        run: |
+          set -uo pipefail
+
+          # KNOWN AND PENDING REMOVAL — this list may only ever shrink.
+          #
+          # Every entry is legacy Firebase code slated for deletion under M-7,
+          # blocked behind the C-6 console audit. The key in them is already
+          # flagged for rotation under H-6. Adding a line here is a visible,
+          # reviewable act; that is the point.
+          ALLOW='^(E2E_AUDIT_REPORT\.md|\.github/workflows/ci\.yml|hq-dashboard/src/firebase\.ts|hq-dashboard/src/AdminDirectory\.tsx|functions/provision-hq-002\.js|functions/test_providers\.js|scripts/provision-respondents\.js)$'
+
+          HITS=$(git ls-files -z \
+            | xargs -0 grep -lEI 'AIza[A-Za-z0-9_-]{20,}|sb_secret_[A-Za-z0-9_-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY' 2>/dev/null \
+            | grep -vE "$ALLOW" || true)
+
+          if [ -n "$HITS" ]; then
+            echo "::error::Credential material found in newly tracked files:"
+            echo "$HITS"
+            echo ""
+            echo "Committing a credential is not undone by adding it to .gitignore —"
+            echo "an already-tracked file stays tracked. Use: git rm --cached <file>"
+            echo "Then ROTATE the credential: it is in git history either way."
+            exit 1
+          fi
+          echo "OK: no credential material outside the documented allowlist."
+
+          # The allowlist must not rot into a permanent exception. Fail if an
+          # entry no longer matches anything — that means it was cleaned up and
+          # the line should go.
+          for F in E2E_AUDIT_REPORT.md .github/workflows/ci.yml hq-dashboard/src/firebase.ts \
+                   hq-dashboard/src/AdminDirectory.tsx functions/provision-hq-002.js \
+                   functions/test_providers.js scripts/provision-respondents.js; do
+            if [ ! -f "$F" ]; then
+              echo "::error::Allowlist entry '$F' no longer exists — remove it from the ALLOW pattern."
+              exit 1
+            fi
+          done
+          echo "OK: allowlist has no stale entries."
 
   functions-guards:
     name: Firebase functions — C-6 endpoint guards
