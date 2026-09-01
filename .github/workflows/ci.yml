@@ -219,6 +219,40 @@ jobs:
           done
           echo "OK: allowlist has no stale entries."
 
+  dryrun-fresh:
+    name: Supabase — production dry-run is in sync
+    runs-on: ubuntu-latest
+    # scripts/rls_production_dryrun.sql is GENERATED from the migration, with the
+    # migration's own BEGIN/COMMIT stripped. A stale copy is dangerous rather than
+    # merely wrong: it is pasted straight into a production SQL editor, and a
+    # nested COMMIT would end the wrapping transaction and apply it for real while
+    # still printing a reassuring ROLLBACK.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Regenerate and diff
+        run: |
+          set -euo pipefail
+          python3 scripts/build_rls_dryrun.py
+          if ! git diff --quiet -- scripts/rls_production_dryrun.sql; then
+            echo "::error::scripts/rls_production_dryrun.sql is stale. Run: python3 scripts/build_rls_dryrun.py"
+            git diff -- scripts/rls_production_dryrun.sql | head -40
+            exit 1
+          fi
+          echo "OK: the dry-run script matches the migration."
+
+      # The generated file must contain no top-level transaction control of its
+      # own beyond the wrapper's single BEGIN/ROLLBACK.
+      - name: Assert no stray COMMIT survived generation
+        run: |
+          set -euo pipefail
+          if grep -nE '^(COMMIT|START TRANSACTION)\s*;' scripts/rls_production_dryrun.sql; then
+            echo "::error::A COMMIT survived generation — pasting this would apply the migration for real."
+            exit 1
+          fi
+          test "$(grep -cE '^BEGIN\s*;' scripts/rls_production_dryrun.sql)" -eq 1
+          test "$(grep -cE '^ROLLBACK\s*;' scripts/rls_production_dryrun.sql)" -eq 1
+          echo "OK: exactly one BEGIN, exactly one ROLLBACK, no COMMIT."
+
   functions-guards:
     name: Firebase functions — C-6 endpoint guards
     runs-on: ubuntu-latest
