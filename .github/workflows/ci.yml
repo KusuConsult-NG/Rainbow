@@ -87,6 +87,27 @@ jobs:
       - name: Test
         run: flutter test
 
+      # A UI test driving the built web app in a real browser found two things
+      # that only appear once it is running: with gstatic.com unreachable every
+      # label rendered BLANK (CanvasKit and google_fonts are fetched at runtime
+      # by default), and `GET /assets/.env` returned the file with SAFE_PIN and
+      # DURESS_PIN in it. build_web.sh bundles the resources and strips the env
+      # file, then asserts both. Running it here keeps the web target honest.
+      - name: Build web safely (bundled resources, no .env in the bundle)
+        run: ./scripts/build_web.sh
+
+      - name: Assert the web bundle really cannot serve .env
+        run: |
+          set -euo pipefail
+          if [ -f build/web/assets/.env ]; then
+            echo "::error::.env survived into the web bundle — it would be served at /assets/.env"
+            exit 1
+          fi
+          # The fonts must be bundled, or text renders blank without the CDN.
+          test -d build/web/assets/assets/google_fonts \
+            || { echo "::error::Fonts are not bundled; text will not render without fonts.gstatic.com"; exit 1; }
+          echo "OK: no .env in the bundle, fonts bundled."
+
   web:
     name: HQ dashboard — typecheck, lint, build
     runs-on: ubuntu-latest
