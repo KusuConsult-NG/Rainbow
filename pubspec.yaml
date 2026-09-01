@@ -60,6 +60,13 @@ dev_dependencies:
   freezed: any
   json_serializable: any
   riverpod_generator: any
+  # Real SQLite engine for tests — without it sqflite throws
+  # "databaseFactory not initialized" and the offline queue cannot be tested.
+  sqflite_common_ffi: ^2.3.3
+  # Mocking framework — the suite had none, so no test could isolate a platform
+  # plugin and every plugin-backed path was exercised only through its error
+  # branch (audit finding M-2).
+  mocktail: ^1.0.4
   riverpod_lint: ^2.6.5
   very_good_analysis: ^10.1.0
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -70,7 +71,7 @@ class _OnboardingPermissionsScreenState
 
       if (!locStatus.isGranted && !locAlwaysStatus.isGranted) {
         if (mounted) {
-          showDialog<void>(
+          unawaited(showDialog<void>(
             context: context,
             barrierDismissible: false,
             builder: (ctx) => AlertDialog(
@@ -115,7 +116,7 @@ class _OnboardingPermissionsScreenState
                 ),
               ],
             ),
-          );
+          ));
         }
         return;
       }

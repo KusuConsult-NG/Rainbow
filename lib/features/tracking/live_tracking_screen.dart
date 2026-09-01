@@ -24,7 +24,7 @@ final respondersStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref
             .select('id, full_name, role')
             .inFilter('id', userIds);
         final nameMap = <String, String>{};
-        for (final p in profiles as List) {
+        for (final p in (profiles as List).cast<Map<String, dynamic>>()) {
           nameMap[p['id'] as String] = p['full_name'] as String? ?? 'Officer';
         }
         return telemetryList.map((t) => {
@@ -59,7 +59,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
   @override
   void initState() {
     super.initState();
-    _startPosStream();
+    unawaited(_startPosStream());
   }
 
   Future<void> _startPosStream() async {
@@ -102,7 +102,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
   }
 
   void _showResponderDetails(Map<String, dynamic> telemetry) {
-    showModalBottomSheet(
+    unawaited(showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
@@ -151,7 +151,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
           ],
         ),
       ),
-    );
+    ));
   }
 
   @override

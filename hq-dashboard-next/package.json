@@ -17,15 +17,18 @@
     "dotenv": "^17.4.2",
     "firebase": "^12.12.1",
     "leaflet": "^1.9.4",
+    "leaflet.markercluster": "^1.5.3",
     "lucide-react": "^1.14.0",
     "next": "16.2.4",
     "pg": "^8.22.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-leaflet": "^5.0.0",
+    "server-only": "^0.0.1",
     "ws": "^8.21.1"
   },
   "devDependencies": {
+    "@types/leaflet.markercluster": "^1.5.6",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

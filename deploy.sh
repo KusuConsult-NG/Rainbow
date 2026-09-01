@@ -1,65 +1,90 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ============================================================
-# Operation Rainbow — Full Production Deploy
-# Account: kusuconsult@gmail.com → Project: rainbow-97f1e
+# Operation Rainbow — production deploy
 # ============================================================
+#
+# Rewritten during the E2E audit. The previous version could not run anywhere
+# except one developer's laptop, and would have failed even there:
+#
+#   1. It hardcoded NODE_BIN=/Users/mac/nodejs/... — a macOS path on one machine.
+#   2. It ran `du -sh hq-dashboard-next/out`, but `out/` stopped being produced
+#      when static export was removed from next.config.ts. Under `set -e` the
+#      deploy aborted at that line.
+#   3. It invoked `firebase deploy --only hosting|firestore:rules|functions`
+#      with no firebase.json in the repo, so no target could resolve.
+#
+# It also deployed Firestore rules and Cloud Functions for a backend the app no
+# longer uses — the mobile app is on Supabase and has no Firebase dependency in
+# pubspec.yaml. Those steps are gone. If the Firebase stack is still live, it
+# needs its own script and its own firebase.json.
 
-set -e  # Exit on first error
-NODE_BIN="/Users/mac/nodejs/node-v20.10.0-darwin-x64/bin"
-export PATH="$NODE_BIN:$PATH"
-ACCOUNT="kusuconsult@gmail.com"
-PROJECT="rainbow-97f1e"
+set -euo pipefail
 
-echo ""
-echo "╔══════════════════════════════════════════════════╗"
-echo "║   OPERATION RAINBOW — PRODUCTION DEPLOY          ║"
-echo "║   Account: $ACCOUNT        ║"
-echo "╚══════════════════════════════════════════════════╝"
-echo ""
+PROJECT="${FIREBASE_PROJECT:-rainbow-97f1e}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DASHBOARD="$ROOT/hq-dashboard-next"
 
-# ── Step 1: Switch to correct account ───────────────────────
-echo "▶ [1/5] Switching Firebase account to $ACCOUNT..."
-firebase login:use "$ACCOUNT" || true
-echo "✓ Account: $(firebase login:list 2>&1 | head -1)"
+log()  { printf '\n\033[0;34m▶ %s\033[0m\n' "$*"; }
+ok()   { printf '\033[0;32m✓ %s\033[0m\n' "$*"; }
+fail() { printf '\033[0;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
-# ── Step 2: Set project ──────────────────────────────────────
-echo ""
-echo "▶ [2/5] Selecting project $PROJECT..."
-firebase use "$PROJECT" --account "$ACCOUNT"
+# ── Preflight ────────────────────────────────────────────────────────────────
+log "Preflight"
 
-# ── Step 3: Deploy Firestore rules & Functions ───────────────────────────
-echo ""
-echo "▶ [3/6] Deploying Cloud Functions..."
-firebase deploy --only functions --account "$ACCOUNT"
-echo "✓ Functions deployed"
+command -v node >/dev/null || fail "node not found on PATH"
+command -v npm  >/dev/null || fail "npm not found on PATH"
+ok "node $(node -v), npm $(npm -v)"
 
-echo ""
-echo "▶ [4/6] Deploying Firestore security rules..."
-firebase deploy --only firestore:rules --account "$ACCOUNT"
-echo "✓ Rules deployed"
+# Fail before building rather than shipping a dashboard that cannot reach its
+# backend. These are read at build time and baked into the bundle.
+: "${NEXT_PUBLIC_SUPABASE_URL:?must be set (see hq-dashboard-next/.env.example)}"
+: "${NEXT_PUBLIC_SUPABASE_ANON_KEY:?must be set (see hq-dashboard-next/.env.example)}"
+ok "Supabase public env present"
 
-# ── Step 4: Deploy Firestore indexes ─────────────────────────
-echo ""
-echo "▶ [4/5] Deploying Firestore composite indexes..."
-firebase deploy --only firestore:indexes --account "$ACCOUNT"
-echo "✓ Indexes deployed"
+if [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+  fail "SUPABASE_SERVICE_ROLE_KEY must be set — the API routes need it server-side.
+       It must NOT be prefixed NEXT_PUBLIC_: that would ship it to every browser,
+       which is exactly how it leaked before (E2E_AUDIT_REPORT.md C-1)."
+fi
+ok "Service role key present (server-side only)"
 
-# ── Step 5: Build + Deploy HQ Dashboard to Hosting ──────────
-echo ""
-echo "▶ [5/5] Building HQ Dashboard..."
-npm --prefix hq-dashboard-next run build
-echo "✓ Build complete ($(du -sh hq-dashboard-next/out | cut -f1))"
+# ── Build ────────────────────────────────────────────────────────────────────
+log "Building HQ dashboard"
+npm --prefix "$DASHBOARD" ci
+npm --prefix "$DASHBOARD" run build
+ok "Build complete ($(du -sh "$DASHBOARD/.next" | cut -f1))"
 
-echo ""
-echo "▶ Deploying HQ Dashboard to Firebase Hosting..."
-firebase deploy --only hosting --account "$ACCOUNT"
+# ── Secret scan ──────────────────────────────────────────────────────────────
+# Same guard as CI. A deploy must never ship a server secret in a client chunk.
+log "Scanning client bundle for leaked secrets"
+LEAKED=0
+for PATTERN in 'sb_secret_[A-Za-z0-9_-]{16,}' 'eyJhbGciOi[A-Za-z0-9_-]{20,}' 'SUPABASE_SERVICE_ROLE_KEY'; do
+  if grep -rlE "$PATTERN" "$DASHBOARD/.next/static/" 2>/dev/null; then
+    printf '\033[0;31m  /%s/ matched in the client bundle\033[0m\n' "$PATTERN" >&2
+    LEAKED=1
+  fi
+done
+[ "$LEAKED" -eq 0 ] || fail "ABORTING: a server secret is present in the client bundle."
+ok "No server secrets in client bundle"
 
-echo ""
-echo "╔══════════════════════════════════════════════════╗"
-echo "║  ✓ DEPLOY COMPLETE                               ║"
-echo "║                                                  ║"
-echo "║  Dashboard: https://rainbow-97f1e.web.app        ║"
-echo "╚══════════════════════════════════════════════════╝"
-echo ""
-echo "To enforce App Check, please visit the Firebase Console:"
-echo "https://console.firebase.google.com/u/2/project/rainbow-97f1e/appcheck"
+# ── Deploy ───────────────────────────────────────────────────────────────────
+log "Deploying HQ dashboard"
+if [ ! -f "$ROOT/firebase.json" ]; then
+  fail "No firebase.json in the repository, so 'firebase deploy' has no target.
+       Either add one, or deploy the Next.js app through whatever host actually
+       serves it. next.config.ts says Firebase App Hosting (Node runtime, since
+       static export was removed for the auth proxy) — but nothing in this repo
+       configures it. This step is intentionally a hard failure rather than a
+       command that looks like it worked."
+fi
+
+command -v firebase >/dev/null || fail "firebase CLI not found on PATH"
+firebase deploy --only hosting --project "$PROJECT"
+ok "Deploy complete"
+
+cat <<'EOF'
+
+Post-deploy checklist (not automated — these need a human):
+  • Confirm RLS is enforced:  node scripts/verify_rls.js
+  • Confirm no credential in this deploy has been leaked previously; rotate if so.
+EOF

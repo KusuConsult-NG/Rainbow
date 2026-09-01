@@ -62,3 +62,23 @@ brain/
 scratch/
 *.txt
 .firebase/
+
+# ── Added during the E2E audit ────────────────────────────────────────────────
+# Dependencies must never be committed: functions/node_modules alone was 13,306
+# tracked files / 116 MB.
+node_modules/
+**/node_modules/
+
+# Build output — hq-dashboard/dist contained a committed bundle with a live
+# Firebase API key baked in.
+hq-dashboard/dist/
+hq-dashboard-next/.next/
+.firebase/
+
+# Credential material. These were committed:
+#   GoogleService-Info (3).plist  — Firebase iOS API key
+#   hq-002-auth.json              — plaintext "passwordHash": "hq-002"
+GoogleService-Info*.plist
+hq-00*-auth.json
+hq-00*-test.json
+users.json

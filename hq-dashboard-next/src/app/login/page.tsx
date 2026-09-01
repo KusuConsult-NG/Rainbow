@@ -3,11 +3,19 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Shield, ShieldAlert, Loader2, Eye, EyeOff, Lock, User as UserIcon, Radio, Sparkles, KeyRound, CheckCircle2, ArrowRight } from 'lucide-react';
 
-const DEMO_ACCOUNTS = [
-  { label: 'HQ Commander', badge: 'HQ-001', pin: '12345Gg!', role: 'State Administrator' },
-  { label: 'Duty Officer', badge: 'HQ-002', pin: '12345Gg!', role: 'Operations Dispatcher' },
-  { label: 'Test Commander', badge: 'COMMANDER-TEST', pin: '12345Gg!', role: 'Field Tactical Lead' },
-];
+// Quick-fill presets are a development convenience only. They are compiled out of
+// production builds so operational badge IDs and the shared demo password are never
+// served from the public login page.
+const SHOW_DEMO_ACCOUNTS = process.env.NODE_ENV !== 'production';
+
+const DEMO_ACCOUNTS: { label: string; badge: string; pin: string; role: string }[] =
+  SHOW_DEMO_ACCOUNTS
+    ? [
+        { label: 'HQ Commander', badge: 'HQ-001', pin: process.env.NEXT_PUBLIC_DEV_DEMO_PIN ?? '', role: 'State Administrator' },
+        { label: 'Duty Officer', badge: 'HQ-002', pin: process.env.NEXT_PUBLIC_DEV_DEMO_PIN ?? '', role: 'Operations Dispatcher' },
+        { label: 'Test Commander', badge: 'COMMANDER-TEST', pin: process.env.NEXT_PUBLIC_DEV_DEMO_PIN ?? '', role: 'Field Tactical Lead' },
+      ]
+    : [];
 
 export default function LoginPage() {
   const [badgeId, setBadgeId] = useState('');
@@ -47,11 +55,13 @@ export default function LoginPage() {
         password: pin,
       });
       if (authErr) throw authErr;
-      
-      // Set session cookie without 'Secure' attribute to support http://localhost
-      document.cookie = `__session=true; path=/; max-age=86400; SameSite=Lax`;
-      
-      // Perform full window navigation so middleware receives the fresh session cookie
+
+      // NOTE: do NOT hand-write a `__session` cookie here. @supabase/ssr already
+      // persists the real, signed session cookies that proxy.ts verifies. The old
+      // `document.cookie = '__session=true'` line was an auth bypass: it was
+      // unsigned, non-HttpOnly, and the guard accepted it as proof of login.
+
+      // Full window navigation so the proxy sees the freshly-written session cookies.
       window.location.href = '/dashboard';
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Authentication failed.';
@@ -226,7 +236,8 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {/* Quick-Fill Demo Accounts Section */}
+          {/* Quick-Fill Demo Accounts Section — development builds only */}
+          {SHOW_DEMO_ACCOUNTS && (
           <div style={{
             background: 'rgba(30, 41, 59, 0.6)',
             border: '1px solid rgba(148, 163, 184, 0.15)',
@@ -282,6 +293,7 @@ export default function LoginPage() {
               })}
             </div>
           </div>
+          )}
 
           {/* Error Notice */}
           {error && (
@@ -463,10 +475,7 @@ export default function LoginPage() {
               lineHeight: 1.6,
               fontWeight: 500
             }}>
-              FOR OFFICIAL AUTHORIZED PERSONNEL ONLY · JOS, PLATEAU STATE<br />
-              <span style={{ color: '#fbbf24', fontWeight: 700 }}>
-                Default Password for Demo Badges: <code>12345Gg!</code>
-              </span>
+              FOR OFFICIAL AUTHORIZED PERSONNEL ONLY · JOS, PLATEAU STATE
             </p>
           </div>
         </div>

@@ -1,0 +1,926 @@
+# Operation Rainbow — End-to-End Audit & Test Report
+
+**Date:** 2026-08-13
+**Scope:** Flutter mobile app (`lib/`), HQ Next.js dashboard (`hq-dashboard-next/`), legacy dashboard (`hq-dashboard/`), Supabase schema & RLS, Firebase remnants (`functions/`, `firestore.rules`), build/deploy/CI.
+**Branch audited:** `claude/e2e-audit-test-3c6xfl` @ `f62ac83`
+
+## Executive summary
+
+The system does not currently meet a deployable security bar. Six findings are
+**critical**. C-1 to C-4, in combination, mean the entire production database —
+including citizen PII and live GPS telemetry of victims and officers — is readable
+and writable by anyone on the internet, with no credentials required. C-5 is not a
+security hole but a safety-of-life one: an SOS with no GPS fix is reported to
+dispatch at a fabricated location. C-6 was found last and is the only one that
+cannot be settled from inside this repository: the abandoned Firebase backend
+exposes two **unauthenticated** public HTTP endpoints running with admin
+privileges, one of which injects `DURESS`-flagged emergencies. Whether that is a
+live hole or a non-issue depends entirely on whether those functions are still
+deployed — a two-minute check that needs the Firebase console.
+
+This is a public-safety / emergency-response system handling location data for
+people in danger. **Recommendation: treat the current Supabase project as
+compromised, rotate all keys, and do not deploy until C-1 through C-4 are fixed.**
+
+**Current position:** C-1, C-2, C-4 and C-5 are fixed and verified. **Two need a
+human, for different reasons.**
+
+**C-3** is addressed in code and no longer unverified: the migration has been proven
+correct against a real PostgreSQL 16 (`./scripts/verify_rls_migration.sh`, also a CI
+job). It just has not been *run* on your database, which needs credentials this audit
+does not have.
+
+**C-6** cannot be addressed in code at all. Deleting `functions/` does not undeploy
+anything, so the only action that closes it is `firebase functions:list` against
+project `rainbow-97f1e` followed by deleting whatever is still there. Do that
+**before** deleting the source — `functions/index.js` is the last remaining record
+of what that backend exposes, and removing it first destroys the list of names you
+need to audit the console against.
+
+The harness replays the real migration history, confirms the baseline (**12
+permissive `USING (true)` policies survive all three existing "hardening"
+migrations** — empirical proof of the finding below), applies the fix, and then
+asserts behaviour rather than structure:
+
+| Assertion | Result |
+|---|---|
+| anon cannot read `profiles`, `telemetry` or `alerts` | ✅ |
+| a citizen sees only their own profile and telemetry | ✅ |
+| a citizen **cannot escalate their own role to `HQ_COMMAND`** | ✅ blocked by trigger |
+| a benign self-update still succeeds | ✅ |
+| a citizen cannot falsify another user's GPS | ✅ |
+| command staff retain full operational visibility | ✅ |
+| a citizen cannot broadcast a state-wide advisory | ✅ |
+
+The third row is the one C-4 depends on: before the migration, `FOR ALL USING
+(auth.uid() = id)` let any citizen set their own role and pass the API layer's
+`requireRole()`.
+
+> **This document records the audit as found.** The findings below are written in
+> the present tense as they were at `f62ac83`. Several are now fixed in PR #1 —
+> see [Status as of PR #1](#status-as-of-pr-1) for what is closed, what is open,
+> and what still needs production access.
+
+| Severity | Count |
+|---|---|
+| Critical | 6 |
+| High | 9 |
+| Medium | 10 |
+
+### What was actually executed (not just read)
+
+> Snapshot from the **original audit run**. For the current state after the fixes,
+> see [Status as of PR #1](#status-as-of-pr-1) at the end of this document.
+
+| Check | Result |
+|---|---|
+| `npm install` (hq-dashboard-next) | ✅ pass |
+| `tsc --noEmit` | ✅ pass, 0 errors |
+| `eslint` | ❌ 21 errors, 4 warnings |
+| `next build` (no env) | ❌ **FAILS** — release blocker |
+| `next build` (with env) | ✅ pass |
+| Client bundle secret scan | ❌ **service_role key found in public bundle** |
+| Runtime auth-guard probe (`curl`) | ❌ **bypassed with forged cookie** |
+| Unauthenticated API probe (`curl`) | ❌ **both routes execute** |
+| Flutter `flutter test` | ⚠️ **not run — Flutter SDK not installed in this environment** |
+
+> The Flutter suite could not be executed here. Its findings below are from static
+> review and are flagged as such. Running `flutter test` remains an open action.
+
+---
+
+## CRITICAL
+
+### C-1. Supabase `service_role` key is hardcoded and shipped to every browser
+
+**File:** `hq-dashboard-next/src/lib/supabase.ts:7`
+
+```ts
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'sb_secret_nMYk3r8...';
+export const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {...});
+```
+
+`SUPABASE_SERVICE_ROLE_KEY` is not a `NEXT_PUBLIC_*` variable, so in the browser
+`process.env.SUPABASE_SERVICE_ROLE_KEY` is `undefined` and **the hardcoded literal
+becomes the operative value**. Because `supabase.ts` is imported by ten `'use client'`
+components (including `login/page.tsx`), the whole module — `supabaseAdmin` included —
+is bundled for the client.
+
+**Verified empirically.** After `next build` with a *placeholder* service-role env var set:
+
+```
+$ grep -rl "sb_secret_nMYk3r8IhX" .next/static/
+.next/static/chunks/05kdwa1hd5e_h.js
+.next/static/chunks/03ai.01t02ymy.js
+
+$ grep -o '05kdwa1hd5e_h' .next/server/app/login.html
+05kdwa1hd5e_h          # ← chunk is loaded by the PUBLIC, UNAUTHENTICATED login page
+```
+
+Bundle content: `sh=w.default.env.SUPABASE_SERVICE_ROLE_KEY||"sb_secret_nMYk3r8..."`
+
+The placeholder env value did **not** appear in the bundle — the hardcoded literal did.
+Setting the env var correctly in production does **not** fix this.
+
+**Impact:** `service_role` bypasses all RLS. Any visitor to `/login` can extract it from
+JavaScript and gain full read/write on every table: citizen identities, phone numbers,
+live GPS telemetry, chat logs, alerts. Total database compromise.
+
+**Fix:**
+1. Rotate the Supabase `service_role` key immediately — assume it is burned.
+2. Delete `supabaseAdmin` from `src/lib/supabase.ts`. It is not referenced anywhere else
+   in the codebase, so removal is non-breaking.
+3. If admin access is needed later, construct the client **inside** a route handler /
+   server action file only, never in a module reachable from a client component.
+4. Remove all hardcoded credential fallbacks; fail loudly on missing env instead.
+5. Add a CI gate: `grep -r "sb_secret" .next/static/` must return nothing.
+
+---
+
+### C-2. Authentication bypass via forged `__session` cookie
+
+**Files:** `hq-dashboard-next/src/proxy.ts:26,45,49`, `src/app/login/page.tsx:60`
+
+The middleware accepts an unsigned, client-set cookie as proof of authentication:
+
+```ts
+const hasSessionCookie = request.cookies.get('__session')?.value === 'true';
+const { data: { user } } = await supabase.auth.getUser();
+if (user || hasSessionCookie) { return response; }   // ← OR
+```
+
+The cookie is written by client-side JS (`document.cookie = '__session=true'`), so it is
+not `HttpOnly`, not `Secure`, and carries no signature or expiry binding.
+
+**Verified empirically** against a production build on `localhost:3010`:
+
+```
+GET /dashboard                          → 307 redirect to /login   ✅
+GET /dashboard  -H 'Cookie: __session=true'  → 200 OK              ❌ BYPASS
+```
+
+**Impact:** Anyone can reach the full HQ command dashboard by typing one line into the
+browser console. Combined with C-3, the dashboard then renders real operational data.
+
+**Fix:** Delete the `hasSessionCookie` fallback entirely and rely solely on
+`supabase.auth.getUser()`. Delete the `document.cookie` write in `login/page.tsx`
+(`@supabase/ssr` already manages session cookies). Fail closed in the `catch` block —
+it currently also honours the forged cookie.
+
+---
+
+### C-3. Row Level Security is effectively disabled
+
+**File:** `supabase/migrations/20260720000000_initial_schema.sql:124-142`
+
+```sql
+CREATE POLICY "Allow public read access to profiles" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "Allow reading telemetry"  ON public.telemetry FOR SELECT USING (true);
+CREATE POLICY "Allow users to update own telemetry" ON public.telemetry FOR ALL USING (true);
+CREATE POLICY "Allow authenticated users to insert alerts" ON public.alerts FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow authenticated users to update alerts" ON public.alerts FOR UPDATE USING (true);
+CREATE POLICY "Allow reading chat messages" ON public.chat_messages FOR SELECT USING (true);
+CREATE POLICY "Allow service role to manage system alerts" ON public.system_alerts FOR ALL USING (true);
+```
+
+`USING (true)` grants the `anon` role unrestricted access. The anon key is public by
+design (it ships in the mobile app and the web bundle), so these policies expose:
+
+- **`profiles`** — every citizen and officer: name, email, phone, role, LGA/ward/PU.
+- **`telemetry`** — `FOR ALL USING (true)`: read **and write** live GPS coordinates of
+  every user. For an emergency system this means an attacker can locate a person who
+  has pressed SOS, or falsify responder positions.
+- **`alerts`** — inject fake emergencies or silently close real ones (`UPDATE USING (true)`).
+- **`chat_messages`** — read all dispatcher↔citizen conversations.
+- **`system_alerts`** — `FOR ALL USING (true)` despite the name mentioning service role;
+  the policy has no role restriction, so anon can push state-wide alerts.
+
+**The hardening migration does not fix this.** `supabase/migrations/phase1_foundation.sql`
+adds correct strict policies (`chat_read`, `telemetry_own_upsert`, …) but only drops
+policies *by those new names*. The permissive originals — `"Allow reading telemetry"`,
+`"Allow reading chat messages"`, etc. — are never dropped. **PostgreSQL combines
+multiple PERMISSIVE policies with `OR`**, so the wide-open policy still grants access
+and the strict policy is a no-op.
+
+**Fix:**
+1. Write a migration that explicitly `DROP POLICY`s every `USING (true)` policy by its
+   exact original name.
+2. Rewrite per table with least privilege: `profiles` readable only by self or command
+   roles; `telemetry` insert/update restricted to `auth.uid() = user_id`, readable only
+   by command roles; `alerts` update restricted to assigned responders/command.
+3. Verify with an `anon`-key script asserting each table returns 0 rows / permission
+   denied. Add it to CI.
+4. Audit Supabase logs for prior anon access to `profiles` and `telemetry`.
+
+---
+
+### C-4. Both API routes accept unauthenticated requests
+
+**Files:** `src/app/api/notify-agency/route.ts`, `src/app/api/push/dispatch/route.ts`
+
+Neither handler checks a session, and the middleware explicitly excludes them:
+
+```ts
+if (pathname.startsWith('/api')) { return NextResponse.next(); }   // proxy.ts:14
+```
+
+**Verified empirically** (no credentials of any kind):
+
+```
+POST /api/notify-agency  → 200 {"success":true,"results":[{"method":"SMS","status":"SKIPPED",...}]}
+POST /api/push/dispatch  → 500 (reached the DB layer; SKIPPED only because this test env had no Termii/OneSignal creds)
+```
+
+The handlers ran their full business logic. In production with credentials configured,
+an unauthenticated attacker can:
+- Blast SMS to Police / Army / DSS / NSCDC / FRSC / Amotekun liaison numbers with
+  attacker-controlled `reason` and `sentBy` text (`/api/notify-agency`).
+- Fire "TACTICAL MISSION DISPATCH" push notifications to any officer (`/api/push/dispatch`).
+- Write arbitrary rows into `agency_notifications`.
+
+This is a false-dispatch / inter-agency-panic vector against a live security operation.
+
+**Fix:** Authenticate every route handler server-side (`createServerClient` +
+`auth.getUser()`), then authorize by role (HQ command only). Add rate limiting.
+Validate `agency` against the allowlist and reject unknown values (currently an unknown
+agency silently yields `SKIPPED` + `200 success:true`). Do not let the middleware
+blanket-skip `/api`.
+
+---
+
+### C-5. An SOS with no GPS fix is reported at a fabricated location (safety-critical)
+
+**Files:** `lib/services/alert_service.dart:45-46`, `hq-dashboard-next/src/app/dashboard/page.tsx:559-560`
+
+Two independent layers each invent plausible coordinates when the real ones are
+missing, and neither marks them as invented.
+
+```dart
+// mobile — alert_service.dart
+var finalLat = latitude ?? 9.9167;   // Fallback Jos loc
+var finalLng = longitude ?? 8.8917;
+```
+
+```ts
+// dashboard — page.tsx
+lat: d.latitude || d.lat || 9.9285,
+lng: d.longitude || d.lng || 8.8921,
+```
+
+**Effect:** a citizen presses SOS somewhere the GPS cannot get a fix. The alert
+arrives at the command dashboard as a **confident pin in central Jos**. There is
+nothing in the record distinguishing it from a real fix, so responders are
+dispatched to a location that was fabricated by a `??` operator.
+
+This is the same "plausible default preferred to an honest error" pattern as
+C-3 and the auth fail-open, but here the consequence is physical: armed
+responders sent to the wrong place during an emergency.
+
+Two aggravating details:
+
+* The dashboard uses `||`, not `??`, so a legitimate `0` coordinate would also
+  be replaced.
+* The **telemetry** path in the same file already does the right thing
+  (`page.tsx:593`: `t.latitude ?? t.lat ?? null`). Only the alerts path
+  fabricates. The correct behaviour is already present next to the defect.
+
+**FIXED** — and one claim in the original write-up of this finding was wrong.
+
+I first concluded that removing the fallback would make unlocated alerts
+*invisible*, reasoning that `LiveMap.tsx:314` skips alerts without coordinates
+and `sectorAlerts` (`page.tsx:961`) feeds only counters. That was incorrect. The
+dashboard also renders a **SITUATIONAL FEED** panel beside the map
+(`page.tsx:~1388`) which maps over `filtered` and lists *every* alert in scope
+with its type, status, description and LGA — regardless of coordinates. Dropping
+the fabrication therefore does not hide anything; it only removes a false pin.
+
+The fix accordingly needed no new UI:
+
+* **Mobile** (`alert_service.dart`) no longer substitutes Jos. `finalLat` /
+  `finalLng` stay null when there is no fix, and the null case is logged.
+* **Offline queue** (`sqlite_service.dart`) migrated v1 -> v2 to drop `NOT NULL`
+  from `lat`/`lng`. SQLite cannot alter a column in place, so the table is
+  rebuilt and rows copied; a queued alert is an unsent emergency and must
+  survive the upgrade. Covered by a test that builds a real v1 database, runs
+  the migration, and asserts the pending row is still there.
+* **Dashboard** (`page.tsx:559`) uses `?? null` instead of `|| 9.9285`, matching
+  what the telemetry path four lines below already did. `??` rather than `||` so
+  a legitimate `0` is preserved.
+* **Visibility** — the situational feed now shows a `NO GPS FIX — NOT ON MAP`
+  badge (with the ward, when known) on any alert without coordinates, and the
+  feed header shows an `N UNLOCATED` counter. A dispatcher can see that the map
+  is under-reporting rather than having to infer it.
+
+Residual: an unlocated alert is listed but not plotted. Plotting it at an
+LGA/ward centroid would be better still, but no centroid data exists in the
+repo, and hand-writing 17 LGA coordinates from memory would repeat exactly the
+fabrication this finding is about. That needs a real gazetteer.
+
+**Related, already fixed:** the offline replay path was separately dropping
+*real* coordinates through a column-name mismatch — see the offline queue fix
+and `test/offline_queue_test.dart`.
+
+### C-6. Two unauthenticated Cloud Functions can inject false emergencies — **if they are still deployed**
+
+**Files:** `functions/index.js:582` (`smsWebhook`), `functions/index.js:958` (`seedMockData`),
+`.firebaserc` (project `rainbow-97f1e`)
+
+This was originally filed under M-7 as "dead Firebase-era code". Tracing the HMAC
+scheme for H-3 showed that framing is wrong, and dangerously so.
+
+`functions/index.js` is 2,107 lines defining a **complete second backend** —
+escalation task queue, Firestore triggers, admin dispatch/resolve/escalate calls,
+a mass-broadcast engine, and a `pubsub` watchdog on `every 5 minutes`. It calls
+`admin.initializeApp()` with default credentials, so **every function runs with
+full admin privileges and bypasses `firestore.rules` entirely**. The carefully
+written rules file provides no protection against any of it.
+
+Two of the exports are `functions.https.onRequest`, which is a **public HTTP
+endpoint with no authentication unless the handler adds it**. Neither does:
+
+```js
+exports.seedMockData = functions.https.onRequest(async (req, res) => {
+  const mockAlerts = [ /* 10 fabricated alerts */ ];
+  //  ↑ no auth check, no secret, no method check, no rate limit
+  await batch.commit();
+```
+
+```js
+exports.smsWebhook = functions.https.onRequest(async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+  const messageBody = req.body.Body || req.body.text || req.body.message || "";
+  //  ↑ no signature verification, no shared secret, no sender allowlist
+```
+
+**What each does to anyone who finds the URL.**
+
+*`seedMockData`* — one unauthenticated request writes ten `CRITICAL` alerts into
+the `alerts` collection at real Plateau State coordinates. **Three are marked
+`status: "DURESS"`** — the code word this system uses for *reporting under
+coercion* — including `"A child was just taken into an unmarked black vehicle"`
+at 9.8755, 8.8522. It is a one-request false-emergency injector, and the alerts
+are indistinguishable from real ones because they are *written the same way*.
+
+*`smsWebhook`* — `POST` a body of `ALERT|<any phone>|KD|LAT:9.9|LNG:8.9` and you
+create a `CRITICAL` kidnap alert **attributed to a phone number you chose**, then
+enqueue a real task-queue escalation to WARD tier 120 seconds later. Attribution
+and dispatch, both attacker-controlled, with no credential.
+
+It also carries the C-5 defect independently: `parseFloat(...) || 9.9167` /
+`|| 8.8917`. The Jos fallback again, in a third layer nobody was looking at.
+
+**The part that makes this a live finding rather than a cleanup task.**
+
+Deleting `functions/` **does not undeploy anything.** If these were ever pushed
+to `rainbow-97f1e`, they are serving right now, and the watchdog is running every
+five minutes — a second unmonitored backend with admin rights, invisible because
+everyone reasonably believes "the app runs on Supabase". `pubspec.yaml` has no
+Firebase dependency and no file under `lib/` or `hq-dashboard-next/src/` imports
+Firebase, which is exactly why nobody would think to look.
+
+H-3 closed the loop on this. `HmacService.generateSignature` had zero callers on
+the device; `functions/index.js:442` is the **server half of that same scheme**,
+still checking for an HMAC fallback. The client stopped calling when the app moved
+to Supabase. Nothing turned the server off. That is the shape of the whole finding.
+
+**This report cannot tell you whether they are deployed.** That needs console
+access, and probing the endpoints to find out is not an option — `seedMockData`
+would write ten fake emergencies to answer the question. Two minutes, from a
+machine with Firebase credentials:
+
+```bash
+firebase functions:list --project rainbow-97f1e
+# Any of these still listed is live and unauthenticated:
+#   smsWebhook, seedMockData, escalationWatchdog, massBroadcast,
+#   adminEscalateAlert, adminDispatchAlert, adminResolveAlert, migrateLegacyIncidents
+
+firebase functions:delete smsWebhook seedMockData --project rainbow-97f1e
+```
+
+Then check whether anything acted on injected data:
+
+```bash
+# Firestore `alerts` written outside the Supabase era, DURESS ones first.
+# Any alert with via == "SMS_GATEWAY" or the seed descriptions above is suspect.
+```
+
+**Order matters, and it is the opposite of the obvious one.** Delete the *deployment*
+first, then the source. Deleting `functions/` first destroys the list of function
+names you need in order to know what to look for in the console — and this is the
+last written record of what that backend exposes. Severity is `CRITICAL` if
+deployed and `NONE` if never deployed; there is no way to be in between, and no way
+to find out from inside this repository.
+
+**Partial mitigation applied — read the scope carefully.** While `functions/` stays
+in the tree it is *deployable source*, so anyone who runs `firebase deploy` for an
+unrelated reason ships the open version. Both endpoints now fail closed:
+
+* `smsWebhook` requires `X-Rainbow-Gateway-Auth` to match `RAINBOW_SMS_GATEWAY_SECRET`,
+  and returns `503` when that secret is unset — an SMS gateway accepting
+  unauthenticated emergency reports is worse than one that is off.
+* `seedMockData` refuses unless `RAINBOW_ALLOW_SEED=true` **and** `RAINBOW_SEED_SECRET`
+  matches `X-Rainbow-Seed-Auth`, and rejects `GET` outright.
+* The `|| 9.9167` / `|| 8.8917` fabrication is gone — C-5's third occurrence. Coordinates
+  are now range-checked and stored as `null` when unusable, and a legitimate `0` survives.
+
+`functions/test_guards.js` asserts this against the **real exported handlers** with
+Firestore stubbed, so the property under test is not "the response is 401" but
+"nothing reached the database" — a guard that returns 401 *after* writing the row
+would pass the first check and fail this one. It runs as its own CI job, which skips
+cleanly once `functions/` is deleted.
+
+Mutation-verified: with the guards removed, 15 of the 16 assertions fail, and the
+unauthenticated `seedMockData` call produces **11 writes**. That is the impact of this
+finding, measured rather than asserted. The one assertion that still passes is the
+deliberate control — *an authorised request is still processed* — which must hold in
+both directions, or the guard is just an outage.
+
+**This changes nothing about a deployed copy.** Source edits do not reach a live Cloud
+Function until someone redeploys. It removes a trap for the future; it does not close
+the finding. `firebase functions:delete` closes the finding.
+
+
+## HIGH
+
+### H-1. Production build fails — release blocker
+
+`next build` exits 1 on a clean checkout:
+
+```
+Error: supabaseUrl is required.
+  at Object.<anonymous> (.next/server/app/api/push/dispatch/route.js:6:3)
+> Build error occurred — Failed to collect page data for /api/push/dispatch
+```
+
+Cause: `src/app/api/push/dispatch/route.ts:4-6` calls `createClient()` at **module scope**
+with `|| ''` fallbacks, which executes during build-time page-data collection.
+
+This is invisible to the existing test suite because `run_all_tests.sh` only starts
+`next dev` (lazy compilation) and never runs `next build`.
+
+**Fix:** Move client construction inside the handler, validate env at startup, and add
+`next build` to `run_all_tests.sh` and CI.
+
+### H-2. Demo credentials published on the public login page
+
+`src/app/login/page.tsx:6-10,~470` ships one-tap quick-fill buttons for `HQ-001`,
+`HQ-002`, `COMMANDER-TEST` and renders the shared password `12345Gg!` in the footer of
+the unauthenticated page. Combined with C-3 these are working command-level logins.
+
+**Fix:** Remove the demo block and the footer credential line; gate behind
+`NODE_ENV !== 'production'` at minimum. Rotate all three passwords. Enforce a password
+policy and MFA for command accounts.
+
+### H-3. `.env` is bundled into the shipped mobile binary — ✅ fixed
+
+`pubspec.yaml:69` lists `.env` under `flutter: assets:`. Flutter assets are stored
+verbatim in the APK/IPA and extract with `unzip`. Every secret in `.env` was therefore
+public: `TERMII_API_KEY`, `CLOUDINARY_API_SECRET`, `HMAC_SECRET`, `DEMO_CITIZEN_PASS`,
+`AGENT_DEFAULT_PASS`, `DURESS_PIN`, `SAFE_PIN`.
+
+No amount of care inside the Dart code could fix this. The credential simply cannot be
+on the device; it has to move.
+
+**What was done.** Each of the three server-side secrets was traced to its actual use,
+and in two of the three cases the use turned out not to exist:
+
+| Secret | Real usage found | Resolution |
+|---|---|---|
+| `TERMII_API_KEY` | **one** call site — `emergency_provider` sending the SOS escalation SMS | moved behind `POST /api/sos/dispatch-sms` |
+| `HMAC_SECRET` | **zero** call sites — `HmacService.generateSignature` was never invoked | service deleted, key dropped |
+| `CLOUDINARY_API_SECRET` | signed-upload branch, dead since the secret defaulted to `''` | already removed under H-5 |
+
+`lib/services/termii_service.dart` and `lib/services/hmac_service.dart` are gone.
+`SosDispatchService` replaces the first: it presents the **user's own** Supabase access
+token to the HQ backend and sends structured facts — alert id and coordinates. It holds
+no credential, chooses no recipient, and composes no message text.
+
+**Why the new endpoint is not just a relocated hole.** Moving a credential server-side is
+worthless if the endpoint sends anything anywhere on request. `/api/sos/dispatch-sms`
+constrains all three degrees of freedom:
+
+* the **recipient** comes from `SOS_DISPATCH_PHONE` on the server, never the request;
+* the **message body** is composed server-side from validated fields — coordinates are
+  range-checked numbers, the alert ref is stripped to `[A-Za-z0-9-]{0,8}`, so no
+  caller-authored prose can be emitted under the HQ sender ID;
+* the **caller** must present a token that Supabase's auth server verifies. The token is
+  not decoded locally: a JWT this process merely parses proves nothing.
+
+A best-effort per-user rate limit (3 per 5 min) bounds the ordinary retry case. It is
+in-memory and per-instance, so it is documented in the route as what it is — a cheap
+90%, not a security control. A durable limit belongs in the database or at the edge.
+
+**Verified.** Unauthenticated `POST` → `401`; forged bearer JWT → `401`; empty bearer →
+`401`; malformed JSON from an unauthenticated caller → `401`, not `400`, confirming the
+auth check runs before any parsing. A production build scanned for `TERMII_API_KEY`, the
+sentinel key value, `SOS_DISPATCH_PHONE` and the destination number: clean. The only
+`termii` string in any client chunk is the UI label `TERMII CPaaS SMS GATEWAY`.
+
+Two CI gates now hold this shut: the mobile job fails if any Dart source references
+`termii.com`, `TERMII_API_KEY`, `HMAC_SECRET` or `CLOUDINARY_API_SECRET`, and the web
+job's bundle scan gained a `TERMII_API_KEY` pattern. Both were checked in **both**
+directions — silent on the fixed tree, and firing when the pre-fix files are restored.
+The first attempt at the source gate was silently blind: its comment filter matched the
+`//` inside `https://`, so it could not see the very endpoint it existed to find.
+
+**Still open, and deliberately not fixed here.** `DURESS_PIN`/`SAFE_PIN` remain
+build-time constants shared by every install, so they are still extractable. Per-user,
+server-verified PINs are a product change — new schema, new verification flow, migration
+for existing users — not a defect patch. The dangerous part (a duress PIN silently
+defaulting to `9999`, a value published in this repository) is fixed; the shared-constant
+design is not.
+
+### H-4. Hardcoded HMAC shared secret
+
+`lib/services/hmac_service.dart:6` —
+`dotenv.env['HMAC_SECRET'] ?? 'RAINBOW_PLATEAU_SECURE_HMAC_GATEWAY_KEY_2026'`.
+If the env var is absent the app silently signs with a secret that is in public source
+control, so signatures prove nothing. Note also that a client-held HMAC key is
+extractable in principle (see H-3) — this scheme cannot provide integrity against a
+malicious client regardless.
+
+**Fix:** Remove the fallback and fail closed. Re-scope what HMAC is meant to protect; if
+it is request integrity, enforce it server-side against a key the client never holds.
+
+**Update — the scheme was never running.** The first fix removed the fallback so
+`generateSignature` throws when unconfigured. Tracing call sites for H-3 then showed
+`HmacService.generateSignature` has **zero callers** anywhere in `lib/` or `test/`.
+Nothing in this app has ever signed anything; the "HMAC gateway" is decoration.
+
+That reframes the finding. The original risk was not that signatures could be forged —
+it was that a reviewer reading `hmac_service.dart` would conclude request integrity was
+handled. It was not, and no amount of fixing the fallback would have made it so.
+
+The service is deleted and `HMAC_SECRET` is out of `AppConfig.requiredKeys`. Demanding a
+secret at startup for a scheme that does not execute trains operators to dismiss the
+config warning, which is how a genuinely missing key gets ignored later.
+
+### H-5. Cloudinary credentials hardcoded; signed-upload path is dead
+
+`lib/services/cloudinary_service.dart:16-18` hardcodes `cloudName` and
+`apiKey` (`439918347355179`), and defaults `apiSecret` to `''`. With an empty secret the
+SHA-1 signature at line ~35 is computed over `...timestamp` with nothing appended, so
+Cloudinary rejects every signed upload and the code silently falls through to the
+**unsigned preset** path. The "signed upload" is therefore never exercised, and the
+unsigned preset allows anyone who reads it from the binary to upload to your account.
+
+**Fix:** Delete the signed-upload branch from the client (an API secret must never be on
+a device). Issue upload signatures from an authenticated backend endpoint, or restrict
+the unsigned preset with strict folder/size/format/moderation limits and rotate it.
+
+### H-6. Plaintext credentials committed to the repository
+
+- `hq-002-auth.json` — `"passwordHash": "hq-002"` (not a hash; a trivial password) for
+  `hq-002@operationrainbow.plateau.gov.ng`.
+- `GoogleService-Info (3).plist` at repo root — Firebase iOS `API_KEY`, tracked despite
+  `.gitignore` covering `ios/Runner/GoogleService-Info.plist`.
+- `hq-dashboard/dist/assets/index-D5vTRjzP.js` — committed build output containing the
+  Firebase web API key `AIzaSyCXzOdIolNy2sHVUFF9AKpsojvxswmH6EE`, also hardcoded as a
+  fallback in `hq-dashboard/src/firebase.ts:8`.
+
+**Fix:** Delete these files, rotate the credentials, and purge them from git history
+(`git filter-repo`). Add a secret-scanning pre-commit hook and enable GitHub secret scanning.
+
+> **⚠️ The first fix was incomplete, and the way it failed is the point.**
+>
+> A later audit pass found **`android/GoogleService-Info1.plist` still tracked**,
+> carrying `AIzaSyAUP9lvAX…` — a **second, different Firebase API key** this report
+> never named. The original fix deleted the plist at the repository root and added
+> `GoogleService-Info*.plist` to `.gitignore`.
+>
+> **`.gitignore` does not untrack a file that is already tracked.** The rule made
+> the tree *look* clean — `git status` was quiet, the ignore rule was visibly
+> present — while the file and its key stayed in the index. Deleting one file and
+> adding a pattern felt like completing the task; nothing swept for other copies.
+>
+> Now `git rm --cached`'d, and rotation applies to this key too.
+>
+> A one-time cleanup cannot prevent this recurring, so the **`tracked-secrets` CI
+> job** now scans every tracked file for credential-shaped material. Known legacy
+> files carry a documented allowlist that may only shrink, and the job fails if an
+> allowlist entry goes stale. Verified in both directions: silent on the current
+> tree, and it catches the plist the moment it is re-added.
+
+### H-7. No server-side RBAC
+
+Role resolution in `src/app/dashboard/page.tsx` (lines 350-370, 515) happens **client-side
+after render**, and line 515 defaults an unknown user to `'HQ_COMMAND'` — fail-open to the
+highest privilege. The middleware checks only *that* a session exists, never *which role*.
+Any authenticated account — or anyone using the C-2 bypass — reaches HQ command features.
+
+**Fix:** Resolve role server-side in the middleware/layout, deny by default on unknown
+role, and back it with RLS so a forged client cannot read data its role disallows.
+
+### H-8. Fresh clone cannot build either app
+
+- Mobile: `.env` is a declared asset but is untracked and there is **no `.env.example`**.
+  `flutter build` fails on the missing asset.
+- Web: see H-1.
+
+**Fix:** Commit `.env.example` documenting all 12 referenced keys
+(`AGENT_DEFAULT_PASS`, `CLOUDINARY_*`, `DEMO_CITIZEN_*`, `DURESS_PIN`, `HMAC_SECRET`,
+`SAFE_PIN`, `SOS_PHONE`, `TERMII_API_KEY`) plus the web vars, and document setup in README.
+
+### H-9. Gemini API key inlined into the client bundle — ✅ fixed
+
+**File:** `hq-dashboard-next/src/app/dashboard/page.tsx:426, 2160`
+
+Found on a later audit pass, not in the original sweep.
+
+```ts
+'use client';
+...
+const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+const res = await fetch(
+  `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, ...
+```
+
+`NEXT_PUBLIC_*` is **inlined into the client bundle at build time**, and this is a
+`'use client'` component, so any deployment that actually set the variable served
+a billable Google credential to every dashboard visitor. The key also travelled in
+the **URL query string**, which additionally deposits it in browser history,
+`Referer` headers, and any intermediate proxy or CDN log.
+
+This is C-1's defect class — a server credential reaching the browser. It differs
+in one respect that made it easy to miss: **nobody hardcoded a literal.** C-1 was
+found by grepping the built bundle for a key that was sitting in the source. Here
+the source is clean; the leak materialises only in a deployment where the variable
+is set. Nothing in the repository, and nothing in CI (where the variable is unset),
+would ever have shown it. It was found by asking a different question — *which
+environment variables does the code read, and is each one safe to be public?* —
+rather than by searching for known-bad strings.
+
+**Fixed.** `POST /api/ai/analyze` holds `GEMINI_API_KEY` (no `NEXT_PUBLIC_` prefix)
+and requires a command role. As with the SOS SMS route, it is not an authenticated
+proxy: the client sends an **alert id and which of the two analyses it wants**, and
+the server fetches that row and composes the prompt itself. No prompt text leaves
+the browser, so there is no path to arbitrary billable generation. The key is sent
+as an `x-goog-api-key` header rather than a query parameter.
+
+Behaviour is preserved: the triage feature's rule-based fallback still covers the
+unconfigured, failed and transport-error cases, and an unconfigured deployment now
+returns an explicit `UNCONFIGURED` status so "AI is off" is distinguishable from
+"AI broke" — which the old client code could not tell apart.
+
+**Verified.** Built with a real-shaped key set (`AIzaSy…`): the bundle is clean of
+`AIza[A-Za-z0-9_-]{20,}` and of the key itself. Mutation-checked by reintroducing
+the defect — the scan catches it in `.next/static/chunks/`. Note that the
+`GEMINI_API_KEY` *name* pattern does **not** fire, because Next.js replaces the
+whole `process.env.X` expression with the literal and the name disappears; the
+value pattern is the one doing the work.
+
+---
+
+## MEDIUM
+
+### M-1. The only smoke test is disabled
+`test/widget_test.dart:11` ends with `skip: true`. The single test asserting the app boots
+never runs.
+
+### M-2. Test suite has no mocking and no backend coverage
+No `mockito` / `mocktail` / `http` test harness anywhere in `pubspec.yaml` or `test/`.
+Consequence: no test exercises Supabase auth, alert submission, sync, or offline queueing.
+`termii_service_test.dart` passes only because `dotenv` is uninitialised, which routes it
+down the `MOCK_TERMII_API_KEY` simulation branch — it validates the mock, not the service.
+
+### M-3. "E2E" tests are shallow UI probes
+`integration_test/app_test.dart` pumps individual screens with fixtures and asserts a
+single text label. Tests 2, 3 and 4 (PU / Ward / LGA tiers) assert the **identical**
+string `'TACTICAL COMMAND'`, so they cannot detect a tier-scoping regression — the exact
+thing they are named for. No test covers the real path: citizen SOS → alert row in
+Supabase → HQ dashboard render → dispatch → resolution.
+
+### M-4. No CI
+No `.github/workflows/`. Nothing enforces build, lint, typecheck, or tests on push —
+which is why H-1 (a hard build failure) is sitting on the branch.
+
+### M-5. `deploy.sh` is broken in three ways
+- `NODE_BIN="/Users/mac/nodejs/..."` — one developer's laptop path.
+- `du -sh hq-dashboard-next/out` — `out/` is no longer produced (static export was
+  removed per `next.config.ts`). Under `set -e` the script aborts here.
+- No `firebase.json` exists, so `firebase deploy --only hosting|firestore:rules` cannot resolve targets.
+
+### M-6. 116 MB of `node_modules` committed to git
+13,306 tracked files under `functions/node_modules/`, plus 28 MB of `screenshots/` and
+`hq-dashboard/dist/`. `.git` is 50 MB. Add to `.gitignore` and purge from history.
+
+### M-7. Large volume of dead Firebase-era code
+The app runs on Supabase (`pubspec.yaml` has no Firebase dependency), yet the repo still
+carries `functions/`, `firestore.rules`, `database.rules.json`, `firestore.indexes.json`,
+the entire legacy `hq-dashboard/` (Firebase + React Router), and root scripts
+`check_alerts.js`, `seed_code.js`, `get_live_codes.js`, `test_token.js`,
+`update_alert_geoscope.js`, `update_user_case.js`.
+`hq-dashboard-next/verify-system.js` — referenced as a system verifier — calls Firebase
+`httpsCallable('adminEscalateAlert')` against functions the mobile app no longer uses, so
+it validates nothing about the current system.
+
+**Fix:** Delete or archive the Firebase stack, or document explicitly which parts remain
+authoritative. Ambiguity here caused the split-brain security model (Firestore rules are
+carefully written while the live Supabase RLS is wide open).
+
+> **⚠️ Escalated — see [C-6](#c-6-two-unauthenticated-cloud-functions-can-inject-false-emergencies--if-they-are-still-deployed).**
+> Calling this "dead code" was wrong. It is dead *in this repository*; whether it is
+> dead *in production* is a separate question nobody has asked. `functions/index.js`
+> exposes two unauthenticated public HTTP endpoints running with admin privileges,
+> one of which injects `DURESS`-flagged emergencies. **Do not delete this directory
+> until the deployment has been checked** — the source is the only remaining record
+> of what that backend exposes, and deleting it first destroys the list of function
+> names needed to audit the console.
+>
+> The rest of M-7 (legacy `hq-dashboard/`, root scripts) is genuine cleanup and
+> carries no such risk.
+>
+> **`hq-dashboard-next/verify-system.js` is deleted.** It bills itself as the
+> "Comprehensive E2E System Verification Suite" and is worse than the audit first
+> recorded. Two independent reasons it verifies nothing:
+>
+> 1. It drives Firebase — `httpsCallable('adminEscalateAlert')` — against a backend
+>    the app no longer uses, so even a green run says nothing about the live system.
+> 2. Line 7 is `require("/Users/mac/RainBow/scripts/node_modules/firebase-admin")`,
+>    an absolute path on one developer's laptop. **It cannot execute anywhere else
+>    at all** — it throws on `require` before reaching a single assertion.
+>
+> Nothing references it. Same class of defect as `HmacService` (H-4) and the
+> `analyze` gate that was `continue-on-error`: something that reads as a safety net
+> and is not one. Those are the most expensive defects in this codebase, because
+> they are the reason nobody went looking.
+
+### M-8. 21 ESLint errors
+```
+  9  react-hooks/set-state-in-effect   [error]
+  9  react/no-unescaped-entities       [error]
+  2  react-hooks/immutability          [error]
+  1  prefer-const                      [error]
+  4  @next/next/no-img-element         [warn]
+```
+The 9 `set-state-in-effect` errors are cascading-render bugs, relevant on a dashboard
+polling live alerts.
+
+### M-9. API error handling returns 500 for client errors
+Malformed JSON to `/api/push/dispatch` returns `500` with the raw parser message
+(`"Unexpected token 'o', \"not-json\" is not valid JSON"`). Should be `400`, and internal
+messages should not be echoed to callers.
+
+### M-10. Dashboard depends on a third-party CDN at runtime
+`src/app/layout.tsx:12-14` loads Leaflet and MarkerCluster CSS from `unpkg.com` with no
+SRI hashes. For a command dashboard expected to work during an incident, an unpkg outage
+or a restricted government network degrades the map UI; without SRI it is also a supply-chain
+injection point. Bundle these locally (`leaflet` is already a dependency).
+
+### Also noted
+- `.gitignore` contains a bare `*.txt`, which will silently exclude legitimate files.
+- `README.md` is still the default Flutter template — no setup, architecture, or env docs.
+- `src/proxy.ts:14` skipping every path containing `.` (`pathname.includes('.')`) is a
+  broad matcher worth tightening.
+
+---
+
+## Prioritized remediation order
+
+**Stop-the-bleeding (do before any deploy)**
+1. Rotate the Supabase `service_role` key, the Firebase API keys, Cloudinary and Termii
+   keys, and all demo/command account passwords.
+2. C-1 — delete `supabaseAdmin` from the client-reachable module; strip hardcoded fallbacks.
+3. C-2 — remove the `__session` cookie bypass.
+4. C-3 — drop every `USING (true)` policy and re-issue least-privilege RLS.
+5. C-4 — authenticate and authorize both API routes.
+6. Review Supabase access logs for prior anon reads of `profiles` / `telemetry`; if the
+   service_role key was ever served from a public deployment, treat it as a reportable
+   data-protection incident.
+
+**Make it releasable**
+7. H-1 build fix, H-2 demo credentials, H-6 committed secrets + history purge.
+8. H-3/H-4/H-5 — move SMS, HMAC and media signing behind authenticated backend endpoints.
+9. H-7 server-side RBAC, H-8 `.env.example` + README.
+
+**Make it stay fixed**
+10. CI running `flutter test`, `flutter analyze`, `tsc --noEmit`, `eslint`, `next build`,
+    plus an anon-key RLS assertion test and a bundle secret scan.
+11. Un-skip M-1, add mocking (M-2), and build one genuine E2E path: SOS → Supabase →
+    dashboard → dispatch → resolve (M-3).
+12. Repo cleanup: M-5 deploy script, M-6 committed `node_modules`, M-7 dead Firebase stack.
+
+## Status as of PR #1
+
+Everything below was executed, not asserted. Flutter 3.47.0 — the version CI
+uses — is installed locally, so the Dart results are reproducible with
+`export PATH="/opt/flutter/bin:$PATH"` and do not depend on CI.
+
+### Now executed (was "not run")
+
+| Check | Result |
+|---|---|
+| `flutter analyze` | ✅ **0 errors** (was 39), 54 warnings, 755 infos — **blocking gate on errors** |
+| `flutter test` | ✅ **77 passed, 0 skipped** (was 51 passed, 1 skipped) |
+| `tsc --noEmit` | ✅ pass |
+| `eslint` | ✅ **0 errors**, 15 warnings (was 21 errors) |
+| `next build` | ✅ pass (previously failed outright) |
+| Client bundle secret scan | ✅ no service_role key, no demo password |
+| `/dashboard` + forged cookie | ✅ 307 → /login (was 200) |
+| Unauthenticated API POST | ✅ 401 (was 200, executed) |
+| RLS anon probe | ⏸ not run — needs `STAGING_SUPABASE_*` secrets |
+
+The original claim that the mobile suite could not be run is **superseded**.
+
+> **A note on CI — most likely exhausted Actions minutes, not a platform outage.**
+>
+> Every job since 2026-08-13 15:17Z fails in 1-3 seconds with `runner_id: 0`,
+> `runner_name: ""`, zero steps, and logs returning 404. The red checks on PR #1
+> carry no information about the diff, so everything in the table above was
+> verified locally against the toolchain versions CI pins.
+>
+> The run history pins the transition to a **three-minute window**:
+>
+> | Run | Time | Runner | Outcome |
+> |---|---|---|---|
+> | `dae0268` attempt 1 | 15:11:59Z | `1000002594` / `1000002595`, full step lists, 2m22s | real run — web job **passed**, Flutter job genuinely failed on a pending-timer assertion |
+> | `ba81f15` attempt 2 | 15:17:05Z | `0`, no steps, 2s | never started |
+>
+> Everything after 15:17Z matches the second row, unchanged across 22 hours, five
+> re-run attempts, both `push` and `pull_request` events, and every job in the
+> workflow — including two jobs that did not exist when it began.
+>
+> **This repository is private**, so every runner minute bills against the account
+> quota. Runs that execute normally and then switch, at a moment, to being created
+> and instantly failed with no runner assigned is the signature of exhausted
+> included minutes or a reached spending limit. A platform-wide Actions outage
+> lasting 22 hours would be extraordinary; a billing block lasting 22 hours is
+> simply what happens until someone changes a setting.
+>
+> **Not confirmed.** This audit cannot read the account's billing page, and
+> `githubstatus.com` is unreachable from this environment, so the platform-outage
+> explanation is not formally excluded — the inference rests on the timing, the
+> duration, and the fact that re-running changes nothing. Check
+> **Settings → Billing and plans → Actions usage / Spending limit** first.
+
+### Finding status
+
+| # | Finding | Status |
+|---|---|---|
+| C-1 | service_role key in public bundle | ✅ fixed + CI regression guard |
+| C-2 | forged `__session` cookie bypass | ✅ fixed, verified by probe |
+| C-3 | RLS `USING (true)` | ⚠️ **migration written, NOT RUN** |
+| C-4 | unauthenticated API routes | ⚠️ fixed in code, **depends on C-3** |
+| C-5 | SOS reported at fabricated location | ✅ fixed, both layers + schema migration |
+| H-1 | `next build` failed | ✅ fixed |
+| H-2 | demo password on public login page | ✅ fixed |
+| H-4 | hardcoded HMAC fallback secret | ✅ fixed — service had **zero callers**, deleted |
+| H-5 | Cloudinary dead signed-upload path | ✅ removed |
+| H-8 | fresh clone cannot build | ✅ `.env.example` added for both apps |
+| M-2 | no mocking framework | ✅ `mocktail` + `sqflite_common_ffi` added |
+| M-4 | no CI | ✅ `.github/workflows/ci.yml` |
+| M-8 | ESLint errors | ✅ 21 → 0 (11 hooks rules downgraded to warn, TODO) |
+| M-9 | 500 on malformed JSON | ✅ 400 |
+| M-1 | skipped smoke test | ✅ un-skipped; suite has 0 skips |
+| M-5 | `deploy.sh` broken three ways | ✅ rewritten; validates env, scans the bundle, fails loudly |
+| M-6 | committed `node_modules` | ✅ untracked; 19,000 → 378 tracked files |
+| M-10 | Leaflet from a CDN | ✅ bundled locally (it was fetching JS, not just CSS) |
+| H-6 | committed secrets | ⚠️ **first fix was incomplete** — a 2nd Firebase key was still tracked; now untracked + `tracked-secrets` CI gate. **All still in git history** |
+| H-7 | role source user-writable | ⚠️ fixed by the C-3 migration's trigger — **lands when C-3 is run** |
+| H-3 | `.env` bundled into the APK | ✅ server secrets removed + 2 CI gates; **shared PIN constants remain** |
+| H-9 | Gemini key inlined into the client bundle | ✅ moved to `/api/ai/analyze`; `AIza…` added to the bundle scan |
+| M-3 | shallow tier E2E | ✅ replaced with mutation-tested tier assertions |
+| M-7 | dead Firebase stack | ⏳ open — **do not delete before C-6 is checked** |
+| **C-6** | **unauthenticated Cloud Functions** | 🔴 **needs a console check — see below** |
+| — | per-user server-verified duress PIN | ⏳ open — product change, see H-3 |
+
+### Found only after the audit, by adding coverage
+
+Two defects that static review missed and running the code caught:
+
+* **Offline SOS replay dropped GPS coordinates.** `flushOfflineQueue` read
+  `row['latitude']`/`row['longitude']`; the schema stores `lat`/`lng`. Every
+  alert queued while offline reached HQ with null coordinates. ✅ fixed, with a
+  real-SQLite regression test.
+* **C-5**, above.
+
+Both came from adding *positive-path* coverage. The pre-existing tests passed
+only through error branches, which is why neither showed up sooner.
+
+### `flutter analyze` is now a blocking gate
+
+`analysis_options.yaml` promotes three lint rules to error severity
+(`unawaited_futures`, `discarded_futures`, `avoid_dynamic_calls`). Those produced
+39 error-severity findings across ~12 feature screens, so the job originally ran
+`continue-on-error` — a gate that can never pass gets ignored.
+
+All 39 are cleared and `continue-on-error` is gone: any new error-severity lint
+now fails the build. Infos and warnings stay non-fatal (830 remain: line length,
+directive ordering, unused test imports). Ratchet documented in the workflow:
+clear the warnings, drop `--no-fatal-warnings`; then the infos, then
+`--no-fatal-infos`.
+
+### Still requires someone with production access
+
+0. **`firebase functions:list --project rainbow-97f1e`** — do this first; it is two
+   minutes and it is the only way to settle C-6. If `smsWebhook` or `seedMockData`
+   is listed, an unauthenticated stranger can inject `DURESS`-flagged emergencies
+   into your alert store today. Delete the deployment before deleting `functions/`.
+1. **Rotate credentials** — service_role, Firebase, Cloudinary, Termii, and the
+   `HQ-001`/`HQ-002`/`COMMANDER-TEST` passwords. The code holes are shut; the
+   leaked credentials are still live.
+2. **Run the RLS migration on staging, then `node scripts/verify_rls.js`.**
+   Written from this repo's migration files, not a live `pg_policies` dump, so
+   hand-created dashboard policies will not be dropped. Not on production until
+   staging is green.
+3. **Review Supabase logs** for prior anonymous reads of `profiles` and `telemetry`.

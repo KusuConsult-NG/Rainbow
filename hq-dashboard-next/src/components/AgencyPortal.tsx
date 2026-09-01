@@ -560,7 +560,7 @@ function PersonnelPanel({ personnel, agencyColor, agency, onRefresh }: {
       <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-muted)' }}>
         <Users size={40} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
         <div style={{ fontSize: 13, fontWeight: 600 }}>No personnel registered yet</div>
-        <div style={{ fontSize: 11, marginTop: 4 }}>Switch to "Add Officer" to register your team</div>
+        <div style={{ fontSize: 11, marginTop: 4 }}>Switch to &ldquo;Add Officer&rdquo; to register your team</div>
       </div>
     );
   }

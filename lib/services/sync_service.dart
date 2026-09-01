@@ -26,7 +26,7 @@ class SyncService {
         Connectivity().onConnectivityChanged.listen((results) {
       if (results.contains(ConnectivityResult.mobile) ||
           results.contains(ConnectivityResult.wifi)) {
-        syncPendingData();
+        unawaited(syncPendingData());
       }
     });
   }
@@ -158,6 +158,6 @@ class SyncService {
   }
 
   void dispose() {
-    _connectivitySubscription?.cancel();
+    unawaited(_connectivitySubscription?.cancel());
   }
 }

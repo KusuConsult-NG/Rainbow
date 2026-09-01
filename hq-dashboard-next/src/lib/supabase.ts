@@ -1,19 +1,18 @@
 import { createBrowserClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
+import { publicEnv, assertPublicEnv } from './env';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://wpffwoblxuogemxcqpep.supabase.co';
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_9ufgK7BJ8Zy8x7-K133NRQ_8myILNuw';
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'sb_secret_nMYk3r8IhX_Be13Wtdfydw_yQLD1PbA';
+/**
+ * Client-safe Supabase access ONLY.
+ *
+ * This module is imported by `'use client'` components, so everything in it is
+ * bundled for the browser. Never add a service_role client here — it will be
+ * shipped to every visitor. Server-privileged access lives in `supabase-server.ts`,
+ * which is import-guarded against client bundles.
+ */
+assertPublicEnv();
 
-// Browser / Public Client using @supabase/ssr for automatic cookie sync across SSR edge middleware
-export const supabase = typeof window !== 'undefined'
-  ? createBrowserClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  : createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// Admin / Service Role Client (for backend / admin operations)
-export const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-});
+export const supabase =
+  typeof window !== 'undefined'
+    ? createBrowserClient(publicEnv.supabaseUrl, publicEnv.supabaseAnonKey)
+    : createClient(publicEnv.supabaseUrl, publicEnv.supabaseAnonKey);

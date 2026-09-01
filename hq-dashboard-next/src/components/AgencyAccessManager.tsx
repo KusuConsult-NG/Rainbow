@@ -180,7 +180,7 @@ export default function AgencyAccessManager() {
         <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
           <Shield size={36} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
           <div style={{ fontSize: 13, fontWeight: 600 }}>No agency liaisons registered</div>
-          <div style={{ fontSize: 11, marginTop: 4 }}>Click "GRANT ACCESS" to create a liaison account</div>
+          <div style={{ fontSize: 11, marginTop: 4 }}>Click &ldquo;GRANT ACCESS&rdquo; to create a liaison account</div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

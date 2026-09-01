@@ -62,7 +62,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
       duration: const Duration(seconds: 2),
     );
 
-    _startListeningFlow();
+    unawaited(_startListeningFlow());
   }
 
   @override
@@ -118,7 +118,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
             // Auto-restart listening so user can keep talking
             Future.delayed(const Duration(milliseconds: 300), () {
               if (mounted && _isListening) {
-                SpeechService.instance.startListening(
+                unawaited(SpeechService.instance.startListening(
                   onResult: (text) {
                     if (!mounted) return;
                     setState(() {
@@ -128,7 +128,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                           : '$_accumulatedText $_currentChunk';
                     });
                   },
-                );
+                ));
               }
             });
           }
