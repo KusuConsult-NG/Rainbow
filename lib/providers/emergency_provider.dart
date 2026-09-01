@@ -34,6 +34,11 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
     final latVal = currentPos?.latitude;
     final lngVal = currentPos?.longitude;
 
+    /// Server-side alert reference to quote in the escalation SMS, or null when
+    /// the write failed or was queued offline. Declared out here so the SMS can
+    /// be dispatched after the try/catch regardless of which way it went.
+    String? dispatchRef;
+
     try {
       final alertId = await ref.read(alertServiceProvider).submitAlert(
             type: 'PANIC SOS',
@@ -54,30 +59,37 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
         BackgroundTrackingService().startSosTracking(safeAlertId, userId),
       );
 
-      // Redundant out-of-band nudge to the HQ dispatch line, for the case where
-      // nobody is watching the dashboard.
-      //
-      // Deliberately NOT awaited: it used to run first and block the alert write
-      // behind an SMS provider's latency, which is backwards — the alert row is
-      // the system of record and must be created as fast as possible.
-      //
-      // A local/offline id is passed as null rather than as text: 'LOCAL_1723…'
-      // means nothing to a dispatcher and would read as a real reference.
-      unawaited(
-        _dispatchEscalationSms(
-          alertId: isRealAlertId ? alertId : null,
-          latitude: latVal,
-          longitude: lngVal,
-        ),
-      );
-
-      state = state.copyWith(alertId: isRealAlertId ? alertId : null);
+      dispatchRef = isRealAlertId ? alertId : null;
+      state = state.copyWith(alertId: dispatchRef);
     } catch (e) {
       dev.log('SOS Alert Creation Failed: $e', name: 'CRITICAL_SOS_ERR');
       state = state.copyWith(
         errorMessage: 'Alert delayed — stay on screen, tracking active.',
       );
     }
+
+    // Redundant out-of-band nudge to the HQ dispatch line, for the case where
+    // nobody is watching the dashboard.
+    //
+    // OUTSIDE the try/catch on purpose. A redundant channel that only fires when
+    // the primary channel succeeded is not redundancy. `submitAlert` happens to
+    // swallow everything and return a local id today, so placing this inside the
+    // try worked — but it made the SOS fallback silently depend on that, and a
+    // later `rethrow` in AlertService would have removed the fallback in exactly
+    // the situation it exists for, with nothing failing to show it.
+    //
+    // Not awaited: it previously ran BEFORE the alert write, blocking the system
+    // of record behind an SMS provider's latency.
+    //
+    // A local/offline id is passed as null rather than as text: 'LOCAL_1723…'
+    // means nothing to a dispatcher and would read as a real reference.
+    unawaited(
+      _dispatchEscalationSms(
+        alertId: dispatchRef,
+        latitude: latVal,
+        longitude: lngVal,
+      ),
+    );
   }
 
   /// Ask the HQ backend to send the escalation SMS.

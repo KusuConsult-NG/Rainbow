@@ -423,35 +423,20 @@ export default function DashboardPage() {
     setAiSummary(null);
     const toastId = toast.loading('Querying Gemini AI Engine...', 'Synthesizing incident data');
     try {
-      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
-      const prompt = `You are the Operation Rainbow Forensic AI Assistant. Your task is to analyze the following resolved incident report and compile a premium, structured Post-Action Operational Summary.
-      
-INCIDENT METADATA:
-- ID: ${report.id}
-- Type: ${report.type || 'N/A'}
-- Description: ${report.description || 'No description provided'}
-- Severity: ${report.severity || report.priority || 'MEDIUM'}
-- LGA: ${report.geo_lga || 'STATE HQ'}
-- Ward: ${report.geo_ward || 'N/A'}
-
-Provide your analysis formatted in Markdown. Your summary MUST contain the following four specific sections:
-1. ### EXECUTIVE OPERATIONAL SUMMARY: A concise 2-sentence tactical summary of the incident and its resolution.
-2. ### TIMELINE SLA AUDIT: Audit response times and evaluate if response milestones were met.
-3. ### KEY RESOURCE PERFORMANCE: Evaluate the actions taken by responding officers and field units.
-4. ### STRATEGIC RECOMMENDATIONS: Provide 2-3 actionable, high-impact tactical recommendations for geofenced patrols in this LGA/Ward.`;
-
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-          }),
-        }
-      );
+      // The Gemini key is server-side (audit H-9). This route composes the
+      // prompt from the alert row itself, so no prompt text leaves the browser.
+      const res = await fetch('/api/ai/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alertId: report.id, kind: 'summary' }),
+      });
       const resData = await res.json();
-      const text = resData.candidates?.[0]?.content?.parts?.[0]?.text || 'Forensic analysis completed with default parameters.';
+      if (resData.status === 'UNCONFIGURED') {
+        setAiSummary('AI analysis is not configured on this deployment.');
+        toast.update(toastId, 'success', 'AI Not Configured', 'No Gemini key is set server-side');
+        return;
+      }
+      const text = resData.text || 'Forensic analysis completed with default parameters.';
       setAiSummary(text);
       toast.update(toastId, 'success', 'Forensic Debrief Ready', 'AI analysis complete');
     } catch (error: any) {
@@ -2157,7 +2142,6 @@ function AlertCard({ alert, agents, usersMap, onViewDossier, onDispatch, onEscal
     setTriageError(null);
     const toastId = toast.loading('Running AI Triage...', 'Analyzing incident description');
     try {
-      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
       const prompt = `You are the Operation Rainbow Emergency Triage AI. Analyze: "${alert.description}".
 Respond ONLY with a JSON object with this exact shape: 
 {
@@ -2172,25 +2156,23 @@ Respond ONLY with a JSON object with this exact shape:
 
       let parsed: any = null;
 
-      if (apiKey) {
-        try {
-          const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-            }
-          );
-          const resData = await res.json();
-          const rawText = resData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      // Server-side Gemini (audit H-9). The rule-based fallback below still
+      // covers UNCONFIGURED, FAILED, and any transport error, exactly as before.
+      try {
+        const res = await fetch('/api/ai/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ alertId: alert.id, kind: 'triage' }),
+        });
+        const resData = await res.json();
+        if (resData.status === 'OK') {
+          const cleanJson = String(resData.text ?? '').replace(/```json/g, '').replace(/```/g, '').trim();
           if (cleanJson) {
             parsed = JSON.parse(cleanJson);
           }
-        } catch (apiErr) {
-          console.warn('Gemini API call failed, using rule-based fallback triage:', apiErr);
         }
+      } catch (apiErr) {
+        console.warn('AI triage call failed, using rule-based fallback triage:', apiErr);
       }
 
       // Rule-based fallback triage engine when API key is missing or fails
