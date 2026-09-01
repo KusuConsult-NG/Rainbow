@@ -214,6 +214,72 @@ and the strict policy is a no-op.
 
 ---
 
+### C-3 UPDATE — a real `pg_policies` dump changed this finding materially
+
+Production was finally read. **44 live policies where a replica rebuilt from this
+repo's migrations has 21.** 34 of them exist only in production; no file here
+creates them. That dump corrects this report in one direction and worsens it in
+another.
+
+**Correction, in your favour.** This report repeatedly said the database was
+"readable and writable by anyone on the internet, with no credentials". **That is
+no longer true of production.** The `USING (true)` policies on `profiles`,
+`telemetry`, `alerts` and `chat_messages` are gone — somebody replaced them by
+hand with `auth.uid() IS NOT NULL` variants. The claim was true of the migration
+files, and I asserted it of the running system without ever having seen one.
+Anon is not reading citizen PII or live GPS.
+
+**What is actually true, and it is still bad.** The wide-open-to-anon problem was
+replaced with wide-open-to-any-authenticated-user, and anyone can register:
+
+| Policy | Effect |
+|---|---|
+| `profiles_read_all` | any signed-in user reads **every** profile — names, emails, phones |
+| `telemetry_read_authenticated` | any signed-in user reads **everyone's live GPS** |
+| `alerts_read_authenticated` | any signed-in user reads every alert |
+| `chat_read_authenticated` | any signed-in user reads every dispatcher message |
+| `agency_*_write` | any signed-in user **writes** agency deployments and personnel |
+
+**Two live privilege-escalation paths, both confirmed executable.**
+
+*First:* `profiles_write_own` is `FOR ALL USING (id = auth.uid())` and
+`profiles_update_own` is `UPDATE ... WITH CHECK (auth.uid() = id)` — neither
+restricts columns. A citizen can set their own `role`. Demonstrated against a
+production-shaped replica: `citizen self-promoted to: HQ_COMMAND`. Since
+`is_hq_or_admin()` and `is_responder()` read `profiles.role`, and the dashboard's
+`requireRole()` reads the same column, this grants everything.
+
+*Second, and worse:* `sysalerts_write_hq`, `agency_notifications_read` and
+`agency_notifications_insert` authorise on
+`auth.jwt() -> 'user_metadata' ->> 'role'`. In Supabase `user_metadata` is
+**written by the client** — `supabase.auth.updateUser({ data: { role:
+'HQ_COMMAND' } })`. Any user grants themselves those permissions with one call
+and no database write at all. Nothing can defend a policy that trusts
+`user_metadata`; only `app_metadata` is server-controlled.
+
+**The migration as written would have been almost entirely decorative.** Its DROP
+list names policies that mostly no longer exist. Of 44 live policies it would
+have dropped 10 and left 34 — and PERMISSIVE policies combine with OR, so
+`profiles_read_all` would have kept defeating `profiles_select_self_or_staff`.
+The identical failure as `phase1_foundation.sql`, which is the finding this
+migration exists to fix. **The dry run existed for exactly this and it was right
+to insist on it.**
+
+**Fixed.** The migration now drops all 34 by name, and adds policies for the four
+`agency_*` tables it never covered — without those, dropping their policies would
+leave RLS enabled with none, denying everything and blanking the agency portal.
+
+Verified against a replica carrying production's real policy shape:
+
+| | before | after |
+|---|---|---|
+| citizen sees profiles | **3 of 3** | 1 (own) |
+| citizen sees telemetry | **2 of 2** | own + staff |
+| citizen sets own role | **succeeds → HQ_COMMAND** | blocked |
+| command staff visibility | full | full |
+| anon | denied | denied |
+
+
 ### C-4. Both API routes accept unauthenticated requests
 
 **Files:** `src/app/api/notify-agency/route.ts`, `src/app/api/push/dispatch/route.ts`
