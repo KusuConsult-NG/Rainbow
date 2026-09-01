@@ -31,9 +31,19 @@
 --
 -- HOW TO READ THE OUTPUT
 --
--- Read the NOTICE messages. `>>> SAFE TO APPLY` at the end means the migration
--- did the right thing against your real data. `>>> PROBLEM` means do not apply
--- it yet. The final SELECT must match the BEFORE numbers, proving nothing stuck.
+-- The Supabase SQL Editor shows the LAST row-returning statement and does NOT
+-- surface `RAISE NOTICE` at all. So every finding comes back as a ROW in the
+-- final result set: look for the row whose status is VERDICT.
+--
+--   VERDICT / >>> SAFE TO APPLY   the migration did the right thing on your data
+--   VERDICT / >>> DO NOT APPLY    one or more PROBLEM rows above it — send them
+--
+-- An ERROR instead of a result set means a tripwire fired; read it carefully,
+-- it means something committed. To confirm nothing persisted afterwards, re-run
+-- scripts/rls_inventory.sql and check the row count is unchanged.
+--
+-- RUN scripts/rls_inventory.sql FIRST. It is read-only and lists every policy
+-- this repository does not create — the ones this migration will not drop.
 -- ============================================================================
 
 BEGIN;
@@ -41,6 +51,25 @@ BEGIN;
 -- Tripwire. ON COMMIT DROP means this disappears the instant anything commits.
 CREATE TEMP TABLE _dryrun_marker(ok boolean) ON COMMIT DROP;
 INSERT INTO _dryrun_marker VALUES (true);
+
+-- Findings are collected as ROWS, not RAISE NOTICE. The Supabase SQL Editor does
+-- not surface notices at all — the first version of this script reported its
+-- entire verdict through NOTICE and the operator saw none of it. The last
+-- row-returning statement is what the editor displays, so that is the verdict.
+CREATE TEMP TABLE _findings(
+  seq    serial,
+  status text,
+  check_ text,
+  detail text
+) ON COMMIT DROP;
+
+-- The assertions impersonate anon and authenticated via SET LOCAL ROLE, and those
+-- roles cannot write to a table owned by the session user. Without these grants
+-- the first anon assertion dies with "permission denied for table _findings" and
+-- the whole transaction aborts. It is a temp table inside a transaction that is
+-- always rolled back, so granting broadly here costs nothing.
+GRANT ALL ON _findings TO PUBLIC;
+GRANT ALL ON SEQUENCE _findings_seq_seq TO PUBLIC;
 
 -- ── 1. What is there right now ──────────────────────────────────────────────
 -- Read this in the results pane. Any policy name you do not recognise from
@@ -57,8 +86,7 @@ BEGIN
   SELECT count(*) INTO n_total FROM pg_policies WHERE schemaname='public';
   SELECT count(*) INTO n_open  FROM pg_policies
    WHERE schemaname='public' AND (qual='true' OR with_check='true');
-  RAISE NOTICE 'BEFORE: % policies on public, % of them USING(true)/WITH CHECK(true)',
-    n_total, n_open;
+  INSERT INTO _findings(status, check_, detail) VALUES ('BEFORE', 'policies on public', n_total || ' total, ' || n_open || ' with USING(true)/WITH CHECK(true)');
 END $dryrun$;
 
 -- ============================================================================
@@ -392,7 +420,7 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'ABORT: the marker table is empty — a COMMIT occurred and this is no longer a dry run.';
   END IF;
-  RAISE NOTICE 'OK: still inside the dry-run transaction, nothing has been committed';
+  INSERT INTO _findings(status, check_, detail) VALUES ('OK', 'still inside the dry-run transaction', 'nothing committed');
 EXCEPTION WHEN undefined_table THEN
   RAISE EXCEPTION 'ABORT: the marker table is GONE — a COMMIT occurred. Changes may be PERMANENT. Stop and check pg_policies.';
 END $dryrun$;
@@ -428,8 +456,7 @@ BEGIN
   SELECT id INTO cit_id FROM public.profiles WHERE role = 'CITIZEN' LIMIT 1;
   SELECT count(*) INTO n_before FROM public.profiles;
 
-  RAISE NOTICE 'Live data: % profiles. command sample=%, citizen sample=%',
-    n_before, coalesce(cmd_id::text,'NONE'), coalesce(cit_id::text,'NONE');
+  INSERT INTO _findings(status, check_, detail) VALUES ('INFO', 'live data', n_before || ' profiles; command sample=' || coalesce(cmd_id::text,'NONE') || '; citizen sample=' || coalesce(cit_id::text,'NONE'));
 
   -- ── anon must be locked out ───────────────────────────────────────────────
   SET LOCAL ROLE anon;
@@ -439,31 +466,31 @@ BEGIN
   BEGIN
     SELECT count(*) INTO n FROM public.profiles;
     IF n > 0 THEN
-      RAISE NOTICE '>>> PROBLEM: anon can still read % profile rows', n;
+      INSERT INTO _findings(status, check_, detail) VALUES ('PROBLEM', 'anon reads profiles', n || ' rows visible');
       problems := problems + 1;
-    ELSE RAISE NOTICE 'OK: anon cannot read profiles'; END IF;
+    ELSE INSERT INTO _findings(status, check_, detail) VALUES ('OK','anon cannot read profiles',''); END IF;
   EXCEPTION WHEN insufficient_privilege THEN
-    RAISE NOTICE 'OK: anon denied on profiles outright';
+    INSERT INTO _findings(status, check_, detail) VALUES ('OK','anon denied on profiles','privilege denied');
   END;
 
   BEGIN
     SELECT count(*) INTO n FROM public.telemetry;
     IF n > 0 THEN
-      RAISE NOTICE '>>> PROBLEM: anon can still read % telemetry rows (live GPS)', n;
+      INSERT INTO _findings(status, check_, detail) VALUES ('PROBLEM','anon reads telemetry (live GPS)', n || ' rows visible');
       problems := problems + 1;
-    ELSE RAISE NOTICE 'OK: anon cannot read telemetry'; END IF;
+    ELSE INSERT INTO _findings(status, check_, detail) VALUES ('OK','anon cannot read telemetry',''); END IF;
   EXCEPTION WHEN insufficient_privilege THEN
-    RAISE NOTICE 'OK: anon denied on telemetry outright';
+    INSERT INTO _findings(status, check_, detail) VALUES ('OK','anon denied on telemetry','privilege denied');
   END;
 
   BEGIN
     SELECT count(*) INTO n FROM public.alerts;
     IF n > 0 THEN
-      RAISE NOTICE '>>> PROBLEM: anon can still read % alert rows', n;
+      INSERT INTO _findings(status, check_, detail) VALUES ('PROBLEM','anon reads alerts', n || ' rows visible');
       problems := problems + 1;
-    ELSE RAISE NOTICE 'OK: anon cannot read alerts'; END IF;
+    ELSE INSERT INTO _findings(status, check_, detail) VALUES ('OK','anon cannot read alerts',''); END IF;
   EXCEPTION WHEN insufficient_privilege THEN
-    RAISE NOTICE 'OK: anon denied on alerts outright';
+    INSERT INTO _findings(status, check_, detail) VALUES ('OK','anon denied on alerts','privilege denied');
   END;
 
   RESET ROLE;
@@ -477,17 +504,17 @@ BEGIN
 
     SELECT count(*) INTO n FROM public.profiles;
     IF n < n_before THEN
-      RAISE NOTICE '>>> PROBLEM: command user sees only % of % profiles', n, n_before;
+      INSERT INTO _findings(status, check_, detail) VALUES ('PROBLEM','command user lost visibility', n || ' of ' || n_before || ' profiles');
       problems := problems + 1;
-    ELSE RAISE NOTICE 'OK: command user still sees all % profiles', n; END IF;
+    ELSE INSERT INTO _findings(status, check_, detail) VALUES ('OK','command user sees all profiles', n || ' profiles'); END IF;
 
     SELECT count(*) INTO n FROM public.alerts;
-    RAISE NOTICE 'OK: command user sees % alerts', n;
+    INSERT INTO _findings(status, check_, detail) VALUES ('OK','command user sees alerts', n || ' alerts');
     SELECT count(*) INTO n FROM public.telemetry;
-    RAISE NOTICE 'OK: command user sees % telemetry rows', n;
+    INSERT INTO _findings(status, check_, detail) VALUES ('OK','command user sees telemetry', n || ' rows');
     RESET ROLE;
   ELSE
-    RAISE NOTICE '>>> PROBLEM: no command-role profile found — cannot prove dispatch still works';
+    INSERT INTO _findings(status, check_, detail) VALUES ('PROBLEM','no command-role profile found','cannot prove dispatch still works');
     problems := problems + 1;
   END IF;
 
@@ -499,9 +526,9 @@ BEGIN
 
     SELECT count(*) INTO n FROM public.profiles;
     IF n <> 1 THEN
-      RAISE NOTICE '>>> PROBLEM: citizen sees % profiles, expected 1', n;
+      INSERT INTO _findings(status, check_, detail) VALUES ('PROBLEM','citizen sees too many profiles', n || ', expected 1');
       problems := problems + 1;
-    ELSE RAISE NOTICE 'OK: citizen sees only their own profile'; END IF;
+    ELSE INSERT INTO _findings(status, check_, detail) VALUES ('OK','citizen sees only their own profile',''); END IF;
 
     -- The check C-4 depends on. Expected to be blocked.
     escalated := false;
@@ -512,32 +539,33 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN NULL;
     END;
     IF escalated THEN
-      RAISE NOTICE '>>> PROBLEM: a citizen escalated their own role to HQ_COMMAND';
+      INSERT INTO _findings(status, check_, detail) VALUES ('PROBLEM','citizen escalated to HQ_COMMAND','privilege escalation NOT blocked');
       problems := problems + 1;
-    ELSE RAISE NOTICE 'OK: self role escalation blocked'; END IF;
+    ELSE INSERT INTO _findings(status, check_, detail) VALUES ('OK','self role escalation blocked',''); END IF;
 
     RESET ROLE;
   ELSE
-    RAISE NOTICE 'note: no CITIZEN profile found — citizen scoping not exercised';
+    INSERT INTO _findings(status, check_, detail) VALUES ('INFO','no CITIZEN profile found','citizen scoping not exercised');
   END IF;
 
   RESET ROLE;
 
-  RAISE NOTICE '=========================================';
   IF problems = 0 THEN
-    RAISE NOTICE '>>> SAFE TO APPLY — 0 problems found';
+    INSERT INTO _findings(status, check_, detail) VALUES ('VERDICT','>>> SAFE TO APPLY','0 problems found');
   ELSE
-    RAISE NOTICE '>>> DO NOT APPLY — % problem(s) above', problems;
+    INSERT INTO _findings(status, check_, detail) VALUES ('VERDICT','>>> DO NOT APPLY', problems || ' problem(s) above');
   END IF;
-  RAISE NOTICE '=========================================';
 END $dryrun$;
 
 -- ============================================================================
--- 5. Throw all of it away
+-- 5. THE VERDICT — this is the result set the SQL Editor will show you.
+--    It must be the LAST row-returning statement: the editor displays only one.
+-- ============================================================================
+SELECT status, check_ AS check, detail FROM _findings ORDER BY seq;
+
+-- ============================================================================
+-- 6. Throw all of it away. Returns no rows, so the verdict above stays on screen.
+--    To confirm nothing persisted, re-run scripts/rls_inventory.sql and check
+--    the row count is unchanged.
 -- ============================================================================
 ROLLBACK;
-
--- Must match the BEFORE numbers above. If it does not, something persisted.
-SELECT count(*) FILTER (WHERE qual='true' OR with_check='true') AS still_wide_open,
-       count(*) AS total_policies
-FROM pg_policies WHERE schemaname='public';
