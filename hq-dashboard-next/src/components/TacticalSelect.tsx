@@ -78,7 +78,7 @@ export default function TacticalSelect({
         display: 'inline-block',
         maxWidth: typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth,
         width: '100%',
-        fontFamily: "'Outfit', 'Inter', sans-serif",
+        fontFamily: "var(--font-outfit), var(--font-inter), sans-serif",
       }}
     >
       {/* Trigger Button */}

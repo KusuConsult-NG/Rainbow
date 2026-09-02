@@ -75,8 +75,12 @@ export function contentSecurityPolicy(nonce: string, isDev: boolean): string {
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''}`,
     // No nonce here, on purpose — see the note above.
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' data: https://fonts.gstatic.com",
+    // No Google Fonts hosts. Inter and Outfit are self-hosted through
+    // next/font/local (src/app/fonts.ts) and served from /_next/static/media,
+    // so both directives are satisfied by 'self'. That also makes them
+    // verifiable in a browser with no egress — which they never were before.
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self' data:",
     // The Supabase origin is REQUIRED here, not optional. Incident evidence —
     // scene photos taken by responders and citizens — is uploaded to Supabase
     // Storage and rendered straight from its public URL. Leaving it out does

@@ -135,7 +135,7 @@ export default function AgencyAccessManager() {
   return (
     <div style={{ padding: 24, maxWidth: 700 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-primary)', fontFamily: "'Outfit', sans-serif", margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-primary)', fontFamily: "var(--font-outfit), sans-serif", margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Shield size={18} style={{ color: 'var(--primary)' }} />
           Agency Liaison Access Control
         </h3>

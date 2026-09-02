@@ -52,7 +52,7 @@ export default function SystemAlertListener() {
       boxShadow: `0 10px 40px ${isCritical ? 'var(--duress)' : 'var(--accent)'}66`,
       display: 'flex', alignItems: 'center', gap: 20,
       border: '2px solid rgba(255,255,255,0.2)',
-      fontFamily: 'Inter, sans-serif'
+      fontFamily: 'var(--font-inter), sans-serif'
     }}>
       <div style={{ background: 'rgba(255,255,255,0.2)', padding: 10, borderRadius: 12 }}>
         {isCritical ? <ShieldAlert size={24} /> : <Info size={24} />}

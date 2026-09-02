@@ -41,19 +41,19 @@ const LiveMap = dynamic(() => import('@/components/LiveMap'), { ssr: false });
 const btnStyle = (color: string, bg: string): React.CSSProperties => ({
   flex: 1, padding: '12px 0', background: bg, color, border: `1px solid ${color}44`,
   borderRadius: 12, cursor: 'pointer', fontWeight: 900, fontSize: 10, letterSpacing: 1, transition: 'all 0.2s',
-  fontFamily: "'Outfit', sans-serif"
+  fontFamily: "var(--font-outfit), sans-serif"
 });
 
 const overlaySelect: React.CSSProperties = {
   background: 'var(--bg-secondary)', backdropFilter: 'blur(12px)',
   border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px',
-  color: 'var(--text-primary)', fontFamily: 'Inter,sans-serif', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+  color: 'var(--text-primary)', fontFamily: 'var(--font-inter),sans-serif', fontSize: 11, fontWeight: 700, cursor: 'pointer',
 };
 
 const fSel: React.CSSProperties = {
   background: 'var(--input-bg)', color: 'var(--text-primary)',
   border: '1px solid var(--border)', borderRadius: 8, padding: '7px 11px',
-  fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif',
+  fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-inter),sans-serif',
 };
 
 type Tab = 'map' | 'alerts' | 'history' | 'analytics' | 'broadcast' | 'admin' | 'settings' | 'audit' | 'uninstall' | 'agency';
@@ -304,7 +304,7 @@ const renderFormattedSummary = (text: string) => {
               color: sectionColor, 
               letterSpacing: 1.2, 
               margin: '0 0 10px 0', 
-              fontFamily: "'Outfit', sans-serif" 
+              fontFamily: "var(--font-outfit), sans-serif" 
             }}>
               {title}
             </h5>
@@ -1522,10 +1522,10 @@ export default function DashboardPage() {
               }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 2, fontFamily: "'Outfit', sans-serif" }}>INCIDENT DOSSIER</span>
+                    <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 2, fontFamily: "var(--font-outfit), sans-serif" }}>INCIDENT DOSSIER</span>
                     <span style={{ fontSize: 8, fontWeight: 900, background: `${statusBadgeColor}22`, color: statusBadgeColor, border: `1px solid ${statusBadgeColor}`, padding: '2px 8px', borderRadius: 20 }}>{statusBadgeLabel}</span>
                   </div>
-                  <h3 style={{ fontSize: 20, fontWeight: 900, color: isDuress ? 'var(--duress)' : 'var(--text-primary)', fontFamily: "'Outfit', sans-serif", margin: 0 }}>
+                  <h3 style={{ fontSize: 20, fontWeight: 900, color: isDuress ? 'var(--duress)' : 'var(--text-primary)', fontFamily: "var(--font-outfit), sans-serif", margin: 0 }}>
                     {isDuress ? 'DURESS CRISIS LOG' : selectedReport.type}
                   </h3>
                 </div>
@@ -1566,7 +1566,7 @@ export default function DashboardPage() {
                 }}>
                   {/* Left Column: Scope and Status */}
                   <div>
-                    <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "'Outfit', sans-serif" }}>OPERATIONAL DETAILS</h4>
+                    <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "var(--font-outfit), sans-serif" }}>OPERATIONAL DETAILS</h4>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Assigned Scope:</span>
@@ -1589,7 +1589,7 @@ export default function DashboardPage() {
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Incident ID:</span>
-                        <span title={selectedReport.id} style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', fontFamily: "'Outfit', monospace", letterSpacing: 0.5 }}>
+                        <span title={selectedReport.id} style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', fontFamily: "var(--font-outfit), monospace", letterSpacing: 0.5 }}>
                           {formatIncidentId(selectedReport.id)}
                         </span>
                       </div>
@@ -1598,7 +1598,7 @@ export default function DashboardPage() {
 
                   {/* Right Column: Location & Resolution */}
                   <div style={{ borderLeft: '1px solid var(--border)', paddingLeft: 20 }}>
-                    <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "'Outfit', sans-serif" }}>GEOSPATIAL & ARCHIVE</h4>
+                    <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "var(--font-outfit), sans-serif" }}>GEOSPATIAL & ARCHIVE</h4>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>LGA / Sector:</span>
@@ -1638,7 +1638,7 @@ export default function DashboardPage() {
 
                 {/* Description Section */}
                 <div>
-                  <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8, fontFamily: "'Outfit', sans-serif" }}>INITIAL REPORT DESCRIPTION</h4>
+                  <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8, fontFamily: "var(--font-outfit), sans-serif" }}>INITIAL REPORT DESCRIPTION</h4>
                   <div style={{ 
                     padding: '16px 20px', 
                     background: 'var(--input-bg)', 
@@ -1658,7 +1658,7 @@ export default function DashboardPage() {
                 {/* Attached Media Dossier (Video, Photos, Audio) */}
                 {((selectedReport.media_urls && selectedReport.media_urls.length > 0) || (selectedReport.attachments && selectedReport.attachments.length > 0)) && (
                   <div>
-                    <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--accent)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "'Outfit', sans-serif" }}>
+                    <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--accent)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "var(--font-outfit), sans-serif" }}>
                       ATTACHED EVIDENCE MEDIA ({((selectedReport.media_urls || selectedReport.attachments || []).length)} FILES)
                     </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
@@ -1695,7 +1695,7 @@ export default function DashboardPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
                   {/* Reporter Profile */}
                   <div style={{ padding: 20, background: 'var(--input-bg)', borderRadius: 20, border: '1px solid var(--border)' }}>
-                    <h4 style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "'Outfit', sans-serif" }}>REPORTER PROFILE</h4>
+                    <h4 style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "var(--font-outfit), sans-serif" }}>REPORTER PROFILE</h4>
                     <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>{reporterName}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontWeight: 600 }}>{reporterContact}</div>
                     <div style={{ fontSize: 8, color: 'var(--text-dim)', marginTop: 8, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.5 }}>
@@ -1705,7 +1705,7 @@ export default function DashboardPage() {
 
                   {/* Resolution Details */}
                   <div style={{ padding: 20, background: 'var(--input-bg)', borderRadius: 20, border: '1px solid var(--border)' }}>
-                    <h4 style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "'Outfit', sans-serif" }}>RESOLUTION LOG</h4>
+                    <h4 style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12, fontFamily: "var(--font-outfit), sans-serif" }}>RESOLUTION LOG</h4>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       <div>
                         <span style={{ fontSize: 10, color: 'var(--text-dim)', display: 'block', fontWeight: 700, marginBottom: 2 }}>RESOLVED BY</span>
@@ -1748,7 +1748,7 @@ export default function DashboardPage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Sparkles size={16} style={{ color: 'var(--primary)' }} />
-                      <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', margin: 0, fontFamily: "'Outfit', sans-serif" }}>
+                      <h4 style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, textTransform: 'uppercase', margin: 0, fontFamily: "var(--font-outfit), sans-serif" }}>
                         Tactical Forensic AI Analysis
                       </h4>
                     </div>
@@ -1954,8 +1954,8 @@ function NavItem({ icon, label, active, onClick, badge }: { icon: React.ReactNod
 function StatBar({ label, value, color, onClick }: { label: string; value: number; color: string; onClick?: () => void }) {
   return (
     <div onClick={onClick} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: onClick ? 'pointer' : 'default', padding: '6px 12px', borderRadius: '8px', transition: 'background 0.2s' }} className="card-hover">
-      <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1.5, fontFamily: "'Outfit', sans-serif" }}>{label}</span>
-      <span style={{ fontSize: 14, fontWeight: 900, color, textShadow: `0 0 10px ${color}44`, fontFamily: "'Outfit', sans-serif" }}>{value}</span>
+      <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1.5, fontFamily: "var(--font-outfit), sans-serif" }}>{label}</span>
+      <span style={{ fontSize: 14, fontWeight: 900, color, textShadow: `0 0 10px ${color}44`, fontFamily: "var(--font-outfit), sans-serif" }}>{value}</span>
     </div>
   );
 }
@@ -2192,7 +2192,7 @@ Respond ONLY with a JSON object with this exact shape:
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 2, fontFamily: "'Outfit', sans-serif" }}>INCIDENT REPORT</span>
+            <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 2, fontFamily: "var(--font-outfit), sans-serif" }}>INCIDENT REPORT</span>
             {['DISPATCHED', 'ACKNOWLEDGED', 'ON_ROUTE', 'ON_SITE'].includes(a.status) && (
               <span style={{ fontSize: 8, fontWeight: 900, background: 'var(--success)', color: 'white', padding: '2px 6px', borderRadius: 4, boxShadow: 'var(--success-glow)' }}>UNIT {a.status}</span>
             )}
@@ -2201,7 +2201,7 @@ Respond ONLY with a JSON object with this exact shape:
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 900, color: isDuress ? 'var(--duress)' : 'var(--text-primary)', fontFamily: "'Outfit', sans-serif", margin: 0 }}>{isDuress ? 'DURESS ALERT' : alert.type}</h3>
+            <h3 style={{ fontSize: 16, fontWeight: 900, color: isDuress ? 'var(--duress)' : 'var(--text-primary)', fontFamily: "var(--font-outfit), sans-serif", margin: 0 }}>{isDuress ? 'DURESS ALERT' : alert.type}</h3>
             {onViewDossier && (
               <button
                 onClick={() => onViewDossier(alert)}
@@ -2223,7 +2223,7 @@ Respond ONLY with a JSON object with this exact shape:
           </div>
         </div>
         <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', padding: '6px 12px', borderRadius: 10 }}>
-          <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', fontFamily: "'Inter', sans-serif" }}>{formatOfficerBadge(alert.assigned_to, usersMap)}</span>
+          <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--primary)', fontFamily: "var(--font-inter), sans-serif" }}>{formatOfficerBadge(alert.assigned_to, usersMap)}</span>
         </div>
       </div>
 
@@ -2254,7 +2254,7 @@ Respond ONLY with a JSON object with this exact shape:
       {/* Evidence Media Thumbnails — Phase 7 */}
       {alert.media_urls && alert.media_urls.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1.5, marginBottom: 8, fontFamily: "'Outfit', sans-serif" }}>
+          <div style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1.5, marginBottom: 8, fontFamily: "var(--font-outfit), sans-serif" }}>
             EVIDENCE ({alert.media_urls.length} FILE{alert.media_urls.length > 1 ? 'S' : ''})
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -2321,7 +2321,7 @@ Respond ONLY with a JSON object with this exact shape:
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Sparkles size={13} style={{ color: 'var(--primary)' }} />
-            <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, fontFamily: "'Outfit', sans-serif" }}>AI TRIAGE ASSESSMENT</span>
+            <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, fontFamily: "var(--font-outfit), sans-serif" }}>AI TRIAGE ASSESSMENT</span>
           </div>
           {(alert as any).ai_triage && !triageLoading && (
             <button
@@ -2468,10 +2468,10 @@ Respond ONLY with a JSON object with this exact shape:
         background: 'var(--input-bg)', 
         borderRadius: 16, 
         border: '1px solid var(--border)',
-        fontFamily: "'Inter', sans-serif" 
+        fontFamily: "var(--font-inter), sans-serif" 
       }}>
         <div style={{ borderRight: '1px solid var(--border)', paddingRight: 12 }}>
-          <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, display: 'block', marginBottom: 6, fontFamily: "'Outfit', sans-serif" }}>TACTICAL LOCATION</span>
+          <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, display: 'block', marginBottom: 6, fontFamily: "var(--font-outfit), sans-serif" }}>TACTICAL LOCATION</span>
           <div style={{ fontSize: 11, fontWeight: 850, color: 'var(--text-primary)', textTransform: 'uppercase' }}>
             {a.geo_lga ? `${a.geo_lga} LGA` : 'STATEWIDE HQ'}
           </div>
@@ -2498,7 +2498,7 @@ Respond ONLY with a JSON object with this exact shape:
           )}
         </div>
         <div style={{ paddingLeft: 4 }}>
-          <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, display: 'block', marginBottom: 6, fontFamily: "'Outfit', sans-serif" }}>REPORTER MAIN PROFILE</span>
+          <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, display: 'block', marginBottom: 6, fontFamily: "var(--font-outfit), sans-serif" }}>REPORTER MAIN PROFILE</span>
           <div style={{ fontSize: 11, fontWeight: 850, color: 'var(--text-primary)', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {reporterName}
           </div>
@@ -2514,7 +2514,7 @@ Respond ONLY with a JSON object with this exact shape:
       {/* Incident Timeline Stepper */}
       {alert.timeline && alert.timeline.length > 0 && (
         <div style={{ marginTop: 20, marginBottom: 24, padding: 16, background: 'var(--input-bg)', borderRadius: 16, border: '1px solid var(--border)' }}>
-          <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, marginBottom: 12, textTransform: 'uppercase', fontFamily: "'Outfit', sans-serif" }}>Command Audit Timeline</p>
+          <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--primary)', letterSpacing: 1.5, marginBottom: 12, textTransform: 'uppercase', fontFamily: "var(--font-outfit), sans-serif" }}>Command Audit Timeline</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, borderLeft: '2px solid var(--border)', paddingLeft: 16, marginLeft: 8 }}>
             {alert.timeline.map((event: any, idx: number) => {
               const date = new Date(event.timestamp);
