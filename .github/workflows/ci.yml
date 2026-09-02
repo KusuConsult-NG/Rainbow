@@ -298,6 +298,67 @@ jobs:
             fi
           done
 
+          # ── The strict-CSP properties ────────────────────────────────────
+          # `script-src` used to carry 'unsafe-inline', which permits exactly the
+          # injected inline script the directive exists to stop — a policy that
+          # looked protective and was not. It is now nonce-based. These assert
+          # the properties that make that real, because a header can contain the
+          # word "nonce" and still be useless.
+          CSP1=$(curl -sI http://localhost:3200/login | grep -i '^content-security-policy:')
+          CSP2=$(curl -sI http://localhost:3200/login | grep -i '^content-security-policy:')
+          SCRIPT_SRC=$(printf '%s' "$CSP1" | grep -o "script-src[^;]*")
+          STYLE_SRC=$(printf '%s' "$CSP1" | grep -o "style-src[^;]*")
+
+          if printf '%s' "$SCRIPT_SRC" | grep -q "'unsafe-inline'"; then
+            echo "::error::script-src carries 'unsafe-inline' — the policy does not stop injected script"
+            FAIL=1
+          else
+            echo "  ok: script-src has no 'unsafe-inline'"
+          fi
+
+          for NEEDLE in "'nonce-" "'strict-dynamic'"; do
+            if printf '%s' "$SCRIPT_SRC" | grep -qF "$NEEDLE"; then
+              echo "  ok: script-src carries ${NEEDLE}"
+            else
+              echo "::error::script-src is missing ${NEEDLE}"
+              FAIL=1
+            fi
+          done
+
+          # A nonce reused across requests is a nonce an attacker can read off
+          # one response and replay into the next.
+          N1=$(printf '%s' "$CSP1" | grep -o "'nonce-[^']*'" | head -1)
+          N2=$(printf '%s' "$CSP2" | grep -o "'nonce-[^']*'" | head -1)
+          if [ -n "$N1" ] && [ "$N1" != "$N2" ]; then
+            echo "  ok: a fresh nonce per request"
+          else
+            echo "::error::the nonce is reused across requests (or absent)"
+            FAIL=1
+          fi
+
+          # style-src MUST keep 'unsafe-inline' and MUST NOT gain a nonce. These
+          # pages are built from React style={{…}} props, which render as style
+          # attributes; a nonce here makes the browser IGNORE 'unsafe-inline'
+          # and strips the styling off every page.
+          if printf '%s' "$STYLE_SRC" | grep -q "'unsafe-inline'" \
+             && ! printf '%s' "$STYLE_SRC" | grep -q "nonce-"; then
+            echo "  ok: style-src keeps 'unsafe-inline' and has no nonce"
+          else
+            echo "::error::style-src must keep 'unsafe-inline' and must not carry a nonce"
+            FAIL=1
+          fi
+
+          # Two CSP headers would mean the response must satisfy BOTH, and a
+          # static one has no nonce — the pair would block the very scripts the
+          # nonce exists to allow. This is why next.config.ts no longer sets one.
+          CSP_COUNT=$(curl -sI http://localhost:3200/login | grep -ci '^content-security-policy:')
+          if [ "$CSP_COUNT" -eq 1 ]; then
+            echo "  ok: exactly one Content-Security-Policy header"
+          else
+            echo "::error::expected exactly 1 CSP header, found ${CSP_COUNT}"
+            FAIL=1
+          fi
+
           # Realtime is a WebSocket to the Supabase host. connect-src must carry
           # the ws scheme that matches the configured URL's scheme, or the
           # browser refuses the upgrade and the live feed goes quiet with no
