@@ -1018,7 +1018,7 @@ The original claim that the mobile suite could not be run is **superseded**.
 |---|---|---|
 | C-1 | service_role key in public bundle | ✅ fixed + CI regression guard |
 | C-2 | forged `__session` cookie bypass | ✅ fixed, verified by probe |
-| C-3 | RLS `USING (true)` | ⚠️ **migration written, NOT RUN** |
+| C-3 | RLS `USING (true)` | ⚠️ **migration written, NOT RUN** — step-by-step in `docs/APPLYING_THE_MIGRATIONS.md` |
 | C-4 | unauthenticated API routes | ⚠️ fixed in code, **depends on C-3** |
 | C-5 | SOS reported at fabricated location | ✅ fixed, both layers + schema migration |
 | H-1 | `next build` failed | ✅ fixed |
