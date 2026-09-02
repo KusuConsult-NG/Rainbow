@@ -1034,7 +1034,7 @@ The original claim that the mobile suite could not be run is **superseded**.
 | M-5 | `deploy.sh` broken three ways | ✅ rewritten; validates env, scans the bundle, fails loudly |
 | M-6 | committed `node_modules` | ✅ untracked; 19,000 → 378 tracked files |
 | M-10 | Leaflet from a CDN | ✅ bundled locally (it was fetching JS, not just CSS) |
-| H-6 | committed secrets | ⚠️ **first fix was incomplete** — a 2nd Firebase key was still tracked; now untracked + `tracked-secrets` CI gate. **All still in git history** |
+| H-6 | committed secrets | ✅ **history purged 2026-09-02** — every leaked value redacted from every commit, secret files and all `node_modules` removed; a normal clone now carries **0** credential-shaped blobs. Residual: GitHub's own `refs/pull/*` still hold the old commits until Support purges them — and **rotation is still required** |
 | H-7 | role source user-writable | ⚠️ fixed by the C-3 migration's trigger — **lands when C-3 is run** |
 | H-3 | `.env` bundled into the APK | ✅ server secrets removed + 2 CI gates; **shared PIN constants remain** |
 | H-9 | Gemini key inlined into the client bundle | ✅ moved to `/api/ai/analyze`; `AIza…` added to the bundle scan |
@@ -1201,6 +1201,50 @@ outright.
 A CI step asserts the allowlist has not returned. That needs to be separate
 from the lint step: re-adding an allowlist downgrades an error to a warning, so
 `npx eslint` still exits 0 and would not notice. Mutation-verified both ways.
+
+### H-6, closed: the leaked material is out of git history
+
+Executed 2026-09-02 with `git filter-repo`, after a full rehearsal on a
+throwaway mirror. The rehearsal earned its keep: it showed the 20-character
+citation of the Supabase key being redacted *before* the full 41-character
+value, leaving a 21-character tail behind that the verification regex could not
+see. The real run orders replacements longest-first and additionally hunts for
+every secret's suffix.
+
+**What was rewritten:** six distinct secret values (two Firebase API keys, the
+Supabase secret-class key and its citations) redacted to `***REMOVED-SECRET***`
+in every blob and every commit message; the two `GoogleService-Info` plists,
+`hq-002-auth.json` and `hq-dashboard/dist/` removed from every commit; every
+`node_modules` directory ever committed removed (which is where the
+third-party test private keys lived). Verified before pushing: 0 blobs matching
+the credential regex, 0 blobs containing any secret suffix, 0 `node_modules`
+objects, and the rewritten `main` identical in content to the original except
+for the seven files carrying a redaction. All three branches force-pushed;
+verified again from a fresh clone of the remote.
+
+**What a normal clone gets now:** 129 commits, ~34 MB (was ~95 MB), **zero**
+credential-shaped material anywhere in history.
+
+**What remains, precisely — and is not mine to fix:**
+
+* GitHub's server-managed `refs/pull/*` (19 of them) still point at the
+  pre-rewrite commits: 152 old commits stay reachable through them, and
+  through direct commit-SHA URLs, until GitHub Support runs its
+  "remove sensitive data" process. Those refs cannot be pushed to or deleted
+  from outside; the attempt is recorded below. **Open a support request
+  citing this repository.**
+* **Rotate every leaked credential.** A purge protects future clones; it does
+  not un-leak a key that was pushed to a remote. Both Firebase API keys and the
+  Supabase secret key are compromised until rotated.
+* **Every existing clone must be re-cloned.** Every SHA changed. Commit
+  references in this report from before this point (e.g. `25ca6b4`) are
+  pre-rewrite SHAs and no longer resolve.
+* A backup of the untouched history exists **only** as a local bundle in the
+  audit environment's scratch space — deliberately never pushed anywhere, since
+  a backup on the same remote would defeat the purge.
+
+The `tracked-secrets` CI gate no longer has an allowlist: the six files that
+were exempted carry `***REMOVED-SECRET***` now, so any match is a new leak.
 
 ### The duress PIN was a shared constant inside the APK — now per-user, server-verified
 
