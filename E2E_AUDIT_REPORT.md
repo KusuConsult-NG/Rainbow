@@ -1040,6 +1040,7 @@ The original claim that the mobile suite could not be run is **superseded**.
 | H-9 | Gemini key inlined into the client bundle | ✅ moved to `/api/ai/analyze`; `AIza…` added to the bundle scan |
 | M-3 | shallow tier E2E | ✅ replaced with mutation-tested tier assertions |
 | M-7 | dead Firebase stack | ⏳ open — confirmed dead (zero callers in either client); **still do not delete `functions/` before the deployment is checked** |
+| — | CSP `script-src` carried `'unsafe-inline'` | ✅ **fixed 2026-09-02** — nonce-based via `proxy.ts`; injected script now provably blocked, and the authenticated map page finally exercised under the policy |
 | **C-6** | **unauthenticated Cloud Functions** | 🔴 **still unknown — both probe routes blocked from the audit container; stack confirmed orphaned and the guards undeployable. See the investigation note.** |
 | — | per-user server-verified duress PIN | ⏳ open — product change, see H-3 |
 
