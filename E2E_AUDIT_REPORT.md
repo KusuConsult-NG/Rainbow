@@ -1064,6 +1064,20 @@ Two defects that static review missed and running the code caught:
   own. ✅ fixed by guarding on `uid != null`, with mutation-verified widget
   tests.
 
+* **Clustering can hide a live incident behind another one.** The HQ board
+  folds active alerts sharing LGA + ward + polling unit + type into a single
+  card carrying a `witness_count`. For many people reporting one riot that is
+  exactly right. But the surviving card keeps the FIRST report's **id**, so
+  dispatching or resolving it acts on that row alone — the others stay open and
+  are no longer visible anywhere on the board. Two genuinely separate incidents
+  that happen to share those four fields therefore collapse, and one can be
+  closed without ever being seen. Severity does travel upward (a DURESS member
+  promotes the card), so the board will not understate urgency — but it will
+  understate *count*. ⏳ open — the fix is to carry the member ids on the
+  cluster and act on all of them, which is a behavioural decision about what
+  "resolve" means for a group. Pinned by tests in
+  `src/lib/alert-display.test.ts` so the current behaviour is at least explicit.
+
 * **A failed read renders as "nothing here" in two admin panels.**
   `AgencyAccessManager` sets its liaison list to `[]` when the query fails, so
   a permissions error or a dropped connection displays "No agency liaisons

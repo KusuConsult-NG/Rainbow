@@ -26,44 +26,16 @@ import {
   Loader2, Filter, Bell, Activity, Clock, Target, Edit3, Send,
   Sun, Moon, X, Sparkles, MapPin, Menu,
 } from 'lucide-react';
+import type { Alert } from './types';
+import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
+
+export type { Alert };
 
 
 // Leaflet must be client-only (no SSR)
 const LiveMap = dynamic(() => import('@/components/LiveMap'), { ssr: false });
 
 // Canonical Mission Alert Interface (Supabase Aligned)
-export interface Alert {
-  id: string;
-  local_id?: string;
-  type?: string;
-  sub_type?: string;
-  description?: string;
-  status: 'PENDING' | 'DISPATCHED' | 'ACKNOWLEDGED' | 'ON_ROUTE' | 'ON_SITE' | 'RESOLVED' | 'DURESS' | 'CANCELLED';
-  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  priority?: string;
-  assigned_to?: string;
-  assignedToUid?: string | null;
-  latitude?: number;
-  longitude?: number;
-  lat?: number;
-  lng?: number;
-  reported_by?: string;
-  reportedBy?: string;
-  geo_lga?: string;
-  geo_ward?: string;
-  geo_pu?: string;
-  ai_summary?: string;
-  citizen_feedback?: string;
-  feedback_at?: string;
-  post_sos_status?: string;
-  media_urls?: string[];
-  attachments?: string[];
-  created_at?: string;
-  reportedAt?: any;
-  resolved_by?: string;
-  resolved_at?: string;
-  timeline?: any[];
-}
 
 const btnStyle = (color: string, bg: string): React.CSSProperties => ({
   flex: 1, padding: '12px 0', background: bg, color, border: `1px solid ${color}44`,
@@ -855,81 +827,17 @@ export default function DashboardPage() {
   const [filterPu, setFilterPu] = useState('ALL');
   const [enableClustering, setEnableClustering] = useState(true);
 
-  // High-Scale Spatial-Temporal Cluster Aggregation (Handles 100,000+ incoming reports)
-  const processAlertsForDisplay = (rawAlerts: Alert[]): Alert[] => {
-    if (!enableClustering) return rawAlerts;
+  // Clustering and filtering moved to src/lib/alert-display.ts so they can be
+  // tested: they decide what reaches an operator's screen, and were previously
+  // buried in this component with no coverage at all.
+  const displayAlerts = clusterAlerts(alerts, enableClustering);
 
-    const clusterMap = new Map<string, { master: Alert; count: number }>();
-
-    rawAlerts.forEach(alert => {
-      if (alert.status === 'RESOLVED') {
-        clusterMap.set(`resolved-${alert.id}`, { master: { ...alert }, count: 1 });
-        return;
-      }
-
-      // Group active threats by LGA + Ward + PU + Type
-      const lga = alert.geo_lga || 'STATE';
-      const ward = alert.geo_ward || 'SECTOR';
-      const pu = alert.geo_pu || 'AREA';
-      const key = `${lga}_${ward}_${pu}_${alert.type}`;
-
-      if (!clusterMap.has(key)) {
-        clusterMap.set(key, { master: { ...alert }, count: 1 });
-      } else {
-        const item = clusterMap.get(key)!;
-        item.count += 1;
-        if (alert.status === 'DURESS' || alert.priority === 'CRITICAL') {
-          item.master.status = alert.status;
-          item.master.priority = 'CRITICAL';
-        }
-      }
-    });
-
-    const result: Alert[] = [];
-    clusterMap.forEach(({ master, count }) => {
-      (master as any).witness_count = count;
-      result.push(master);
-    });
-
-    return result;
-  };
-
-  const displayAlerts = processAlertsForDisplay(alerts);
-
-  const filtered = displayAlerts.filter(a => {
-    if (filterStatus === 'CRITICAL') {
-      if (a.status !== 'DURESS' && a.priority !== 'CRITICAL') return false;
-    } else if (filterStatus === 'SMS_FALLBACK') {
-      const isSms = (a.description || '').includes('[OFFLINE_SMS]') || 
-                    (a.description || '').includes('[SMS]') ||
-                    (a as any).via === 'SMS_GATEWAY' || 
-                    (a as any).source === 'SMS' || 
-                    (a as any).channel === 'SMS';
-      if (!isSms) return false;
-    } else if (filterStatus !== 'ALL' && a.status !== filterStatus) return false;
-    if (filterTier !== 'ALL' && a.assigned_to !== filterTier) return false;
-    if (filterLga !== 'ALL') {
-      const alertLga = (a.geo_lga || '').trim().toLowerCase();
-      const targetLga = filterLga.trim().toLowerCase();
-      if (alertLga !== targetLga && !alertLga.includes(targetLga) && !targetLga.includes(alertLga)) {
-        return false;
-      }
-    }
-    if (filterWard !== 'ALL') {
-      const alertWard = (a.geo_ward || '').trim().toLowerCase();
-      const targetWard = filterWard.trim().toLowerCase();
-      if (alertWard !== targetWard && !alertWard.includes(targetWard) && !targetWard.includes(alertWard)) {
-        return false;
-      }
-    }
-    if (filterPu !== 'ALL') {
-      const alertPu = (a.geo_pu || '').trim().toLowerCase();
-      const targetPu = filterPu.trim().toLowerCase();
-      if (alertPu !== targetPu && !alertPu.includes(targetPu) && !targetPu.includes(alertPu)) {
-        return false;
-      }
-    }
-    return true;
+  const filtered = filterAlerts(displayAlerts, {
+    status: filterStatus,
+    tier: filterTier,
+    lga: filterLga,
+    ward: filterWard,
+    pu: filterPu,
   });
 
   const norm = (str?: string) => (str || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
