@@ -15,8 +15,14 @@ const SUPABASE_ORIGIN = (() => {
   }
 })();
 
-// Supabase Realtime upgrades to a WebSocket on the same host.
-const SUPABASE_WS = SUPABASE_ORIGIN?.replace(/^https:/, 'wss:') ?? null;
+// Supabase Realtime upgrades to a WebSocket on the same host. Derive the scheme
+// from the URL rather than assuming https: a self-hosted or local Supabase on
+// http speaks ws, and hard-coding wss silently blocks its realtime channel.
+// Caught by a UI run against a local backend, where the console reported
+// "Refused to connect to 'ws://…' because it violates … connect-src".
+const SUPABASE_WS = SUPABASE_ORIGIN
+  ? SUPABASE_ORIGIN.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')
+  : null;
 
 // Leaflet basemap tiles (src/components/LiveMap.tsx).
 const TILE_HOSTS = [

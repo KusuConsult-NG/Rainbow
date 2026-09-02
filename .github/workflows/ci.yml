@@ -201,7 +201,10 @@ jobs:
           set -euo pipefail
           npx next start -p 3200 &
           SERVER_PID=$!
-          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          # Kill the process group: `npx` spawns next-server as a child, so
+          # killing the npx pid alone leaves the server behind as an orphan for
+          # the runner to reap.
+          trap 'kill -- -$(ps -o pgid= "$SERVER_PID" | tr -d " ") 2>/dev/null || kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
           for i in $(seq 1 30); do
             curl -sf -o /dev/null http://localhost:3200/login && break
@@ -236,6 +239,28 @@ jobs:
               FAIL=1
             fi
           done
+
+          # Realtime is a WebSocket to the Supabase host. connect-src must carry
+          # the ws scheme that matches the configured URL's scheme, or the
+          # browser refuses the upgrade and the live feed goes quiet with no
+          # error the operator can see. The first version derived it with
+          # `.replace(/^https:/,'wss:')`, which emitted `wss:` for an http
+          # backend and blocked realtime outright — caught by a browser run,
+          # not by reading the config.
+          CSP=$(curl -sI http://localhost:3200/login | grep -i '^content-security-policy:')
+          case "${NEXT_PUBLIC_SUPABASE_URL}" in
+            https://*) WANT="wss://${NEXT_PUBLIC_SUPABASE_URL#https://}" ;;
+            http://*)  WANT="ws://${NEXT_PUBLIC_SUPABASE_URL#http://}" ;;
+            *)         WANT="" ;;
+          esac
+          if [ -n "$WANT" ]; then
+            if printf '%s' "$CSP" | grep -qF "$WANT"; then
+              echo "  ok: connect-src allows ${WANT}"
+            else
+              echo "::error::connect-src does not allow ${WANT} — Supabase Realtime will be blocked"
+              FAIL=1
+            fi
+          fi
 
           if [ "$FAIL" -ne 0 ]; then exit 1; fi
           echo "OK: security headers present on public and guarded routes."
