@@ -85,6 +85,21 @@ void main() {
       ),
     );
 
+    // Never fetch a font over the network.
+    //
+    // `google_fonts` downloads font files on first use and caches them. A UI
+    // test against the web build with fonts.gstatic.com unreachable rendered
+    // EVERY LABEL BLANK — the logo and the icon fonts drew, but the panic
+    // button had no text on it. Text in an emergency app cannot depend on
+    // reaching a Google CDN from a rural link.
+    //
+    // The weights this app uses are bundled under assets/google_fonts/, which
+    // the package resolves before considering the network. Turning fetching off
+    // means a family that is NOT bundled falls back to the platform font
+    // immediately and visibly, rather than working for whoever has warm cache
+    // and failing for whoever does not.
+    GoogleFonts.config.allowRuntimeFetching = false;
+
     try {
       debugPrint('🚀 [MAIN] Loading .env...');
       await dotenv.load().timeout(const Duration(seconds: 3));
