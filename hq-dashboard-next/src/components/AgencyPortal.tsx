@@ -551,7 +551,9 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
                       cursor: 'pointer', flexShrink: 0,
                     }}
                   >
-                    <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    {/* eslint-disable-next-line @next/next/no-img-element -- images.unoptimized is set, so next/image serves this unchanged; see the note in dashboard/page.tsx. */}
+                    <img src={url} alt="" loading="lazy" decoding="async"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                     />
                   </div>

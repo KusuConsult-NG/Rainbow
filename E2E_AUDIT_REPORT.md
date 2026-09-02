@@ -1079,6 +1079,38 @@ Two defects that static review missed and running the code caught:
   "resolve" means for a group. Pinned by tests in
   `src/lib/alert-display.test.ts` so the current behaviour is at least explicit.
 
+* **...and every voice recording and scene video, via a different directive.**
+  🔴 Found and fixed 2026-09-02, immediately after the photo bug and by
+  following the same question one step further. Evidence media rides the SAME
+  Supabase Storage origin, but `<audio src>` and `<video src>` are governed by
+  `media-src`, which the policy did not contain at all — so it fell back to
+  `default-src 'self'` and both were refused. Fixing `img-src` did nothing for
+  them. A duress voice recording is often the only account of what happened;
+  silently refusing to play it is the worst form of this bug. Confirmed in a
+  browser before and after. The CI assertion now loops over BOTH directives,
+  and fails if either is missing entirely rather than merely wrong.
+  
+  `LiveFeedViewer` is unaffected: it attaches a MediaStream through
+  `srcObject`, which CSP does not govern.
+
+* **The strict CSP silently blocked every incident evidence photo.** 🔴 Found
+  and fixed 2026-09-02, and introduced by the nonce-based policy in the same
+  session. Evidence — scene photos taken by responders and citizens — is
+  uploaded to Supabase Storage and rendered straight from its public URL, but
+  `img-src` allowed only `'self' data: blob:` and the two map-tile hosts. The
+  Supabase origin was present in `connect-src`, which is what made this easy to
+  miss: images are governed by `img-src` alone, so the data loaded and the
+  pictures did not.
+  
+  The failure is invisible by construction — the console renders the incident
+  with a blank space, and an operator reviewing a report cannot tell a blocked
+  photo from one that was never taken. Confirmed in a real browser (`Refused to
+  load the image ...`) before and after the fix, and a CI assertion now checks
+  `img-src` carries the Supabase origin, mutation-verified.
+  
+  Worth noting how it surfaced: not from reading the policy, but from asking
+  where the `<img>` tags behind four lint warnings actually pointed.
+
 * **Tapping an emergency push notification navigated nowhere.** Found by a
   lint (`use_setters_to_change_properties` pointing at a setter with no
   callers), and broken three separate ways at once: the
@@ -1151,6 +1183,21 @@ outright.
 A CI step asserts the allowlist has not returned. That needs to be separate
 from the lint step: re-adding an allowlist downgrades an error to a warning, so
 `npx eslint` still exits 0 and would not notice. Mutation-verified both ways.
+
+### One CSP path remains unverified
+
+A general browser sweep of the console reports zero violations of any
+directive. But `font-src`/`style-src` are unproven rather than confirmed: the
+audit container has no egress to `fonts.googleapis.com`, so the webfont is
+never requested and the browser never has cause to allow or refuse it.
+
+Worth knowing because the same condition is a live deployment risk, not just a
+test-environment quirk. `globals.css` pulls Inter and Outfit from Google Fonts
+at runtime with `@import url(...)`. On a restricted government network — the
+exact scenario that made the Leaflet-from-unpkg dependency a finding (M-10) —
+those requests fail and the console falls back to system fonts. The Flutter web
+target already had this problem and `build_web.sh` bundles its resources for
+that reason; the console does not. Not a security issue, and not changed here.
 
 ### Widget tests could not render any screen that touches the database
 

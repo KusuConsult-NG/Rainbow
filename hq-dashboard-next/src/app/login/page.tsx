@@ -271,9 +271,11 @@ export default function LoginPage() {
                 boxShadow: '0 10px 30px rgba(79, 70, 229, 0.3), inset 0 0 20px rgba(255, 255, 255, 0.1)',
                 padding: 10
               }}>
-                <img 
-                  src="/app_icon.png" 
-                  alt="Operation Rainbow Emblem" 
+                {/* eslint-disable-next-line @next/next/no-img-element -- a local static emblem, above the fold, with a JS fallback on error. images.unoptimized is set so next/image would serve the same bytes, and it lazy-loads by default — wrong for the first thing on the sign-in page, which would then need `priority` to undo. */}
+                <img
+                  src="/app_icon.png"
+                  alt="Operation Rainbow Emblem"
+                  decoding="async" 
                   style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: 14 }}
                   onError={(e) => {
                     e.currentTarget.style.display = 'none';
