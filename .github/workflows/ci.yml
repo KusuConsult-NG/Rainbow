@@ -199,9 +199,34 @@ jobs:
       - name: Assert security headers reach the wire
         run: |
           set -euo pipefail
-          npx next start -p 3200 &
+
+          # Redirect the server's output to a file. A background process that
+          # inherits the step's stdout keeps that pipe open after the shell
+          # exits, and the runner waits on it.
+          npx next start -p 3200 > /tmp/next-ci.log 2>&1 &
           SERVER_PID=$!
-          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          # Kill the server's whole descendant tree, BY PID.
+          #
+          # Never `kill -- -$PGID` here. An earlier version of this step did
+          # exactly that, to tidy away an "orphan process" notice, and it took
+          # the runner down with it: the step's own shell and the runner agent
+          # share that process group, so the group kill reached them too. Both
+          # runs died with "The runner has received a shutdown signal" straight
+          # after this step printed its last OK line — every assertion had
+          # passed, and the job still failed.
+          #
+          # `pkill -P` is not enough either: npx spawns `sh -c next start`,
+          # which spawns next-server, so the grandchild survives a one-level
+          # kill. Recurse.
+          kill_tree() {
+            local pid=$1 child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          trap 'kill_tree "$SERVER_PID"' EXIT
 
           for i in $(seq 1 30); do
             curl -sf -o /dev/null http://localhost:3200/login && break
@@ -236,6 +261,28 @@ jobs:
               FAIL=1
             fi
           done
+
+          # Realtime is a WebSocket to the Supabase host. connect-src must carry
+          # the ws scheme that matches the configured URL's scheme, or the
+          # browser refuses the upgrade and the live feed goes quiet with no
+          # error the operator can see. The first version derived it with
+          # `.replace(/^https:/,'wss:')`, which emitted `wss:` for an http
+          # backend and blocked realtime outright — caught by a browser run,
+          # not by reading the config.
+          CSP=$(curl -sI http://localhost:3200/login | grep -i '^content-security-policy:')
+          case "${NEXT_PUBLIC_SUPABASE_URL}" in
+            https://*) WANT="wss://${NEXT_PUBLIC_SUPABASE_URL#https://}" ;;
+            http://*)  WANT="ws://${NEXT_PUBLIC_SUPABASE_URL#http://}" ;;
+            *)         WANT="" ;;
+          esac
+          if [ -n "$WANT" ]; then
+            if printf '%s' "$CSP" | grep -qF "$WANT"; then
+              echo "  ok: connect-src allows ${WANT}"
+            else
+              echo "::error::connect-src does not allow ${WANT} — Supabase Realtime will be blocked"
+              FAIL=1
+            fi
+          fi
 
           if [ "$FAIL" -ne 0 ]; then exit 1; fi
           echo "OK: security headers present on public and guarded routes."

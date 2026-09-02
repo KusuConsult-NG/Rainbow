@@ -13,14 +13,19 @@ import 'package:latlong2/latlong.dart';
 import 'package:local_auth/local_auth.dart' as local_auth;
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/providers/alerts_feed.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/auth_service.dart';
 import 'package:rainbow_app/services/tts_service.dart';
 import 'package:rainbow_app/shared/widgets/broadcast_hud.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
 
-/// Documentation for this public member.
-final alertsStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
+/// The responder's mission feed, with its own liveness attached.
+///
+/// This used to be a bare `.stream()` whose failures were indistinguishable
+/// from "nothing is happening" — see `resilientAlertsFeed` for why that was a
+/// safety problem rather than a cosmetic one.
+final alertsStreamProvider = StreamProvider<AlertsFeed>((ref) {
   final auth = ref.watch(authProvider);
   final profile = auth.profile ?? {};
   final role = (profile['role'] as String? ?? '').toUpperCase();
@@ -29,11 +34,8 @@ final alertsStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
   final geoPu = profile['geo_pu'] as String?;
   final userId = auth.user?.id;
 
-  return SupabaseConfig.client
-      .from('alerts')
-      .stream(primaryKey: ['id'])
-      .map((list) {
-    return list.where((alert) {
+  return supabaseAlertsFeed(SupabaseConfig.client).map((feed) {
+    return feed.copyWith(rows: feed.rows.where((alert) {
       final aGeoLga = alert['geo_lga'] as String?;
       final aGeoWard = alert['geo_ward'] as String?;
       final aGeoPu = alert['geo_pu'] as String?;
@@ -72,7 +74,7 @@ final alertsStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
       // statewide data to every field device. The build-level filteredAlerts
       // handles any edge cases for assigned-to-me alerts.
       return false;
-    }).toList();
+    }).toList());
   });
 });
 
@@ -235,6 +237,12 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final profile = ref.watch(authProvider).profile ?? {};
+    // The app bar advertised "LIVE MISSION FEED" with a lit indicator dot
+    // unconditionally, which put a liveness claim directly above a feed that
+    // may not be live. Read the real state and label it accordingly.
+    final feedLiveness = ref.watch(alertsStreamProvider).valueOrNull?.liveness ??
+        FeedLiveness.connecting;
+    final feedIsLive = feedLiveness == FeedLiveness.live;
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -260,13 +268,22 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                _roleTitle,
-                style: GoogleFonts.outfit(
-                  fontWeight: FontWeight.w900,
-                  color: Colors.white,
-                  fontSize: 18,
-                  letterSpacing: 1,
+              // Scale to fit rather than clip: with four action icons in this
+              // bar the fixed 18px title rendered as "OPERATION..." on an
+              // ordinary phone.
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _roleTitle,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: GoogleFonts.outfit(
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    fontSize: 18,
+                    letterSpacing: 1,
+                  ),
                 ),
               ),
               Row(
@@ -274,19 +291,35 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
                   Container(
                     width: 6,
                     height: 6,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
+                    decoration: BoxDecoration(
+                      color: feedIsLive
+                          ? Colors.white
+                          : AppColors.warning,
                       shape: BoxShape.circle,
                     ),
                   ),
                   const SizedBox(width: 6),
-                  Text(
-                    'LIVE MISSION FEED',
-                    style: GoogleFonts.outfit(
-                      color: Colors.white.withValues(alpha: 0.8),
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 2,
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        feedIsLive
+                            ? 'LIVE MISSION FEED'
+                            : feedLiveness == FeedLiveness.connecting
+                                ? 'CONNECTING...'
+                                : 'FEED NOT LIVE',
+                        maxLines: 1,
+                        softWrap: false,
+                        style: GoogleFonts.outfit(
+                          color: feedIsLive
+                              ? Colors.white.withValues(alpha: 0.8)
+                              : AppColors.warning,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 2,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -356,7 +389,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
               children: [
                 const BroadcastHud(),
                 Expanded(
-                  child: StreamBuilder<List<Map<String, dynamic>>>(
+                  child: StreamBuilder<AlertsFeed>(
                     stream: ref.watch(alertsStreamProvider.stream),
                     builder: (context, alertSnapshot) {
                       return StreamBuilder<List<Map<String, dynamic>>>(
@@ -370,6 +403,18 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
                               ),
                             );
                           }
+
+                          // A stream error must never fall through to an empty
+                          // list: empty renders as ALL CLEAR, and "the feed
+                          // broke" is not "there are no incidents".
+                          final feed = alertSnapshot.data ??
+                              (alertSnapshot.hasError
+                                  ? AlertsFeed(
+                                      rows: const [],
+                                      liveness: FeedLiveness.degraded,
+                                      error: alertSnapshot.error.toString(),
+                                    )
+                                  : AlertsFeed.initial);
 
                           final uid =
                               ref.watch(authServiceProvider).currentUserId;
@@ -395,7 +440,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
                                     profile['geo_pu'] as String? ??
                                         profile['pu'] as String?,
                                   ].whereType<String>().toList();
-                          final allDocs = alertSnapshot.data ?? [];
+                          final allDocs = feed.rows;
                           final filteredAlerts = allDocs.where((alert) {
                             if (alert['assignedToUid'] == uid) return true;
 
@@ -464,7 +509,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
                             duration: const Duration(milliseconds: 500),
                             child: _showMap
                                 ? _buildMap(filteredAlerts, responderMarkers)
-                                : _buildList(filteredAlerts),
+                                : _buildList(filteredAlerts, feed),
                           );
                         },
                       );
@@ -502,35 +547,105 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
         .stream(primaryKey: ['id']);
   }
 
-  Widget _buildList(List<Map<String, dynamic>> alerts) {
+  Widget _buildList(List<Map<String, dynamic>> alerts, AlertsFeed feed) {
     if (alerts.isEmpty) {
+      // "ALL CLEAR" is a claim about the world, and it may only be made when
+      // the feed is actually live. When it is not, say so — a responder acts
+      // very differently on "nothing is happening" than on "I am not being
+      // told what is happening".
+      final live = feed.liveness == FeedLiveness.live;
+      final connecting = feed.liveness == FeedLiveness.connecting;
+
+      final (icon, colour, headline, detail) = live
+          ? (Icons.radar_rounded, AppColors.outline,
+              'ALL CLEAR - NO ACTIVE MISSIONS', null)
+          : connecting
+              ? (Icons.radar_rounded, AppColors.outline,
+                  'CONNECTING TO MISSION FEED', null)
+              : (
+                  Icons.cloud_off_rounded,
+                  AppColors.warning,
+                  'MISSION FEED NOT LIVE',
+                  'Cannot confirm all clear. Retrying, and falling back to '
+                      'periodic refresh — use radio to verify status.',
+                );
+
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.radar_rounded, size: 64, color: AppColors.outline),
-            const SizedBox(height: 24),
-            Text(
-              'ALL CLEAR - NO ACTIVE MISSIONS',
-              style: GoogleFonts.outfit(
-                color: AppColors.textDim,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 3,
-                fontSize: 12,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 64, color: colour),
+              const SizedBox(height: 24),
+              Text(
+                headline,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.outfit(
+                  color: live || connecting ? AppColors.textDim : AppColors.warning,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 3,
+                  fontSize: 12,
+                ),
               ),
-            ),
-          ],
+              if (detail != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  detail,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    color: AppColors.textDim,
+                    fontSize: 12,
+                    height: 1.5,
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       );
     }
 
     final criticalCount = alerts.where((a) => a['severity'] == 'CRITICAL' || a['status'] == 'DURESS').length;
     final escalatedCount = alerts.where((a) => a['status'] == 'ESCALATED').length;
+    // A populated but stale list is the more dangerous of the two degraded
+    // cases: it looks authoritative. Say plainly that it may be out of date.
+    final stale = feed.liveness == FeedLiveness.degraded;
 
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 120, 16, 40),
-      itemCount: alerts.length + 1,
-      itemBuilder: (context, index) {
+      itemCount: alerts.length + (stale ? 2 : 1),
+      itemBuilder: (context, rawIndex) {
+        if (stale && rawIndex == 0) {
+          return Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColors.warning.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.warning, width: 1.2),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.cloud_off_rounded,
+                    size: 18, color: AppColors.warning),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'FEED NOT LIVE - list may be out of date, refreshing periodically',
+                    style: GoogleFonts.inter(
+                      color: AppColors.warning,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        final index = stale ? rawIndex - 1 : rawIndex;
         if (index == 0) {
           return Container(
             margin: const EdgeInsets.only(bottom: 20),
@@ -583,9 +698,16 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
+                        // "All systems active" is a claim about the system,
+                        // not about the alert count — and it must not be made
+                        // while the feed this panel summarises is degraded.
+                        // It sat directly beneath the FEED NOT LIVE banner and
+                        // flatly contradicted it.
                         criticalCount > 0
                             ? '$criticalCount Critical Incidents require immediate field unit dispatch or HQ escalation.'
-                            : 'All systems active. $escalatedCount escalated alerts pending command review.',
+                            : stale
+                                ? 'Feed is not live; this summary may be incomplete. $escalatedCount escalated alerts in the last known state.'
+                                : 'All systems active. $escalatedCount escalated alerts pending command review.',
                         style: GoogleFonts.inter(
                           color: AppColors.textSecondary,
                           fontSize: 11,
