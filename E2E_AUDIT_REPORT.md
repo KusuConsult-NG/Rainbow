@@ -1028,7 +1028,7 @@ The original claim that the mobile suite could not be run is **superseded**.
 | H-8 | fresh clone cannot build | ✅ `.env.example` added for both apps |
 | M-2 | no mocking framework | ✅ `mocktail` + `sqflite_common_ffi` added |
 | M-4 | no CI | ✅ `.github/workflows/ci.yml` |
-| M-8 | ESLint errors | ✅ 21 → 0; **ratchet tightened 2026-09-02** — the two hooks rules are now `error` project-wide with a shrinking 6-file allowlist for pre-existing sites |
+| M-8 | ESLint errors | ✅ 21 → 0; **ratchet completed 2026-09-02** — both hooks rules are `error` project-wide with **no allowlist at all**; all 8 sites across 6 files fixed behind characterisation tests |
 | M-9 | 500 on malformed JSON | ✅ 400 |
 | M-1 | skipped smoke test | ✅ un-skipped; suite has 0 skips |
 | M-5 | `deploy.sh` broken three ways | ✅ rewritten; validates env, scans the bundle, fails loudly |
@@ -1068,6 +1068,46 @@ All three came from adding *positive-path* coverage. The pre-existing tests
 passed only through error branches, which is why none showed up sooner — and
 the tier-scoping bug specifically could not be caught at all until widget tests
 could render a populated alert list (see below).
+
+### The console had no unit tests, so its lint ratchet could not be cleared
+
+`react-hooks/set-state-in-effect` was `error` project-wide with a six-file
+allowlist. The allowlist existed for an honest reason: clearing it means
+restructuring data loading in components that dispatch responders, and the
+dashboard had **no unit test framework at all** — only `verify-web-routes.js`,
+which drives a browser and can tell you a page returned 200, not whether a
+panel silently stopped refreshing.
+
+vitest + Testing Library were added, and each of the eight sites was fixed
+behind characterisation tests written against the ORIGINAL code first, so the
+tests describe behaviour that had to survive rather than behaviour invented to
+match the result. 33 tests now cover panels that previously had none.
+
+Two of the fixes are worth noting beyond the lint:
+
+* **AgencyPortal** kept five untagged lists plus a `loading` flag. A slow
+  response for a previously-selected agency could land after a switch and
+  render POLICE incidents under the ARMY heading. The data is now one snapshot
+  tagged with the agency it belongs to, `loading` is derived from whether that
+  tag matches, and late responses are discarded.
+* **The theme** was read from `localStorage` in a mount effect, so the console
+  rendered light and then corrected itself. It is now a `useSyncExternalStore`
+  hook with a server snapshot — right on the first paint, no hydration
+  mismatch.
+
+**A wrong assumption, corrected.** LiveMap was nearly left as a permanent
+exception on the grounds that Leaflet needs real layout and so could not be
+unit tested. That was wrong. Leaflet runs under jsdom once `matchMedia`,
+`ResizeObserver` and element dimensions are stubbed. Without the dimension
+stubs the map initialises but its marker pane stays empty — a map that looks
+fine and shows no incidents, which is the exact failure the tests now guard.
+With coverage in place the readiness signal was modelled as what it is (an
+external system, via `useSyncExternalStore`) and the allowlist was deleted
+outright.
+
+A CI step asserts the allowlist has not returned. That needs to be separate
+from the lint step: re-adding an allowlist downgrades an error to a warning, so
+`npx eslint` still exits 0 and would not notice. Mutation-verified both ways.
 
 ### Widget tests could not render any screen that touches the database
 

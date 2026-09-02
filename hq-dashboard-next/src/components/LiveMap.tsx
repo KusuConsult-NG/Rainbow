@@ -1,6 +1,40 @@
 'use client';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+
+/**
+ * A one-bit store for "the Leaflet map exists".
+ *
+ * The map is created imperatively inside an effect, and the marker-drawing
+ * effects need to know when it is there. Doing that with `setState` inside the
+ * effect is what `react-hooks/set-state-in-effect` forbids — and the rule is
+ * right about the shape even though the cascade here is one render at mount:
+ * an allowlist with one entry still has to be maintained, and can be widened
+ * by the next person.
+ *
+ * Modelling the map as what it is — an external system this component
+ * subscribes to — removes the exception entirely. It does not reduce the
+ * number of renders; it makes the rule enforceable everywhere with no
+ * exceptions, which is the actual benefit.
+ */
+function createReadySignal() {
+  let ready = false;
+  const subscribers = new Set<() => void>();
+  return {
+    get: () => ready,
+    set: (next: boolean) => {
+      if (ready === next) return;
+      ready = next;
+      subscribers.forEach((notify) => notify());
+    },
+    subscribe: (notify: () => void) => {
+      subscribers.add(notify);
+      return () => {
+        subscribers.delete(notify);
+      };
+    },
+  };
+}
 
 interface Alert {
   id: string;
@@ -50,7 +84,15 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   const agentPolylinesRef = useRef<Map<string, any>>(new Map());
   const tileLayerRef = useRef<any>(null);
 
-  const [mapReady, setMapReady] = useState(false);
+  // Per-instance, created once. Held in state rather than a ref because refs
+  // must not be read during render, and `subscribe`/`getSnapshot` are read on
+  // every render. `getServerSnapshot` is false — there is no map on the server.
+  const [readySignal] = useState(createReadySignal);
+  const mapReady = useSyncExternalStore(
+    readySignal.subscribe,
+    readySignal.get,
+    () => false,
+  );
   const [showRiskGrid, setShowRiskGrid] = useState(true);
   const riskGridLayersRef = useRef<any[]>([]);
   const [leafletLoaded, setLeafletLoaded] = useState(false);
@@ -81,11 +123,12 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
       return !!L;
     };
 
-    if (isReady()) {
-      setLeafletLoaded(true);
-      return;
-    }
-
+    // There used to be a synchronous fast path here: if `window.L` already
+    // existed (a remount), it called setLeafletLoaded(true) straight away.
+    // That was a set-state-in-effect, and it was redundant — initScripts
+    // already skips the import when `window.L` is set, and a dynamic import of
+    // an already-evaluated module resolves from the module cache on the next
+    // microtask. Going through one path costs a microtask and removes a branch.
     const initScripts = async () => {
       try {
         if (!(window as any).L) {
@@ -172,10 +215,10 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
       .catch(err => console.error('Failed to load boundaries:', err));
 
     mapInstanceRef.current = { map, L: Leaflet };
-    setMapReady(true);
+    readySignal.set(true);
 
     return () => {
-      setMapReady(false);
+      readySignal.set(false);
       if (mapInstanceRef.current) {
         mapInstanceRef.current.map.remove();
         mapInstanceRef.current = null;

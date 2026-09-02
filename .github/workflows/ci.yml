@@ -199,6 +199,28 @@ jobs:
       - name: Lint
         run: npx eslint
 
+      # The console had NO unit tests until the set-state-in-effect allowlist was
+      # cleared — only a browser script that checks routes return 200, which
+      # cannot tell you a panel silently stopped refreshing. These are the
+      # characterisation tests each of those refactors went in behind.
+      - name: Component tests
+        run: npm test
+
+      # The two hooks rules are `error` project-wide with NO allowlist. This
+      # asserts the allowlist has not quietly come back: re-adding one would
+      # turn a blocking error into a warning and `npx eslint` would still exit 0,
+      # so the lint step above cannot detect it on its own.
+      - name: Assert the hooks-rule allowlist has not returned
+        run: |
+          set -euo pipefail
+          if grep -qE '"react-hooks/(set-state-in-effect|immutability)":\s*"(warn|off)"' \
+               eslint.config.mjs; then
+            grep -nE '"react-hooks/(set-state-in-effect|immutability)"' eslint.config.mjs
+            echo "::error::a hooks rule was downgraded from error — fix the site, do not exempt it"
+            exit 1
+          fi
+          echo "OK: both hooks rules are error everywhere, no exceptions."
+
       # Regression guard for H-1: a module-scope createClient() with missing env
       # crashed page-data collection. `next dev` compiles lazily and never caught it.
       - name: Build

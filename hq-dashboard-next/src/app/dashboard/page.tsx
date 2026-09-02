@@ -15,6 +15,7 @@ import AgencyPortal from '@/components/AgencyPortal';
 import IncidentReplayPanel from '@/components/IncidentReplayPanel';
 import LiveFeedViewer from '@/components/LiveFeedViewer';
 import TacticalSelect, { SelectOption } from '@/components/TacticalSelect';
+import { usePersistedTheme } from '@/hooks/usePersistedTheme';
 
 
 import { useToast } from '@/components/ToastProvider';
@@ -416,23 +417,28 @@ export default function DashboardPage() {
 
   const [filterTier, setFilterTier] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setTheme] = usePersistedTheme();
   const [timeString, setTimeString] = useState('');
   const [selectedReport, setSelectedReport] = useState<Alert | null>(null);
-  const [aiSummary, setAiSummary] = useState<string | null>(null);
-  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  // The AI summary belongs to ONE report, so it is stored WITH that report's
+  // id and read back only when it still matches. The old code kept two loose
+  // pieces of state and wiped them from an effect on `selectedReport` — a
+  // set-state-in-effect that also rendered the previous report's summary for
+  // one frame before clearing it. Deriving removes both problems: opening a
+  // different report simply has nothing to show.
+  const [summary, setSummary] = useState<
+    { reportId: string; text: string | null; generating: boolean } | null
+  >(null);
+  const summaryIsForSelected =
+    summary !== null && selectedReport !== null && summary.reportId === selectedReport.id;
+  const aiSummary = summaryIsForSelected ? summary.text : null;
+  const isGeneratingSummary = summaryIsForSelected ? summary.generating : false;
   const router = useRouter();
   const toast = useToast();
 
-  useEffect(() => {
-    setAiSummary(null);
-    setIsGeneratingSummary(false);
-  }, [selectedReport]);
-
   const generateAISummary = async (report: Alert) => {
     if (!report) return;
-    setIsGeneratingSummary(true);
-    setAiSummary(null);
+    setSummary({ reportId: report.id, text: null, generating: true });
     const toastId = toast.loading('Querying Gemini AI Engine...', 'Synthesizing incident data');
     try {
       // The Gemini key is server-side (audit H-9). This route composes the
@@ -444,20 +450,22 @@ export default function DashboardPage() {
       });
       const resData = await res.json();
       if (resData.status === 'UNCONFIGURED') {
-        setAiSummary('AI analysis is not configured on this deployment.');
+        setSummary({ reportId: report.id, text: 'AI analysis is not configured on this deployment.', generating: true });
         toast.update(toastId, 'success', 'AI Not Configured', 'No Gemini key is set server-side');
         return;
       }
       const text = resData.text || 'Forensic analysis completed with default parameters.';
-      setAiSummary(text);
+      setSummary({ reportId: report.id, text: text, generating: true });
       toast.update(toastId, 'success', 'Forensic Debrief Ready', 'AI analysis complete');
     } catch (error: any) {
       console.error('Error generating AI summary:', error);
       const errMsg = error.message || String(error);
-      setAiSummary(`Failed to generate forensic summary: ${errMsg}`);
+      setSummary({ reportId: report.id, text: `Failed to generate forensic summary: ${errMsg}`, generating: true });
       toast.update(toastId, 'error', 'AI Analysis Failed', errMsg.substring(0, 80));
     } finally {
-      setIsGeneratingSummary(false);
+      setSummary((prev) =>
+        prev && prev.reportId === report.id ? { ...prev, generating: false } : prev,
+      );
     }
   };
 
@@ -471,20 +479,11 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
+  // Syncing a class onto <body> is a genuine external-system effect: it sets
+  // no state. Persistence now lives in usePersistedTheme, so the theme is
+  // right on the FIRST render instead of being corrected by a mount effect.
   useEffect(() => {
-    const savedTheme = localStorage.getItem('hq-theme') as 'light' | 'dark' | null;
-    if (savedTheme) {
-      setTheme(savedTheme);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (theme === 'dark') {
-      document.body.classList.add('dark-theme');
-    } else {
-      document.body.classList.remove('dark-theme');
-    }
-    localStorage.setItem('hq-theme', theme);
+    document.body.classList.toggle('dark-theme', theme === 'dark');
   }, [theme]);
 
   useEffect(() => {
