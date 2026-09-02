@@ -5,9 +5,9 @@
 // is the whole point: the bug these tests were written for was a column-name
 // mismatch between the two, which no mock would have caught.
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/sqlite_service.dart';
-import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -79,7 +79,7 @@ void main() {
       final legacy = pending.where((r) => r['local_id'] == 'LEGACY_SOS_1');
 
       expect(legacy, isNotEmpty,
-          reason: 'the migration must not drop unsent emergencies');
+          reason: 'the migration must not drop unsent emergencies',);
       expect(legacy.first['lat'], closeTo(9.8965, 0.000001));
       expect(legacy.first['description'], 'Queued before the upgrade');
 
@@ -155,9 +155,9 @@ void main() {
       final payload = AlertService.buildOfflineSyncPayload(row);
 
       expect(payload['latitude'], isNotNull,
-          reason: 'an SOS synced from the offline queue must keep its location');
+          reason: 'an SOS synced from the offline queue must keep its location',);
       expect(payload['longitude'], isNotNull,
-          reason: 'an SOS synced from the offline queue must keep its location');
+          reason: 'an SOS synced from the offline queue must keep its location',);
       expect(payload['latitude'], closeTo(testLat, 0.000001));
       expect(payload['longitude'], closeTo(testLng, 0.000001));
     });
@@ -231,7 +231,7 @@ void main() {
 
       final payload = AlertService.buildOfflineSyncPayload(row);
       expect(payload['latitude'], isNull,
-          reason: 'must not invent a location for an unlocated SOS');
+          reason: 'must not invent a location for an unlocated SOS',);
       expect(payload['longitude'], isNull);
       // Jos centre, the old fabricated fallback.
       expect(payload['latitude'], isNot(closeTo(9.9167, 0.01)));

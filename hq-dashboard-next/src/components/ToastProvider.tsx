@@ -65,6 +65,11 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
     return () => clearTimeout(t);
   }, []);
 
+  const handleDismiss = () => {
+    setLeaving(true);
+    setTimeout(() => onDismiss(toast.id), 300);
+  };
+
   useEffect(() => {
     if (toast.duration === 0) return; // permanent
     const duration = toast.duration ?? (toast.type === 'error' ? 6000 : toast.type === 'loading' ? 0 : 4000);
@@ -73,10 +78,6 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
     return () => clearTimeout(timer);
   }, [toast.duration, toast.type]);
 
-  const handleDismiss = () => {
-    setLeaving(true);
-    setTimeout(() => onDismiss(toast.id), 300);
-  };
 
   return (
     <div

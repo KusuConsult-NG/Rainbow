@@ -8,9 +8,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
-import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
-
 import 'package:rainbow_app/services/location_service.dart';
+import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
 final respondersStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
   // Stream telemetry, then enrich with profile names
@@ -30,7 +29,7 @@ final respondersStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref
         return telemetryList.map((t) => {
           ...t,
           'officer_name': nameMap[t['user_id'] as String] ?? 'Unknown Officer',
-        }).toList();
+        },).toList();
       } catch (_) {
         return telemetryList;
       }
@@ -109,7 +108,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -151,7 +150,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
           ],
         ),
       ),
-    ));
+    ),);
   }
 
   @override
@@ -229,8 +228,6 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                             if (lat == null || lng == null) return null;
                             return Marker(
                               point: LatLng(lat, lng),
-                              width: 30,
-                              height: 30,
                               child: const Icon(
                                 Icons.warning_rounded,
                                 color: AppColors.warning,
@@ -249,8 +246,6 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                             
                             return Marker(
                               point: LatLng(lat, lng),
-                              width: 30,
-                              height: 30,
                               child: GestureDetector(
                                 onTap: () => _showResponderDetails(r),
                                 child: Container(
@@ -283,14 +278,14 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: AppColors.outline),
                     ),
-                    child: Column(
+                    child: const Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const _LegendItem(color: AppColors.success, label: 'PATROLLING'),
-                        const SizedBox(height: 4),
-                        const _LegendItem(color: AppColors.warning, label: 'DISPATCHED / ALERT'),
-                        const SizedBox(height: 4),
-                        const _LegendItem(color: AppColors.danger, label: 'EMERGENCY'),
+                        _LegendItem(color: AppColors.success, label: 'PATROLLING'),
+                        SizedBox(height: 4),
+                        _LegendItem(color: AppColors.warning, label: 'DISPATCHED / ALERT'),
+                        SizedBox(height: 4),
+                        _LegendItem(color: AppColors.danger, label: 'EMERGENCY'),
                       ],
                     ),
                   ),

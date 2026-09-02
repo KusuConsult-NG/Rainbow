@@ -3,10 +3,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 
 class UpdateInfo {
-  final bool hasUpdate;
-  final bool isForceUpdate;
-  final String updateUrl;
-  final String latestVersion;
 
   UpdateInfo({
     required this.hasUpdate,
@@ -14,6 +10,10 @@ class UpdateInfo {
     required this.updateUrl,
     required this.latestVersion,
   });
+  final bool hasUpdate;
+  final bool isForceUpdate;
+  final String updateUrl;
+  final String latestVersion;
 }
 
 final updateServiceProvider = Provider<UpdateService>((ref) {
@@ -31,10 +31,10 @@ class UpdateService {
           .select()
           .inFilter('key', ['min_version', 'latest_version', 'force_update', 'update_url']);
 
-      String minVersion = '1.0.0';
-      String latestVersion = '1.0.0';
-      bool forceUpdate = false;
-      String updateUrl = '';
+      var minVersion = '1.0.0';
+      var latestVersion = '1.0.0';
+      var forceUpdate = false;
+      var updateUrl = '';
 
       for (final row in response) {
         if (row['key'] == 'min_version') minVersion = row['value']?.toString() ?? '1.0.0';
@@ -43,8 +43,8 @@ class UpdateService {
         if (row['key'] == 'update_url') updateUrl = row['value']?.toString() ?? '';
       }
 
-      bool isForceUpdateResult = forceUpdate || currentVersion.compareTo(minVersion) < 0;
-      bool hasUpdate = currentVersion.compareTo(latestVersion) < 0;
+      final isForceUpdateResult = forceUpdate || currentVersion.compareTo(minVersion) < 0;
+      final hasUpdate = currentVersion.compareTo(latestVersion) < 0;
 
       return UpdateInfo(
         hasUpdate: hasUpdate,

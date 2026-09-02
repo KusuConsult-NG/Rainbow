@@ -1,5 +1,6 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -8,19 +9,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rainbow_app/core/config/app_config.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
-import 'package:rainbow_app/services/location_service.dart';
-import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
-import 'package:rainbow_app/core/supabase/supabase_config.dart';
-import 'package:rainbow_app/shared/widgets/safety_feedback_dialog.dart';
-import 'dart:io';
-import 'package:image_picker/image_picker.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
 import 'package:rainbow_app/services/live_stream_service.dart';
+import 'package:rainbow_app/services/location_service.dart';
+import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
+import 'package:rainbow_app/shared/widgets/safety_feedback_dialog.dart';
 
 
 /// Documentation for this public member.
@@ -56,7 +56,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
       vsync: this,
       duration: const Duration(seconds: 2),
     );
-    unawaited(_pulseController.repeat(reverse: true));
+    _pulseController.repeat(reverse: true);
 
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) ref.read(emergencyProvider.notifier).tick();
@@ -121,10 +121,9 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
     setState(() => _isCapturingEvidence = true);
     try {
       final picker = ImagePicker();
-      final XFile? photo = await picker.pickImage(
+      final photo = await picker.pickImage(
         source: ImageSource.camera,
         imageQuality: 60,
-        preferredCameraDevice: CameraDevice.rear,
       );
       if (photo == null) {
         setState(() => _isCapturingEvidence = false);
@@ -132,9 +131,11 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
       }
       final alertId = ref.read(emergencyProvider).alertId;
       if (alertId == null) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('SOS not yet confirmed — evidence saved locally')),
         );
+        }
         setState(() => _isCapturingEvidence = false);
         return;
       }
@@ -176,18 +177,18 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
 
   void _startCancel() {
     unawaited(HapticFeedback.mediumImpact());
-    unawaited(_cancelController.forward());
+    _cancelController.forward();
     _cancelTimer = Timer(const Duration(seconds: 3), () {
       if (!mounted) return;
       unawaited(HapticFeedback.heavyImpact());
-      unawaited(_cancelController.reverse());
+      _cancelController.reverse();
       _showPinVerification();
     });
   }
 
   void _stopCancel() {
     _cancelTimer?.cancel();
-    unawaited(_cancelController.reverse());
+    _cancelController.reverse();
   }
 
   void _showPinVerification() {
@@ -278,7 +279,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                               color: Colors.orange,
                               fontWeight: FontWeight.w800,
                               fontSize: 10,
-                              letterSpacing: 1.0,
+                              letterSpacing: 1,
                             ),
                           ),
                           style: OutlinedButton.styleFrom(
@@ -303,7 +304,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                               color: Colors.white,
                               fontWeight: FontWeight.w800,
                               fontSize: 10,
-                              letterSpacing: 1.0,
+                              letterSpacing: 1,
                             ),
                           ),
                           style: ElevatedButton.styleFrom(
@@ -987,7 +988,7 @@ class _PulseMarkerState extends State<_PulseMarker>
       vsync: this,
       duration: const Duration(seconds: 2),
     );
-    unawaited(_controller.repeat());
+    _controller.repeat();
   }
 
   @override

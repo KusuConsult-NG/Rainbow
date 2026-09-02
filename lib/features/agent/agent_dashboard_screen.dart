@@ -2,7 +2,6 @@
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -12,6 +11,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:local_auth/local_auth.dart' as local_auth;
 import 'package:rainbow_app/core/router/app_router.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/alerts_feed.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
@@ -74,7 +74,7 @@ final alertsStreamProvider = StreamProvider<AlertsFeed>((ref) {
       // statewide data to every field device. The build-level filteredAlerts
       // handles any edge cases for assigned-to-me alerts.
       return false;
-    }).toList());
+    }).toList(),);
   });
 });
 
@@ -341,7 +341,15 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
                   : 'AUDIO: EARPIECE',
               onPressed: () async {
                 await TtsService.instance.toggleAudioOutputMode();
-                if (mounted) setState(() {});
+                // The old `if (mounted) setState(...)` guarded only the
+                // setState; the snackbar below used `context` unguarded after
+                // the same await, so an unmount mid-toggle threw.
+                //
+                // Both checks are needed and they answer different questions:
+                // `mounted` is the State's (setState needs it), `context.mounted`
+                // is this builder context's (ScaffoldMessenger.of needs that one).
+                if (!mounted || !context.mounted) return;
+                setState(() {});
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     duration: const Duration(seconds: 2),
@@ -446,8 +454,6 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
 
 
                             final auth = ref.watch(authProvider);
-                            final alertAssignedTo =
-                                alert['assigned_to']?.toString() ?? '';
 
                             if (auth.tier == ResponderTier.lga) {
                               return assignedLgas.contains(alert['geo_lga']) ||
@@ -541,11 +547,6 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
     );
   }
 
-  Stream<List<Map<String, dynamic>>> _buildAlertsStream(Map<String, dynamic> profile) {
-    return SupabaseConfig.client
-        .from('alerts')
-        .stream(primaryKey: ['id']);
-  }
 
   Widget _buildList(List<Map<String, dynamic>> alerts, AlertsFeed feed) {
     if (alerts.isEmpty) {
@@ -628,7 +629,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
             child: Row(
               children: [
                 const Icon(Icons.cloud_off_rounded,
-                    size: 18, color: AppColors.warning),
+                    size: 18, color: AppColors.warning,),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -913,14 +914,14 @@ class _MissionCard extends ConsumerWidget {
                               final isVideo = urlLower.contains('/video/') || urlLower.endsWith('.mp4') || urlLower.endsWith('.mov');
                               final isAudio = urlLower.endsWith('.m4a') || urlLower.endsWith('.mp3') || urlLower.endsWith('.wav');
                               return GestureDetector(
-                                onTap: () => showDialog(context: ctx, builder: (_) => Dialog(
+                                onTap: () => showDialog<void>(context: ctx, builder: (_) => Dialog(
                                   backgroundColor: Colors.black,
                                   child: isVideo
                                       ? const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 64))
                                       : isAudio
                                           ? const Center(child: Icon(Icons.audiotrack, color: Colors.white, size: 64))
                                           : InteractiveViewer(child: Image.network(url)),
-                                )),
+                                ),),
                                 child: Container(
                                   width: 80,
                                   margin: const EdgeInsets.only(right: 6),
@@ -940,7 +941,7 @@ class _MissionCard extends ConsumerWidget {
                         ),
                       ],
                     );
-                  }),
+                  },),
                   const SizedBox(height: 16),
                   Row(
                     children: [
@@ -999,7 +1000,6 @@ class _MissionCard extends ConsumerWidget {
                           onPressed: () async {
                             await showDialog<bool>(
                               context: context,
-                              barrierDismissible: true,
                               builder: (ctx) => _DispatchDialog(alertDoc: alert),
                             );
                           },
@@ -1206,7 +1206,7 @@ class _TacticalActionSheet extends StatelessWidget {
                 if (nextStatus == 'ACKNOWLEDGED') {
                   final type = alertDoc['type'] as String? ?? 'UNKNOWN';
                   final desc = alertDoc['description'] as String? ?? 'No details provided.';
-                  final speechText = "Mission accepted. Emergency type: $type. Threat details: $desc.";
+                  final speechText = 'Mission accepted. Emergency type: $type. Threat details: $desc.';
                   unawaited(TtsService.instance.speak(speechText));
                 }
 
@@ -1273,7 +1273,6 @@ class _TacticalActionSheet extends StatelessWidget {
                         onAction();
                         final success = await showDialog<bool>(
                           context: context,
-                          barrierDismissible: true,
                           builder: (ctx) => _DispatchDialog(alertDoc: alertDoc),
                         );
                         if ((success ?? false) && context.mounted) {
@@ -1458,7 +1457,7 @@ class _EscalationDialogState extends State<_EscalationDialog> {
                 Text('ESCALATE TO', style: GoogleFonts.outfit(color: AppColors.textSecondary, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<Map<String, dynamic>>(
-                  value: _targetCommander,
+                  initialValue: _targetCommander,
                   dropdownColor: AppColors.surfaceContainerHigh,
                   decoration: InputDecoration(
                     filled: true,
@@ -1800,7 +1799,7 @@ class _PulseMarkerState extends State<_PulseMarker>
     super.initState();
     _ctrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 2));
-    unawaited(_ctrl.repeat());
+    _ctrl.repeat();
   }
 
   @override
@@ -1929,7 +1928,7 @@ class _DispatchDialogState extends State<_DispatchDialog> {
           .select('id, full_name, badge_number, role, geo_lga, geo_ward');
 
       final rawList = List<Map<String, dynamic>>.from(res as List);
-      var filtered = rawList.where((r) {
+      final filtered = rawList.where((r) {
         final role = (r['role'] as String? ?? '').toUpperCase();
         return role != 'CITIZEN' && role.isNotEmpty;
       }).toList();
@@ -2058,7 +2057,7 @@ class _DispatchDialogState extends State<_DispatchDialog> {
                               ),
                               onChanged: (val) {
                                 setState(() {
-                                  if (val == true) {
+                                  if (val ?? false) {
                                     _selectedResponderIds.add(rId);
                                   } else {
                                     _selectedResponderIds.remove(rId);

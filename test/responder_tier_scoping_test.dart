@@ -97,14 +97,14 @@ void main() {
         await tester.pump();
 
         expect(find.text(expected.title), findsWidgets,
-            reason: '${tier.name} must render its own command banner');
+            reason: '${tier.name} must render its own command banner',);
 
         // ...and NOT another tier's. This is the half the old tests omitted:
         // asserting only the positive lets every tier render the same thing.
         for (final other in cases.values) {
           if (other.title == expected.title) continue;
           expect(find.text(other.title), findsNothing,
-              reason: '${tier.name} must not render ${other.title}');
+              reason: '${tier.name} must not render ${other.title}',);
         }
       });
     });

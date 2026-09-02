@@ -116,7 +116,7 @@ class _OnboardingPermissionsScreenState
                 ),
               ],
             ),
-          ));
+          ),);
         }
         return;
       }

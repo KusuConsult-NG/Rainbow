@@ -33,7 +33,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       vsync: this,
       duration: const Duration(seconds: 3),
     );
-    unawaited(_pulseController.repeat(reverse: true));
+    _pulseController.repeat(reverse: true);
   }
 
   @override

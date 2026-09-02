@@ -110,7 +110,7 @@ Stream<AlertsFeed> resilientAlertsFeed({
       liveness: liveness,
       error: lastError,
       at: DateTime.now(),
-    ));
+    ),);
   }
 
   Future<void> fetchOnce() async {

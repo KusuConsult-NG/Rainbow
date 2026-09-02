@@ -11,7 +11,6 @@ void main() {
         version: '1.0.2',
         buildNumber: '12',
         buildSignature: 'signature',
-        installerStore: null,
       );
     });
 

@@ -50,7 +50,7 @@ class BackgroundTrackingService {
   /// Starts persistent tracking for a responder.
   Future<void> startResponderTracking(String userId) async {
     try {
-      LocationPermission permission = await Geolocator.checkPermission();
+      var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
@@ -74,7 +74,7 @@ class BackgroundTrackingService {
   /// Starts transient tracking for a citizen SOS event.
   Future<void> startSosTracking(String alertId, String userId) async {
     try {
-      LocationPermission permission = await Geolocator.checkPermission();
+      var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
@@ -140,7 +140,6 @@ Future<void> onStart(ServiceInstance service) async {
     final prefs = await SharedPreferences.getInstance();
     var modeStr = prefs.getString('trackingMode');
     var currentUserId = prefs.getString('activeTrackingUserId');
-    var currentAlertId = prefs.getString('activeTrackingAlertId');
     String? currentStatus = prefs.getString('responderStatus') ??
         (modeStr == 'sos' ? 'EMERGENCY' : 'PATROLLING');
 
@@ -175,7 +174,6 @@ Future<void> onStart(ServiceInstance service) async {
         accuracy: LocationAccuracy.high,
         distanceFilter: distance,
         activityType: ActivityType.fitness,
-        pauseLocationUpdatesAutomatically: false,
       );
     } else {
       dynamicSettings = AndroidSettings(
@@ -255,7 +253,6 @@ Future<void> onStart(ServiceInstance service) async {
     if (event != null) {
       modeStr = event['mode'] as String?;
       currentUserId = event['userId'] as String?;
-      currentAlertId = event['alertId'] as String?;
       startTelemetry();
     }
   });

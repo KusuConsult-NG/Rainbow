@@ -86,7 +86,7 @@ class SyncService {
 
     for (var i = 0; i < fileList.length; i++) {
       final file = fileList[i];
-      if (!await file.exists()) {
+      if (!file.existsSync()) {
         debugPrint('[SYNC] File not found, skipping: ${file.path}');
         continue;
       }

@@ -123,7 +123,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ],
       ),
-    ));
+    ),);
   }
 
   void _showAddContactDialog() {
@@ -159,7 +159,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ],
       ),
-    ));
+    ),);
   }
 
   @override
@@ -206,10 +206,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             title: Text('Push Notifications', style: GoogleFonts.outfit(color: AppColors.onBackground)),
             subtitle: Text('Receive emergency alerts', style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12)),
             value: pushEnabled,
-            activeColor: AppColors.primary,
+            activeThumbColor: AppColors.primary,
             tileColor: AppColors.surfaceContainer,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            onChanged: (val) => _updatePushEnabled(val),
+            onChanged: _updatePushEnabled,
           ),
           const SizedBox(height: 16),
 
@@ -243,7 +243,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       icon: const Icon(Icons.remove_circle_outline, color: AppColors.danger),
                       onPressed: () => _removeEmergencyContact(c),
                     ),
-                  )),
+                  ),),
               ],
             ),
           ),

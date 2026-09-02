@@ -132,9 +132,9 @@ void main() {
     );
 
     runApp(
-      ProviderScope(
+      const ProviderScope(
         observers: [TacticalProviderObserver()],
-        child: const RainbowApp(),
+        child: RainbowApp(),
       ),
     );
   }, (error, stackTrace) {

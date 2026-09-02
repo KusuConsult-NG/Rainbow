@@ -1,19 +1,20 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/services/update_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Root-level listener that automatically checks for available app updates on startup
 /// and triggers a custom modal block/prompt as necessary.
 class UpdateCheckListener extends ConsumerStatefulWidget {
-  /// The child widget (typically the router navigator wrapper)
-  final Widget child;
 
   /// Creates a new update checker listener.
   const UpdateCheckListener({required this.child, super.key});
+  /// The child widget (typically the router navigator wrapper)
+  final Widget child;
 
   @override
   ConsumerState<UpdateCheckListener> createState() => _UpdateCheckListenerState();
@@ -35,7 +36,7 @@ class _UpdateCheckListenerState extends ConsumerState<UpdateCheckListener> {
     _hasChecked = true;
 
     // Slight delay to allow full navigator state layout to settle
-    await Future.delayed(const Duration(milliseconds: 1200));
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
     if (!mounted) return;
 
     final updateService = ref.read(updateServiceProvider);
@@ -198,7 +199,7 @@ class _UpdateCheckListenerState extends ConsumerState<UpdateCheckListener> {
           ),
         );
       },
-    ));
+    ),);
   }
 
   @override

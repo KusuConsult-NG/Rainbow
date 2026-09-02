@@ -82,7 +82,16 @@ jobs:
       # RATCHET: clear the 54 warnings, then drop `--no-fatal-warnings`; then
       # the infos, then `--no-fatal-infos`.
       - name: Analyze
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        # RATCHET, 2026-09-02: `--no-fatal-warnings` is gone. Warnings were 53
+        # (30 unused imports, dead code, missing type arguments); they are now
+        # ZERO, so any new warning fails the build.
+        #
+        # `--no-fatal-infos` stays, but it means much less than it did: the
+        # info-level rules that catch real defects have been promoted to `error`
+        # in analysis_options.yaml and are therefore blocking regardless. What
+        # remains behind this flag is three style rules, each exempted there with
+        # a written reason.
+        run: flutter analyze --no-fatal-infos
 
       - name: Test
         run: flutter test
