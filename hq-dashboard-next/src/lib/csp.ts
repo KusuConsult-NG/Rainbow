@@ -86,6 +86,16 @@ export function contentSecurityPolicy(nonce: string, isDev: boolean): string {
     // That was the state shipped with the first nonce-based policy, and it was
     // caught by a browser check rather than by reading the header.
     `img-src 'self' data: blob: ${[...mediaOrigins, ...TILE_HOSTS].join(' ')}`,
+    // Voice recordings and scene video ride the SAME Supabase Storage origin as
+    // the photos, and `<audio src>` / `<video src>` are governed by media-src —
+    // NOT img-src, and not connect-src. With no media-src at all they fell back
+    // to `default-src 'self'` and were refused. A duress voice recording is
+    // often the only account of what happened; silently refusing to play it is
+    // the worst version of this bug.
+    //
+    // LiveFeedViewer is unaffected either way: it attaches a MediaStream via
+    // `srcObject`, which CSP does not govern.
+    `media-src 'self' blob: ${mediaOrigins.join(' ')}`.trimEnd(),
     `connect-src ${connect}`,
     "object-src 'none'",
     "base-uri 'self'",
