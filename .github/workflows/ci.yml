@@ -123,6 +123,29 @@ jobs:
       - name: Test
         run: flutter test
 
+      # SupabaseConfig.clientOverride exists so widget tests can render screens
+      # that reach for the client. It is a static mutable pointing at
+      # the whole app's database access, so production code must never call it:
+      # one call from lib/ would silently redirect every query in the app. It is
+      # @visibleForTesting, but that is an analyzer info the CI gate does not
+      # fail on, so the ban is enforced here instead.
+      - name: Assert the test-only Supabase seam is not used in production code
+        run: |
+          set -euo pipefail
+          HITS=$(grep -rn "clientOverride" lib \
+                   --include=*.dart \
+                 | grep -v '^lib/core/supabase/supabase_config.dart:' || true)
+          if [ -n "$HITS" ]; then
+            echo "$HITS"
+            echo "::error::the Supabase test seam must not be called from lib/"
+            exit 1
+          fi
+          # ...and the seam must still exist, or the guard is guarding nothing
+          # and every widget test that renders a client-touching screen breaks.
+          grep -q "static set clientOverride" lib/core/supabase/supabase_config.dart \
+            || { echo "::error::the Supabase test seam is gone"; exit 1; }
+          echo "OK: the Supabase test seam exists and is confined to tests."
+
       # A UI test driving the built web app in a real browser found two things
       # that only appear once it is running: with gstatic.com unreachable every
       # label rendered BLANK (CanvasKit and google_fonts are fetched at runtime
