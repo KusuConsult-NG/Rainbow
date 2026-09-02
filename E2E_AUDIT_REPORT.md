@@ -1039,6 +1039,7 @@ The original claim that the mobile suite could not be run is **superseded**.
 | H-3 | `.env` bundled into the APK | ✅ server secrets removed + 2 CI gates; **shared PIN constants remain** |
 | H-9 | Gemini key inlined into the client bundle | ✅ moved to `/api/ai/analyze`; `AIza…` added to the bundle scan |
 | M-3 | shallow tier E2E | ✅ replaced with mutation-tested tier assertions |
+| — | notification tap navigated nowhere | ✅ **fixed 2026-09-02** — see the post-audit findings; was dead in three independent ways |
 | M-7 | dead Firebase stack | ⏳ open — confirmed dead (zero callers in either client); **still do not delete `functions/` before the deployment is checked** |
 | — | CSP `script-src` carried `'unsafe-inline'` | ✅ **fixed 2026-09-02** — nonce-based via `proxy.ts`; injected script now provably blocked, and the authenticated map page finally exercised under the policy |
 | **C-6** | **unauthenticated Cloud Functions** | 🔴 **still unknown — both probe routes blocked from the audit container; stack confirmed orphaned and the guards undeployable. See the investigation note.** |
@@ -1077,6 +1078,23 @@ Two defects that static review missed and running the code caught:
   cluster and act on all of them, which is a behavioural decision about what
   "resolve" means for a group. Pinned by tests in
   `src/lib/alert-display.test.ts` so the current behaviour is at least explicit.
+
+* **Tapping an emergency push notification navigated nowhere.** Found by a
+  lint (`use_setters_to_change_properties` pointing at a setter with no
+  callers), and broken three separate ways at once: the
+  `GlobalKey<NavigatorState>` it routed through was never assigned by anything;
+  it called `Navigator.pushNamed`, but this app routes with go_router via
+  `MaterialApp.router`, which registers no named routes at all; and it passed
+  only `{'alertId': id}` while the mission-intel route reads the FULL alert row
+  from `extra` — type, severity, description, coordinates, media. Any one alone
+  would have made the tap useless. ✅ fixed: the id is now resolved into the
+  real row and opened through the router, falling back to the responder's
+  dashboard when the row cannot be read. Mutation-verified — restoring the
+  original id-only behaviour fails three tests.
+
+  It was originally deferred as "needs a device to verify". A device is needed
+  to confirm the notification *arrives*; it was never needed to test what
+  happens when it does, which is the part that was broken.
 
 * **A failed read renders as "nothing here" in two admin panels.**
   `AgencyAccessManager` sets its liaison list to `[]` when the query fails, so
