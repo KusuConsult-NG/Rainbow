@@ -30,52 +30,88 @@ export const NO_FILTERS: AlertFilters = {
 };
 
 /**
+ * Reports of the same event that arrive further apart than this are NOT the
+ * same event. Witnesses to one riot phone in within minutes of each other; two
+ * fires in the same polling unit a day apart are two fires.
+ */
+export const CLUSTER_WINDOW_MS = 60 * 60 * 1000;
+
+/**
  * Collapses duplicate reports of the same event into one card.
  *
  * Many people phoning in one riot should not read as many riots, so active
- * alerts sharing LGA + ward + polling unit + type are merged and the survivor
- * carries `witness_count`. Resolved alerts are never merged — each keeps its
- * own history.
+ * alerts sharing LGA + ward + polling unit + type — AND filed within
+ * CLUSTER_WINDOW_MS of the first report — are merged. Resolved alerts are
+ * never merged; each keeps its own history.
  *
- * The merged card inherits the FIRST alert's identity (its id, location and
- * timestamp) and is promoted to the most severe status seen in the group.
+ * The merged card inherits the FIRST report's identity for display, is
+ * promoted to the most severe status seen in the group, and — this is the part
+ * that used to be missing — carries `member_ids` for every report in it. The
+ * write paths act on all of them, so acting on the card can no longer close
+ * one report while the others stay open and invisible.
+ *
+ * The time window is the other half of that fix: the previous key had no
+ * temporal component at all despite the code calling itself
+ * "spatial-temporal", so two genuinely separate incidents in the same place
+ * on different days collapsed into one.
  */
-export function clusterAlerts(rawAlerts: Alert[], enabled: boolean): Alert[] {
+export function clusterAlerts(
+  rawAlerts: Alert[],
+  enabled: boolean,
+  windowMs: number = CLUSTER_WINDOW_MS,
+): Alert[] {
   if (!enabled) return rawAlerts;
 
-  const clusterMap = new Map<string, { master: Alert; count: number }>();
+  type Cluster = { master: Alert; ids: string[]; anchor: number | null };
+  // Each place+type key can hold several clusters, one per time window.
+  const clusters = new Map<string, Cluster[]>();
+  const order: Cluster[] = [];
+
+  const stamp = (a: Alert): number | null => {
+    const t = a.created_at ? Date.parse(a.created_at) : NaN;
+    return Number.isNaN(t) ? null : t;
+  };
 
   rawAlerts.forEach(alert => {
     if (alert.status === 'RESOLVED') {
-      clusterMap.set(`resolved-${alert.id}`, { master: { ...alert }, count: 1 });
+      const c: Cluster = { master: { ...alert }, ids: [alert.id], anchor: null };
+      order.push(c);
       return;
     }
 
-    // Group active threats by LGA + Ward + PU + Type
     const lga = alert.geo_lga || 'STATE';
     const ward = alert.geo_ward || 'SECTOR';
     const pu = alert.geo_pu || 'AREA';
     const key = `${lga}_${ward}_${pu}_${alert.type}`;
+    const at = stamp(alert);
 
-    if (!clusterMap.has(key)) {
-      clusterMap.set(key, { master: { ...alert }, count: 1 });
+    const existing = clusters.get(key) ?? [];
+    // Join the newest cluster at this place if this report falls inside its
+    // window. Reports with no usable timestamp join regardless — they cannot
+    // be shown to be a different event, and hiding them is worse.
+    const target = existing.find(c =>
+      at === null || c.anchor === null || Math.abs(at - c.anchor) <= windowMs,
+    );
+
+    if (!target) {
+      const c: Cluster = { master: { ...alert }, ids: [alert.id], anchor: at };
+      existing.unshift(c);
+      clusters.set(key, existing);
+      order.push(c);
     } else {
-      const item = clusterMap.get(key)!;
-      item.count += 1;
+      target.ids.push(alert.id);
       if (alert.status === 'DURESS' || alert.priority === 'CRITICAL') {
-        item.master.status = alert.status;
-        item.master.priority = 'CRITICAL';
+        target.master.status = alert.status;
+        target.master.priority = 'CRITICAL';
       }
     }
   });
 
-  const result: Alert[] = [];
-  clusterMap.forEach(({ master, count }) => {
-    (master as unknown as { witness_count: number }).witness_count = count;
-    result.push(master);
+  return order.map(({ master, ids }) => {
+    master.member_ids = ids;
+    master.witness_count = ids.length;
+    return master;
   });
-
-  return result;
 }
 
 /** True when the alert appears to have arrived over the SMS fallback path. */

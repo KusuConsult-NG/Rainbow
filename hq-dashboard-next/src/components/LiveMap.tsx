@@ -38,6 +38,8 @@ function createReadySignal() {
 
 interface Alert {
   id: string;
+  /** Every report folded into this card, when it is a cluster. */
+  member_ids?: string[];
   type?: string;
   status: string;
   priority?: string;
@@ -71,8 +73,8 @@ export interface AgentLocation {
 interface Props {
   alerts: Alert[];
   agents?: AgentLocation[];
-  onResolve: (id: string) => void;
-  onEscalate: (id: string, tier: string) => void;
+  onResolve: (ids: string | string[]) => void;
+  onEscalate: (ids: string | string[], tier: string) => void;
   theme?: 'light' | 'dark';
 }
 
@@ -309,16 +311,23 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   }, [theme]);
 
   // Global action handlers for popup buttons
+  // Popup buttons carry ONE alert id (they are HTML strings). A clustered
+  // card stands for several reports, so the id is expanded to the whole
+  // cluster before any action — otherwise resolving from the map closes one
+  // report and hides the rest.
+  const clusterOf = (id: string): string | string[] =>
+    alerts.find(a => a.id === id)?.member_ids ?? id;
+
   useEffect(() => {
     (window as any)._hqResolve = (id: string) => {
       if (typeof onResolve === 'function') {
-        onResolve(id);
+        onResolve(clusterOf(id));
       }
     };
 
     (window as any)._hqShowDispatch = (id: string) => {
       if (typeof onEscalate === 'function') {
-        onEscalate(id, 'DISPATCH');
+        onEscalate(clusterOf(id), 'DISPATCH');
       }
     };
 
@@ -505,14 +514,14 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   useEffect(() => {
     (window as any)._hqResolve = async (id: string) => {
       try {
-        await onResolve(id);
+        await onResolve(clusterOf(id));
       } catch (e: any) {
         window.alert("Resolution failed: " + e.message);
       }
     };
     (window as any)._hqEscalate = async (id: string, currentTier: string) => {
       try {
-        await onEscalate(id, currentTier);
+        await onEscalate(clusterOf(id), currentTier);
       } catch (e: any) {
         window.alert("Escalation failed: " + e.message);
       }

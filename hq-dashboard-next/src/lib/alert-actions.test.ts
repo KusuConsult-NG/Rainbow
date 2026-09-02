@@ -66,6 +66,25 @@ describe('escalateAlert', () => {
     expect(alertUpdate().eq).toEqual(['id', 'alert-1']);
   });
 
+  // Each member keeps its OWN log and notes: one write per row, not one
+  // multi-row write that stamps the first report's history on every member.
+  it('escalates every member of a cluster, appending to each row separately', async () => {
+    db.setRows('alerts', [
+      { ...ALERT, id: 'a', escalation_log: [{ reason: 'a-history' }] },
+      { ...ALERT, id: 'b', escalation_log: [{ reason: 'b-history' }] },
+    ]);
+    const { escalateAlert } = await actions();
+    const res = await escalateAlert(['a', 'b'], { targetAgency: 'POLICE' }, HQ);
+
+    expect(res.ok).toBe(true);
+    const writes = db.updates.filter(u => u.table === 'alerts');
+    expect(writes.map(w => w.eq)).toEqual([['id', 'a'], ['id', 'b']]);
+    expect((writes[0].values.escalation_log as any[])[0]).toEqual({ reason: 'a-history' });
+    expect((writes[1].values.escalation_log as any[])[0]).toEqual({ reason: 'b-history' });
+    // one notification for the event, not one per report
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
   // The bug the source comment warns about. Assigning the HQ operator routes
   // the escalation straight back to the person escalating it.
   it('assigns the TARGET LGA commander, not the HQ operator', async () => {
@@ -191,6 +210,13 @@ describe('hqOverride', () => {
       status: 'IN_PROGRESS',
       assigned_to: HQ.id,
     });
+    expect(alertUpdate().in).toEqual(['id', ['alert-1']]);
+  });
+
+  it('overrides every member of a cluster in one write', async () => {
+    const { hqOverride } = await actions();
+    await hqOverride(['a', 'b', 'c'], HQ);
+    expect(alertUpdate().in).toEqual(['id', ['a', 'b', 'c']]);
   });
 
   it('omits the assignment when there is no signed-in operator', async () => {
@@ -224,6 +250,17 @@ describe('resolveAlert', () => {
       resolved_by: HQ.email,
     });
     expect(alertUpdate().values.resolved_at).toEqual(expect.any(String));
+    expect(alertUpdate().in).toEqual(['id', ['alert-1']]);
+  });
+
+  // The bug this exists for: resolving a clustered card used to close the
+  // first report only, leaving the rest open and no longer on the board.
+  it('resolves every member of a cluster, not just the first', async () => {
+    const { resolveAlert } = await actions();
+    await resolveAlert(['first', 'second', 'third'], HQ);
+
+    expect(alertUpdate().in).toEqual(['id', ['first', 'second', 'third']]);
+    expect(alertUpdate().values.status).toBe('RESOLVED');
   });
 
   // Who closed an incident is the audit trail for it. Falling back to the id,
@@ -263,6 +300,16 @@ describe('dispatchAlert', () => {
       assigned_to: 'lead-uid',
       assigned_responders: ['lead-uid', 'second-uid', 'third-uid'],
     });
+    expect(alertUpdate().in).toEqual(['id', ['alert-1']]);
+  });
+
+  it('dispatches the same team to every member of a cluster', async () => {
+    const { dispatchAlert } = await actions();
+    await dispatchAlert(['a', 'b'], ['lead']);
+    expect(alertUpdate().in).toEqual(['id', ['a', 'b']]);
+    expect(globalThis.fetch).toHaveBeenCalledWith('/api/push/dispatch', expect.objectContaining({
+      body: JSON.stringify({ alertId: 'a', alertIds: ['a', 'b'], responderUids: ['lead'] }),
+    }));
   });
 
   it('accepts a single uid as well as a list', async () => {
@@ -291,7 +338,7 @@ describe('dispatchAlert', () => {
       '/api/push/dispatch',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ alertId: 'alert-1', responderUids: ['a', 'b'] }),
+        body: JSON.stringify({ alertId: 'alert-1', alertIds: ['alert-1'], responderUids: ['a', 'b'] }),
       }),
     );
   });

@@ -12,6 +12,10 @@
  */
 export interface Alert {
   id: string;
+  /** Set by clusterAlerts: every report folded into this card, this one included. */
+  member_ids?: string[];
+  /** Set by clusterAlerts: how many reports this card stands for. */
+  witness_count?: number;
   local_id?: string;
   type?: string;
   sub_type?: string;

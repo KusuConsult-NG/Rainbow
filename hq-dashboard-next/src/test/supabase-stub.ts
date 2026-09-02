@@ -18,6 +18,8 @@ export interface RecordedUpdate {
   table: string;
   values: Record<string, unknown>;
   eq: [string, unknown] | null;
+  /** Set when the write targeted several rows with `.in(col, values)`. */
+  in: [string, unknown[]] | null;
 }
 
 export interface RecordedInsert {
@@ -136,12 +138,13 @@ export function makeSupabaseStub(): SupabaseStub {
           );
         },
         update: (values: Record<string, unknown>) => {
-          const rec: RecordedUpdate = { table, values, eq: null };
+          const rec: RecordedUpdate = { table, values, eq: null, in: null };
           updates.push(rec);
           return chain(
             () => ({ data: null, error: writeErrors.get(table) ?? null }),
             (m, a) => {
               if (m === 'eq') rec.eq = [a[0] as string, a[1]];
+              if (m === 'in') rec.in = [a[0] as string, a[1] as unknown[]];
             },
           );
         },
