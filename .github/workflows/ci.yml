@@ -427,6 +427,13 @@ jobs:
     # the tree it is deployable source containing two public HTTP endpoints that
     # run with admin privileges. This asserts they stay shut.
     #
+    # SCOPE, sharpened 2026-09-02: `firebase.json` was deleted in 25ca6b4 and
+    # nothing replaced it, so as the repo stands `firebase deploy` cannot ship
+    # these functions at all — the guards this job proves have no current route
+    # to production. The job is kept because the source is still here and would
+    # become deployable the moment anyone restores a deploy config; it is not
+    # evidence that anything running is guarded. See C-6 in E2E_AUDIT_REPORT.md.
+    #
     # NOTE: this is a source-level gate. It cannot see an already-deployed copy —
     # closing C-6 means `firebase functions:delete`. See E2E_AUDIT_REPORT.md C-6.
     steps:
