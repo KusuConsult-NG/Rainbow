@@ -1,10 +1,8 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
-import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 
 class ReportSuccessScreen extends StatelessWidget {

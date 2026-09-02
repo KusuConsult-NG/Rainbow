@@ -1,19 +1,19 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:rainbow_app/services/cloudinary_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
-import 'package:rainbow_app/services/cloudinary_service.dart';
-import 'package:rainbow_app/services/sync_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class MissionIntelScreen extends ConsumerStatefulWidget {
@@ -51,7 +51,7 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
     unawaited(showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.surfaceContainerHigh,
-      builder: (BuildContext ctx) {
+      builder: (ctx) {
         return SafeArea(
           child: Wrap(
             children: [
@@ -83,7 +83,7 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
           ),
         );
       },
-    ));
+    ),);
   }
 
   Future<void> _pickAndUploadMedia(ImageSource source, bool isVideo) async {
@@ -126,7 +126,7 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
           );
         }
       } else {
-        throw Exception("Failed to get URL from Cloudinary");
+        throw Exception('Failed to get URL from Cloudinary');
       }
     } catch (e) {
       setState(() => _isUploading = false);
@@ -196,7 +196,7 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
                                 ? const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 64))
                                 : InteractiveViewer(child: Image.network(url)),
                             ),
-                          ));
+                          ),);
                         }
                       },
                       child: Container(
@@ -208,11 +208,11 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
                           child: isImage
                               ? Image.network(url, fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: AppColors.textDim))
                               : isVideo
-                                  ? Stack(
+                                  ? const Stack(
                                       fit: StackFit.expand,
                                       children: [
-                                        const Center(child: Icon(Icons.movie, color: AppColors.primary, size: 40)),
-                                        const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 32)),
+                                        Center(child: Icon(Icons.movie, color: AppColors.primary, size: 40)),
+                                        Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 32)),
                                       ],
                                     )
                                   : Column(

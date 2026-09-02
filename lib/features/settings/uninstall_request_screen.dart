@@ -2,10 +2,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:rainbow_app/core/theme/app_colors.dart';
-import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
-import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
+import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/providers/auth_provider.dart';
+import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
 class UninstallRequestScreen extends ConsumerStatefulWidget {
   const UninstallRequestScreen({super.key});
@@ -87,7 +87,7 @@ class _UninstallRequestScreenState
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
-              value: _reason,
+              initialValue: _reason,
               dropdownColor: AppColors.surfaceContainer,
               decoration: InputDecoration(
                 filled: true,

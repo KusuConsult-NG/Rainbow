@@ -6,7 +6,6 @@ class MockDataGenerator {
       uid: 'mock-citizen-001',
       email: 'citizen-mock@rainbow.gov.ng',
       displayName: 'Test Citizen',
-      role: 'USER',
       geoLgas: ['JOS SOUTH'],
       geoWards: ['BUKURU WARD'],
     );

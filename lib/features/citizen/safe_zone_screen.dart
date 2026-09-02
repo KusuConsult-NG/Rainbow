@@ -1,13 +1,14 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'dart:async';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:rainbow_app/core/supabase/supabase_config.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/services/tts_service.dart';
@@ -17,7 +18,7 @@ final _safeZonesProvider = FutureProvider<List<_SafeZone>>((ref) async {
   try {
     final response = await SupabaseConfig.client
         .from('safe_zones')
-        .select('*')
+        .select()
         .eq('is_active', true);
         
     if (response.isEmpty) {
@@ -56,9 +57,7 @@ final _activeAlertsProvider = StreamProvider<List<LatLng>>((ref) {
               final status = (data['status'] as String? ?? '').toUpperCase();
               final isActive = status == 'ACTIVE' || status == 'ESCALATED';
               final createdRaw = data['created_at'] as String?;
-              final isRecent = createdRaw == null
-                  ? true
-                  : DateTime.tryParse(createdRaw)?.isAfter(cutoff) ?? true;
+              final isRecent = createdRaw == null || (DateTime.tryParse(createdRaw)?.isAfter(cutoff) ?? true);
               return isActive && isRecent;
             })
             .map((data) {
@@ -107,7 +106,10 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
   bool _isCalculatingRoute = false;
 
   double _calculateRouteThreatScore(List<LatLng> path, List<LatLng> threats) {
-    double score = 0.0;
+    // `0.0`, not `0`: this accumulates a double threat score. `dart fix`
+    // rewrote `double score = 0.0` to `var score = 0` and silently changed the
+    // type, which the analyzer then caught as two hard errors.
+    var score = 0.0;
     for (final point in path) {
       for (final threat in threats) {
         final dLat = point.latitude - threat.latitude;
@@ -132,11 +134,11 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
       if (res.statusCode != 200) return [];
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final routes = data['routes'] as List<dynamic>? ?? [];
-      final List<List<LatLng>> paths = [];
+      final paths = <List<LatLng>>[];
       for (final r in routes.cast<Map<String, dynamic>>()) {
         final geometry = r['geometry'] as Map<String, dynamic>? ?? const {};
         final coordinates = geometry['coordinates'] as List<dynamic>? ?? [];
-        final List<LatLng> path = coordinates.map((c) {
+        final path = coordinates.map((c) {
           final coords = c as List<dynamic>;
           // GeoJSON is [lng, lat]; values arrive as num (int or double).
           return LatLng(
@@ -169,7 +171,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
     }
 
     List<LatLng>? bestPath;
-    double lowestScore = double.infinity;
+    var lowestScore = double.infinity;
 
     for (final p in paths) {
       final score = _calculateRouteThreatScore(p, threats);
@@ -179,7 +181,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
       }
     }
 
-    bool warning = false;
+    var warning = false;
     if (bestPath != null) {
       for (final point in bestPath) {
         for (final threat in threats) {
@@ -201,8 +203,8 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
     });
 
     final message = warning
-        ? "Safe route calculated to ${zone.name}. Warning: The route passes near an active threat. Proceed with extreme caution."
-        : "Safe route calculated to ${zone.name}. The path is clear.";
+        ? 'Safe route calculated to ${zone.name}. Warning: The route passes near an active threat. Proceed with extreme caution.'
+        : 'Safe route calculated to ${zone.name}. The path is clear.';
     unawaited(TtsService.instance.speak(message));
   }
 

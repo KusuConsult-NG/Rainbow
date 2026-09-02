@@ -969,7 +969,7 @@ uses — is installed locally, so the Dart results are reproducible with
 
 | Check | Result |
 |---|---|
-| `flutter analyze` | ✅ **0 errors** (was 39), 54 warnings, 755 infos — **blocking gate on errors** |
+| `flutter analyze` | ✅ **0 errors, 0 warnings** (was 39 errors / 54 warnings) — **warnings now blocking**; 9 info rules promoted to `error`; 551 infos remain behind three documented exemptions |
 | `flutter test` | ✅ **77 passed, 0 skipped** (was 51 passed, 1 skipped) |
 | `tsc --noEmit` | ✅ pass |
 | `eslint` | ✅ **0 errors**, 15 warnings (was 21 errors) |
@@ -1028,7 +1028,7 @@ The original claim that the mobile suite could not be run is **superseded**.
 | H-8 | fresh clone cannot build | ✅ `.env.example` added for both apps |
 | M-2 | no mocking framework | ✅ `mocktail` + `sqflite_common_ffi` added |
 | M-4 | no CI | ✅ `.github/workflows/ci.yml` |
-| M-8 | ESLint errors | ✅ 21 → 0 (11 hooks rules downgraded to warn, TODO) |
+| M-8 | ESLint errors | ✅ 21 → 0; **ratchet tightened 2026-09-02** — the two hooks rules are now `error` project-wide with a shrinking 6-file allowlist for pre-existing sites |
 | M-9 | 500 on malformed JSON | ✅ 400 |
 | M-1 | skipped smoke test | ✅ un-skipped; suite has 0 skips |
 | M-5 | `deploy.sh` broken three ways | ✅ rewritten; validates env, scans the bundle, fails loudly |

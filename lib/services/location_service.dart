@@ -94,7 +94,6 @@ class LocationService {
         accuracy: LocationAccuracy.high,
         activityType: ActivityType.fitness,
         distanceFilter: distanceFilter,
-        pauseLocationUpdatesAutomatically: false,
       );
     } else {
       return LocationSettings(

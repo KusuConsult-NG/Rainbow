@@ -51,7 +51,7 @@ class _LocationDisclosureDialogState extends State<LocationDisclosureDialog>
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     );
-    unawaited(_pulseController.repeat(reverse: true));
+    _pulseController.repeat(reverse: true);
     _pulseAnimation = Tween<double>(begin: 1, end: 1.15).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );

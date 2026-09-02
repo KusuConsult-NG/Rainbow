@@ -1,16 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:rainbow_app/models/alert_model.dart';
+import 'package:rainbow_app/features/agent/mission_resolution_screen.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/navigation_provider.dart';
 import 'package:rainbow_app/services/push_notification_service.dart';
 import 'package:rainbow_app/services/sync_service.dart';
-import 'package:rainbow_app/services/location_service.dart';
-import 'package:rainbow_app/features/agent/agent_dashboard_screen.dart';
-import 'package:rainbow_app/features/agent/mission_resolution_screen.dart';
-import 'package:rainbow_app/shared/widgets/system_alert_listener.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
 class FakePushNotificationService implements PushNotificationService {

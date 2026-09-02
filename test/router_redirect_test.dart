@@ -61,12 +61,12 @@ void main() {
 
   group('role resolution', () {
     test('responder lands on the agent dashboard', () {
-      expect(redirect(role: UserRole.responder), AppRoutes.agentDashboard);
+      expect(redirect(), AppRoutes.agentDashboard);
     });
 
     test('onboarded citizen lands on home', () {
       expect(
-        redirect(role: UserRole.citizen, hasOnboarded: true),
+        redirect(role: UserRole.citizen),
         AppRoutes.home,
       );
     });
@@ -87,8 +87,6 @@ void main() {
         'splash instead of being bounced to login', () {
       final result = redirect(
         role: UserRole.unknown,
-        resolutionError: null,
-        location: AppRoutes.splash,
       );
       expect(result, isNot(AppRoutes.login));
       expect(result, isNull, reason: 'already on splash — stay put');
@@ -126,7 +124,6 @@ void main() {
       final result = redirect(
         role: UserRole.unknown,
         resolutionError: 'PostgrestException: permission denied',
-        location: AppRoutes.splash,
       );
       expect(result, AppRoutes.login);
       expect(result, isNot(AppRoutes.onboardingPermissions));
@@ -144,7 +141,7 @@ void main() {
 
     test('responder is moved off the citizen home', () {
       expect(
-        redirect(role: UserRole.responder, location: AppRoutes.home),
+        redirect(location: AppRoutes.home),
         AppRoutes.agentDashboard,
       );
     });

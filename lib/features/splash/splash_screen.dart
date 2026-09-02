@@ -39,19 +39,19 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       vsync: this,
       duration: const Duration(milliseconds: 3000),
     );
-    unawaited(_progressController.forward());
+    _progressController.forward();
 
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
     );
-    unawaited(_pulseController.repeat());
+    _pulseController.repeat();
 
     _fadeController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 500),
     );
-    unawaited(_fadeController.forward());
+    _fadeController.forward();
 
     _fadeIn = CurvedAnimation(parent: _fadeController, curve: Curves.easeIn);
 

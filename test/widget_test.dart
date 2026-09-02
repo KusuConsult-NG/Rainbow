@@ -97,7 +97,7 @@ void main() {
   }
   testWidgets('app boots without throwing', (tester) async {
     await tester.pumpWidget(
-      _bootApp(auth: AuthState(isLoading: true), splashFinished: false),
+      _bootApp(auth: AuthState(), splashFinished: false),
     );
     await tester.pump();
     expect(find.byType(MaterialApp), findsOneWidget);

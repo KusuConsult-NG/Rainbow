@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -7,8 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
-import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
+import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/services/sqlite_service.dart';
 
 /// Documentation for this public member.
@@ -49,8 +48,8 @@ class AlertService {
     // dashboard as a confident pin, indistinguishable from a real position, and
     // responders were dispatched to a location produced by a `??` operator.
     // A missing location must read as missing. See E2E_AUDIT_REPORT.md C-5.
-    double? finalLat = latitude;
-    double? finalLng = longitude;
+    var finalLat = latitude;
+    var finalLng = longitude;
 
     try {
       if (finalLat == null || finalLng == null) {
@@ -108,7 +107,7 @@ class AlertService {
         for (final filePath in attachments) {
           try {
             final file = File(filePath);
-            if (await file.exists()) {
+            if (file.existsSync()) {
               // 1. Cost-optimized Cloudinary Upload (Free 25GB Storage + Transcoding)
               final cloudinaryUrl = await CloudinaryService.instance.uploadMedia(file);
               if (cloudinaryUrl != null) {

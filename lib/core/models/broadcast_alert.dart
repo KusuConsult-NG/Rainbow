@@ -33,6 +33,3 @@ DateTime? _timestampFromJson(dynamic date) {
 dynamic _timestampToJson(DateTime? date) {
   return date?.toIso8601String();
 }
-
-DateTime? _dateTimeFromJson(dynamic date) => _timestampFromJson(date);
-dynamic _dateTimeToJson(DateTime? date) => _timestampToJson(date);
