@@ -396,132 +396,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
             Column(
               children: [
                 const BroadcastHud(),
-                Expanded(
-                  child: StreamBuilder<AlertsFeed>(
-                    stream: ref.watch(alertsStreamProvider.stream),
-                    builder: (context, alertSnapshot) {
-                      return StreamBuilder<List<Map<String, dynamic>>>(
-                        stream: ref.watch(trackingStreamProvider.stream),
-                        builder: (context, trackingSnapshot) {
-                          if (alertSnapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const Center(
-                              child: CircularProgressIndicator(
-                                color: AppColors.primary,
-                              ),
-                            );
-                          }
-
-                          // A stream error must never fall through to an empty
-                          // list: empty renders as ALL CLEAR, and "the feed
-                          // broke" is not "there are no incidents".
-                          final feed = alertSnapshot.data ??
-                              (alertSnapshot.hasError
-                                  ? AlertsFeed(
-                                      rows: const [],
-                                      liveness: FeedLiveness.degraded,
-                                      error: alertSnapshot.error.toString(),
-                                    )
-                                  : AlertsFeed.initial);
-
-                          final uid =
-                              ref.watch(authServiceProvider).currentUserId;
-                          final profile = ref.watch(authProvider).profile ?? {};
-                          final assignedLgas =
-                              (profile['geo_lgas'] as List<dynamic>?)
-                                      ?.cast<String>() ??
-                                  [
-                                    profile['geo_lga'] as String? ??
-                                        profile['lga'] as String?,
-                                  ].whereType<String>().toList();
-                          final assignedWards =
-                              (profile['geo_wards'] as List<dynamic>?)
-                                      ?.cast<String>() ??
-                                  [
-                                    profile['geo_ward'] as String? ??
-                                        profile['ward'] as String?,
-                                  ].whereType<String>().toList();
-                          final assignedPus =
-                              (profile['geo_pus'] as List<dynamic>?)
-                                      ?.cast<String>() ??
-                                  [
-                                    profile['geo_pu'] as String? ??
-                                        profile['pu'] as String?,
-                                  ].whereType<String>().toList();
-                          final allDocs = feed.rows;
-                          final filteredAlerts = allDocs.where((alert) {
-                            if (alert['assignedToUid'] == uid) return true;
-
-
-                            final auth = ref.watch(authProvider);
-
-                            if (auth.tier == ResponderTier.lga) {
-                              return assignedLgas.contains(alert['geo_lga']) ||
-                                  assignedLgas.contains('ALL') ||
-                                  alert['geo_lga'] == null;
-                            }
-                            if (auth.tier == ResponderTier.ward) {
-                              return assignedWards.contains(alert['geo_ward']) ||
-                                  assignedWards.contains('ALL') ||
-                                  assignedLgas.contains(alert['geo_lga']) ||
-                                  alert['geo_ward'] == null;
-                            }
-                            if (auth.tier == ResponderTier.pu) {
-                              return assignedPus.contains(alert['geo_pu']) ||
-                                  assignedPus.contains('ALL') ||
-                                  assignedWards.contains(alert['geo_ward']) ||
-                                  assignedWards.contains('ALL') ||
-                                  assignedLgas.contains(alert['geo_lga']) ||
-                                  alert['geo_pu'] == null;
-                            }
-                            // HQ or special commands fall back to true
-                            return true;
-                          }).toList()
-                              ..sort((a, b) {
-                                final aTime = a['created_at'] as String? ?? '';
-                                final bTime = b['created_at'] as String? ?? '';
-                                return bTime.compareTo(aTime);
-                              });
-
-                          // Process Responder Telemetry
-                          final responderMarkers = <Marker>[];
-                          if (trackingSnapshot.hasData) {
-                            final telemetryList = trackingSnapshot.data ?? [];
-                            for (final telemetry in telemetryList) {
-                              final userId = telemetry['user_id'];
-                              if (userId == uid) {
-                                continue; // Don't show self as responder marker
-                              }
-                              final lat = (telemetry['latitude'] ?? telemetry['lat']) as double?;
-                              final lng = (telemetry['longitude'] ?? telemetry['lng']) as double?;
-                              if (lat != null && lng != null) {
-                                responderMarkers.add(
-                                  Marker(
-                                    point: LatLng(lat, lng),
-                                    width: 40,
-                                    height: 40,
-                                    child: _ResponderMarker(
-                                      status: (telemetry['status'] as String?) ??
-                                          'ONLINE',
-                                      isEmergency: telemetry['mode'] == 'sos',
-                                    ),
-                                  ),
-                                );
-                              }
-                            }
-                          }
-
-                          return AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 500),
-                            child: _showMap
-                                ? _buildMap(filteredAlerts, responderMarkers)
-                                : _buildList(filteredAlerts, feed),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
+                Expanded(child: _buildMissionFeed()),
               ],
             ),
             // Scanner overlay effect
@@ -547,6 +422,144 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
     );
   }
 
+
+  /// The mission feed pane: alerts, responder telemetry, and the map/list
+  /// switch.
+  ///
+  /// This watches the providers directly as `AsyncValue`s. It used to nest two
+  /// `StreamBuilder`s over `provider.stream`, which riverpod deprecates and
+  /// removes in 3.0.
+  ///
+  /// The mapping below is deliberately explicit rather than a bare `.value`,
+  /// because the two APIs disagree about errors: `StreamBuilder` DROPS the last
+  /// data when an error arrives, while `AsyncValue` RETAINS it. Inheriting
+  /// riverpod's behaviour unexamined would leave the last known rows on screen
+  /// still labelled `live` after the feed had died — the pane would assert a
+  /// liveness it no longer has. On error this keeps the old contract: no rows,
+  /// and say so.
+  Widget _buildMissionFeed() {
+    final alertsAsync = ref.watch(alertsStreamProvider);
+    final trackingAsync = ref.watch(trackingStreamProvider);
+
+    // Nothing has arrived yet — the old `ConnectionState.waiting` branch.
+    if (alertsAsync.isLoading && !alertsAsync.hasValue) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.primary),
+      );
+    }
+
+    // A stream error must never fall through to an empty list: empty renders
+    // as ALL CLEAR, and "the feed broke" is not "there are no incidents".
+    final feed = switch (alertsAsync) {
+      AsyncError(:final error) => AlertsFeed(
+          rows: const [],
+          liveness: FeedLiveness.degraded,
+          error: error.toString(),
+        ),
+      AsyncData(:final value) => value,
+      // A refresh in flight keeps the rows it already had.
+      AsyncValue(:final value?) => value,
+      _ => AlertsFeed.initial,
+    };
+
+    // Same rule for telemetry: only settled data counts as positions we are
+    // willing to draw a responder at.
+    final telemetryList = switch (trackingAsync) {
+      AsyncData(:final value) => value,
+      _ => const <Map<String, dynamic>>[],
+    };
+
+    final uid =
+        ref.watch(authServiceProvider).currentUserId;
+    final profile = ref.watch(authProvider).profile ?? {};
+    final assignedLgas =
+        (profile['geo_lgas'] as List<dynamic>?)
+                ?.cast<String>() ??
+            [
+              profile['geo_lga'] as String? ??
+                  profile['lga'] as String?,
+            ].whereType<String>().toList();
+    final assignedWards =
+        (profile['geo_wards'] as List<dynamic>?)
+                ?.cast<String>() ??
+            [
+              profile['geo_ward'] as String? ??
+                  profile['ward'] as String?,
+            ].whereType<String>().toList();
+    final assignedPus =
+        (profile['geo_pus'] as List<dynamic>?)
+                ?.cast<String>() ??
+            [
+              profile['geo_pu'] as String? ??
+                  profile['pu'] as String?,
+            ].whereType<String>().toList();
+    final allDocs = feed.rows;
+    final filteredAlerts = allDocs.where((alert) {
+      if (alert['assignedToUid'] == uid) return true;
+
+
+      final auth = ref.watch(authProvider);
+
+      if (auth.tier == ResponderTier.lga) {
+        return assignedLgas.contains(alert['geo_lga']) ||
+            assignedLgas.contains('ALL') ||
+            alert['geo_lga'] == null;
+      }
+      if (auth.tier == ResponderTier.ward) {
+        return assignedWards.contains(alert['geo_ward']) ||
+            assignedWards.contains('ALL') ||
+            assignedLgas.contains(alert['geo_lga']) ||
+            alert['geo_ward'] == null;
+      }
+      if (auth.tier == ResponderTier.pu) {
+        return assignedPus.contains(alert['geo_pu']) ||
+            assignedPus.contains('ALL') ||
+            assignedWards.contains(alert['geo_ward']) ||
+            assignedWards.contains('ALL') ||
+            assignedLgas.contains(alert['geo_lga']) ||
+            alert['geo_pu'] == null;
+      }
+      // HQ or special commands fall back to true
+      return true;
+    }).toList()
+        ..sort((a, b) {
+          final aTime = a['created_at'] as String? ?? '';
+          final bTime = b['created_at'] as String? ?? '';
+          return bTime.compareTo(aTime);
+        });
+
+    // Process Responder Telemetry
+    final responderMarkers = <Marker>[];
+    for (final telemetry in telemetryList) {
+      final userId = telemetry['user_id'];
+      if (userId == uid) {
+        continue; // Don't show self as responder marker
+      }
+      final lat = (telemetry['latitude'] ?? telemetry['lat']) as double?;
+      final lng = (telemetry['longitude'] ?? telemetry['lng']) as double?;
+      if (lat != null && lng != null) {
+        responderMarkers.add(
+          Marker(
+            point: LatLng(lat, lng),
+            width: 40,
+            height: 40,
+            child: _ResponderMarker(
+              status: (telemetry['status'] as String?) ??
+                  'ONLINE',
+              isEmergency: telemetry['mode'] == 'sos',
+            ),
+          ),
+        );
+      }
+    }
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 500),
+      child: _showMap
+          ? _buildMap(filteredAlerts, responderMarkers)
+          : _buildList(filteredAlerts, feed),
+    );
+  }
 
   Widget _buildList(List<Map<String, dynamic>> alerts, AlertsFeed feed) {
     if (alerts.isEmpty) {
