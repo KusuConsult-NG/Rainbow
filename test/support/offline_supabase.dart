@@ -17,11 +17,57 @@
 // to fake `.from().select().eq()` chains and would drift from the SDK. Here
 // only the transport is faked, which is the one part a test has no business
 // exercising.
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+/// Answers every REST call with these rows.
+///
+/// PostgREST returns a JSON array; `.maybeSingle()`/`.single()` ask for a
+/// single object via the Accept header, so the shape is chosen accordingly —
+/// otherwise `maybeSingle()` sees a list and throws instead of returning null.
+///
+/// Every response carries `request:`. postgrest dereferences
+/// `response.request!` while parsing, so a response without it fails with a
+/// bare "Null check operator used on a null value" that looks like a bug in
+/// the code under test rather than in the fixture.
+Future<http.Response> Function(http.Request) jsonRows(
+  List<Map<String, dynamic>> rows,
+) =>
+    (request) async {
+      final wantsSingle =
+          (request.headers['Accept'] ?? '').contains('vnd.pgrst.object');
+      if (wantsSingle) {
+        if (rows.isEmpty) {
+          // PostgREST answers a no-rows `maybeSingle` with 200 and an empty
+          // body; the client turns that into null rather than an error.
+          return http.Response('', 200,
+              headers: _jsonHeaders, request: request);
+        }
+        return http.Response(jsonEncode(rows.first), 200,
+            headers: _jsonHeaders, request: request);
+      }
+      return http.Response(jsonEncode(rows), 200,
+          headers: _jsonHeaders, request: request);
+    };
+
+/// Answers every REST call with a PostgREST-shaped error.
+Future<http.Response> Function(http.Request) jsonError(
+  int status,
+  String message,
+) =>
+    (request) async => http.Response(
+          jsonEncode({'message': message}),
+          status,
+          headers: _jsonHeaders,
+          request: request,
+        );
+
+const _jsonHeaders = {'content-type': 'application/json; charset=utf-8'};
 
 /// Thrown when a widget test reaches realtime. See [installOfflineSupabase].
 class RealtimeNotAvailableInTests extends StateError {
