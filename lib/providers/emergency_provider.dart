@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:developer' as dev;
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:rainbow_app/core/config/app_config.dart';
 import 'package:rainbow_app/core/models/emergency_state.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
@@ -122,46 +122,84 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
     }
   }
 
-  Future<bool> verifyCancellation(String pin) async {
-    // No fallbacks. These previously defaulted to '0000'/'9999', which are
-    // published in this repository — a captor who had read it would know that
-    // 9999 signals duress. Unconfigured now means "reject", not "use 9999".
-    final safePin = AppConfig.safePin;
-    final duressPin = AppConfig.duressPin;
+  /// Test seam: BackgroundTrackingService talks to platform channels, which do
+  /// not exist under `flutter test`.
+  @visibleForTesting
+  static Future<void> Function()? stopTrackingOverride;
 
-    if (safePin == null || duressPin == null) {
-      dev.log(
-        'Emergency PINs unconfigured — cancellation rejected. See AppConfig.validate().',
-        name: 'CONFIG_ERR',
-      );
-      return false;
-    }
-
+  /// Verifies an emergency PIN ON THE SERVER and, when there is an alert, closes
+  /// it there too.
+  ///
+  /// This used to compare the entry against SAFE_PIN / DURESS_PIN — build-time
+  /// constants shipped inside the APK, identical for every install and
+  /// readable by anyone who unzipped it. No PIN material exists on the device
+  /// now: `resolve_emergency` checks a bcrypt hash the API cannot read, rate
+  /// limits guesses, and records who resolved the alert.
+  ///
+  /// The screen treats [CancelOutcome.resolved] and [CancelOutcome.duress]
+  /// identically — that is the whole point of a duress code. The only
+  /// difference is that tracking keeps running under duress, so HQ can follow.
+  Future<CancelOutcome> verifyCancellation(String pin) async {
     try {
-      if (pin == safePin) {
-        if (state.alertId != null) {
-          await SupabaseConfig.client
-              .from('alerts')
-              .update({'status': 'RESOLVED'})
-              .eq('id', state.alertId!);
-        }
-        unawaited(BackgroundTrackingService().stopTracking());
-        state = const EmergencyState();
-        return true;
-      } else if (pin == duressPin) {
-        if (state.alertId != null) {
-          await SupabaseConfig.client
-              .from('alerts')
-              .update({'status': 'DURESS'})
-              .eq('id', state.alertId!);
-        }
-        state = const EmergencyState();
-        return true;
+      final dynamic raw = state.alertId != null
+          ? await SupabaseConfig.client.rpc<dynamic>(
+              'resolve_emergency',
+              params: <String, dynamic>{'p_alert_id': state.alertId, 'p_pin': pin},
+            )
+          : await SupabaseConfig.client.rpc<dynamic>(
+              'verify_emergency_pin',
+              params: <String, dynamic>{'p_pin': pin},
+            );
+      final code = raw is String ? raw : raw?.toString() ?? '';
+
+      switch (code) {
+        case 'RESOLVED':
+        case 'SAFE':
+          unawaited(
+            (stopTrackingOverride ?? BackgroundTrackingService().stopTracking)(),
+          );
+          state = const EmergencyState();
+          return CancelOutcome.resolved;
+        case 'DURESS':
+          // Deliberately NOT stopping tracking: the person may still be in danger.
+          state = const EmergencyState();
+          return CancelOutcome.duress;
+        case 'LOCKED':
+          return CancelOutcome.locked;
+        case 'UNSET':
+          return CancelOutcome.unset;
+        case 'NOT_FOUND':
+          return CancelOutcome.notFound;
+        default:
+          return CancelOutcome.invalid;
       }
     } catch (e) {
       dev.log('Cancel Verify Failed: $e', name: 'SYS_ERR');
+      return CancelOutcome.error;
     }
-
-    return false;
   }
+}
+
+/// What the server said about a cancellation attempt.
+enum CancelOutcome {
+  /// Safe PIN: the alert is resolved and tracking stops.
+  resolved,
+
+  /// Duress PIN: the alert is flagged DURESS; the screen behaves as [resolved].
+  duress,
+
+  /// Wrong PIN.
+  invalid,
+
+  /// Too many wrong PINs; entry is locked for a while.
+  locked,
+
+  /// This account has no emergency PINs configured yet.
+  unset,
+
+  /// No such alert reported by or assigned to this user.
+  notFound,
+
+  /// The server could not be reached, or returned something unexpected.
+  error,
 }

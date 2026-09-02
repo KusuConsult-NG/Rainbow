@@ -44,7 +44,8 @@ sleep 2
 # Stage every SQL file the run needs somewhere the postgres user can read.
 cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/test_rls_migration.sql \
-   "$REPO"/scripts/rls_behaviour_test.sql "$PGROOT/"
+   "$REPO"/scripts/rls_behaviour_test.sql \
+   "$REPO"/scripts/emergency_pins_behaviour_test.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
 psql_run() {
@@ -74,6 +75,21 @@ echo "  permissive USING(true)/WITH CHECK(true) policies before: $BEFORE"
 
 echo "▶ Applying 20260813000000_rls_least_privilege.sql"
 psql_run "-f $PGROOT/20260813000000_rls_least_privilege.sql" >/dev/null
+
+# Per-user emergency PINs: applied on top of the RLS migration, then its own
+# behaviour test — lockout, attribution, and that the hashes are unreadable
+# through the API even by their owner.
+echo "▶ Applying 20260902000000_per_user_emergency_pins.sql"
+psql_run "-f $PGROOT/20260902000000_per_user_emergency_pins.sql" >/dev/null
+echo "▶ Emergency PIN behaviour test"
+# Run ONCE, keeping both the output and the exit code. (Running it twice, as the
+# RLS test below is, broke on the second pass: the first had already set PINs.)
+PIN_OUT=$(psql_run "-f $PGROOT/emergency_pins_behaviour_test.sql" 2>&1); PIN_RC=$?
+printf '%s\n' "$PIN_OUT" | grep -E "PASS|FAIL|ALL EMERGENCY" || true
+if [ "$PIN_RC" -ne 0 ]; then
+  printf '%s\n' "$PIN_OUT" | grep -vE "PASS" | tail -20
+  echo "::error::emergency PIN behaviour test FAILED"; exit 1
+fi
 
 AFTER=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
   \"select count(*) from pg_policies where schemaname='public' and (qual='true' or with_check='true') and 'anon'=any(roles);\"")

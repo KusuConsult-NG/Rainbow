@@ -17,6 +17,7 @@ import 'package:rainbow_app/features/home/home_screen.dart';
 import 'package:rainbow_app/features/onboarding/onboarding_contacts_screen.dart';
 import 'package:rainbow_app/features/onboarding/onboarding_permissions_screen.dart';
 import 'package:rainbow_app/features/onboarding/onboarding_profile_screen.dart';
+import 'package:rainbow_app/features/settings/emergency_pin_screen.dart';
 import 'package:rainbow_app/features/report/report_category_screen.dart';
 import 'package:rainbow_app/features/report/report_details_screen.dart';
 import 'package:rainbow_app/features/report/report_initial_screen.dart';
@@ -216,6 +217,9 @@ class AppRoutes {
   /// Documentation for this public member.
   static const String missionIntel = '/mission-intel';
 
+  /// Set or change the per-user safe and duress PINs.
+  static const String emergencyPins = '/emergency-pins';
+
   /// Documentation for this public member.
   static const String missionResolution = '/mission-resolution';
 
@@ -305,6 +309,18 @@ final appRouter = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.liveTracking,
             pageBuilder: (c, s) => _slide(s, const LiveTrackingScreen()),
+          ),
+          GoRoute(
+            path: AppRoutes.emergencyPins,
+            pageBuilder: (c, s) {
+              final extra = s.extra as Map<String, dynamic>?;
+              return _slide(
+                s,
+                EmergencyPinScreen(
+                  fromOnboarding: extra?['onboarding'] == true,
+                ),
+              );
+            },
           ),
           GoRoute(
             path: AppRoutes.missionIntel,

@@ -96,7 +96,14 @@ class _OnboardingContactsScreenState
                     }
                     // context.mounted, not the State's mounted: this is a
                     // builder's context and the two can disagree.
-                    if (context.mounted) context.go(AppRoutes.home);
+                    // PINs come last in onboarding: an SOS cannot be safely
+                    // cancelled without them, and they are per-user now.
+                    if (context.mounted) {
+                      context.go(
+                        AppRoutes.emergencyPins,
+                        extra: <String, dynamic>{'onboarding': true},
+                      );
+                    }
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
