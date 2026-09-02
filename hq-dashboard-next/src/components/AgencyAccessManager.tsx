@@ -20,6 +20,25 @@ interface LiaisonUser {
   created_at: string;
 }
 
+/**
+ * The read, with no state in it. Keeping the query separate from the setState
+ * calls is what lets the mount path stop touching state synchronously.
+ *
+ * Returns `[]` rather than null on failure, preserving the original
+ * behaviour — see the note in E2E_AUDIT_REPORT.md: an error here renders as
+ * "No agency liaisons registered", which is a claim the panel cannot support.
+ * Changing that is a UI decision, not a lint fix, so it is recorded rather
+ * than smuggled in here.
+ */
+async function loadLiaisons(): Promise<LiaisonUser[]> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('id, full_name, role, agency, created_at')
+    .like('role', '%_LIAISON%')
+    .order('created_at', { ascending: false });
+  return (data as LiaisonUser[]) || [];
+}
+
 export default function AgencyAccessManager() {
   const [liaisons, setLiaisons] = useState<LiaisonUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,18 +49,31 @@ export default function AgencyAccessManager() {
   const [success, setSuccess] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
+  // The initial load. `loading` already starts true, so the old
+  // `setLoading(true)` in the fetch was redundant on mount and was what made
+  // this a set-state-in-effect — it ran synchronously as the effect body.
+  // `cancelled` also stops a setState landing after the operator navigates
+  // away mid-request.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const rows = await loadLiaisons();
+      if (cancelled) return;
+      setLiaisons(rows);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Called from clicks, never from an effect, so setting state up front is
+  // fine here — and it is what tells the operator the list is re-reading.
   const fetchLiaisons = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, full_name, role, agency, created_at')
-      .like('role', '%_LIAISON%')
-      .order('created_at', { ascending: false });
-    setLiaisons((data as LiaisonUser[]) || []);
+    setLiaisons(await loadLiaisons());
     setLoading(false);
   };
-
-  useEffect(() => { fetchLiaisons(); }, []);
 
   const createLiaison = async (e: React.FormEvent) => {
     e.preventDefault();

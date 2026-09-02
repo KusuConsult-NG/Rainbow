@@ -13,23 +13,58 @@ interface UninstallRequest {
   profiles?: { full_name: string; role: string; geo_lga: string };
 }
 
+/**
+ * The read, with no state in it.
+ *
+ * Keeping the query separate from the setState calls is what lets the mount
+ * path stop touching state synchronously — see the effect below. Returns null
+ * on failure so the caller can tell "the query failed" from "there are no
+ * requests"; blanking the list on an error would claim there is nothing to
+ * authorise when we simply could not ask.
+ */
+async function loadRequests(): Promise<UninstallRequest[] | null> {
+  const { data, error } = await supabase
+    .from('uninstall_requests')
+    .select('*, profiles(full_name, role, geo_lga)')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error || !data) return null;
+  return data as UninstallRequest[];
+}
+
 export default function UninstallRequests() {
   const [requests, setRequests] = useState<UninstallRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
 
-  const fetchRequests = async () => {
+  // The initial load. `loading` already starts true, so the old
+  // `setLoading(true)` here was both redundant and the thing that made this a
+  // set-state-in-effect: it ran synchronously as the effect body. Now nothing
+  // touches state until the await resolves.
+  //
+  // `cancelled` matters beyond the lint: without it, an operator who navigates
+  // away mid-request gets a setState on an unmounted component.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const rows = await loadRequests();
+      if (cancelled) return;
+      if (rows) setRequests(rows);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Called from a click, not an effect, so setting state up front is fine here
+  // — and it is what tells the operator the panel is re-reading.
+  const refresh = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('uninstall_requests')
-      .select('*, profiles(full_name, role, geo_lga)')
-      .order('created_at', { ascending: false })
-      .limit(50);
-    if (!error && data) setRequests(data as UninstallRequest[]);
+    const rows = await loadRequests();
+    if (rows) setRequests(rows);
     setLoading(false);
   };
-
-  useEffect(() => { fetchRequests(); }, []);
 
   const handleAction = async (id: string, newStatus: 'APPROVED' | 'DENIED') => {
     setActionId(id);
@@ -38,7 +73,9 @@ export default function UninstallRequests() {
         .from('uninstall_requests')
         .update({ status: newStatus, reviewed_at: new Date().toISOString() })
         .eq('id', id);
-      await fetchRequests();
+      // Re-read, always. Without it the row still shows PENDING and the same
+      // authorisation gets issued twice.
+      await refresh();
     } finally {
       setActionId(null);
     }
