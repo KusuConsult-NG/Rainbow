@@ -188,6 +188,81 @@ jobs:
           fi
           echo "OK: no demo credentials in bundle."
 
+      # A UI pass driving a real browser found the login page carried NO
+      # protective headers at all: any site could iframe the command console and
+      # overlay a lookalike to harvest badge IDs and PINs.
+      #
+      # This asks the running server, not next.config.ts. A header can be
+      # configured and still not reach the wire — the proxy sits in front of
+      # /dashboard and builds its own responses — so the assertion has to be
+      # made against an actual HTTP response on both a public and a guarded path.
+      - name: Assert security headers reach the wire
+        run: |
+          set -euo pipefail
+          npx next start -p 3200 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://localhost:3200/login && break
+            sleep 1
+          done
+
+          FAIL=0
+          for PATH_UNDER_TEST in /login /dashboard; do
+            H=$(curl -sI "http://localhost:3200${PATH_UNDER_TEST}")
+            echo "--- ${PATH_UNDER_TEST} ---"
+            # frame-ancestors is the directive that closes the clickjacking hole;
+            # X-Frame-Options covers browsers that ignore CSP framing.
+            for NEEDLE in \
+              'X-Frame-Options: DENY' \
+              "frame-ancestors 'none'" \
+              'X-Content-Type-Options: nosniff' \
+              'Referrer-Policy:' \
+              'Permissions-Policy:' \
+              'Strict-Transport-Security:'
+            do
+              if printf '%s' "$H" | grep -qiF "$NEEDLE"; then
+                echo "  ok: ${NEEDLE}"
+              else
+                echo "::error::${PATH_UNDER_TEST} is missing '${NEEDLE}'"
+                FAIL=1
+              fi
+            done
+            # Do not advertise the framework version to anyone scanning for a
+            # known-vulnerable release.
+            if printf '%s' "$H" | grep -qi '^x-powered-by:'; then
+              echo "::error::${PATH_UNDER_TEST} still sends X-Powered-By"
+              FAIL=1
+            fi
+          done
+
+          if [ "$FAIL" -ne 0 ]; then exit 1; fi
+          echo "OK: security headers present on public and guarded routes."
+
+      # A <label> that neither wraps its input nor carries htmlFor is styled
+      # text, not a label: assistive tech announces the field as an unnamed
+      # "edit text". Both login fields were in that state.
+      - name: Assert login form inputs are labelled
+        run: |
+          set -euo pipefail
+          FAIL=0
+          for ID in badge-id security-pin; do
+            grep -q "htmlFor=\"${ID}\"" src/app/login/page.tsx \
+              || { echo "::error::no <label htmlFor=\"${ID}\">"; FAIL=1; }
+            grep -q "id=\"${ID}\"" src/app/login/page.tsx \
+              || { echo "::error::no input with id=\"${ID}\""; FAIL=1; }
+          done
+          # The show/hide PIN control is icon-only and announces as just
+          # "button" without an explicit name.
+          grep -q "aria-label={showPin" src/app/login/page.tsx \
+            || { echo "::error::PIN visibility toggle has no aria-label"; FAIL=1; }
+          # Without role="alert" a failed sign-in is drawn but never spoken.
+          grep -q 'role="alert"' src/app/login/page.tsx \
+            || { echo "::error::login error banner is not a live region"; FAIL=1; }
+          if [ "$FAIL" -ne 0 ]; then exit 1; fi
+          echo "OK: login form is labelled for assistive technology."
+
   tracked-secrets:
     name: Repo — no credential material in tracked files
     runs-on: ubuntu-latest

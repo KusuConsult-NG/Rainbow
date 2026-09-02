@@ -382,9 +382,14 @@ export default function LoginPage() {
           </div>
           )}
 
-          {/* Error Notice */}
+          {/* Error Notice.
+              role="alert" (an implicit assertive live region) is what makes a
+              screen reader speak this the moment it appears. Without it the
+              failure is purely visual: the operator hears the button click,
+              nothing else happens, and there is no way to tell "wrong PIN"
+              from "the console cannot reach the server". */}
           {error && (
-            <div style={{
+            <div role="alert" style={{
               background: 'rgba(239, 68, 68, 0.15)',
               border: '1px solid rgba(239, 68, 68, 0.4)',
               borderRadius: 12,
@@ -402,7 +407,10 @@ export default function LoginPage() {
           {/* Login Form */}
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div>
-              <label style={{
+              {/* htmlFor is not decoration: without it this <label> is just
+                  styled text that happens to sit above a box, and a screen
+                  reader announces the field as an unnamed "edit text". */}
+              <label htmlFor="badge-id" style={{
                 display: 'block',
                 fontSize: 11,
                 color: '#cbd5e1',
@@ -415,6 +423,7 @@ export default function LoginPage() {
               </label>
               <div style={{ position: 'relative' }}>
                 <input
+                  id="badge-id"
                   value={badgeId}
                   onChange={e => {
                     setBadgeId(e.target.value);
@@ -445,7 +454,7 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label style={{
+              <label htmlFor="security-pin" style={{
                 display: 'block',
                 fontSize: 11,
                 color: '#cbd5e1',
@@ -458,6 +467,7 @@ export default function LoginPage() {
               </label>
               <div style={{ position: 'relative' }}>
                 <input
+                  id="security-pin"
                   value={pin}
                   onChange={e => {
                     setPin(e.target.value);
@@ -487,9 +497,17 @@ export default function LoginPage() {
                   transform: 'translateY(-50%)',
                   pointerEvents: 'none'
                 }} />
+                {/* Icon-only, so it carries no text for assistive tech to read.
+                    Without an explicit name it is announced as just "button",
+                    and aria-pressed is what tells the user which state it is
+                    currently in. */}
                 <button
                   type="button"
                   onClick={() => setShowPin(p => !p)}
+                  aria-label={showPin ? 'Hide PIN' : 'Show PIN'}
+                  aria-pressed={showPin}
+                  aria-controls="security-pin"
+                  title={showPin ? 'Hide PIN' : 'Show PIN'}
                   style={{
                     position: 'absolute',
                     right: 14,
