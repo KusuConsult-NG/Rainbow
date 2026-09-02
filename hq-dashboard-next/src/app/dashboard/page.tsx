@@ -1680,7 +1680,8 @@ export default function DashboardPage() {
                             ) : (
                               <div>
                                 <span style={{ fontSize: 9, fontWeight: 900, color: 'var(--success)', display: 'block', marginBottom: 8, letterSpacing: 1 }}>📷 SCENE PHOTO</span>
-                                <img src={url} alt="Incident media" style={{ width: '100%', height: 180, borderRadius: 12, objectFit: 'cover' }} />
+                                {/* eslint-disable-next-line @next/next/no-img-element -- next.config sets images.unoptimized, so next/image would serve this byte-identically while additionally requiring the Supabase Storage host in images.remotePatterns — a second copy of the CSP's img-src allowlist to keep in sync. Lazy loading, the part of the rule's concern that is real here, is set explicitly. */}
+                                <img src={url} alt="Incident media" loading="lazy" decoding="async" style={{ width: '100%', height: 180, borderRadius: 12, objectFit: 'cover' }} />
                               </div>
                             )}
                           </div>
@@ -2283,9 +2284,12 @@ Respond ONLY with a JSON object with this exact shape:
                       <div style={{ fontSize: 8, color: 'var(--text-muted)', marginTop: 2 }}>AUDIO</div>
                     </div>
                   ) : (
+                    /* eslint-disable-next-line @next/next/no-img-element -- see the note on the incident media image above. An alert can carry six of these thumbnails and the board shows many alerts, so `loading="lazy"` matters here more than anywhere: without it every thumbnail on screen is fetched eagerly over what may be a constrained network. */
                     <img
                       src={url}
                       alt={`Evidence ${idx + 1}`}
+                      loading="lazy"
+                      decoding="async"
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                     />

@@ -37,15 +37,20 @@ const TILE_HOSTS = [
   'https://*.tile.openstreetmap.org',
 ];
 
-function supabaseOrigins(): string[] {
+/** The Supabase project origin, or null when it is not configured. */
+function supabaseOrigin(): string | null {
   const raw = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!raw) return [];
-  let origin: string;
+  if (!raw) return null;
   try {
-    origin = new URL(raw).origin;
+    return new URL(raw).origin;
   } catch {
-    return [];
+    return null;
   }
+}
+
+function supabaseOrigins(): string[] {
+  const origin = supabaseOrigin();
+  if (!origin) return [];
   // Realtime upgrades to a WebSocket on the same host. Derive the scheme from
   // the URL rather than assuming https: a self-hosted or local Supabase on
   // http speaks ws, and hard-coding wss silently blocks its realtime channel.
@@ -63,6 +68,8 @@ function supabaseOrigins(): string[] {
  */
 export function contentSecurityPolicy(nonce: string, isDev: boolean): string {
   const connect = ["'self'", ...supabaseOrigins()].join(' ');
+  const origin = supabaseOrigin();
+  const mediaOrigins = origin ? [origin] : [];
 
   return [
     "default-src 'self'",
@@ -70,7 +77,25 @@ export function contentSecurityPolicy(nonce: string, isDev: boolean): string {
     // No nonce here, on purpose — see the note above.
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' data: https://fonts.gstatic.com",
-    `img-src 'self' data: blob: ${TILE_HOSTS.join(' ')}`,
+    // The Supabase origin is REQUIRED here, not optional. Incident evidence —
+    // scene photos taken by responders and citizens — is uploaded to Supabase
+    // Storage and rendered straight from its public URL. Leaving it out does
+    // not degrade anything visibly: the console renders the incident with a
+    // blank space where the evidence should be, and an operator reviewing a
+    // report has no way to tell a missing photo from one that was never taken.
+    // That was the state shipped with the first nonce-based policy, and it was
+    // caught by a browser check rather than by reading the header.
+    `img-src 'self' data: blob: ${[...mediaOrigins, ...TILE_HOSTS].join(' ')}`,
+    // Voice recordings and scene video ride the SAME Supabase Storage origin as
+    // the photos, and `<audio src>` / `<video src>` are governed by media-src —
+    // NOT img-src, and not connect-src. With no media-src at all they fell back
+    // to `default-src 'self'` and were refused. A duress voice recording is
+    // often the only account of what happened; silently refusing to play it is
+    // the worst version of this bug.
+    //
+    // LiveFeedViewer is unaffected either way: it attaches a MediaStream via
+    // `srcObject`, which CSP does not govern.
+    `media-src 'self' blob: ${mediaOrigins.join(' ')}`.trimEnd(),
     `connect-src ${connect}`,
     "object-src 'none'",
     "base-uri 'self'",

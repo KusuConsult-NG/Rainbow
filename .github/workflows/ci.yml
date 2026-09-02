@@ -426,6 +426,33 @@ jobs:
             fi
           fi
 
+          # Incident evidence — scene photos from responders and citizens — is
+          # uploaded to Supabase Storage and rendered from its public URL, so
+          # img-src must allow the Supabase ORIGIN as well. The first
+          # nonce-based policy omitted it and silently blanked every evidence
+          # photo on the console: an operator reviewing a report cannot tell a
+          # blocked photo from one that was never taken. connect-src carrying
+          # the host is NOT enough — images are governed by img-src alone.
+          # Evidence photos are <img>, voice recordings and scene video are
+          # <audio>/<video>. They come from ONE origin but are governed by TWO
+          # different directives, and both were wrong: img-src omitted the
+          # origin, and media-src did not exist at all so it fell back to
+          # `default-src 'self'`. Checking one does not cover the other, which
+          # is exactly how the second half survived fixing the first.
+          for D in img-src media-src; do
+            VAL=$(printf '%s' "$CSP" | tr ';' '\n' | grep -i "$D" || true)
+            if [ -z "$VAL" ]; then
+              echo "::error::${D} is missing entirely — it falls back to default-src 'self' and blocks incident evidence"
+              FAIL=1
+            elif printf '%s' "$VAL" | grep -qF "${NEXT_PUBLIC_SUPABASE_URL}"; then
+              echo "  ok: ${D} allows ${NEXT_PUBLIC_SUPABASE_URL}"
+            else
+              echo "  ${D} is: ${VAL}"
+              echo "::error::${D} does not allow ${NEXT_PUBLIC_SUPABASE_URL} — incident evidence will be blocked"
+              FAIL=1
+            fi
+          done
+
           if [ "$FAIL" -ne 0 ]; then exit 1; fi
           echo "OK: security headers present on public and guarded routes."
 
