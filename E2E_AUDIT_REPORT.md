@@ -1053,9 +1053,43 @@ Two defects that static review missed and running the code caught:
   alert queued while offline reached HQ with null coordinates. ✅ fixed, with a
   real-SQLite regression test.
 * **C-5**, above.
+* **Tier scoping failed open when the session could not be read.**
+  `AuthService.currentUserId` catches every error and returns null. The
+  responder dashboard's filter then evaluated
+  `alert['assignedToUid'] == uid` — which with a null `uid` is `null == null`
+  for any alert carrying no assignee, returning **true** and waving that row
+  past all LGA/ward/PU scoping below it. A transient auth read failure would
+  have shown every responder every alert in the state. The same trap sat in
+  `_MissionCard`, where it highlighted every unassigned alert as the officer's
+  own. ✅ fixed by guarding on `uid != null`, with mutation-verified widget
+  tests.
 
-Both came from adding *positive-path* coverage. The pre-existing tests passed
-only through error branches, which is why neither showed up sooner.
+All three came from adding *positive-path* coverage. The pre-existing tests
+passed only through error branches, which is why none showed up sooner — and
+the tier-scoping bug specifically could not be caught at all until widget tests
+could render a populated alert list (see below).
+
+### Widget tests could not render any screen that touches the database
+
+`Supabase.instance` asserts that `initialize` has run, and that assertion fires
+during `build()`. So any widget reaching for the client — an alert card, the
+mission list, the map — could not be built in a widget test at all. Whole
+screens were untestable, and the gap was invisible: tests that only ever
+reached empty states passed happily, because they never built the widgets that
+touch the client.
+
+`SupabaseConfig.client` is the single path to the client anywhere in `lib/`
+(all 84 call sites go through it), so one `@visibleForTesting` seam on that
+getter opens every screen to testing without threading a client through the
+codebase. `test/support/offline_supabase.dart` installs a **real**
+`SupabaseClient` over a mock HTTP transport — keeping the genuine query
+builders and types, faking only the wire. Realtime is deliberately made to
+throw rather than open a socket, because a real WebSocket attempt leaves a
+pending timer and *hangs* the test rather than failing it.
+
+A CI step bans the seam from `lib/`, and asserts it still exists — a static
+mutable holding the whole app's database access must never be reachable from
+production code.
 
 ### `flutter analyze` is now a blocking gate
 

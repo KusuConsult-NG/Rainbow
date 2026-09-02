@@ -495,7 +495,14 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
             ].whereType<String>().toList();
     final allDocs = feed.rows;
     final filteredAlerts = allDocs.where((alert) {
-      if (alert['assignedToUid'] == uid) return true;
+      // `uid` is null whenever the session cannot be read — AuthService
+      // .currentUserId catches and returns null. Without this guard the
+      // comparison becomes `null == null` for every alert that carries no
+      // assignee, which returns true and waves the row past ALL tier scoping
+      // below. A transient auth read failure would show every responder every
+      // alert in the state. You cannot be assigned something when we do not
+      // know who you are.
+      if (uid != null && alert['assignedToUid'] == uid) return true;
 
 
       final auth = ref.watch(authProvider);
@@ -795,7 +802,10 @@ class _MissionCard extends ConsumerWidget {
     final status = alert['status'] ?? 'OPEN';
     final severity = alert['severity'] ?? 'MEDIUM';
     final uid = SupabaseConfig.client.auth.currentUser?.id;
-    final isMine = alert['assignedToUid'] == uid || alert['assigned_to'] == uid;
+    // Same null trap as the tier filter: with no session, `null == null` marks
+    // every unassigned alert as this officer's own and highlights the lot.
+    final isMine = uid != null &&
+        (alert['assignedToUid'] == uid || alert['assigned_to'] == uid);
 
     final statusColors = {
       'OPEN': AppColors.warning,
