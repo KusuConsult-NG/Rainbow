@@ -58,14 +58,51 @@ describe('AgencyAccessManager', () => {
     expect(await screen.findByText(/No agency liaisons registered/i)).toBeInTheDocument();
   });
 
-  it('leaves the loading state even when the query errors', async () => {
+  // A failed read must never be displayed as "none registered". That claim
+  // invites an administrator to grant access that already exists.
+  it('reports a failed read as a failure, never as an empty roster', async () => {
     db.setError('profiles', { message: 'permission denied' });
     const AgencyAccessManager = await load();
 
     render(<AgencyAccessManager />);
-    await waitFor(() =>
-      expect(screen.queryByText(/Loading liaison accounts/i)).not.toBeInTheDocument(),
-    );
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/Could not load liaison accounts/i);
+    expect(alert).toHaveTextContent(/permission denied/i);
+    expect(screen.queryByText(/No agency liaisons registered/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Loading liaison accounts/i)).not.toBeInTheDocument();
+  });
+
+  it('recovers when RETRY is pressed and the read succeeds', async () => {
+    db.setError('profiles', { message: 'connection reset' });
+    const AgencyAccessManager = await load();
+
+    render(<AgencyAccessManager />);
+    await screen.findByRole('alert');
+    const before = db.selectCount('profiles');
+
+    db.setRows('profiles', [LIAISON]);
+    await userEvent.click(screen.getByRole('button', { name: /RETRY/i }));
+
+    expect(await screen.findByText('DSP Audu Ibrahim')).toBeInTheDocument();
+    expect(db.selectCount('profiles')).toBeGreaterThan(before);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps the last good roster, marked stale, when a refresh fails', async () => {
+    db.setRows('profiles', [LIAISON]);
+    const AgencyAccessManager = await load();
+
+    render(<AgencyAccessManager />);
+    await screen.findByText('DSP Audu Ibrahim');
+
+    db.setError('profiles', { message: 'timeout' });
+    await userEvent.click(screen.getAllByRole('button')[0]); // the refresh icon button
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/showing the last list that loaded/i);
+    // The roster itself is still there — stale but visible.
+    expect(screen.getByText('DSP Audu Ibrahim')).toBeInTheDocument();
+    expect(screen.queryByText(/No agency liaisons registered/i)).not.toBeInTheDocument();
   });
 
   it('re-reads the list when the refresh button is used', async () => {

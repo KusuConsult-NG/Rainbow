@@ -29,6 +29,7 @@ import {
 import type { Alert } from './types';
 import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
 import * as alertActions from '@/lib/alert-actions';
+import type { AlertIds } from '@/lib/alert-actions';
 
 export type { Alert };
 
@@ -668,7 +669,7 @@ export default function DashboardPage() {
   // they change incidents, and a dispatch that silently did not happen looks
   // exactly like one that did. What stays here is the toast wrapping, which is
   // presentation.
-  const escalateAlert = useCallback(async (alertId: string, targetLga: string = 'ALL', reason: string = '', targetAgency: string = 'ALL') => {
+  const escalateAlert = useCallback(async (alertId: AlertIds, targetLga: string = 'ALL', reason: string = '', targetAgency: string = 'ALL') => {
     const lgaTarget = targetLga || 'ALL';
     const agencyTarget = targetAgency || 'ALL';
     const toastId = toast.loading('Escalating Incident...', `Handing over to ${agencyTarget} Command (${lgaTarget})`);
@@ -684,7 +685,7 @@ export default function DashboardPage() {
     }
   }, [toast, user]);
 
-  const hqOverride = useCallback(async (alertId: string) => {
+  const hqOverride = useCallback(async (alertId: AlertIds) => {
     const toastId = toast.loading('HQ Override...', 'Taking command of incident');
     const res = await alertActions.hqOverride(alertId, { id: user?.id, email: user?.email });
     if (res.ok) {
@@ -694,7 +695,7 @@ export default function DashboardPage() {
     }
   }, [toast, user]);
 
-  const resolveAlert = useCallback(async (alertId: string) => {
+  const resolveAlert = useCallback(async (alertId: AlertIds) => {
     const toastId = toast.loading('Resolving Incident...', 'Marking incident as resolved');
     const res = await alertActions.resolveAlert(alertId, { id: user?.id, email: user?.email });
     if (res.ok) {
@@ -704,7 +705,7 @@ export default function DashboardPage() {
     }
   }, [toast, user]);
 
-  const dispatchAlert = useCallback(async (alertId: string, responderUids: string[] | string) => {
+  const dispatchAlert = useCallback(async (alertId: AlertIds, responderUids: string[] | string) => {
     const uids = Array.isArray(responderUids) ? responderUids : [responderUids];
     if (uids.length === 0) return;
     const toastId = toast.loading('Dispatching Tactical Team...', `Assigning ${uids.length} responders to incident`);
@@ -1975,11 +1976,15 @@ function AlertCard({ alert, agents, usersMap, onViewDossier, onDispatch, onEscal
   agents: any[];
   usersMap: Record<string, any>;
   onViewDossier?: (alert: Alert) => void;
-  onDispatch: (id: string, responderUid: string) => Promise<void> | void;
-  onEscalate: (id: string, t: string, notes?: string, agency?: string) => Promise<void> | void; 
-  onResolve: (id: string) => Promise<void> | void; 
-  onHqOverride: (id: string) => Promise<void> | void;
+  onDispatch: (ids: AlertIds, responderUid: string) => Promise<void> | void;
+  onEscalate: (ids: AlertIds, t: string, notes?: string, agency?: string) => Promise<void> | void; 
+  onResolve: (ids: AlertIds) => Promise<void> | void; 
+  onHqOverride: (ids: AlertIds) => Promise<void> | void;
 }) {
+  // A clustered card stands for every report in `member_ids`. Acting on the
+  // card acts on all of them — never just the first, which used to leave the
+  // rest open and invisible.
+  const targetIds: string[] = alert.member_ids ?? [alert.id];
   const isDuress = alert.status === 'DURESS';
   const statusColors: Record<string, string> = {
     'OPEN': 'var(--warning)',
@@ -2114,7 +2119,7 @@ Respond ONLY with a JSON object with this exact shape:
   const handleEscalate = async () => {
     setLoading(true);
     try {
-      await onEscalate(alert.id, alert.assigned_to || 'POLLING_UNIT');
+      await onEscalate(targetIds, alert.assigned_to || 'POLLING_UNIT');
     } catch (e: any) {
       // Error toast is already shown by the parent callback
     } finally {
@@ -2125,7 +2130,7 @@ Respond ONLY with a JSON object with this exact shape:
   const handleResolve = async () => {
     setLoading(true);
     try {
-      await onResolve(alert.id);
+      await onResolve(targetIds);
     } catch (e: any) {
       // Error toast is already shown by the parent callback
     } finally {
@@ -2136,7 +2141,7 @@ Respond ONLY with a JSON object with this exact shape:
   const handleDispatch = async (responderUid: string) => {
     setLoading(true);
     try {
-      await onDispatch(alert.id, responderUid);
+      await onDispatch(targetIds, responderUid);
       setShowDispatch(false);
     } catch (e: any) {
       // Error toast is already shown by the parent callback
@@ -2169,7 +2174,7 @@ Respond ONLY with a JSON object with this exact shape:
         </div>
       )}
 
-      {(alert as any).witness_count && (alert as any).witness_count > 1 && (
+      {alert.witness_count && alert.witness_count > 1 && (
         <div style={{
           background: 'rgba(99, 102, 241, 0.15)',
           border: '1px solid rgba(129, 140, 248, 0.4)',
@@ -2181,7 +2186,7 @@ Respond ONLY with a JSON object with this exact shape:
           justifyContent: 'space-between'
         }}>
           <span style={{ fontSize: 10, fontWeight: 900, color: '#818cf8', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
-            👥 HIGH-SCALE CLUSTER: {(alert as any).witness_count.toLocaleString()} WITNESS REPORTS AGGREGATED
+            👥 HIGH-SCALE CLUSTER: {alert.witness_count.toLocaleString()} WITNESS REPORTS AGGREGATED
           </span>
           <span style={{ fontSize: 9, fontWeight: 800, color: '#c7d2fe', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4 }}>
             AUTO-CLUSTERED
@@ -2670,7 +2675,7 @@ Respond ONLY with a JSON object with this exact shape:
             disabled={selectedResponders.length === 0}
             onClick={async () => {
               if (selectedResponders.length > 0) {
-                await onDispatch(alert.id, selectedResponders as any);
+                await onDispatch(targetIds, selectedResponders as any);
                 setShowDispatch(false);
                 setSelectedResponders([]);
               }
@@ -2780,7 +2785,7 @@ Respond ONLY with a JSON object with this exact shape:
 
             <button
               onClick={async () => {
-                await onEscalate(alert.id, targetLga, escalateNotes, targetAgency);
+                await onEscalate(targetIds, targetLga, escalateNotes, targetAgency);
                 setShowEscalate(false);
               }}
               className="btn-tactical"

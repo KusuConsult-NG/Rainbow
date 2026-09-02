@@ -1043,7 +1043,7 @@ The original claim that the mobile suite could not be run is **superseded**.
 | M-7 | dead Firebase stack | ⏳ open — confirmed dead (zero callers in either client); **still do not delete `functions/` before the deployment is checked** |
 | — | CSP `script-src` carried `'unsafe-inline'` | ✅ **fixed 2026-09-02** — nonce-based via `proxy.ts`; injected script now provably blocked, and the authenticated map page finally exercised under the policy |
 | **C-6** | **unauthenticated Cloud Functions** | 🔴 **still unknown — both probe routes blocked from the audit container; stack confirmed orphaned and the guards undeployable. See the investigation note.** |
-| — | per-user server-verified duress PIN | ⏳ open — product change, see H-3 |
+| — | per-user server-verified duress PIN | ✅ **fixed 2026-09-02** — `emergency_pins` table nobody can read, bcrypt via pgcrypto, lockout after 5, `resolve_emergency` RPC records who resolved; no PIN material on the device at all |
 
 ### Found only after the audit, by adding coverage
 
@@ -1065,7 +1065,18 @@ Two defects that static review missed and running the code caught:
   own. ✅ fixed by guarding on `uid != null`, with mutation-verified widget
   tests.
 
-* **Clustering can hide a live incident behind another one.** The HQ board
+* **Clustering can hide a live incident behind another one.** ✅ **Fixed
+  2026-09-02, both halves.** The merged card now carries `member_ids`, and every
+  write path — resolve, dispatch, escalate, HQ override, from the card and from
+  the map popup — acts on all of them, so acting on the card can no longer
+  close one report while its siblings stay open and invisible. Escalation
+  writes one row at a time so each report keeps its own log. And the key
+  finally has the temporal half its name claimed: reports further apart than
+  `CLUSTER_WINDOW_MS` (60 min) are different events and no longer merge.
+  Mutation-verified — removing the window fails a test; acting on the first
+  member only fails two.
+
+  *As originally found:* The HQ board
   folds active alerts sharing LGA + ward + polling unit + type into a single
   card carrying a `witness_count`. For many people reporting one riot that is
   exactly right. But the surviving card keeps the FIRST report's **id**, so
@@ -1128,7 +1139,14 @@ Two defects that static review missed and running the code caught:
   to confirm the notification *arrives*; it was never needed to test what
   happens when it does, which is the part that was broken.
 
-* **A failed read renders as "nothing here" in two admin panels.**
+* **A failed read renders as "nothing here" in two admin panels.** ✅ **Fixed
+  2026-09-02.** `AgencyAccessManager` now reports a failed read as a failure —
+  a `role="alert"` panel with the error and a RETRY — never as "No agency
+  liaisons registered"; and a failed *refresh* keeps the last good roster on
+  screen, marked stale, rather than blanking it. Mutation-verified: restoring
+  the empty-on-error behaviour fails three tests.
+
+  *As originally found:*
   `AgencyAccessManager` sets its liaison list to `[]` when the query fails, so
   a permissions error or a dropped connection displays "No agency liaisons
   registered" — a claim the panel cannot support. `AdminDirectory` had the same
@@ -1183,6 +1201,41 @@ outright.
 A CI step asserts the allowlist has not returned. That needs to be separate
 from the lint step: re-adding an allowlist downgrades an error to a warning, so
 `npx eslint` still exits 0 and would not notice. Mutation-verified both ways.
+
+### The duress PIN was a shared constant inside the APK — now per-user, server-verified
+
+`SAFE_PIN` and `DURESS_PIN` lived in `.env`, which `pubspec.yaml` declares as a
+Flutter **asset**: shipped verbatim in every build, identical for every install,
+extractable with `unzip`. A duress code a captor can look up is worse than
+none — it tells them which code not to let the victim enter.
+
+✅ **Fixed 2026-09-02** (`supabase/migrations/20260902000000_per_user_emergency_pins.sql`):
+
+* Each user sets their own safe and duress PINs (4–8 digits, must differ), at
+  onboarding and under Settings → Emergency PIN. Only bcrypt hashes are stored
+  (pgcrypto, cost 10), in `emergency_pins` — RLS enabled with **no policies**
+  and all API-role privileges revoked, so nothing can read it through
+  PostgREST, its owner included. Asserted in the harness.
+* Verification is server-side only. `resolve_emergency(alert, pin)` checks the
+  PIN and closes the alert in one call, writing `resolved_by`/`resolved_at` —
+  the follow-up the RLS migration's own comment asked for. Five wrong guesses
+  lock entry for fifteen minutes; a *correct* PIN does nothing while locked.
+  Only the reporter or the assigned responder can close an alert this way.
+* The device holds no PIN material. `AppConfig.requiredKeys` is now empty, and
+  a regression test asserts neither name can return.
+* The screen treats the safe and duress outcomes identically — the point of a
+  duress code — with one invisible difference: tracking keeps running under
+  duress so HQ can follow. Mutation-verified (making duress stop tracking
+  fails the test).
+
+**Offline:** verification needs the server. This is not a regression — the old
+client-side check also awaited a database update and returned false when it
+failed, so an offline cancellation already did not succeed. What changed is
+that nothing PIN-shaped exists on the device to extract.
+
+**Not applied to production**, like C-3: the migration is proven against a
+real PostgreSQL in CI on every push (twelve behavioural assertions, run
+transactionally so the harness is idempotent). It ships with the RLS migration.
 
 ### The last unverified CSP path, closed by removing the dependency
 

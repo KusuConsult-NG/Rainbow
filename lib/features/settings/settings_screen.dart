@@ -270,6 +270,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           const SizedBox(height: 16),
 
+          // Emergency PINs — per-user, verified on the server.
+          ListTile(
+            tileColor: AppColors.surfaceContainer,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            leading: const Icon(Icons.pin_outlined, color: AppColors.emergency),
+            title: Text(
+              'Emergency PIN',
+              style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: AppColors.onBackground),
+            ),
+            subtitle: Text(
+              'Set or change your safe and duress PINs',
+              style: GoogleFonts.inter(fontSize: 12, color: AppColors.textDim),
+            ),
+            onTap: () => context.push(AppRoutes.emergencyPins),
+          ),
+          const SizedBox(height: 16),
+
           // 6. App Removal Authorization
           ListTile(
             tileColor: AppColors.surfaceContainer,

@@ -20,23 +20,28 @@ interface LiaisonUser {
   created_at: string;
 }
 
+type LoadResult =
+  | { ok: true; rows: LiaisonUser[] }
+  | { ok: false; error: string };
+
 /**
  * The read, with no state in it. Keeping the query separate from the setState
  * calls is what lets the mount path stop touching state synchronously.
  *
- * Returns `[]` rather than null on failure, preserving the original
- * behaviour — see the note in E2E_AUDIT_REPORT.md: an error here renders as
- * "No agency liaisons registered", which is a claim the panel cannot support.
- * Changing that is a UI decision, not a lint fix, so it is recorded rather
- * than smuggled in here.
+ * A failed read is reported as a failure, not as an empty list. This used to
+ * return `[]` on error, and the panel then said "No agency liaisons
+ * registered" — a claim it could not support, and one that invites an
+ * administrator to re-grant access that already exists. Absence must never be
+ * displayed as an answer.
  */
-async function loadLiaisons(): Promise<LiaisonUser[]> {
-  const { data } = await supabase
+async function loadLiaisons(): Promise<LoadResult> {
+  const { data, error } = await supabase
     .from('profiles')
     .select('id, full_name, role, agency, created_at')
     .like('role', '%_LIAISON%')
     .order('created_at', { ascending: false });
-  return (data as LiaisonUser[]) || [];
+  if (error) return { ok: false, error: error.message || 'Could not read liaison accounts' };
+  return { ok: true, rows: (data as LiaisonUser[]) || [] };
 }
 
 export default function AgencyAccessManager() {
@@ -48,6 +53,20 @@ export default function AgencyAccessManager() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  // Set when the last read failed. The list already on screen is kept — a
+  // stale roster that says it is stale beats an empty one that claims to be
+  // current.
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const applyLoad = (result: LoadResult) => {
+    if (result.ok) {
+      setLiaisons(result.rows);
+      setLoadError(null);
+    } else {
+      setLoadError(result.error);
+    }
+    setLoading(false);
+  };
 
   // The initial load. `loading` already starts true, so the old
   // `setLoading(true)` in the fetch was redundant on mount and was what made
@@ -57,10 +76,8 @@ export default function AgencyAccessManager() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const rows = await loadLiaisons();
-      if (cancelled) return;
-      setLiaisons(rows);
-      setLoading(false);
+      const result = await loadLiaisons();
+      if (!cancelled) applyLoad(result);
     })();
     return () => {
       cancelled = true;
@@ -71,8 +88,7 @@ export default function AgencyAccessManager() {
   // fine here — and it is what tells the operator the list is re-reading.
   const fetchLiaisons = async () => {
     setLoading(true);
-    setLiaisons(await loadLiaisons());
-    setLoading(false);
+    applyLoad(await loadLiaisons());
   };
 
   const createLiaison = async (e: React.FormEvent) => {
@@ -203,10 +219,29 @@ export default function AgencyAccessManager() {
         </div>
       )}
 
+      {/* A refresh failed but an earlier read succeeded: keep the roster, mark it stale. */}
+      {loadError && liaisons.length > 0 && !loading && (
+        <div role="alert" style={{ padding: '10px 12px', marginBottom: 12, borderRadius: 8, background: '#f59e0b18', border: '1px solid #f59e0b66', color: '#f59e0b', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <span>Could not refresh — showing the last list that loaded. {loadError}</span>
+          <button onClick={fetchLiaisons} style={{ background: 'none', border: '1px solid #f59e0b', borderRadius: 6, padding: '4px 10px', color: '#f59e0b', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>RETRY</button>
+        </div>
+      )}
+
       {/* Liaisons list */}
       {loading ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)', fontSize: 13 }}>
           <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Loading liaison accounts...
+        </div>
+      ) : loadError && liaisons.length === 0 ? (
+        // The read failed and there is nothing to fall back on. Say that —
+        // never "none registered", which is the one thing we do not know.
+        <div role="alert" style={{ textAlign: 'center', padding: 32, color: '#ef4444', background: '#ef444411', border: '1px solid #ef444455', borderRadius: 12 }}>
+          <Shield size={36} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Could not load liaison accounts</div>
+          <div style={{ fontSize: 11, marginTop: 4, color: 'var(--text-muted)' }}>{loadError}</div>
+          <button onClick={fetchLiaisons} style={{ marginTop: 14, padding: '8px 16px', borderRadius: 8, border: '1px solid #ef4444', background: 'transparent', color: '#ef4444', fontWeight: 700, fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <RefreshCw size={12} /> RETRY
+          </button>
         </div>
       ) : liaisons.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>

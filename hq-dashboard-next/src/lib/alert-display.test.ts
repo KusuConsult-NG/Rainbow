@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Alert } from '@/app/dashboard/types';
-import { NO_FILTERS, clusterAlerts, filterAlerts } from './alert-display';
+import { CLUSTER_WINDOW_MS, NO_FILTERS, clusterAlerts, filterAlerts } from './alert-display';
 
 const a = (over: Partial<Alert> & { id: string }): Alert =>
   ({
@@ -99,13 +99,59 @@ describe('clusterAlerts', () => {
     expect(witnesses(first)).toBeUndefined();
   });
 
-  // DOCUMENTED CONSEQUENCE, not an endorsement. The surviving card carries the
-  // FIRST report's id, so acting on it — dispatch, resolve — acts on that row
-  // alone. The other rows in the cluster stay open and are no longer visible.
-  // For witnesses to one event that is the intent; for two genuinely separate
-  // incidents that happen to share LGA + ward + PU + type, it means one of them
-  // can be closed without ever being seen. Recorded in E2E_AUDIT_REPORT.md.
-  it('gives the merged card the FIRST report id, hiding the others', () => {
+  it('carries every member id, so acting on the card can act on all of them', () => {
+    const out = clusterAlerts([a({ id: '1' }), a({ id: '2' }), a({ id: '3' })], true);
+
+    expect(out[0].member_ids).toEqual(['1', '2', '3']);
+    expect(out[0].witness_count).toBe(3);
+  });
+
+  it('gives a lone alert a one-element member list too', () => {
+    const out = clusterAlerts([a({ id: 'solo' })], true);
+    expect(out[0].member_ids).toEqual(['solo']);
+    expect(out[0].witness_count).toBe(1);
+  });
+
+  // The "temporal" half of "spatial-temporal" clustering. Reports of one event
+  // arrive minutes apart; the same place and type on different days is a
+  // different event, and merging them hid one.
+  it('does not merge reports filed further apart than the window', () => {
+    const t0 = Date.parse('2026-09-01T10:00:00Z');
+    const later = new Date(t0 + CLUSTER_WINDOW_MS + 60_000).toISOString();
+    const out = clusterAlerts(
+      [a({ id: 'morning', created_at: new Date(t0).toISOString() }), a({ id: 'afternoon', created_at: later })],
+      true,
+    );
+
+    expect(out).toHaveLength(2);
+    expect(out.map(x => x.id).sort()).toEqual(['afternoon', 'morning']);
+  });
+
+  it('merges reports filed inside the window', () => {
+    const t0 = Date.parse('2026-09-01T10:00:00Z');
+    const soon = new Date(t0 + 10 * 60_000).toISOString();
+    const out = clusterAlerts(
+      [a({ id: '1', created_at: new Date(t0).toISOString() }), a({ id: '2', created_at: soon })],
+      true,
+    );
+
+    expect(out).toHaveLength(1);
+    expect(out[0].member_ids).toEqual(['1', '2']);
+  });
+
+  it('still merges a report with no usable timestamp rather than hide it', () => {
+    const out = clusterAlerts(
+      [a({ id: '1' }), a({ id: 'undated', created_at: undefined as unknown as string })],
+      true,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].member_ids).toEqual(['1', 'undated']);
+  });
+
+  // The surviving card carries the FIRST report's id for display, but every
+  // member id travels with it. The write paths act on `member_ids`, so nothing
+  // is closed while its siblings stay open and invisible.
+  it('displays as the first report but stands for all of them', () => {
     const out = clusterAlerts(
       [a({ id: 'first' }), a({ id: 'second', status: 'DURESS' })],
       true,
@@ -113,8 +159,7 @@ describe('clusterAlerts', () => {
 
     expect(out[0].id).toBe('first');
     expect(out[0].status).toBe('DURESS');
-    // 'second' is not reachable from the board at all.
-    expect(out.map(x => x.id)).not.toContain('second');
+    expect(out[0].member_ids).toEqual(['first', 'second']);
   });
 });
 

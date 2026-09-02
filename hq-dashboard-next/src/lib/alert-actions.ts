@@ -12,6 +12,19 @@ import { supabase } from '@/lib/supabase';
  * asserted without rendering a 3,000-line component.
  */
 
+/**
+ * One alert, or every member of a clustered card.
+ *
+ * A cluster stands for several reports of one event. Acting on the card must
+ * act on all of them — resolving only the first report used to leave the rest
+ * open and invisible, since the board no longer showed them.
+ */
+export type AlertIds = string | string[];
+
+export function idsOf(ids: AlertIds): string[] {
+  return Array.isArray(ids) ? ids : [ids];
+}
+
 /** The signed-in HQ operator. */
 export interface Actor {
   id?: string;
@@ -49,24 +62,17 @@ export interface EscalateOptions {
  * the chain of custody for an incident.
  */
 export async function escalateAlert(
-  alertId: string,
+  alertIds: AlertIds,
   options: EscalateOptions,
   actor: Actor,
 ): Promise<ActionResult<{ commanderName: string; agency: string }>> {
+  const ids = idsOf(alertIds);
   const lgaTarget = options.targetLga || 'ALL';
   const agencyTarget = options.targetAgency || 'ALL';
   const reason = options.reason || 'High Threat Escalation';
   const byEmail = actor.email || 'HQ_OFFICER';
 
   try {
-    const { data: existing } = await supabase
-      .from('alerts')
-      .select('ai_summary, escalation_log, geo_lga')
-      .eq('id', alertId)
-      .single();
-    const existingNotes = existing?.ai_summary || '';
-    const existingLog = existing?.escalation_log || [];
-
     // Resolve the target LGA commander UUID — do NOT use the HQ operator's own ID
     let targetCommanderId: string | null = null;
     let targetCommanderName = `${agencyTarget} Command`;
@@ -85,6 +91,7 @@ export async function escalateAlert(
     }
 
     const escNote = `[HQ ESCALATION → ${agencyTarget} | ${lgaTarget}] ${reason} (by ${byEmail})`;
+    const at = new Date().toISOString();
     const logEntry = {
       from_tier: 'HQ',
       to_tier: lgaTarget,
@@ -93,29 +100,42 @@ export async function escalateAlert(
       to_officer_name: targetCommanderName,
       reason,
       by_email: byEmail,
-      at: new Date().toISOString(),
+      at,
     };
 
-    const updateData: Record<string, unknown> = {
-      severity: 'CRITICAL',
-      status: 'ESCALATED',
-      escalated_to_agency: agencyTarget,
-      // IMPORTANT: Do NOT overwrite geo_lga — incident location must stay intact
-      escalation_log: [...existingLog, logEntry],
-      ai_summary: existingNotes ? `${existingNotes}\n${escNote}` : escNote,
-      updated_at: new Date().toISOString(),
-    };
+    // One row at a time, on purpose: each report keeps ITS OWN escalation log
+    // and notes. A single multi-row update would stamp the first report's
+    // history onto every member of the cluster.
+    for (const alertId of ids) {
+      const { data: existing } = await supabase
+        .from('alerts')
+        .select('ai_summary, escalation_log, geo_lga')
+        .eq('id', alertId)
+        .single();
+      const existingNotes = existing?.ai_summary || '';
+      const existingLog = existing?.escalation_log || [];
 
-    // Assign to the resolved commander UUID — NOT the HQ operator's own ID
-    if (targetCommanderId) {
-      updateData.assigned_to = targetCommanderId;
-    } else if (actor.id) {
-      // Fallback: assign to HQ operator only if no commander found
-      updateData.assigned_to = actor.id;
+      const updateData: Record<string, unknown> = {
+        severity: 'CRITICAL',
+        status: 'ESCALATED',
+        escalated_to_agency: agencyTarget,
+        // IMPORTANT: Do NOT overwrite geo_lga — incident location must stay intact
+        escalation_log: [...existingLog, logEntry],
+        ai_summary: existingNotes ? `${existingNotes}\n${escNote}` : escNote,
+        updated_at: at,
+      };
+
+      // Assign to the resolved commander UUID — NOT the HQ operator's own ID
+      if (targetCommanderId) {
+        updateData.assigned_to = targetCommanderId;
+      } else if (actor.id) {
+        // Fallback: assign to HQ operator only if no commander found
+        updateData.assigned_to = actor.id;
+      }
+
+      const { error } = await supabase.from('alerts').update(updateData).eq('id', alertId);
+      if (error) throw error;
     }
-
-    const { error } = await supabase.from('alerts').update(updateData).eq('id', alertId);
-    if (error) throw error;
 
     // Fire agency notification if a specific external agency was selected.
     // Deliberately not awaited and never fatal: the escalation is already
@@ -125,7 +145,8 @@ export async function escalateAlert(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          alertId,
+          alertId: ids[0],
+          alertIds: ids,
           agency: agencyTarget,
           targetLga: lgaTarget,
           reason,
@@ -142,7 +163,8 @@ export async function escalateAlert(
 }
 
 /** HQ takes command of an incident itself. */
-export async function hqOverride(alertId: string, actor: Actor): Promise<ActionResult> {
+export async function hqOverride(alertIds: AlertIds, actor: Actor): Promise<ActionResult> {
+  const ids = idsOf(alertIds);
   try {
     const updateData: Record<string, unknown> = {
       severity: 'CRITICAL',
@@ -151,7 +173,7 @@ export async function hqOverride(alertId: string, actor: Actor): Promise<ActionR
     if (actor.id) {
       updateData.assigned_to = actor.id;
     }
-    const { error } = await supabase.from('alerts').update(updateData).eq('id', alertId);
+    const { error } = await supabase.from('alerts').update(updateData).in('id', ids);
     if (error) throw error;
     return { ok: true };
   } catch (e) {
@@ -161,7 +183,8 @@ export async function hqOverride(alertId: string, actor: Actor): Promise<ActionR
 }
 
 /** Closes an incident, recording who closed it. */
-export async function resolveAlert(alertId: string, actor: Actor): Promise<ActionResult> {
+export async function resolveAlert(alertIds: AlertIds, actor: Actor): Promise<ActionResult> {
+  const ids = idsOf(alertIds);
   try {
     const resolver = actor.email || actor.id || 'HQ_OFFICER';
     const nowIso = new Date().toISOString();
@@ -170,7 +193,7 @@ export async function resolveAlert(alertId: string, actor: Actor): Promise<Actio
       resolved_by: resolver,
       resolved_at: nowIso,
       updated_at: nowIso,
-    }).eq('id', alertId);
+    }).in('id', ids);
     if (error) throw error;
     return { ok: true };
   } catch (e) {
@@ -189,9 +212,10 @@ export async function resolveAlert(alertId: string, actor: Actor): Promise<Actio
  * operator otherwise invites a second dispatch.
  */
 export async function dispatchAlert(
-  alertId: string,
+  alertIds: AlertIds,
   responderUids: string[] | string,
 ): Promise<ActionResult<{ count: number }>> {
+  const ids = idsOf(alertIds);
   const uids = Array.isArray(responderUids) ? responderUids : [responderUids];
   if (uids.length === 0) return { ok: false, error: 'No responders selected' };
 
@@ -203,7 +227,7 @@ export async function dispatchAlert(
       assigned_to: leadId,
       assigned_responders: uids,
       updated_at: nowIso,
-    }).eq('id', alertId);
+    }).in('id', ids);
     if (error) throw error;
 
     // Secure server-side push notification dispatch
@@ -211,7 +235,7 @@ export async function dispatchAlert(
       await fetch('/api/push/dispatch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ alertId, responderUids: uids }),
+        body: JSON.stringify({ alertId: ids[0], alertIds: ids, responderUids: uids }),
       });
     } catch (pushErr) {
       console.warn('[HQ_PUSH_WARN] Notification push API failed:', pushErr);

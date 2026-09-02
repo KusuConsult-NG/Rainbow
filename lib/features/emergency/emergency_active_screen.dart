@@ -11,7 +11,6 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:rainbow_app/core/config/app_config.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
@@ -710,11 +709,16 @@ class _TacticalPinVerification extends ConsumerStatefulWidget {
 class _TacticalPinVerificationState
     extends ConsumerState<_TacticalPinVerification> {
   String pin = '';
+  bool _verifying = false;
+
+  // PINs are per-user and server-verified, so the pad cannot know a length in
+  // advance. It accepts 4–8 digits and submits on the ✓ key.
+  static const int _minPinLength = 4;
+  static const int _maxPinLength = 8;
 
   @override
   Widget build(BuildContext context) {
-    // Length spans BOTH pins so a duress PIN longer than the safe PIN stays enterable.
-    final pinLength = AppConfig.pinEntryLength;
+    final pinLength = pin.length < _minPinLength ? _minPinLength : pin.length;
     final horizontalMargin = pinLength > 4 ? 8.0 : 16.0;
 
     return BackdropFilter(
@@ -814,7 +818,7 @@ class _TacticalPinVerificationState
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            const SizedBox(width: 80),
+            _buildSubmit(),
             _buildKey(0),
             _buildBackspace(),
           ],
@@ -824,63 +828,15 @@ class _TacticalPinVerificationState
   }
 
   Widget _buildKey(int number) {
-    final pinLength = AppConfig.pinEntryLength;
     return GestureDetector(
-      onTap: () async {
+      onTap: () {
         unawaited(HapticFeedback.lightImpact());
-        final currentPin = pin + number.toString();
-        
-        final safePin = AppConfig.safePin;
-        final duressPin = AppConfig.duressPin;
-
-        // Fail loudly when unconfigured; the provider no longer silently
-        // falls back to the publicly-known '0000'/'9999' constants.
-        if (!AppConfig.hasEmergencyPins) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Error: No PIN configured in environment.')),
-          );
-          return;
-        }
-
-        // 1. Submit immediately if it matches the correct SAFE_PIN, DURESS_PIN
-        if (currentPin == safePin || currentPin == duressPin) {
-          setState(() => pin = currentPin);
-          final verified = await ref
-              .read(emergencyProvider.notifier)
-              .verifyCancellation(currentPin);
-          if (!mounted) return;
-          if (verified) {
-            Navigator.of(context).pop();
-            widget.onVerified();
-          } else {
-            unawaited(HapticFeedback.vibrate());
-            setState(() => pin = '');
-          }
-          return;
-        }
-
-        // 2. Otherwise handle typing increments
-        if (currentPin.length == pinLength) {
-          setState(() => pin = currentPin);
-          final verified = await ref
-              .read(emergencyProvider.notifier)
-              .verifyCancellation(currentPin);
-          if (!mounted) return;
-          if (verified) {
-            Navigator.of(context).pop();
-            widget.onVerified();
-          } else {
-            unawaited(HapticFeedback.vibrate());
-            setState(() => pin = '');
-          }
-        } else if (currentPin.length < pinLength) {
-          // Allow typing to continue
-          setState(() => pin = currentPin);
-        } else {
-          // Length exceeded or wrong input path
+        if (_verifying) return;
+        if (pin.length >= _maxPinLength) {
           unawaited(HapticFeedback.vibrate());
-          setState(() => pin = '');
+          return;
         }
+        setState(() => pin = pin + number.toString());
       },
       child: Container(
         width: 80,
@@ -899,6 +855,76 @@ class _TacticalPinVerificationState
               fontWeight: FontWeight.w600,
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _submit() async {
+    if (pin.length < _minPinLength || _verifying) return;
+    setState(() => _verifying = true);
+    final outcome =
+        await ref.read(emergencyProvider.notifier).verifyCancellation(pin);
+    if (!mounted) return;
+    setState(() => _verifying = false);
+
+    switch (outcome) {
+      // Identical handling on purpose. A captor watching the screen must not
+      // be able to tell which code was entered.
+      case CancelOutcome.resolved:
+      case CancelOutcome.duress:
+        Navigator.of(context).pop();
+        widget.onVerified();
+      case CancelOutcome.unset:
+        _say('No emergency PIN is set for this account. '
+            'Set one under Settings → Emergency PIN.');
+      case CancelOutcome.locked:
+        _say('Too many attempts. PIN entry is locked for 15 minutes.');
+        setState(() => pin = '');
+      case CancelOutcome.error:
+        _say('Could not verify the PIN — check your connection and try again.');
+      case CancelOutcome.invalid:
+      case CancelOutcome.notFound:
+        unawaited(HapticFeedback.vibrate());
+        setState(() => pin = '');
+    }
+  }
+
+  void _say(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Widget _buildSubmit() {
+    final enabled = pin.length >= _minPinLength && !_verifying;
+    return GestureDetector(
+      onTap: enabled ? _submit : null,
+      child: Container(
+        width: 80,
+        height: 80,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: enabled
+              ? AppColors.emergency.withValues(alpha: 0.15)
+              : Colors.transparent,
+          border: Border.all(
+            color: enabled ? AppColors.emergency : AppColors.outline,
+          ),
+        ),
+        child: Center(
+          child: _verifying
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.emergency,
+                  ),
+                )
+              : Icon(
+                  Icons.check_rounded,
+                  color: enabled ? AppColors.emergency : AppColors.textDim,
+                  size: 32,
+                ),
         ),
       ),
     );
