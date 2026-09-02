@@ -15,21 +15,32 @@ const eslintConfig = defineConfig([
 
       // ── RATCHET, tightened 2026-09-02 ──────────────────────────────────────
       // These were "warn" PROJECT-WIDE, which meant nothing stopped new code
-      // from adding more. They are now ERRORS everywhere, with a file-scoped
-      // allowlist below for the sites that predate the gate.
-      //
-      // The allowlist can only shrink. New files, and new code in any file not
-      // named there, fail the build.
+      // from adding more. They are now ERRORS everywhere, with no exceptions —
+      // the file-scoped allowlist this comment used to describe is gone, all
+      // eight pre-existing sites having been fixed behind tests. See the note
+      // below the rules block.
       "react-hooks/set-state-in-effect": "error",
       "react-hooks/immutability": "error",
 
-      // The premise of this rule is that next/image optimises the image. This
-      // project sets `images: { unoptimized: true }` in next.config.ts, so that
-      // optimisation is off and the rule's benefit largely does not apply.
-      // Converting the four remaining <img> tags would also require inventing
-      // explicit width/height for a logo and two avatars, which is a layout
-      // change dressed up as a lint fix. Left visible, not silenced.
-      "@next/next/no-img-element": "warn",
+      // ERROR, with four documented exceptions at their call sites.
+      //
+      // The rule's premise is that next/image optimises the image. This project
+      // sets `images: { unoptimized: true }`, and the Next docs are explicit
+      // that unoptimized means "served as-is from the src instead of changing
+      // quality, size, or format" — so next/image would emit the same bytes.
+      // For the three remote ones it would additionally require the Supabase
+      // Storage host in `images.remotePatterns`: a second copy of the CSP's
+      // img-src allowlist, in another file, to keep in sync.
+      //
+      // What IS real in the rule's concern is bandwidth, so that part is now
+      // handled directly — every remote <img> carries loading="lazy" and
+      // decoding="async". The login emblem stays eager on purpose: it is the
+      // first thing on the sign-in page.
+      //
+      // `error` rather than `warn` because the four exceptions are argued at
+      // their call sites. A NEW <img> should have to make that argument too,
+      // not inherit a project-wide pass.
+      "@next/next/no-img-element": "error",
     },
   },
   // ── The allowlist is GONE ─────────────────────────────────────────────────

@@ -426,6 +426,22 @@ jobs:
             fi
           fi
 
+          # Incident evidence — scene photos from responders and citizens — is
+          # uploaded to Supabase Storage and rendered from its public URL, so
+          # img-src must allow the Supabase ORIGIN as well. The first
+          # nonce-based policy omitted it and silently blanked every evidence
+          # photo on the console: an operator reviewing a report cannot tell a
+          # blocked photo from one that was never taken. connect-src carrying
+          # the host is NOT enough — images are governed by img-src alone.
+          IMG=$(printf '%s' "$CSP" | tr ';' '\n' | grep -i 'img-src' || true)
+          if printf '%s' "$IMG" | grep -qF "${NEXT_PUBLIC_SUPABASE_URL}"; then
+            echo "  ok: img-src allows ${NEXT_PUBLIC_SUPABASE_URL} (evidence photos)"
+          else
+            echo "  img-src is: ${IMG}"
+            echo "::error::img-src does not allow ${NEXT_PUBLIC_SUPABASE_URL} — incident evidence photos will be blocked"
+            FAIL=1
+          fi
+
           if [ "$FAIL" -ne 0 ]; then exit 1; fi
           echo "OK: security headers present on public and guarded routes."
 
