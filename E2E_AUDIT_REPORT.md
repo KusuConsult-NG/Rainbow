@@ -477,9 +477,54 @@ last written record of what that backend exposes. Severity is `CRITICAL` if
 deployed and `NONE` if never deployed; there is no way to be in between, and no way
 to find out from inside this repository.
 
+#### Investigation, 2026-09-02 — deployment state still unknown, but the picture changed
+
+Two routes to an answer were tried from the audit container. Both are closed:
+
+* **Probing the endpoints directly.** `https://us-central1-rainbow-97f1e.cloudfunctions.net/…`
+  is refused by the egress policy — the proxy answers `403` to the `CONNECT`, the
+  same denial that blocks Supabase.
+* **The Cloud Functions admin API**, which lists deployments without invoking
+  anything. `cloudfunctions.googleapis.com` *is* reachable, but there are no GCP
+  credentials here: `CLOUDSDK_AUTH_ACCESS_TOKEN` is the literal string
+  `proxy-injected`, and both anonymous and that value return `401`.
+
+Note for whoever picks this up: **`seedMockData` must not be probed over HTTP at
+all.** The deployed copy — if it is the pre-guard one — has no method check; it
+builds the ten mock alerts and writes them before examining the request. A bare
+`curl` of that URL, sent to find out whether it exists, would itself inject ten
+fabricated CRITICAL/DURESS emergencies into the live system. `smsWebhook` is safe
+to probe: both the old and the new version return `405` to anything that is not a
+`POST`, and a `POST` whose body does not begin with `ALERT|` returns `200 Format
+ignored.` without touching Firestore.
+
+**Two findings that did come out of it.**
+
+*The stack is fully orphaned.* Neither client can call these functions any more:
+`pubspec.yaml` declares no Firebase package at all, `lib/` contains no
+`httpsCallable` and no Firebase reference, the dashboard has none either, there is
+no `google-services.json` or `GoogleService-Info.plist` left in the tree, and
+`main.dart` initialises Supabase and nothing else. Whatever is deployed serves no
+caller in this repository. The one consumer that could still exist outside it is an
+SMS gateway POSTing to `smsWebhook`.
+
+*The guards below cannot currently be deployed.* `firebase.json` was deleted in
+commit `25ca6b4`, and nothing replaced it. It was the file naming `functions` as
+the deploy source — along with `firestore.rules` and the database rules — so
+`firebase deploy` cannot ship functions, Firestore rules or database rules from
+this repository as it stands. The mitigation described below is therefore **dead
+code until someone restores a deploy configuration**, and the `functions-guards`
+CI job is proving the behaviour of source that has no route to production.
+
+That inverts the remediation. Deploying the guarded version would mean first
+restoring deploy config for a stack with no callers; **deleting the deployment is
+both the smaller change and the correct one**, and `firebase functions:delete`
+needs no `firebase.json`.
+
 **Partial mitigation applied — read the scope carefully.** While `functions/` stays
-in the tree it is *deployable source*, so anyone who runs `firebase deploy` for an
-unrelated reason ships the open version. Both endpoints now fail closed:
+in the tree it is *deployable source*, so anyone who restores a `firebase.json` and
+runs `firebase deploy` for an unrelated reason ships whichever version is on disk.
+Both endpoints now fail closed:
 
 * `smsWebhook` requires `X-Rainbow-Gateway-Auth` to match `RAINBOW_SMS_GATEWAY_SECRET`,
   and returns `503` when that secret is unset — an SMS gateway accepting
@@ -946,8 +991,8 @@ The original claim that the mobile suite could not be run is **superseded**.
 | H-3 | `.env` bundled into the APK | ✅ server secrets removed + 2 CI gates; **shared PIN constants remain** |
 | H-9 | Gemini key inlined into the client bundle | ✅ moved to `/api/ai/analyze`; `AIza…` added to the bundle scan |
 | M-3 | shallow tier E2E | ✅ replaced with mutation-tested tier assertions |
-| M-7 | dead Firebase stack | ⏳ open — **do not delete before C-6 is checked** |
-| **C-6** | **unauthenticated Cloud Functions** | 🔴 **needs a console check — see below** |
+| M-7 | dead Firebase stack | ⏳ open — confirmed dead (zero callers in either client); **still do not delete `functions/` before the deployment is checked** |
+| **C-6** | **unauthenticated Cloud Functions** | 🔴 **still unknown — both probe routes blocked from the audit container; stack confirmed orphaned and the guards undeployable. See the investigation note.** |
 | — | per-user server-verified duress PIN | ⏳ open — product change, see H-3 |
 
 ### Found only after the audit, by adding coverage
@@ -979,9 +1024,47 @@ clear the warnings, drop `--no-fatal-warnings`; then the infos, then
 ### Still requires someone with production access
 
 0. **`firebase functions:list --project rainbow-97f1e`** — do this first; it is two
-   minutes and it is the only way to settle C-6. If `smsWebhook` or `seedMockData`
-   is listed, an unauthenticated stranger can inject `DURESS`-flagged emergencies
-   into your alert store today. Delete the deployment before deleting `functions/`.
+   minutes and it is the only way to settle C-6. Both routes to an answer from the
+   audit container are closed (see the C-6 investigation note above): the egress
+   policy refuses `cloudfunctions.net`, and there are no GCP credentials here for
+   the admin API. If `smsWebhook` or `seedMockData` is listed, an unauthenticated
+   stranger can inject `DURESS`-flagged emergencies into your alert store today.
+
+   **Do not `curl` `seedMockData` to find out whether it exists.** The pre-guard
+   version has no method check — the probe itself would write ten fabricated
+   emergencies. Use the list command, or, if you only have a shell, probe
+   `smsWebhook` instead, which is inert on anything that is not a well-formed
+   `POST`:
+
+   ```bash
+   # Safe on both the old and the new version: neither writes on this input.
+   #   404 → not deployed
+   #   200 "Format ignored."      → OLD, UNGUARDED code is live — treat as urgent
+   #   503 "Gateway not configured." / 401 → the guarded version is live
+   curl -s -o /dev/stdout -w '\nHTTP %{http_code}\n' \
+     -X POST -H 'Content-Type: application/json' -d '{"Body":"probe"}' \
+     https://us-central1-rainbow-97f1e.cloudfunctions.net/smsWebhook
+   ```
+
+   Then delete the deployment. Nothing in either client calls any of these 25
+   functions — no Firebase package in `pubspec.yaml`, no `httpsCallable` anywhere —
+   so deletion is the remediation, not deployment of the guards, which in any case
+   have no route to production while `firebase.json` is missing:
+
+   ```bash
+   firebase functions:delete smsWebhook seedMockData --project rainbow-97f1e --force
+   # then the remaining 23, once you have confirmed no external caller:
+   #   adminDispatchAlert adminEscalateAlert adminResolveAlert agentUpdateMissionStatus
+   #   approveAppUninstall calculateSafetyIndex createAlert escalateTask
+   #   escalationWatchdog findBestResponders getETA logAlertChanges massBroadcast
+   #   migrateLegacyIncidents onAlertCreatedGIS processAudioIncidentReport
+   #   pruneTrackingPaths requestAppUninstall syncUserCustomClaims
+   #   triageAndCreateVoiceAlert triggerSLASweep validateAgentAccessCode
+   #   validateRemovalCode
+   ```
+
+   Delete the deployment before deleting `functions/` — the source is the last
+   written record of what that backend exposes.
 1. **Rotate credentials** — service_role, Firebase, Cloudinary, Termii, and the
    `HQ-001`/`HQ-002`/`COMMANDER-TEST` passwords. The code holes are shut; the
    leaked credentials are still live.
