@@ -279,6 +279,54 @@ Verified against a replica carrying production's real policy shape:
 | command staff visibility | full | full |
 | anon | denied | denied |
 
+#### The dry run came back empty — investigation, 2026-09-02
+
+Run against the real database, `scripts/rls_production_dryrun.sql` returned its
+three column headers and **zero rows**. No error, no findings, nothing to act on.
+On a script whose entire job is to answer *"is this safe to apply?"*, silence is
+the most dangerous output it can give: it is indistinguishable from "all clear".
+
+Reproduced against a production-shaped PostgreSQL 16 replica — the repo's
+migration history replayed, Supabase's default `anon`/`authenticated` grants
+added, real profile rows seeded. **Two causes, both now fixed:**
+
+1. **A result set is transactional.** The findings were `SELECT`ed from a temp
+   table and the script then ran `ROLLBACK`. A client that has not materialised
+   the rows before the rollback lands has nothing left to hand back. `psql`
+   materialises eagerly and showed them, which is why this survived local
+   testing; the SQL Editor evidently does not.
+2. **One unhandled error destroyed every finding.** With real data present, the
+   command-visibility assertion raised `permission denied for table profiles`,
+   which aborted the whole transaction — so the closing `SELECT` had nothing to
+   read. Any single unexpected error anywhere in the script did this.
+
+The findings now come back as a **`RAISE EXCEPTION`**. An error message is
+delivered out of band and cannot be rolled back, and raising also makes the
+rollback intrinsic rather than a trailing statement that must survive whatever
+the client does with the batch — the script cannot commit even in principle. The
+verdict is the first line of the message so it survives truncation. Each
+assertion section is individually guarded, so a failure is recorded as a
+`PROBLEM` naming its own cause instead of silencing the run.
+
+**The tool is now proven to detect the thing it exists for**, rather than
+asserted to. On identical replicas differing by one hand-created policy —
+`CREATE POLICY … ON profiles FOR SELECT TO authenticated USING (true)`, the kind
+the migration cannot drop because it does not know the name:
+
+| replica | verdict | citizen check |
+|---|---|---|
+| policy present | `>>> DO NOT APPLY` | *citizen sees too many profiles — 2, expected 1* |
+| policy absent | `>>> SAFE TO APPLY` | *citizen sees only their own profile* |
+
+`scripts/verify_dryrun_emits.sh` gates all of this in CI: a verdict is emitted, a
+re-opened table is detected, an assertion failure does not silence the run, and
+the policy count is unchanged afterwards. Mutation-verified — restoring the old
+`SELECT`-then-`ROLLBACK` delivery fails the gate.
+
+**This does not close C-3.** The migration still has not been run against your
+database. What changed is that the instrument for deciding whether it is safe now
+reports its answer instead of returning nothing.
+
 
 ### C-4. Both API routes accept unauthenticated requests
 
