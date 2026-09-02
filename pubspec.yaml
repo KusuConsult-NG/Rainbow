@@ -75,6 +75,15 @@ flutter:
   assets:
     - .env
     - assets/images/
+    # Outfit and Inter, bundled rather than fetched.
+    #
+    # `google_fonts` downloads font files over HTTP on first use. A UI test
+    # against the web build with fonts.gstatic.com unreachable rendered EVERY
+    # LABEL BLANK — logo and icons drew, but the panic button had no text on it.
+    # For an app used on Nigerian rural links, legible text cannot depend on
+    # reaching a Google CDN. `main.dart` sets allowRuntimeFetching = false so a
+    # missing weight fails loudly in development instead of silently at 3am.
+    - assets/google_fonts/
 
 flutter_launcher_icons:
   android: true

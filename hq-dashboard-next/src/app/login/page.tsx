@@ -17,12 +17,60 @@ const DEMO_ACCOUNTS: { label: string; badge: string; pin: string; role: string }
       ]
     : [];
 
+
+/**
+ * Turn any thrown value into something an officer can act on.
+ *
+ * The distinction that matters on an emergency console is credentials-versus-
+ * connectivity: a wrong PIN means try again, an unreachable server means fall
+ * back to radio and report the outage. A raw `err.message` — "Failed to fetch",
+ * "NetworkError when attempting to fetch resource" — tells the user neither.
+ */
+function describeAuthError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+  const lower = raw.toLowerCase();
+
+  // Transport-level: the request never got an answer from Supabase.
+  if (
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('load failed') ||
+    lower.includes('err_') ||
+    lower.includes('timeout') ||
+    lower.includes('econnrefused')
+  ) {
+    return 'Cannot reach the command server. Check this terminal\u2019s connection — your credentials have not been checked.';
+  }
+
+  // Supabase's wording for a bad email/password pair.
+  if (
+    lower.includes('invalid login credentials') ||
+    lower.includes('invalid-credential') ||
+    lower.includes('invalid credentials')
+  ) {
+    return 'Invalid Badge ID or PIN.';
+  }
+
+  if (lower.includes('email not confirmed')) {
+    return 'This account is not yet activated. Contact HQ administration.';
+  }
+  if (lower.includes('rate limit') || lower.includes('too many')) {
+    return 'Too many attempts. Wait a minute before trying again.';
+  }
+
+  // Anything unrecognised: say so plainly rather than leaking internals.
+  console.error('[LOGIN] Unclassified auth error:', raw);
+  return 'Sign-in failed. If this repeats, report it to HQ administration.';
+}
+
 export default function LoginPage() {
   const [badgeId, setBadgeId] = useState('');
   const [pin, setPin] = useState('');
   const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // null = not yet probed. The banner must not claim ONLINE before it knows.
+  const [reachable, setReachable] = useState<boolean | null>(null);
   const [selectedDemo, setSelectedDemo] = useState<string | null>(null);
 
   useEffect(() => {
@@ -35,6 +83,32 @@ export default function LoginPage() {
     setSelectedDemo(acc.badge);
     setError('');
   };
+
+  // The banner used to read "HQ COMMAND NODE · ONLINE" as a hardcoded string —
+  // it said ONLINE with every backend request failing. A status light that can
+  // only ever show healthy is worse than no status light, because an operator
+  // reads it as information. This asks the auth endpoint whether it is actually
+  // there.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // NOT getSession(): that reads localStorage and never touches the
+        // network, so it reports success against a server that is completely
+        // unreachable — which is exactly the wrong answer for a status light.
+        // The auth health endpoint is a real round trip and needs no session.
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/health`,
+          { method: 'GET', cache: 'no-store',
+            headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '' } },
+        );
+        if (!cancelled) setReachable(res.ok);
+      } catch {
+        if (!cancelled) setReachable(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,8 +138,17 @@ export default function LoginPage() {
       // Full window navigation so the proxy sees the freshly-written session cookies.
       window.location.href = '/dashboard';
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Authentication failed.';
-      setError(msg.includes('invalid-credential') ? 'Invalid Badge ID or PIN.' : msg);
+      // Never surface a raw exception message.
+      //
+      // This used to pass `err.message` straight through unless it happened to
+      // contain 'invalid-credential'. A UI test with the backend unreachable
+      // showed the operator the literal string "Failed to fetch" — a browser
+      // internal. On an emergency console the one thing the user must be able
+      // to tell apart is "my PIN is wrong" from "this console cannot reach the
+      // server", because those need completely different responses: try again,
+      // versus fall back to radio and tell someone the system is down.
+      setError(describeAuthError(err));
+      setReachable(false);
       setLoading(false);
     }
   };
@@ -142,12 +225,16 @@ export default function LoginPage() {
               width: 8,
               height: 8,
               borderRadius: '50%',
-              background: '#10b981',
-              boxShadow: '0 0 10px #10b981',
+              background: reachable === false ? '#ef4444' : reachable === true ? '#10b981' : '#64748b',
+              boxShadow: reachable === false ? '0 0 10px #ef4444' : reachable === true ? '0 0 10px #10b981' : 'none',
               display: 'inline-block'
             }} />
             <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, color: '#e2e8f0', textTransform: 'uppercase' }}>
-              HQ COMMAND NODE · ONLINE
+              {reachable === false
+                ? 'HQ COMMAND NODE · UNREACHABLE'
+                : reachable === true
+                  ? 'HQ COMMAND NODE · ONLINE'
+                  : 'HQ COMMAND NODE · CHECKING…'}
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#818cf8', fontWeight: 600 }}>
@@ -295,9 +382,14 @@ export default function LoginPage() {
           </div>
           )}
 
-          {/* Error Notice */}
+          {/* Error Notice.
+              role="alert" (an implicit assertive live region) is what makes a
+              screen reader speak this the moment it appears. Without it the
+              failure is purely visual: the operator hears the button click,
+              nothing else happens, and there is no way to tell "wrong PIN"
+              from "the console cannot reach the server". */}
           {error && (
-            <div style={{
+            <div role="alert" style={{
               background: 'rgba(239, 68, 68, 0.15)',
               border: '1px solid rgba(239, 68, 68, 0.4)',
               borderRadius: 12,
@@ -315,7 +407,10 @@ export default function LoginPage() {
           {/* Login Form */}
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div>
-              <label style={{
+              {/* htmlFor is not decoration: without it this <label> is just
+                  styled text that happens to sit above a box, and a screen
+                  reader announces the field as an unnamed "edit text". */}
+              <label htmlFor="badge-id" style={{
                 display: 'block',
                 fontSize: 11,
                 color: '#cbd5e1',
@@ -328,6 +423,7 @@ export default function LoginPage() {
               </label>
               <div style={{ position: 'relative' }}>
                 <input
+                  id="badge-id"
                   value={badgeId}
                   onChange={e => {
                     setBadgeId(e.target.value);
@@ -358,7 +454,7 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label style={{
+              <label htmlFor="security-pin" style={{
                 display: 'block',
                 fontSize: 11,
                 color: '#cbd5e1',
@@ -371,6 +467,7 @@ export default function LoginPage() {
               </label>
               <div style={{ position: 'relative' }}>
                 <input
+                  id="security-pin"
                   value={pin}
                   onChange={e => {
                     setPin(e.target.value);
@@ -400,9 +497,17 @@ export default function LoginPage() {
                   transform: 'translateY(-50%)',
                   pointerEvents: 'none'
                 }} />
+                {/* Icon-only, so it carries no text for assistive tech to read.
+                    Without an explicit name it is announced as just "button",
+                    and aria-pressed is what tells the user which state it is
+                    currently in. */}
                 <button
                   type="button"
                   onClick={() => setShowPin(p => !p)}
+                  aria-label={showPin ? 'Hide PIN' : 'Show PIN'}
+                  aria-pressed={showPin}
+                  aria-controls="security-pin"
+                  title={showPin ? 'Hide PIN' : 'Show PIN'}
                   style={{
                     position: 'absolute',
                     right: 14,
