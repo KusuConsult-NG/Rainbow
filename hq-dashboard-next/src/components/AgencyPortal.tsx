@@ -104,6 +104,86 @@ interface AgencyPortalProps {
   userId?: string;
 }
 
+/**
+ * One consistent snapshot of an agency's data, tagged with whose it is.
+ *
+ * The tag is what makes `loading` derivable and what makes a late response
+ * from a previously-selected agency harmless.
+ */
+interface AgencyData {
+  agency: string;
+  incidents: AgencyAlert[];
+  personnel: AgencyPersonnel[];
+  reports: AgencyActionReport[];
+  deployments: AgencyDeployment[];
+}
+
+// Shared empties. A fresh `[]` on every render would hand the child
+// components a new prop identity each time and defeat their memoisation.
+// Typed mutable because that is what the children's props expect; nothing
+// writes to them.
+const EMPTY_INCIDENTS: AgencyAlert[] = [];
+const EMPTY_PERSONNEL: AgencyPersonnel[] = [];
+const EMPTY_REPORTS: AgencyActionReport[] = [];
+const EMPTY_DEPLOYMENTS: AgencyDeployment[] = [];
+
+/**
+ * Reads one agency's whole picture. No state, no React — just the four
+ * queries, returned as a single tagged snapshot.
+ *
+ * On failure it returns an EMPTY snapshot rather than throwing, so the portal
+ * clears its spinner and says "no incidents" instead of spinning forever. The
+ * snapshot is still tagged, so a later successful read replaces it.
+ */
+async function loadAgencyData(agency: string): Promise<AgencyData> {
+  try {
+    const { data: incidentData } = await supabase
+      .from('alerts')
+      .select('id, type, description, status, severity, geo_lga, geo_ward, geo_pu, latitude, longitude, media_urls, escalated_to_agency, escalation_log, created_at, updated_at')
+      .eq('escalated_to_agency', agency)
+      .neq('status', 'RESOLVED')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    const { data: personnelData } = await supabase
+      .from('agency_personnel')
+      .select('*')
+      .eq('agency', agency)
+      .order('name');
+
+    const { data: reportData } = await supabase
+      .from('agency_action_reports')
+      .select('*')
+      .eq('agency', agency)
+      .order('submitted_at', { ascending: false })
+      .limit(30);
+
+    const { data: deployData } = await supabase
+      .from('agency_deployments')
+      .select('*')
+      .eq('agency', agency)
+      .in('status', ['EN_ROUTE', 'ON_SITE'])
+      .order('deployed_at', { ascending: false });
+
+    return {
+      agency,
+      incidents: (incidentData as AgencyAlert[]) || [],
+      personnel: (personnelData as AgencyPersonnel[]) || [],
+      reports: (reportData as AgencyActionReport[]) || [],
+      deployments: (deployData as AgencyDeployment[]) || [],
+    };
+  } catch (e) {
+    console.error('[AGENCY_PORTAL_FETCH]', e);
+    return {
+      agency,
+      incidents: EMPTY_INCIDENTS,
+      personnel: EMPTY_PERSONNEL,
+      reports: EMPTY_REPORTS,
+      deployments: EMPTY_DEPLOYMENTS,
+    };
+  }
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────
 
 export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, userId }: AgencyPortalProps) {
@@ -113,13 +193,25 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
   );
   const [activeSection, setActiveSection] = useState<'incidents' | 'personnel' | 'reports' | 'add_personnel'>('incidents');
 
-  // Data
-  const [incidents, setIncidents] = useState<AgencyAlert[]>([]);
-  const [personnel, setPersonnel] = useState<AgencyPersonnel[]>([]);
-  const [reports, setReports] = useState<AgencyActionReport[]>([]);
-  const [deployments, setDeployments] = useState<AgencyDeployment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [unreadReports, setUnreadReports] = useState(0);
+  // Data — ONE piece of state, tagged with the agency it belongs to.
+  //
+  // This used to be five separate states plus a `loading` flag that the fetch
+  // set to true as its first statement. Because the fetch was called straight
+  // from an effect, that was a `set-state-in-effect`; and because the lists
+  // were untagged, a slow response for the previous agency could land after a
+  // switch and render POLICE incidents under the ARMY heading.
+  //
+  // Tagging the payload fixes both. `loading` is now DERIVED — "what I have is
+  // not for the agency being shown" — so nothing has to set it, and stale
+  // responses are ignored rather than displayed.
+  const [data, setData] = useState<AgencyData | null>(null);
+
+  const loading = data === null || data.agency !== selectedAgency;
+  const incidents = loading ? EMPTY_INCIDENTS : data.incidents;
+  const personnel = loading ? EMPTY_PERSONNEL : data.personnel;
+  const reports = loading ? EMPTY_REPORTS : data.reports;
+  const deployments = loading ? EMPTY_DEPLOYMENTS : data.deployments;
+  const unreadReports = reports.filter(r => !r.read_by_hq).length;
 
   // Selected incident for action
   const [selectedIncident, setSelectedIncident] = useState<AgencyAlert | null>(null);
@@ -129,57 +221,29 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
   const agencyInfo = AGENCIES.find(a => a.code === selectedAgency) || AGENCIES[0];
 
   // ── Data fetching ─────────────────────────────────────────────────────
+  //
+  // `fetchAll` is a thin wrapper so the refresh button, the realtime handlers
+  // and the modals can all re-read. The effect below does NOT call it: the
+  // lint rule cannot see across the useCallback boundary to tell that every
+  // setState happens after an await, and a rule that has to be argued with is
+  // a rule that gets disabled. Inlining the load in the effect is also plainly
+  // better — it can cancel.
   const fetchAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      // 1. Incidents escalated to this agency
-      const { data: incidentData } = await supabase
-        .from('alerts')
-        .select('id, type, description, status, severity, geo_lga, geo_ward, geo_pu, latitude, longitude, media_urls, escalated_to_agency, escalation_log, created_at, updated_at')
-        .eq('escalated_to_agency', selectedAgency)
-        .neq('status', 'RESOLVED')
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      setIncidents((incidentData as AgencyAlert[]) || []);
-
-      // 2. Agency personnel
-      const { data: personnelData } = await supabase
-        .from('agency_personnel')
-        .select('*')
-        .eq('agency', selectedAgency)
-        .order('name');
-
-      setPersonnel((personnelData as AgencyPersonnel[]) || []);
-
-      // 3. Action reports
-      const { data: reportData } = await supabase
-        .from('agency_action_reports')
-        .select('*')
-        .eq('agency', selectedAgency)
-        .order('submitted_at', { ascending: false })
-        .limit(30);
-
-      setReports((reportData as AgencyActionReport[]) || []);
-      setUnreadReports((reportData || []).filter((r: AgencyActionReport) => !r.read_by_hq).length);
-
-      // 4. Active deployments
-      const { data: deployData } = await supabase
-        .from('agency_deployments')
-        .select('*')
-        .eq('agency', selectedAgency)
-        .in('status', ['EN_ROUTE', 'ON_SITE'])
-        .order('deployed_at', { ascending: false });
-
-      setDeployments((deployData as AgencyDeployment[]) || []);
-    } catch (e) {
-      console.error('[AGENCY_PORTAL_FETCH]', e);
-    } finally {
-      setLoading(false);
-    }
+    setData(await loadAgencyData(selectedAgency));
   }, [selectedAgency]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const snapshot = await loadAgencyData(selectedAgency);
+      // Discard a response for an agency the operator has already left, so
+      // POLICE incidents can never appear under the ARMY heading.
+      if (!cancelled) setData(snapshot);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAgency]);
 
   // Realtime subscription for incidents assigned to this agency
   useEffect(() => {

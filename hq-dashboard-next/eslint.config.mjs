@@ -32,30 +32,23 @@ const eslintConfig = defineConfig([
       "@next/next/no-img-element": "warn",
     },
   },
-  {
-    // ── The shrinking allowlist ───────────────────────────────────────────────
-    // Eight pre-existing `set-state-in-effect` sites, all the same shape: an
-    // effect that calls an async fetch which then sets state. Fixing them means
-    // restructuring data loading in components with NO test coverage, on a
-    // console that dispatches responders to emergencies. That is a real change
-    // with real risk, and it does not belong in a lint sweep — the failure mode
-    // (a dashboard that silently stops refreshing) is exactly the class of
-    // defect this audit keeps finding.
-    //
-    // Fix them behind tests, then delete the file from this list. When the list
-    // is empty, delete the block.
-    files: [
-      "src/app/dashboard/page.tsx",
-      "src/components/AdminDirectory.tsx",
-      "src/components/AgencyAccessManager.tsx",
-      "src/components/AgencyPortal.tsx",
-      "src/components/LiveMap.tsx",
-      "src/components/UninstallRequests.tsx",
-    ],
-    rules: {
-      "react-hooks/set-state-in-effect": "warn",
-    },
-  },
+  // ── The allowlist is GONE ─────────────────────────────────────────────────
+  //
+  // All eight `set-state-in-effect` sites across six files are fixed, so both
+  // hooks rules above are now `error` project-wide with NO exceptions. Nothing
+  // to maintain, and nothing for the next person to widen.
+  //
+  // Each fix went in behind characterisation tests written against the
+  // ORIGINAL code first — see the *.test.tsx beside each component, added with
+  // the vitest setup in this change. That order matters: the tests describe
+  // behaviour that had to survive, not behaviour invented to match the result.
+  //
+  // The last one, LiveMap, was nearly left exempt on the grounds that Leaflet
+  // needs real layout and so could not be unit tested. That turned out to be
+  // wrong: Leaflet runs fine under jsdom once `matchMedia`, `ResizeObserver`
+  // and element dimensions are stubbed (vitest.setup.ts). Without those stubs
+  // the map initialises but its marker pane stays empty — which is precisely
+  // the failure mode the tests now guard.
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

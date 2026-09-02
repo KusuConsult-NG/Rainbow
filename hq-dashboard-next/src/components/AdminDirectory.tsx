@@ -26,6 +26,25 @@ const ROLES = [
   { value: 'UNIT_COMMAND', label: 'Local Post Command' },
 ];
 
+/**
+ * The read, with no state in it. Returns null on failure so the caller leaves
+ * the roster it already has rather than blanking it — an empty directory reads
+ * as "no officers are provisioned", which is not what a failed query means.
+ */
+async function loadStaff(): Promise<StaffRecord[] | null> {
+  try {
+    const { data, error: err } = await supabase
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (err) throw err;
+    return (data || []) as StaffRecord[];
+  } catch (e: any) {
+    console.error('Failed to load profiles:', e);
+    return null;
+  }
+}
+
 export default function AdminDirectory() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -43,19 +62,25 @@ export default function AdminDirectory() {
   const [success, setSuccess] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffRecord[]>([]);
 
-  const fetchStaff = async () => {
-    try {
-      const { data, error: err } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
-      if (err) throw err;
-      setStaff((data || []) as StaffRecord[]);
-    } catch (e: any) {
-      console.error('Failed to load profiles:', e);
-    }
-  };
-
+  // The initial load. The old code called `fetchStaff()` as the effect body,
+  // which made its setState a set-state-in-effect. `cancelled` also stops a
+  // setState landing after the administrator navigates away mid-request.
   useEffect(() => {
-    fetchStaff();
+    let cancelled = false;
+    void (async () => {
+      const rows = await loadStaff();
+      if (!cancelled && rows) setStaff(rows);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  // Called after a successful provision, not from an effect.
+  const fetchStaff = async () => {
+    const rows = await loadStaff();
+    if (rows) setStaff(rows);
+  };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();

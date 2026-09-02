@@ -1,0 +1,319 @@
+// What HQ *does* to an incident.
+//
+// These four writes were extracted verbatim from dashboard/page.tsx, where they
+// had no coverage. They assign responders, hand incidents to outside agencies
+// and close them out. A silent failure here is not cosmetic: a dispatch that
+// did not happen looks exactly like one that did.
+//
+// Two of the assertions below correspond to comments in the original source
+// marking bugs that were already fixed once ("do NOT use the HQ operator's own
+// ID", "Do NOT overwrite geo_lga"). A comment cannot stop a regression; these
+// can.
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { makeSupabaseStub, type SupabaseStub } from '@/test/supabase-stub';
+
+let db: SupabaseStub;
+
+vi.mock('@/lib/supabase', () => ({
+  get supabase() {
+    return db.client;
+  },
+}));
+
+const HQ = { id: 'hq-operator-uuid', email: 'hq@operationrainbow.plateau.gov.ng' };
+
+const ALERT = {
+  id: 'alert-1',
+  status: 'PENDING',
+  geo_lga: 'JOS NORTH',
+  ai_summary: '',
+  escalation_log: [],
+};
+
+const COMMANDER = {
+  id: 'lga-commander-uuid',
+  full_name: 'ACP Ibrahim Sule',
+  role: 'LGA_COMMAND',
+  geo_lga: 'JOS SOUTH',
+};
+
+async function actions() {
+  return import('./alert-actions');
+}
+
+/** The single `alerts` update a test performed. */
+const alertUpdate = () => db.updates.find(u => u.table === 'alerts')!;
+
+describe('escalateAlert', () => {
+  beforeEach(() => {
+    db = makeSupabaseStub();
+    db.setRows('alerts', [ALERT]);
+    db.setRows('profiles', [COMMANDER]);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
+  });
+
+  it('escalates to CRITICAL/ESCALATED and records the agency', async () => {
+    const { escalateAlert } = await actions();
+    const res = await escalateAlert('alert-1', { targetAgency: 'POLICE' }, HQ);
+
+    expect(res.ok).toBe(true);
+    expect(alertUpdate().values).toMatchObject({
+      severity: 'CRITICAL',
+      status: 'ESCALATED',
+      escalated_to_agency: 'POLICE',
+    });
+    expect(alertUpdate().eq).toEqual(['id', 'alert-1']);
+  });
+
+  // The bug the source comment warns about. Assigning the HQ operator routes
+  // the escalation straight back to the person escalating it.
+  it('assigns the TARGET LGA commander, not the HQ operator', async () => {
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', { targetLga: 'JOS SOUTH', targetAgency: 'POLICE' }, HQ);
+
+    expect(alertUpdate().values.assigned_to).toBe('lga-commander-uuid');
+    expect(alertUpdate().values.assigned_to).not.toBe(HQ.id);
+  });
+
+  it('falls back to the HQ operator only when no commander exists', async () => {
+    db.setRows('profiles', []);
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', { targetLga: 'NOWHERE' }, HQ);
+
+    expect(alertUpdate().values.assigned_to).toBe(HQ.id);
+  });
+
+  it('assigns nobody when there is no commander and no signed-in operator', async () => {
+    db.setRows('profiles', []);
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', { targetLga: 'NOWHERE' }, {});
+
+    expect(alertUpdate().values).not.toHaveProperty('assigned_to');
+  });
+
+  // The other comment-marked bug. An incident's location is where it happened,
+  // not who is handling it; writing geo_lga moves the emergency on the map.
+  it('never writes geo_lga', async () => {
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', { targetLga: 'JOS SOUTH', targetAgency: 'ARMY' }, HQ);
+
+    expect(alertUpdate().values).not.toHaveProperty('geo_lga');
+  });
+
+  it('APPENDS to the escalation log rather than replacing it', async () => {
+    const prior = { from_tier: 'LGA', to_tier: 'HQ', reason: 'earlier handover' };
+    db.setRows('alerts', [{ ...ALERT, escalation_log: [prior] }]);
+
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', { targetLga: 'JOS SOUTH', reason: 'riot spreading' }, HQ);
+
+    const log = alertUpdate().values.escalation_log as unknown[];
+    expect(log).toHaveLength(2);
+    expect(log[0]).toEqual(prior);
+    expect(log[1]).toMatchObject({
+      from_tier: 'HQ',
+      to_tier: 'JOS SOUTH',
+      to_officer_id: 'lga-commander-uuid',
+      to_officer_name: 'ACP Ibrahim Sule',
+      reason: 'riot spreading',
+      by_email: HQ.email,
+    });
+  });
+
+  it('APPENDS to the notes rather than overwriting them', async () => {
+    db.setRows('alerts', [{ ...ALERT, ai_summary: 'Existing forensic summary.' }]);
+
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', { targetAgency: 'DSS', reason: 'needs intel' }, HQ);
+
+    const notes = alertUpdate().values.ai_summary as string;
+    expect(notes.startsWith('Existing forensic summary.')).toBe(true);
+    expect(notes).toContain('[HQ ESCALATION → DSS | ALL] needs intel');
+  });
+
+  it('uses a default reason when none is given', async () => {
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', {}, HQ);
+
+    expect(alertUpdate().values.ai_summary).toContain('High Threat Escalation');
+  });
+
+  it('notifies an external agency', async () => {
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', { targetAgency: 'NSCDC', targetLga: 'JOS SOUTH' }, HQ);
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/notify-agency',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it.each(['ALL', 'HQ'])('does not fire an agency notification for %s', async (agency) => {
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', { targetAgency: agency }, HQ);
+
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  // The escalation is already committed when the notification is attempted.
+  // Reporting failure would invite the operator to escalate a second time.
+  it('still succeeds when the agency notification fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'));
+    const { escalateAlert } = await actions();
+
+    const res = await escalateAlert('alert-1', { targetAgency: 'POLICE' }, HQ);
+    expect(res.ok).toBe(true);
+  });
+
+  it('reports failure when the update is rejected', async () => {
+    db.setUpdateError('alerts', { message: 'permission denied for table alerts' });
+    const { escalateAlert } = await actions();
+
+    const res = await escalateAlert('alert-1', { targetAgency: 'POLICE' }, HQ);
+    expect(res).toEqual({ ok: false, error: 'permission denied for table alerts' });
+  });
+});
+
+describe('hqOverride', () => {
+  beforeEach(() => {
+    db = makeSupabaseStub();
+    db.setRows('alerts', [ALERT]);
+  });
+
+  it('takes command: CRITICAL, IN_PROGRESS, assigned to the operator', async () => {
+    const { hqOverride } = await actions();
+    const res = await hqOverride('alert-1', HQ);
+
+    expect(res.ok).toBe(true);
+    expect(alertUpdate().values).toMatchObject({
+      severity: 'CRITICAL',
+      status: 'IN_PROGRESS',
+      assigned_to: HQ.id,
+    });
+  });
+
+  it('omits the assignment when there is no signed-in operator', async () => {
+    const { hqOverride } = await actions();
+    await hqOverride('alert-1', {});
+
+    expect(alertUpdate().values).not.toHaveProperty('assigned_to');
+  });
+
+  it('reports failure when the update is rejected', async () => {
+    db.setUpdateError('alerts', { message: 'row level security' });
+    const { hqOverride } = await actions();
+
+    expect(await hqOverride('alert-1', HQ)).toEqual({ ok: false, error: 'row level security' });
+  });
+});
+
+describe('resolveAlert', () => {
+  beforeEach(() => {
+    db = makeSupabaseStub();
+    db.setRows('alerts', [ALERT]);
+  });
+
+  it('closes the incident with attribution', async () => {
+    const { resolveAlert } = await actions();
+    const res = await resolveAlert('alert-1', HQ);
+
+    expect(res.ok).toBe(true);
+    expect(alertUpdate().values).toMatchObject({
+      status: 'RESOLVED',
+      resolved_by: HQ.email,
+    });
+    expect(alertUpdate().values.resolved_at).toEqual(expect.any(String));
+  });
+
+  // Who closed an incident is the audit trail for it. Falling back to the id,
+  // then to a marker, means the field is never silently empty.
+  it.each([
+    [{ id: 'only-an-id' }, 'only-an-id'],
+    [{}, 'HQ_OFFICER'],
+  ])('attributes the resolution even with a partial actor (%o)', async (actor, expected) => {
+    const { resolveAlert } = await actions();
+    await resolveAlert('alert-1', actor);
+
+    expect(alertUpdate().values.resolved_by).toBe(expected);
+  });
+
+  it('reports failure when the update is rejected', async () => {
+    db.setUpdateError('alerts', { message: 'connection lost' });
+    const { resolveAlert } = await actions();
+
+    expect(await resolveAlert('alert-1', HQ)).toEqual({ ok: false, error: 'connection lost' });
+  });
+});
+
+describe('dispatchAlert', () => {
+  beforeEach(() => {
+    db = makeSupabaseStub();
+    db.setRows('alerts', [ALERT]);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
+  });
+
+  it('assigns the first responder as lead and records them all', async () => {
+    const { dispatchAlert } = await actions();
+    const res = await dispatchAlert('alert-1', ['lead-uid', 'second-uid', 'third-uid']);
+
+    expect(res.ok).toBe(true);
+    expect(alertUpdate().values).toMatchObject({
+      status: 'DISPATCHED',
+      assigned_to: 'lead-uid',
+      assigned_responders: ['lead-uid', 'second-uid', 'third-uid'],
+    });
+  });
+
+  it('accepts a single uid as well as a list', async () => {
+    const { dispatchAlert } = await actions();
+    await dispatchAlert('alert-1', 'solo-uid');
+
+    expect(alertUpdate().values).toMatchObject({
+      assigned_to: 'solo-uid',
+      assigned_responders: ['solo-uid'],
+    });
+  });
+
+  it('writes nothing when no responders were selected', async () => {
+    const { dispatchAlert } = await actions();
+    const res = await dispatchAlert('alert-1', []);
+
+    expect(res.ok).toBe(false);
+    expect(db.updates).toHaveLength(0);
+  });
+
+  it('pushes a notification to the assigned responders', async () => {
+    const { dispatchAlert } = await actions();
+    await dispatchAlert('alert-1', ['a', 'b']);
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/push/dispatch',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ alertId: 'alert-1', responderUids: ['a', 'b'] }),
+      }),
+    );
+  });
+
+  // The assignment is already committed when the push is attempted. Reporting
+  // failure would invite the operator to dispatch a second team.
+  it('still reports success when the push notification fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('push gateway down'));
+    const { dispatchAlert } = await actions();
+
+    const res = await dispatchAlert('alert-1', ['a']);
+    expect(res.ok).toBe(true);
+    expect(alertUpdate().values.status).toBe('DISPATCHED');
+  });
+
+  it('reports failure when the assignment itself is rejected', async () => {
+    db.setUpdateError('alerts', { message: 'permission denied' });
+    const { dispatchAlert } = await actions();
+
+    expect(await dispatchAlert('alert-1', ['a'])).toEqual({
+      ok: false,
+      error: 'permission denied',
+    });
+  });
+});

@@ -15,6 +15,7 @@ import AgencyPortal from '@/components/AgencyPortal';
 import IncidentReplayPanel from '@/components/IncidentReplayPanel';
 import LiveFeedViewer from '@/components/LiveFeedViewer';
 import TacticalSelect, { SelectOption } from '@/components/TacticalSelect';
+import { usePersistedTheme } from '@/hooks/usePersistedTheme';
 
 
 import { useToast } from '@/components/ToastProvider';
@@ -25,44 +26,17 @@ import {
   Loader2, Filter, Bell, Activity, Clock, Target, Edit3, Send,
   Sun, Moon, X, Sparkles, MapPin, Menu,
 } from 'lucide-react';
+import type { Alert } from './types';
+import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
+import * as alertActions from '@/lib/alert-actions';
+
+export type { Alert };
 
 
 // Leaflet must be client-only (no SSR)
 const LiveMap = dynamic(() => import('@/components/LiveMap'), { ssr: false });
 
 // Canonical Mission Alert Interface (Supabase Aligned)
-export interface Alert {
-  id: string;
-  local_id?: string;
-  type?: string;
-  sub_type?: string;
-  description?: string;
-  status: 'PENDING' | 'DISPATCHED' | 'ACKNOWLEDGED' | 'ON_ROUTE' | 'ON_SITE' | 'RESOLVED' | 'DURESS' | 'CANCELLED';
-  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  priority?: string;
-  assigned_to?: string;
-  assignedToUid?: string | null;
-  latitude?: number;
-  longitude?: number;
-  lat?: number;
-  lng?: number;
-  reported_by?: string;
-  reportedBy?: string;
-  geo_lga?: string;
-  geo_ward?: string;
-  geo_pu?: string;
-  ai_summary?: string;
-  citizen_feedback?: string;
-  feedback_at?: string;
-  post_sos_status?: string;
-  media_urls?: string[];
-  attachments?: string[];
-  created_at?: string;
-  reportedAt?: any;
-  resolved_by?: string;
-  resolved_at?: string;
-  timeline?: any[];
-}
 
 const btnStyle = (color: string, bg: string): React.CSSProperties => ({
   flex: 1, padding: '12px 0', background: bg, color, border: `1px solid ${color}44`,
@@ -416,23 +390,28 @@ export default function DashboardPage() {
 
   const [filterTier, setFilterTier] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setTheme] = usePersistedTheme();
   const [timeString, setTimeString] = useState('');
   const [selectedReport, setSelectedReport] = useState<Alert | null>(null);
-  const [aiSummary, setAiSummary] = useState<string | null>(null);
-  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  // The AI summary belongs to ONE report, so it is stored WITH that report's
+  // id and read back only when it still matches. The old code kept two loose
+  // pieces of state and wiped them from an effect on `selectedReport` — a
+  // set-state-in-effect that also rendered the previous report's summary for
+  // one frame before clearing it. Deriving removes both problems: opening a
+  // different report simply has nothing to show.
+  const [summary, setSummary] = useState<
+    { reportId: string; text: string | null; generating: boolean } | null
+  >(null);
+  const summaryIsForSelected =
+    summary !== null && selectedReport !== null && summary.reportId === selectedReport.id;
+  const aiSummary = summaryIsForSelected ? summary.text : null;
+  const isGeneratingSummary = summaryIsForSelected ? summary.generating : false;
   const router = useRouter();
   const toast = useToast();
 
-  useEffect(() => {
-    setAiSummary(null);
-    setIsGeneratingSummary(false);
-  }, [selectedReport]);
-
   const generateAISummary = async (report: Alert) => {
     if (!report) return;
-    setIsGeneratingSummary(true);
-    setAiSummary(null);
+    setSummary({ reportId: report.id, text: null, generating: true });
     const toastId = toast.loading('Querying Gemini AI Engine...', 'Synthesizing incident data');
     try {
       // The Gemini key is server-side (audit H-9). This route composes the
@@ -444,20 +423,22 @@ export default function DashboardPage() {
       });
       const resData = await res.json();
       if (resData.status === 'UNCONFIGURED') {
-        setAiSummary('AI analysis is not configured on this deployment.');
+        setSummary({ reportId: report.id, text: 'AI analysis is not configured on this deployment.', generating: true });
         toast.update(toastId, 'success', 'AI Not Configured', 'No Gemini key is set server-side');
         return;
       }
       const text = resData.text || 'Forensic analysis completed with default parameters.';
-      setAiSummary(text);
+      setSummary({ reportId: report.id, text: text, generating: true });
       toast.update(toastId, 'success', 'Forensic Debrief Ready', 'AI analysis complete');
     } catch (error: any) {
       console.error('Error generating AI summary:', error);
       const errMsg = error.message || String(error);
-      setAiSummary(`Failed to generate forensic summary: ${errMsg}`);
+      setSummary({ reportId: report.id, text: `Failed to generate forensic summary: ${errMsg}`, generating: true });
       toast.update(toastId, 'error', 'AI Analysis Failed', errMsg.substring(0, 80));
     } finally {
-      setIsGeneratingSummary(false);
+      setSummary((prev) =>
+        prev && prev.reportId === report.id ? { ...prev, generating: false } : prev,
+      );
     }
   };
 
@@ -471,20 +452,11 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
+  // Syncing a class onto <body> is a genuine external-system effect: it sets
+  // no state. Persistence now lives in usePersistedTheme, so the theme is
+  // right on the FIRST render instead of being corrected by a mount effect.
   useEffect(() => {
-    const savedTheme = localStorage.getItem('hq-theme') as 'light' | 'dark' | null;
-    if (savedTheme) {
-      setTheme(savedTheme);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (theme === 'dark') {
-      document.body.classList.add('dark-theme');
-    } else {
-      document.body.classList.remove('dark-theme');
-    }
-    localStorage.setItem('hq-theme', theme);
+    document.body.classList.toggle('dark-theme', theme === 'dark');
   }, [theme]);
 
   useEffect(() => {
@@ -692,128 +664,43 @@ export default function DashboardPage() {
   // NOTE: Live agent tracking is handled by the combined data useEffect above
   // (hq-telemetry-channel). Duplicate subscription removed — BUG #11.
 
+  // The four writes live in src/lib/alert-actions.ts so they can be tested —
+  // they change incidents, and a dispatch that silently did not happen looks
+  // exactly like one that did. What stays here is the toast wrapping, which is
+  // presentation.
   const escalateAlert = useCallback(async (alertId: string, targetLga: string = 'ALL', reason: string = '', targetAgency: string = 'ALL') => {
     const lgaTarget = targetLga || 'ALL';
     const agencyTarget = targetAgency || 'ALL';
     const toastId = toast.loading('Escalating Incident...', `Handing over to ${agencyTarget} Command (${lgaTarget})`);
-    try {
-      const { data: existing } = await supabase
-        .from('alerts')
-        .select('ai_summary, escalation_log, geo_lga')
-        .eq('id', alertId)
-        .single();
-      const existingNotes = existing?.ai_summary || '';
-      const existingLog = existing?.escalation_log || [];
-
-      // Resolve the target LGA commander UUID — do NOT use the HQ operator's own ID
-      let targetCommanderId: string | null = null;
-      let targetCommanderName = `${agencyTarget} Command`;
-      if (lgaTarget && lgaTarget !== 'ALL') {
-        const { data: commander } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .eq('role', 'LGA_COMMAND')
-          .eq('geo_lga', lgaTarget)
-          .limit(1)
-          .maybeSingle();
-        if (commander) {
-          targetCommanderId = commander.id;
-          targetCommanderName = commander.full_name || targetCommanderName;
-        }
-      }
-
-      const escNote = `[HQ ESCALATION → ${agencyTarget} | ${lgaTarget}] ${reason || 'High Threat Escalation'} (by ${user?.email || 'HQ_OFFICER'})`;
-      const logEntry = {
-        from_tier: 'HQ',
-        to_tier: lgaTarget,
-        to_agency: agencyTarget,
-        to_officer_id: targetCommanderId,
-        to_officer_name: targetCommanderName,
-        reason: reason || 'High Threat Escalation',
-        by_email: user?.email || 'HQ_OFFICER',
-        at: new Date().toISOString(),
-      };
-
-      const updateData: Record<string, any> = {
-        severity: 'CRITICAL',
-        status: 'ESCALATED',
-        escalated_to_agency: agencyTarget,
-        // IMPORTANT: Do NOT overwrite geo_lga — incident location must stay intact
-        escalation_log: [...existingLog, logEntry],
-        ai_summary: existingNotes ? `${existingNotes}\n${escNote}` : escNote,
-        updated_at: new Date().toISOString(),
-      };
-
-      // Assign to the resolved commander UUID — NOT the HQ operator's own ID
-      if (targetCommanderId) {
-        updateData.assigned_to = targetCommanderId;
-      } else if (user?.id) {
-        // Fallback: assign to HQ operator only if no commander found
-        updateData.assigned_to = user.id;
-      }
-
-      const { error } = await supabase.from('alerts').update(updateData).eq('id', alertId);
-      if (error) throw error;
-
-      // Fire agency notification if a specific external agency was selected
-      if (agencyTarget !== 'ALL' && agencyTarget !== 'HQ') {
-        fetch('/api/notify-agency', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            alertId,
-            agency: agencyTarget,
-            targetLga: lgaTarget,
-            reason: reason || 'High Threat Escalation',
-            sentBy: user?.email || 'HQ_OFFICER',
-          }),
-        }).catch(err => console.warn('[HQ_AGENCY_NOTIFY_WARN]', err));
-      }
-
-      toast.update(toastId, 'success', 'Escalation Sent', `Handed off to ${targetCommanderName} (${agencyTarget})`);
-    } catch (e: any) {
-      console.error('[HQ_ESCALATE_ERR]', e);
-      toast.update(toastId, 'error', 'Escalation Failed', (e as any)?.message || 'Unknown error');
+    const res = await alertActions.escalateAlert(
+      alertId,
+      { targetLga, reason, targetAgency },
+      { id: user?.id, email: user?.email },
+    );
+    if (res.ok) {
+      toast.update(toastId, 'success', 'Escalation Sent', `Handed off to ${res.value.commanderName} (${res.value.agency})`);
+    } else {
+      toast.update(toastId, 'error', 'Escalation Failed', res.error);
     }
   }, [toast, user]);
 
   const hqOverride = useCallback(async (alertId: string) => {
     const toastId = toast.loading('HQ Override...', 'Taking command of incident');
-    try {
-      const updateData: Record<string, any> = {
-        severity: 'CRITICAL',
-        status: 'IN_PROGRESS',
-      };
-      if (user?.id) {
-        updateData.assigned_to = user.id;
-      }
-      const { error } = await supabase.from('alerts').update(updateData).eq('id', alertId);
-      if (error) throw error;
+    const res = await alertActions.hqOverride(alertId, { id: user?.id, email: user?.email });
+    if (res.ok) {
       toast.update(toastId, 'success', 'HQ Override Applied', 'Incident transferred to Command HQ');
-    } catch (e: any) {
-      console.error('[HQ_OVERRIDE_ERR]', e);
-      const msg = e?.message || 'Override failed';
-      toast.update(toastId, 'error', 'Override Failed', msg);
+    } else {
+      toast.update(toastId, 'error', 'Override Failed', res.error);
     }
   }, [toast, user]);
 
   const resolveAlert = useCallback(async (alertId: string) => {
     const toastId = toast.loading('Resolving Incident...', 'Marking incident as resolved');
-    try {
-      const resolver = user?.email || user?.id || 'HQ_OFFICER';
-      const nowIso = new Date().toISOString();
-      const { error } = await supabase.from('alerts').update({ 
-        status: 'RESOLVED',
-        resolved_by: resolver,
-        resolved_at: nowIso,
-        updated_at: nowIso
-      }).eq('id', alertId);
-      if (error) throw error;
+    const res = await alertActions.resolveAlert(alertId, { id: user?.id, email: user?.email });
+    if (res.ok) {
       toast.update(toastId, 'success', 'Incident Resolved', 'Alert marked as resolved and archived with officer attribution');
-    } catch (e: any) {
-      console.error('[HQ_RESOLVE_ERR]', e);
-      const msg = e?.message || 'Resolution failed';
-      toast.update(toastId, 'error', 'Resolution Failed', msg);
+    } else {
+      toast.update(toastId, 'error', 'Resolution Failed', res.error);
     }
   }, [toast, user]);
 
@@ -821,33 +708,11 @@ export default function DashboardPage() {
     const uids = Array.isArray(responderUids) ? responderUids : [responderUids];
     if (uids.length === 0) return;
     const toastId = toast.loading('Dispatching Tactical Team...', `Assigning ${uids.length} responders to incident`);
-    try {
-      const leadId = uids[0];
-      const nowIso = new Date().toISOString();
-      const { error } = await supabase.from('alerts').update({ 
-        status: 'DISPATCHED', 
-        assigned_to: leadId,
-        assigned_responders: uids,
-        updated_at: nowIso
-      }).eq('id', alertId);
-      if (error) throw error;
-
-      // Secure server-side push notification dispatch
-      try {
-        await fetch('/api/push/dispatch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ alertId, responderUids: uids })
-        });
-      } catch (pushErr) {
-        console.warn('[HQ_PUSH_WARN] Notification push API failed:', pushErr);
-      }
-
-      toast.update(toastId, 'success', 'Tactical Team Dispatched', `${uids.length} field units successfully assigned and notified`);
-    } catch (e: any) {
-      console.error('[HQ_DISPATCH_ERR]', e);
-      const msg = e?.message || 'Dispatch failed';
-      toast.update(toastId, 'error', 'Dispatch Failed', msg);
+    const res = await alertActions.dispatchAlert(alertId, uids);
+    if (res.ok) {
+      toast.update(toastId, 'success', 'Tactical Team Dispatched', `${res.value.count} field units successfully assigned and notified`);
+    } else {
+      toast.update(toastId, 'error', 'Dispatch Failed', res.error);
     }
   }, [toast]);
 
@@ -856,81 +721,17 @@ export default function DashboardPage() {
   const [filterPu, setFilterPu] = useState('ALL');
   const [enableClustering, setEnableClustering] = useState(true);
 
-  // High-Scale Spatial-Temporal Cluster Aggregation (Handles 100,000+ incoming reports)
-  const processAlertsForDisplay = (rawAlerts: Alert[]): Alert[] => {
-    if (!enableClustering) return rawAlerts;
+  // Clustering and filtering moved to src/lib/alert-display.ts so they can be
+  // tested: they decide what reaches an operator's screen, and were previously
+  // buried in this component with no coverage at all.
+  const displayAlerts = clusterAlerts(alerts, enableClustering);
 
-    const clusterMap = new Map<string, { master: Alert; count: number }>();
-
-    rawAlerts.forEach(alert => {
-      if (alert.status === 'RESOLVED') {
-        clusterMap.set(`resolved-${alert.id}`, { master: { ...alert }, count: 1 });
-        return;
-      }
-
-      // Group active threats by LGA + Ward + PU + Type
-      const lga = alert.geo_lga || 'STATE';
-      const ward = alert.geo_ward || 'SECTOR';
-      const pu = alert.geo_pu || 'AREA';
-      const key = `${lga}_${ward}_${pu}_${alert.type}`;
-
-      if (!clusterMap.has(key)) {
-        clusterMap.set(key, { master: { ...alert }, count: 1 });
-      } else {
-        const item = clusterMap.get(key)!;
-        item.count += 1;
-        if (alert.status === 'DURESS' || alert.priority === 'CRITICAL') {
-          item.master.status = alert.status;
-          item.master.priority = 'CRITICAL';
-        }
-      }
-    });
-
-    const result: Alert[] = [];
-    clusterMap.forEach(({ master, count }) => {
-      (master as any).witness_count = count;
-      result.push(master);
-    });
-
-    return result;
-  };
-
-  const displayAlerts = processAlertsForDisplay(alerts);
-
-  const filtered = displayAlerts.filter(a => {
-    if (filterStatus === 'CRITICAL') {
-      if (a.status !== 'DURESS' && a.priority !== 'CRITICAL') return false;
-    } else if (filterStatus === 'SMS_FALLBACK') {
-      const isSms = (a.description || '').includes('[OFFLINE_SMS]') || 
-                    (a.description || '').includes('[SMS]') ||
-                    (a as any).via === 'SMS_GATEWAY' || 
-                    (a as any).source === 'SMS' || 
-                    (a as any).channel === 'SMS';
-      if (!isSms) return false;
-    } else if (filterStatus !== 'ALL' && a.status !== filterStatus) return false;
-    if (filterTier !== 'ALL' && a.assigned_to !== filterTier) return false;
-    if (filterLga !== 'ALL') {
-      const alertLga = (a.geo_lga || '').trim().toLowerCase();
-      const targetLga = filterLga.trim().toLowerCase();
-      if (alertLga !== targetLga && !alertLga.includes(targetLga) && !targetLga.includes(alertLga)) {
-        return false;
-      }
-    }
-    if (filterWard !== 'ALL') {
-      const alertWard = (a.geo_ward || '').trim().toLowerCase();
-      const targetWard = filterWard.trim().toLowerCase();
-      if (alertWard !== targetWard && !alertWard.includes(targetWard) && !targetWard.includes(alertWard)) {
-        return false;
-      }
-    }
-    if (filterPu !== 'ALL') {
-      const alertPu = (a.geo_pu || '').trim().toLowerCase();
-      const targetPu = filterPu.trim().toLowerCase();
-      if (alertPu !== targetPu && !alertPu.includes(targetPu) && !targetPu.includes(alertPu)) {
-        return false;
-      }
-    }
-    return true;
+  const filtered = filterAlerts(displayAlerts, {
+    status: filterStatus,
+    tier: filterTier,
+    lga: filterLga,
+    ward: filterWard,
+    pu: filterPu,
   });
 
   const norm = (str?: string) => (str || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
