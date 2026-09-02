@@ -1,4 +1,5 @@
 'use client';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useEffect, useRef, useState } from 'react';
 
 interface Alert {
@@ -53,6 +54,9 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   const [showRiskGrid, setShowRiskGrid] = useState(true);
   const riskGridLayersRef = useRef<any[]>([]);
   const [leafletLoaded, setLeafletLoaded] = useState(false);
+  // The analytics HUD is a secondary overlay. At phone width it competes with
+  // the map it annotates, so it stands down below the console breakpoint.
+  const isNarrow = useMediaQuery('(max-width: 1024px)');
 
   // Plateau State Tactical Bounds
   const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.50, 10.80]];
@@ -502,11 +506,17 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
       `}</style>
       <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
 
-      {/* Strategic Forecasting Dashboard Overlay */}
+      {/* Strategic Forecasting Dashboard Overlay.
+          Anchored bottom-LEFT, not top-right: the situational feed already
+          occupies the top-right of the map at a greater width, so both panels
+          landed on top of each other and the HUD clipped the text of the first
+          incident card. Bottom-left is the one corner nothing else claims —
+          filters sit top-left, zoom and attribution bottom-right. */}
       <div style={{
+        display: isNarrow ? 'none' : 'block',
         position: 'absolute',
-        top: '20px',
-        right: '20px',
+        bottom: '32px',
+        left: '20px',
         zIndex: 1000,
         background: theme === 'dark' ? 'rgba(17, 23, 38, 0.95)' : 'rgba(255, 255, 255, 0.98)',
         border: theme === 'dark' ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(148, 163, 184, 0.35)',

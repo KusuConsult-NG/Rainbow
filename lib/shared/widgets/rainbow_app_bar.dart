@@ -117,30 +117,50 @@ class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
                 ),
               ),
               const SizedBox(width: 16),
+              // Scale the title down to fit rather than letting it clip.
+              //
+              // At 390px — an ordinary phone, not an edge case — the fixed 16px
+              // title left "OPERATION RAINBOW" rendering as "OPERATION RAI…",
+              // and worse on the responder dashboard, which carries four action
+              // icons. BoxFit.scaleDown only ever shrinks, so wide screens keep
+              // the full 16px and narrow ones get the whole name at a smaller
+              // size instead of a clipped fragment.
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      title.toUpperCase(),
-                      style: GoogleFonts.outfit(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 16,
-                        letterSpacing: 1,
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        title.toUpperCase(),
+                        maxLines: 1,
+                        softWrap: false,
+                        style: GoogleFonts.outfit(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                          letterSpacing: 1,
+                        ),
                       ),
                     ),
                     if (subtitle != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                          subtitle!.toUpperCase(),
-                          style: GoogleFonts.outfit(
-                            color: AppColors.textDim,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 9,
-                            letterSpacing: 1.5,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            subtitle!.toUpperCase(),
+                            maxLines: 1,
+                            softWrap: false,
+                            style: GoogleFonts.outfit(
+                              color: AppColors.textDim,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 9,
+                              letterSpacing: 1.5,
+                            ),
                           ),
                         ),
                       ),

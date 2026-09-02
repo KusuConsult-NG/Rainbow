@@ -232,12 +232,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               },
             ),
           ),
-          title: Text(
-            Translations.get('title', lang),
-            style: GoogleFonts.outfit(
-              fontWeight: FontWeight.w900,
-              letterSpacing: 3,
-              fontSize: 14,
+          // Scale to fit rather than clip. At 390px the 14px title with 3px
+          // letter-spacing rendered as "OPERATION RAI…" — the app's own name,
+          // truncated, on the first screen a citizen sees.
+          title: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              Translations.get('title', lang),
+              maxLines: 1,
+              softWrap: false,
+              style: GoogleFonts.outfit(
+                fontWeight: FontWeight.w900,
+                letterSpacing: 3,
+                fontSize: 14,
+              ),
             ),
           ),
           centerTitle: true,

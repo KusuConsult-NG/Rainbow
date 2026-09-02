@@ -8,6 +8,7 @@ import SystemConfig from '@/components/SystemConfig';
 import AuditLogs from '@/components/AuditLogs';
 import MassBroadcast from '@/components/MassBroadcast';
 import SystemAlertListener from '@/components/SystemAlertListener';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import Analytics from '@/components/Analytics';
 import UninstallRequests from '@/components/UninstallRequests';
 import AgencyPortal from '@/components/AgencyPortal';
@@ -22,7 +23,7 @@ import {
   ShieldAlert, Shield, Map as MapIcon, Users, Radio, Settings,
   LogOut, AlertTriangle, CheckCircle, ChevronUp, Phone,
   Loader2, Filter, Bell, Activity, Clock, Target, Edit3, Send,
-  Sun, Moon, X, Sparkles, MapPin
+  Sun, Moon, X, Sparkles, MapPin, Menu,
 } from 'lucide-react';
 
 
@@ -344,6 +345,12 @@ const renderFormattedSummary = (text: string) => {
 };
 
 export default function DashboardPage() {
+  // Below this width the 280px sidebar left the map — the console's primary
+  // instrument — a ~60px strip at 390px and squeezed at 768px. It becomes a
+  // slide-over drawer instead of permanently claiming the width.
+  const isNarrow = useMediaQuery('(max-width: 1024px)');
+  const [navOpen, setNavOpen] = useState(false);
+
   const [user, setUser] = useState<any>(null);
   const [userRole, setUserRole] = useState('HQ_OFFICER');
 
@@ -1076,10 +1083,38 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: 'var(--bg-primary)', overflow: 'hidden', color: 'var(--text-primary)', padding: '16px', gap: '16px', boxSizing: 'border-box' }}>
-      <SystemAlertListener />
+    <div style={{ display: 'flex', height: '100vh', background: 'var(--bg-primary)', overflow: 'hidden', color: 'var(--text-primary)', padding: isNarrow ? '8px' : '16px', gap: isNarrow ? 0 : '16px', boxSizing: 'border-box' }}>
+      {/* Backdrop for the drawer. Only rendered while it is open, so it never
+          swallows clicks on the desktop layout. */}
+      {isNarrow && navOpen && (
+        <div
+          onClick={() => setNavOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.6)', zIndex: 4000 }}
+        />
+      )}
 
-      <aside className="tactical-panel glass" style={{ width: 280, display: 'flex', flexDirection: 'column', padding: '24px 16px', flexShrink: 0, zIndex: 100, maxHeight: '100%' }}>
+      <aside
+        className="tactical-panel glass"
+        onClick={() => { if (isNarrow) setNavOpen(false); }}
+        style={{
+          width: 280,
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '24px 16px',
+          flexShrink: 0,
+          ...(isNarrow
+            ? {
+                position: 'fixed' as const,
+                top: 8, bottom: 8, left: 8,
+                zIndex: 5000,
+                maxHeight: 'calc(100vh - 16px)',
+                transform: navOpen ? 'none' : 'translateX(calc(-100% - 16px))',
+                transition: 'transform .22s ease',
+                boxShadow: navOpen ? '0 24px 60px rgba(0,0,0,.5)' : 'none',
+              }
+            : { zIndex: 100, maxHeight: '100%' }),
+        }}
+      >
         {/* Sidebar Header (Fixed at top) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24, padding: '0 8px', flexShrink: 0 }}>
           <div className="pulse-emerald" style={{ background: 'var(--primary)', padding: 10, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--primary-glow)' }}>
@@ -1147,6 +1182,22 @@ export default function DashboardPage() {
       <main className="tactical-panel glass" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
         <header style={{ padding: '0 24px', height: 72, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0, flexShrink: 1 }}>
+            {isNarrow && (
+              <button
+                type="button"
+                onClick={() => setNavOpen(o => !o)}
+                aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
+                aria-expanded={navOpen}
+                style={{
+                  flexShrink: 0, width: 38, height: 38, borderRadius: 10,
+                  border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                  color: 'var(--text-primary)', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Menu size={18} />
+              </button>
+            )}
             <div style={{ minWidth: 0 }}>
               <h2 style={{ fontSize: 15, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
                 {activeTab === 'map' && (
@@ -1171,8 +1222,8 @@ export default function DashboardPage() {
                 {activeTab === 'agency' && 'Inter-Agency Command'}
               </h2>
             </div>
-            <div style={{ height: 20, width: 1, background: 'var(--border)', flexShrink: 0 }}></div>
-            <div style={{ display: 'flex', gap: 12, flexShrink: 0 }}>
+            {!isNarrow && <div style={{ height: 20, width: 1, background: 'var(--border)', flexShrink: 0 }}></div>}
+            <div style={{ display: isNarrow ? 'none' : 'flex', gap: 12, flexShrink: 0 }}>
                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--success)', boxShadow: 'var(--success-glow)' }} className="pulse-emerald"></div>
                   <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--success)', letterSpacing: 0.5 }}>LIVE UPLINK</span>
@@ -1272,8 +1323,18 @@ export default function DashboardPage() {
           </div>
         </header>
 
+        <SystemAlertListener />
+
+        {/* Filters sit IN THE FLOW, not floating over the map.
+            They were `position: absolute; top: 86` with only a left edge, so
+            `flexWrap: 'wrap'` could never fire and the row simply ran off the
+            side of the map — and the hard-coded 86px assumed nothing would ever
+            appear between the header and the map, which the advisory banner now
+            does. As a normal toolbar row they wrap when the viewport is narrow,
+            stack correctly under the banner, and stop competing with the map's
+            own overlays for the top-left corner. */}
         {activeTab === 'map' && (
-          <div style={{ position: 'absolute', top: 86, left: 24, zIndex: 1000, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ flexShrink: 0, padding: isNarrow ? '10px 12px 0' : '14px 24px 0', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <div className="glass" style={{ padding: '6px 10px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border)', boxShadow: '0 12px 32px rgba(0,0,0,0.3)', backdropFilter: 'blur(16px)' }}>
               <Filter size={13} style={{ color: 'var(--text-muted)' }} />
               
@@ -1367,7 +1428,7 @@ export default function DashboardPage() {
           {activeTab === 'map' && (
             <div style={{ position: 'relative', height: '100%', width: '100%' }}>
               <LiveMap alerts={filtered} agents={agentLocations} onResolve={resolveAlert} onEscalate={escalateAlert} theme={theme} />
-              <div className="glass fade-in" style={{ position: 'absolute', top: 24, right: 24, width: 320, maxHeight: 'calc(100% - 48px)', borderRadius: 20, display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }}>
+              <div className="glass fade-in" style={{ position: 'absolute', top: 24, right: 24, width: 320, maxHeight: 'calc(100% - 48px)', display: isNarrow ? 'none' : 'flex', borderRadius: 20, flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }}>
                 <div style={{ padding: '20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h3 style={{ fontSize: 12, fontWeight: 900, color: 'var(--accent)', letterSpacing: 1.5 }}>SITUATIONAL FEED</h3>
