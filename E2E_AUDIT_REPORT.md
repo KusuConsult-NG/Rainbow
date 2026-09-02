@@ -1064,6 +1064,17 @@ Two defects that static review missed and running the code caught:
   own. ✅ fixed by guarding on `uid != null`, with mutation-verified widget
   tests.
 
+* **A failed read renders as "nothing here" in two admin panels.**
+  `AgencyAccessManager` sets its liaison list to `[]` when the query fails, so
+  a permissions error or a dropped connection displays "No agency liaisons
+  registered" — a claim the panel cannot support. `AdminDirectory` had the same
+  shape and was fixed in passing (its loader now returns null and leaves the
+  roster alone). AgencyAccessManager's behaviour was **deliberately preserved**
+  during the lint refactor rather than changed silently: it needs an error
+  state in the UI, which is a design decision, not a lint fix. ⏳ open, low
+  severity — these are admin screens, not the responder feed, but it is the
+  same "absence reads as an answer" family as C-5 and the ALL CLEAR bug.
+
 All three came from adding *positive-path* coverage. The pre-existing tests
 passed only through error branches, which is why none showed up sooner — and
 the tier-scoping bug specifically could not be caught at all until widget tests
