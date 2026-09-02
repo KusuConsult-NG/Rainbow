@@ -282,7 +282,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
         });
 
         rect.bindPopup(`
-          <div style="font-family:Inter,sans-serif;padding:6px;min-width:165px;color:black;">
+          <div style="font-family:var(--font-inter),sans-serif;padding:6px;min-width:165px;color:black;">
             <strong style="color:${color};font-size:11px;letter-spacing:1px;">${riskLabel}</strong>
             <hr style="border:0;border-top:1px solid #eee;margin:6px 0;"/>
             <div style="font-size:10px;color:#555;">
@@ -379,7 +379,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
       });
 
       const popupContent = `
-        <div style="font-family:'Outfit','Inter',sans-serif;min-width:210px;padding:6px 4px;color:#0f172a">
+        <div style="font-family:var(--font-outfit),var(--font-inter),sans-serif;min-width:210px;padding:6px 4px;color:#0f172a">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <strong style="color:${color};font-size:13px;font-weight:900;text-transform:uppercase">${alert.type || 'EMERGENCY'}</strong>
             <span style="font-size:9px;font-weight:900;background:${color}22;color:${color};padding:2px 6px;border-radius:4px;border:1px solid ${color}44">${alert.status}</span>
@@ -457,7 +457,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
       } else {
         const marker = L.marker([agent.lat, agent.lng], { icon, zIndexOffset: 1000 }).addTo(map);
         marker.bindPopup(`
-          <div style="font-family:Inter,sans-serif;padding:4px">
+          <div style="font-family:var(--font-inter),sans-serif;padding:4px">
             <strong style="color:${color};font-size:12px">${agent.displayName || 'FIELD AGENT'}</strong>
             <p style="font-size:10px;color:#555;margin:4px 0 0">STATUS: ${agent.status || 'ONLINE'}</p>
             ${isOutOfBounds ? '<p style="font-size:10px;color:var(--duress);font-weight:900;margin:4px 0 0">🚨 OUT OF PLATEAU BOUNDS</p>' : ''}
@@ -542,7 +542,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
           box-shadow: none !important;
           color: var(--text-dim) !important;
           font-size: 10px !important;
-          font-family: 'Inter', sans-serif !important;
+          font-family: var(--font-inter), sans-serif !important;
           letter-spacing: 2px !important;
           pointer-events: none !important;
         }

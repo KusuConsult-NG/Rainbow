@@ -1184,20 +1184,31 @@ A CI step asserts the allowlist has not returned. That needs to be separate
 from the lint step: re-adding an allowlist downgrades an error to a warning, so
 `npx eslint` still exits 0 and would not notice. Mutation-verified both ways.
 
-### One CSP path remains unverified
+### The last unverified CSP path, closed by removing the dependency
 
-A general browser sweep of the console reports zero violations of any
-directive. But `font-src`/`style-src` are unproven rather than confirmed: the
-audit container has no egress to `fonts.googleapis.com`, so the webfont is
-never requested and the browser never has cause to allow or refuse it.
+A general browser sweep of the console reported zero violations of any
+directive — but `font-src`/`style-src` were unproven rather than confirmed,
+because the audit environment has no egress to Google Fonts and so the webfont
+was never even requested. The same condition was a live deployment risk:
+`globals.css` pulled Inter and Outfit at runtime with `@import url(...)`, and on
+a restricted government network — the scenario that made Leaflet-from-unpkg a
+finding (M-10) — every label silently fell back to a system font. The Flutter
+web target had already been fixed for exactly this (`build_web.sh` bundles its
+resources); the console never was.
 
-Worth knowing because the same condition is a live deployment risk, not just a
-test-environment quirk. `globals.css` pulls Inter and Outfit from Google Fonts
-at runtime with `@import url(...)`. On a restricted government network — the
-exact scenario that made the Leaflet-from-unpkg dependency a finding (M-10) —
-those requests fail and the console falls back to system fonts. The Flutter web
-target already had this problem and `build_web.sh` bundles its resources for
-that reason; the console does not. Not a security issue, and not changed here.
+✅ **Fixed 2026-09-02.** Both typefaces are now self-hosted through
+`next/font/local` (`src/app/fonts.ts`), using the same SIL-OFL files the mobile
+app ships in `assets/google_fonts/`, converted to WOFF2 (2.1 MB of TTF → 755 KB).
+`next/font/google` was deliberately not used: it downloads at *build* time,
+which only moves the network dependency from the browser to CI. The two Google
+hosts are gone from the policy entirely — `font-src 'self' data:`,
+`style-src 'self' 'unsafe-inline'` — and a browser check now proves the fonts
+load with no request leaving the origin. Two CI gates hold it: the policy may
+not name a Google Fonts host, and source may not reference one outside a
+comment. Both mutation-verified.
+
+That closes the sweep: every directive in the policy has now been exercised in
+a browser, not just read.
 
 ### Widget tests could not render any screen that touches the database
 

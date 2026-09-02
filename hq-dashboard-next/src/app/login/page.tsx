@@ -163,7 +163,7 @@ export default function LoginPage() {
       padding: '32px 20px',
       position: 'relative',
       overflow: 'hidden',
-      fontFamily: "'Inter', sans-serif"
+      fontFamily: "var(--font-inter), sans-serif"
     }}>
       {/* Background Ambient Glow Orbs */}
       <div style={{
@@ -306,7 +306,7 @@ export default function LoginPage() {
               letterSpacing: 2,
               color: '#ffffff',
               textAlign: 'center',
-              fontFamily: "'Outfit', sans-serif",
+              fontFamily: "var(--font-outfit), sans-serif",
               marginBottom: 4,
               textShadow: '0 2px 10px rgba(0,0,0,0.5)'
             }}>
@@ -318,7 +318,7 @@ export default function LoginPage() {
               letterSpacing: 2.5,
               color: '#818cf8',
               textAlign: 'center',
-              fontFamily: "'Outfit', sans-serif",
+              fontFamily: "var(--font-outfit), sans-serif",
               textTransform: 'uppercase'
             }}>
               PLATEAU STATE EARLY WARNING & RESPONSE HQ

@@ -72,7 +72,7 @@ export default function MassBroadcast() {
 
   return (
     <div className="tactical-panel glass" style={{ padding: 32, maxWidth: 840, margin: '0 auto', borderRadius: 20 }}>
-      <h2 style={{ fontSize: 20, fontWeight: 900, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-primary)', fontFamily: "'Outfit', sans-serif" }}>
+      <h2 style={{ fontSize: 20, fontWeight: 900, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-primary)', fontFamily: "var(--font-outfit), sans-serif" }}>
         <Radio style={{ width: 24, height: 24, color: 'var(--primary)' }} />
         Inter-Agency Public Safety Communications & Dispatcher
       </h2>

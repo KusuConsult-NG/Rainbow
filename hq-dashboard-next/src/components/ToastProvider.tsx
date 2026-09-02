@@ -108,7 +108,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
           color: 'var(--text-primary)',
           margin: 0,
           letterSpacing: 0.3,
-          fontFamily: "'Outfit', sans-serif",
+          fontFamily: "var(--font-outfit), sans-serif",
           textTransform: 'uppercase',
         }}>
           {toast.title}
@@ -119,7 +119,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
             color: 'var(--text-muted)',
             margin: '4px 0 0 0',
             lineHeight: 1.4,
-            fontFamily: "'Inter', sans-serif",
+            fontFamily: "var(--font-inter), sans-serif",
             fontWeight: 500,
           }}>
             {toast.message}
