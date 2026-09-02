@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { connection } from 'next/server';
 import './globals.css';
+import { inter, outfit } from './fonts';
 import { ToastProvider } from '@/components/ToastProvider';
 
 export const metadata: Metadata = {
@@ -27,7 +28,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   await connection();
 
   return (
-    <html lang="en">
+    // The two font variables are scoped to <html> so `var(--font-inter)` and
+    // `var(--font-outfit)` resolve everywhere — including inside Leaflet
+    // popups, which are injected as HTML strings and pick up document CSS.
+    <html lang="en" className={`${inter.variable} ${outfit.variable}`}>
       <body>
         <ToastProvider>
           {children}

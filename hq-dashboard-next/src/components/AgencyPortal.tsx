@@ -290,7 +290,7 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
             {agencyInfo.icon}
           </div>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 900, color: 'var(--text-primary)', fontFamily: "'Outfit', sans-serif", letterSpacing: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 900, color: 'var(--text-primary)', fontFamily: "var(--font-outfit), sans-serif", letterSpacing: 1 }}>
               {agencyInfo.label.toUpperCase()}
             </div>
             <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>INTER-AGENCY COMMAND PORTAL</div>
@@ -310,7 +310,7 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
                   border: `1px solid ${selectedAgency === a.code ? a.color : 'var(--border)'}`,
                   background: selectedAgency === a.code ? a.color + '22' : 'transparent',
                   color: selectedAgency === a.code ? a.color : 'var(--text-muted)',
-                  fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: "'Outfit', sans-serif",
+                  fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: "var(--font-outfit), sans-serif",
                 }}
               >
                 {a.icon} {a.code}
@@ -340,7 +340,7 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
           { label: 'UNREAD REPORTS', value: isHq ? unreadReports : reports.length, color: '#8b5cf6' },
         ].map(stat => (
           <div key={stat.label} style={{ padding: '12px 16px', background: 'var(--surface)', textAlign: 'center' }}>
-            <div style={{ fontSize: 20, fontWeight: 900, color: stat.color, fontFamily: "'Outfit', sans-serif" }}>{stat.value}</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: stat.color, fontFamily: "var(--font-outfit), sans-serif" }}>{stat.value}</div>
             <div style={{ fontSize: 9, color: 'var(--text-muted)', letterSpacing: 1, fontWeight: 700 }}>{stat.label}</div>
           </div>
         ))}
@@ -362,7 +362,7 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
               border: 'none', borderBottom: activeSection === tab.key ? `2px solid ${agencyInfo.color}` : '2px solid transparent',
               color: activeSection === tab.key ? agencyInfo.color : 'var(--text-muted)',
               cursor: 'pointer', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6,
-              fontFamily: "'Outfit', sans-serif", letterSpacing: 0.5, position: 'relative',
+              fontFamily: "var(--font-outfit), sans-serif", letterSpacing: 0.5, position: 'relative',
             }}
           >
             {tab.icon} {tab.label}
@@ -502,7 +502,7 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
             <div>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: "'Outfit', sans-serif" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: "var(--font-outfit), sans-serif" }}>
                 {incident.type}
               </span>
               {activeDeployment && (
@@ -584,7 +584,7 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
                   flex: 1, padding: '9px 16px', borderRadius: 8, border: `1px solid ${agencyColor}`,
                   background: agencyColor + '22', color: agencyColor, fontWeight: 700, fontSize: 12,
                   cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                  fontFamily: "'Outfit', sans-serif",
+                  fontFamily: "var(--font-outfit), sans-serif",
                 }}
               >
                 <UserCheck size={14} /> DEPLOY PERSONNEL
@@ -595,7 +595,7 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
                   flex: 1, padding: '9px 16px', borderRadius: 8, border: '1px solid var(--border)',
                   background: 'var(--input-bg)', color: 'var(--text-primary)', fontWeight: 700, fontSize: 12,
                   cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                  fontFamily: "'Outfit', sans-serif",
+                  fontFamily: "var(--font-outfit), sans-serif",
                 }}
               >
                 <Send size={14} /> FILE REPORT TO HQ
@@ -798,7 +798,7 @@ function AddPersonnelForm({ agency, agencyColor, userId, onSuccess }: {
 
   return (
     <div style={{ maxWidth: 480 }}>
-      <h3 style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-primary)', marginBottom: 20, fontFamily: "'Outfit', sans-serif" }}>
+      <h3 style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-primary)', marginBottom: 20, fontFamily: "var(--font-outfit), sans-serif" }}>
         Register New Officer
       </h3>
       {error && (
@@ -838,7 +838,7 @@ function AddPersonnelForm({ agency, agencyColor, userId, onSuccess }: {
             border: `1px solid ${agencyColor}`, background: agencyColor,
             color: 'white', fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer',
             opacity: saving ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            fontFamily: "'Outfit', sans-serif",
+            fontFamily: "var(--font-outfit), sans-serif",
           }}
         >
           {saving ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</> : <><Plus size={14} /> Register Officer</>}
@@ -917,7 +917,7 @@ function DeployModal({ incident, personnel, agency, userId, userEmail, agencyCol
         border: `1px solid ${agencyColor}`,
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-primary)', fontFamily: "'Outfit', sans-serif", margin: 0 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-primary)', fontFamily: "var(--font-outfit), sans-serif", margin: 0 }}>
             🚔 DEPLOY PERSONNEL
           </h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18 }}>✕</button>
@@ -975,7 +975,7 @@ function DeployModal({ incident, personnel, agency, userId, userEmail, agencyCol
               background: agencyColor, color: 'white', fontWeight: 700, fontSize: 13,
               cursor: submitting || selected.length === 0 ? 'not-allowed' : 'pointer',
               opacity: submitting || selected.length === 0 ? 0.6 : 1,
-              fontFamily: "'Outfit', sans-serif", display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              fontFamily: "var(--font-outfit), sans-serif", display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
             }}
           >
             {submitting ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <UserCheck size={14} />}
@@ -1039,7 +1039,7 @@ function ReportModal({ incident, agency, userId, userEmail, agencyColor, onClose
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
       <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 520, maxHeight: '85vh', overflowY: 'auto', border: `1px solid ${agencyColor}` }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-primary)', fontFamily: "'Outfit', sans-serif", margin: 0 }}>📋 FILE ACTION REPORT TO HQ</h3>
+          <h3 style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-primary)', fontFamily: "var(--font-outfit), sans-serif", margin: 0 }}>📋 FILE ACTION REPORT TO HQ</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18 }}>✕</button>
         </div>
 
@@ -1119,7 +1119,7 @@ function ReportModal({ incident, agency, userId, userEmail, agencyColor, onClose
                 flex: 2, padding: '10px', borderRadius: 8, border: `1px solid ${agencyColor}`,
                 background: agencyColor, color: 'white', fontWeight: 700, fontSize: 13,
                 cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1,
-                fontFamily: "'Outfit', sans-serif", display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                fontFamily: "var(--font-outfit), sans-serif", display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               }}
             >
               {submitting ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Send size={14} />}

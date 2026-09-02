@@ -210,6 +210,26 @@ jobs:
       # asserts the allowlist has not quietly come back: re-adding one would
       # turn a blocking error into a warning and `npx eslint` would still exit 0,
       # so the lint step above cannot detect it on its own.
+      # The console used to @import Inter and Outfit from fonts.googleapis.com at
+      # runtime. On a restricted government network that request fails and
+      # every label silently falls back to a system font — the exact failure
+      # the Flutter web target had before build_web.sh bundled its resources.
+      # The fonts are now self-hosted via next/font/local; nothing in source
+      # may fetch them from Google again. Comment lines are excluded, anchored
+      # to `<path>:<line>:` so the `//` inside a URL is not mistaken for one.
+      - name: Assert no runtime Google Fonts dependency
+        run: |
+          set -euo pipefail
+          HITS=$(grep -rnE 'fonts\.(googleapis|gstatic)\.com' src/ \
+                 | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|/\*|\*)' || true)
+          if [ -n "$HITS" ]; then
+            echo "$HITS"
+            echo "::error::source references Google Fonts at runtime — use next/font/local (src/app/fonts.ts)"
+            exit 1
+          fi
+          test -f src/app/fonts.ts || { echo "::error::src/app/fonts.ts is gone"; exit 1; }
+          echo "OK: fonts are self-hosted; no runtime Google Fonts reference in source."
+
       - name: Assert the hooks-rule allowlist has not returned
         run: |
           set -euo pipefail
@@ -439,6 +459,18 @@ jobs:
           # origin, and media-src did not exist at all so it fell back to
           # `default-src 'self'`. Checking one does not cover the other, which
           # is exactly how the second half survived fixing the first.
+          # Inter and Outfit are self-hosted (src/app/fonts.ts). If either Google
+          # Fonts host reappears in the policy, the runtime dependency that
+          # blanked the Flutter web target on a restricted network has crept
+          # back into the console — and font-src/style-src are once again
+          # unverifiable from an environment without egress.
+          if printf '%s' "$CSP" | grep -qE 'fonts\.(googleapis|gstatic)\.com'; then
+            echo "::error::the CSP names a Google Fonts host — fonts must stay self-hosted"
+            FAIL=1
+          else
+            echo "  ok: no Google Fonts host in the policy (fonts are self-hosted)"
+          fi
+
           for D in img-src media-src; do
             VAL=$(printf '%s' "$CSP" | tr ';' '\n' | grep -i "$D" || true)
             if [ -z "$VAL" ]; then
