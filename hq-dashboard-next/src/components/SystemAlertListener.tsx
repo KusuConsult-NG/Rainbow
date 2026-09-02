@@ -34,9 +34,19 @@ export default function SystemAlertListener() {
   const isCritical = severity === 'CRITICAL';
   
   return (
+    // DOCKED, not floating.
+    //
+    // This was `position: fixed; top: 24; left: 50%`, which put it straight over
+    // the console header — hiding the live-status readout that tells an operator
+    // whether the console is still connected at all. Moving it to the bottom
+    // only traded one collision for another: it then clipped the map's
+    // forecasting legend, because every corner of the map is already claimed by
+    // filters, the incident feed, the legend and the zoom controls.
+    //
+    // A system-wide advisory is not a map overlay. Docking it under the header
+    // as a full-width bar means it can never occlude anything, at any width.
     <div className="fade-in" style={{
-      position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)',
-      zIndex: 9999, minWidth: 400, maxWidth: '80%',
+      flexShrink: 0, margin: '12px 24px 0', zIndex: 500,
       background: isCritical ? 'var(--duress)' : 'var(--accent)',
       color: '#ffffff', padding: '16px 24px', borderRadius: 16,
       boxShadow: `0 10px 40px ${isCritical ? 'var(--duress)' : 'var(--accent)'}66`,
