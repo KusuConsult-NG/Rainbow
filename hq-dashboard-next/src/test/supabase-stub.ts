@@ -9,8 +9,9 @@
  *
  * The query builder is faked as a chainable thenable rather than a real
  * PostgREST client: `.select().order().limit()` returns `this` until awaited.
- * Filters are recorded, not applied — a test that needs filtering should set
- * the rows it expects back.
+ * `.eq()` and `.like()`/`.ilike()` really are applied to the rows; ordering and
+ * limits are recorded but ignored, so a test that depends on either should set
+ * the rows it expects back in the order it expects them.
  */
 
 export interface RecordedUpdate {
@@ -28,7 +29,10 @@ export interface SupabaseStub {
   /** Pass this where the component expects `supabase`. */
   client: any;
   setRows(table: string, rows: unknown[]): void;
+  /** Make reads of `table` fail. */
   setError(table: string, error: { message: string }): void;
+  /** Make writes to `table` fail — reads still succeed. */
+  setUpdateError(table: string, error: { message: string }): void;
   /** How many times the component read `table`. */
   selectCount(table: string): number;
   updates: RecordedUpdate[];
@@ -42,6 +46,7 @@ type Result = { data: unknown; error: unknown };
 export function makeSupabaseStub(): SupabaseStub {
   const rows = new Map<string, unknown[]>();
   const errors = new Map<string, { message: string }>();
+  const writeErrors = new Map<string, { message: string }>();
   const selects = new Map<string, number>();
   const updates: RecordedUpdate[] = [];
   const inserts: RecordedInsert[] = [];
@@ -53,6 +58,7 @@ export function makeSupabaseStub(): SupabaseStub {
       errors.delete(t);
     },
     setError: (t, e) => errors.set(t, e),
+    setUpdateError: (t, e) => writeErrors.set(t, e),
     selectCount: (t) => selects.get(t) ?? 0,
     updates,
     inserts,
@@ -133,7 +139,7 @@ export function makeSupabaseStub(): SupabaseStub {
           const rec: RecordedUpdate = { table, values, eq: null };
           updates.push(rec);
           return chain(
-            () => ({ data: null, error: null }),
+            () => ({ data: null, error: writeErrors.get(table) ?? null }),
             (m, a) => {
               if (m === 'eq') rec.eq = [a[0] as string, a[1]];
             },
@@ -141,11 +147,11 @@ export function makeSupabaseStub(): SupabaseStub {
         },
         insert: (values: unknown) => {
           inserts.push({ table, values });
-          return chain(() => ({ data: null, error: null }));
+          return chain(() => ({ data: null, error: writeErrors.get(table) ?? null }));
         },
         upsert: (values: unknown) => {
           inserts.push({ table, values });
-          return chain(() => ({ data: null, error: null }));
+          return chain(() => ({ data: null, error: writeErrors.get(table) ?? null }));
         },
         delete: () => chain(() => ({ data: null, error: null })),
       };

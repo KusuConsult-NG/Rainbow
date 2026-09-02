@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import type { Alert } from './types';
 import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
+import * as alertActions from '@/lib/alert-actions';
 
 export type { Alert };
 
@@ -663,128 +664,43 @@ export default function DashboardPage() {
   // NOTE: Live agent tracking is handled by the combined data useEffect above
   // (hq-telemetry-channel). Duplicate subscription removed — BUG #11.
 
+  // The four writes live in src/lib/alert-actions.ts so they can be tested —
+  // they change incidents, and a dispatch that silently did not happen looks
+  // exactly like one that did. What stays here is the toast wrapping, which is
+  // presentation.
   const escalateAlert = useCallback(async (alertId: string, targetLga: string = 'ALL', reason: string = '', targetAgency: string = 'ALL') => {
     const lgaTarget = targetLga || 'ALL';
     const agencyTarget = targetAgency || 'ALL';
     const toastId = toast.loading('Escalating Incident...', `Handing over to ${agencyTarget} Command (${lgaTarget})`);
-    try {
-      const { data: existing } = await supabase
-        .from('alerts')
-        .select('ai_summary, escalation_log, geo_lga')
-        .eq('id', alertId)
-        .single();
-      const existingNotes = existing?.ai_summary || '';
-      const existingLog = existing?.escalation_log || [];
-
-      // Resolve the target LGA commander UUID — do NOT use the HQ operator's own ID
-      let targetCommanderId: string | null = null;
-      let targetCommanderName = `${agencyTarget} Command`;
-      if (lgaTarget && lgaTarget !== 'ALL') {
-        const { data: commander } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .eq('role', 'LGA_COMMAND')
-          .eq('geo_lga', lgaTarget)
-          .limit(1)
-          .maybeSingle();
-        if (commander) {
-          targetCommanderId = commander.id;
-          targetCommanderName = commander.full_name || targetCommanderName;
-        }
-      }
-
-      const escNote = `[HQ ESCALATION → ${agencyTarget} | ${lgaTarget}] ${reason || 'High Threat Escalation'} (by ${user?.email || 'HQ_OFFICER'})`;
-      const logEntry = {
-        from_tier: 'HQ',
-        to_tier: lgaTarget,
-        to_agency: agencyTarget,
-        to_officer_id: targetCommanderId,
-        to_officer_name: targetCommanderName,
-        reason: reason || 'High Threat Escalation',
-        by_email: user?.email || 'HQ_OFFICER',
-        at: new Date().toISOString(),
-      };
-
-      const updateData: Record<string, any> = {
-        severity: 'CRITICAL',
-        status: 'ESCALATED',
-        escalated_to_agency: agencyTarget,
-        // IMPORTANT: Do NOT overwrite geo_lga — incident location must stay intact
-        escalation_log: [...existingLog, logEntry],
-        ai_summary: existingNotes ? `${existingNotes}\n${escNote}` : escNote,
-        updated_at: new Date().toISOString(),
-      };
-
-      // Assign to the resolved commander UUID — NOT the HQ operator's own ID
-      if (targetCommanderId) {
-        updateData.assigned_to = targetCommanderId;
-      } else if (user?.id) {
-        // Fallback: assign to HQ operator only if no commander found
-        updateData.assigned_to = user.id;
-      }
-
-      const { error } = await supabase.from('alerts').update(updateData).eq('id', alertId);
-      if (error) throw error;
-
-      // Fire agency notification if a specific external agency was selected
-      if (agencyTarget !== 'ALL' && agencyTarget !== 'HQ') {
-        fetch('/api/notify-agency', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            alertId,
-            agency: agencyTarget,
-            targetLga: lgaTarget,
-            reason: reason || 'High Threat Escalation',
-            sentBy: user?.email || 'HQ_OFFICER',
-          }),
-        }).catch(err => console.warn('[HQ_AGENCY_NOTIFY_WARN]', err));
-      }
-
-      toast.update(toastId, 'success', 'Escalation Sent', `Handed off to ${targetCommanderName} (${agencyTarget})`);
-    } catch (e: any) {
-      console.error('[HQ_ESCALATE_ERR]', e);
-      toast.update(toastId, 'error', 'Escalation Failed', (e as any)?.message || 'Unknown error');
+    const res = await alertActions.escalateAlert(
+      alertId,
+      { targetLga, reason, targetAgency },
+      { id: user?.id, email: user?.email },
+    );
+    if (res.ok) {
+      toast.update(toastId, 'success', 'Escalation Sent', `Handed off to ${res.value.commanderName} (${res.value.agency})`);
+    } else {
+      toast.update(toastId, 'error', 'Escalation Failed', res.error);
     }
   }, [toast, user]);
 
   const hqOverride = useCallback(async (alertId: string) => {
     const toastId = toast.loading('HQ Override...', 'Taking command of incident');
-    try {
-      const updateData: Record<string, any> = {
-        severity: 'CRITICAL',
-        status: 'IN_PROGRESS',
-      };
-      if (user?.id) {
-        updateData.assigned_to = user.id;
-      }
-      const { error } = await supabase.from('alerts').update(updateData).eq('id', alertId);
-      if (error) throw error;
+    const res = await alertActions.hqOverride(alertId, { id: user?.id, email: user?.email });
+    if (res.ok) {
       toast.update(toastId, 'success', 'HQ Override Applied', 'Incident transferred to Command HQ');
-    } catch (e: any) {
-      console.error('[HQ_OVERRIDE_ERR]', e);
-      const msg = e?.message || 'Override failed';
-      toast.update(toastId, 'error', 'Override Failed', msg);
+    } else {
+      toast.update(toastId, 'error', 'Override Failed', res.error);
     }
   }, [toast, user]);
 
   const resolveAlert = useCallback(async (alertId: string) => {
     const toastId = toast.loading('Resolving Incident...', 'Marking incident as resolved');
-    try {
-      const resolver = user?.email || user?.id || 'HQ_OFFICER';
-      const nowIso = new Date().toISOString();
-      const { error } = await supabase.from('alerts').update({ 
-        status: 'RESOLVED',
-        resolved_by: resolver,
-        resolved_at: nowIso,
-        updated_at: nowIso
-      }).eq('id', alertId);
-      if (error) throw error;
+    const res = await alertActions.resolveAlert(alertId, { id: user?.id, email: user?.email });
+    if (res.ok) {
       toast.update(toastId, 'success', 'Incident Resolved', 'Alert marked as resolved and archived with officer attribution');
-    } catch (e: any) {
-      console.error('[HQ_RESOLVE_ERR]', e);
-      const msg = e?.message || 'Resolution failed';
-      toast.update(toastId, 'error', 'Resolution Failed', msg);
+    } else {
+      toast.update(toastId, 'error', 'Resolution Failed', res.error);
     }
   }, [toast, user]);
 
@@ -792,33 +708,11 @@ export default function DashboardPage() {
     const uids = Array.isArray(responderUids) ? responderUids : [responderUids];
     if (uids.length === 0) return;
     const toastId = toast.loading('Dispatching Tactical Team...', `Assigning ${uids.length} responders to incident`);
-    try {
-      const leadId = uids[0];
-      const nowIso = new Date().toISOString();
-      const { error } = await supabase.from('alerts').update({ 
-        status: 'DISPATCHED', 
-        assigned_to: leadId,
-        assigned_responders: uids,
-        updated_at: nowIso
-      }).eq('id', alertId);
-      if (error) throw error;
-
-      // Secure server-side push notification dispatch
-      try {
-        await fetch('/api/push/dispatch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ alertId, responderUids: uids })
-        });
-      } catch (pushErr) {
-        console.warn('[HQ_PUSH_WARN] Notification push API failed:', pushErr);
-      }
-
-      toast.update(toastId, 'success', 'Tactical Team Dispatched', `${uids.length} field units successfully assigned and notified`);
-    } catch (e: any) {
-      console.error('[HQ_DISPATCH_ERR]', e);
-      const msg = e?.message || 'Dispatch failed';
-      toast.update(toastId, 'error', 'Dispatch Failed', msg);
+    const res = await alertActions.dispatchAlert(alertId, uids);
+    if (res.ok) {
+      toast.update(toastId, 'success', 'Tactical Team Dispatched', `${res.value.count} field units successfully assigned and notified`);
+    } else {
+      toast.update(toastId, 'error', 'Dispatch Failed', res.error);
     }
   }, [toast]);
 
