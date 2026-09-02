@@ -32,7 +32,8 @@ HEADER = """-- =================================================================
 --   Regenerate with: python3 scripts/build_rls_dryrun.py
 --
 --   Paste the WHOLE of this file into the Supabase dashboard -> SQL Editor and
---   run it. It ends in ROLLBACK. Nothing it does is kept.
+--   run it. It ends by raising an error ON PURPOSE — that error is the
+--   result. Nothing it does is kept.
 --
 -- WHY THIS EXISTS
 --
@@ -60,16 +61,36 @@ HEADER = """-- =================================================================
 --
 -- HOW TO READ THE OUTPUT
 --
--- The Supabase SQL Editor shows the LAST row-returning statement and does NOT
--- surface `RAISE NOTICE` at all. So every finding comes back as a ROW in the
--- final result set: look for the row whose status is VERDICT.
+-- **THIS SCRIPT ENDS IN AN ERROR, AND THAT IS THE SUCCESS CASE.** The findings
+-- are the error message. Read it; the verdict is on its first line:
 --
---   VERDICT / >>> SAFE TO APPLY   the migration did the right thing on your data
---   VERDICT / >>> DO NOT APPLY    one or more PROBLEM rows above it — send them
+--   ===== RLS DRY RUN — >>> SAFE TO APPLY =====   the migration did the right
+--                                                 thing on your data
+--   ===== RLS DRY RUN — >>> DO NOT APPLY =====    PROBLEM lines follow — send them
 --
--- An ERROR instead of a result set means a tripwire fired; read it carefully,
--- it means something committed. To confirm nothing persisted afterwards, re-run
--- scripts/rls_inventory.sql and check the row count is unchanged.
+-- WHY AN ERROR AND NOT A RESULT SET
+--
+-- The first version returned the findings as rows and ended with ROLLBACK. Run
+-- against the real database it came back as three column headers and ZERO ROWS:
+-- no error, no findings, nothing to act on — indistinguishable from "all clear"
+-- on a script whose entire job is to answer "is this safe to apply". Two causes,
+-- both fixed here:
+--
+--   1. A result set is transactional. If the client has not materialised the
+--      rows before the ROLLBACK lands, there is nothing left to hand back. An
+--      error message is delivered out of band and cannot be rolled back.
+--   2. Any unhandled error inside the script aborts the whole transaction and
+--      takes every finding with it. Reproduced deliberately: with `authenticated`
+--      lacking SELECT on `profiles`, the old script emitted `ERROR: permission
+--      denied` and nothing else. The assertion sections are now individually
+--      guarded, so a failure is RECORDED as a PROBLEM and the rest still runs.
+--
+-- Raising also makes the rollback intrinsic rather than a trailing statement
+-- that has to survive whatever the client does with the batch: the transaction
+-- is aborted by the RAISE itself, so this cannot commit even in principle.
+--
+-- To confirm nothing persisted afterwards, re-run scripts/rls_inventory.sql and
+-- check the policy count is unchanged.
 --
 -- RUN scripts/rls_inventory.sql FIRST. It is read-only and lists every policy
 -- this repository does not create — the ones this migration will not drop.
@@ -211,6 +232,11 @@ BEGIN
   -- ── command staff must NOT lose visibility ───────────────────────────────
   -- The assertion that matters most for not breaking your operation.
   IF cmd_id IS NOT NULL THEN
+   -- Guarded. An unhandled error anywhere in here aborts the WHOLE transaction,
+   -- and every finding gathered so far dies with it — the operator then gets an
+   -- empty result and no way to tell "clean" from "the script fell over".
+   -- Recording the failure as a finding is strictly better than losing all of them.
+   BEGIN
     SET LOCAL ROLE authenticated;
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
     PERFORM set_config('request.jwt.claim.sub', cmd_id::text, true);
@@ -226,6 +252,12 @@ BEGIN
     SELECT count(*) INTO n FROM public.telemetry;
     INSERT INTO _findings(status, check_, detail) VALUES ('OK','command user sees telemetry', n || ' rows');
     RESET ROLE;
+   EXCEPTION WHEN OTHERS THEN
+    RESET ROLE;
+    INSERT INTO _findings(status, check_, detail)
+      VALUES ('PROBLEM','command visibility check could not run', SQLERRM);
+    problems := problems + 1;
+   END;
   ELSE
     INSERT INTO _findings(status, check_, detail) VALUES ('PROBLEM','no command-role profile found','cannot prove dispatch still works');
     problems := problems + 1;
@@ -233,6 +265,7 @@ BEGIN
 
   -- ── a citizen sees only themselves, and cannot promote themselves ────────
   IF cit_id IS NOT NULL THEN
+   BEGIN
     SET LOCAL ROLE authenticated;
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
     PERFORM set_config('request.jwt.claim.sub', cit_id::text, true);
@@ -257,6 +290,12 @@ BEGIN
     ELSE INSERT INTO _findings(status, check_, detail) VALUES ('OK','self role escalation blocked',''); END IF;
 
     RESET ROLE;
+   EXCEPTION WHEN OTHERS THEN
+    RESET ROLE;
+    INSERT INTO _findings(status, check_, detail)
+      VALUES ('PROBLEM','citizen scoping check could not run', SQLERRM);
+    problems := problems + 1;
+   END;
   ELSE
     INSERT INTO _findings(status, check_, detail) VALUES ('INFO','no CITIZEN profile found','citizen scoping not exercised');
   END IF;
@@ -271,15 +310,47 @@ BEGIN
 END $dryrun$;
 
 -- ============================================================================
--- 5. THE VERDICT — this is the result set the SQL Editor will show you.
---    It must be the LAST row-returning statement: the editor displays only one.
+-- 5. THE VERDICT — delivered as an ERROR, on purpose.
+--
+-- This used to be `SELECT ... FROM _findings;` followed by `ROLLBACK;`, and it
+-- came back from the Supabase SQL Editor as the three column headers with ZERO
+-- ROWS — no error, no findings, nothing to act on. A result set is transactional:
+-- if the client has not materialised the rows by the time the ROLLBACK lands,
+-- there is nothing left to hand back, and the operator is told nothing at all.
+-- On a script whose whole job is to answer "is this safe to apply", silence is
+-- the worst possible output — it is indistinguishable from "no problems".
+--
+-- An error message is delivered out of band and cannot be rolled back. Raising
+-- one also makes the rollback intrinsic rather than a trailing statement that
+-- has to survive whatever the client does with the batch: the transaction is
+-- aborted by the RAISE itself, so this script cannot commit even in principle.
+--
+-- So: SEEING AN ERROR HERE IS THE SUCCESS CASE. Read the message.
+-- The verdict is on its first line, so it survives any truncation.
 -- ============================================================================
-SELECT status, check_ AS check, detail FROM _findings ORDER BY seq;
+DO $emit$
+DECLARE
+  verdict text;
+  body    text;
+BEGIN
+  SELECT detail INTO verdict FROM _findings WHERE status = 'VERDICT' LIMIT 1;
+
+  SELECT string_agg(format('%s | %s | %s', status, check_, detail), chr(10) ORDER BY seq)
+    INTO body
+    FROM _findings
+   WHERE status <> 'VERDICT';
+
+  RAISE EXCEPTION E'\n\n===== RLS DRY RUN — % =====\n%\n\n(This error IS the result. Nothing was kept.)',
+    COALESCE((SELECT check_ FROM _findings WHERE status = 'VERDICT' LIMIT 1), '>>> NO VERDICT — the checks did not run'),
+    COALESCE(body, '(no findings recorded)')
+    USING ERRCODE = 'raise_exception';
+END $emit$;
 
 -- ============================================================================
--- 6. Throw all of it away. Returns no rows, so the verdict above stays on screen.
---    To confirm nothing persisted, re-run scripts/rls_inventory.sql and check
---    the row count is unchanged.
+-- 6. Belt and braces. The RAISE above has already aborted the transaction, so
+--    this is a no-op that exists only for the case where someone edits the
+--    emit block out. To confirm nothing persisted, re-run
+--    scripts/rls_inventory.sql and check the row count is unchanged.
 -- ============================================================================
 ROLLBACK;
 """

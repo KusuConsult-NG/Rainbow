@@ -486,6 +486,33 @@ jobs:
       - name: Verify the RLS migration against a real PostgreSQL
         run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_rls_migration.sh
 
+  dryrun-speaks:
+    name: Supabase — the production dry run actually reports something
+    runs-on: ubuntu-latest
+    # The dry run is the ONLY way to find out whether the RLS migration is safe
+    # to apply to the real database, because that database holds policies created
+    # by hand in the dashboard which no replica can reproduce.
+    #
+    # Run against production, its first version returned three column headers and
+    # ZERO ROWS: no error, no findings, nothing to act on. On a script whose whole
+    # job is to answer "is this safe to apply", silence is indistinguishable from
+    # "all clear" and is the most dangerous output it could give. Two causes — a
+    # result set discarded by the rollback, and an unhandled error aborting the
+    # transaction and taking every finding with it.
+    #
+    # So "it says something" is not a detail, it is the property the artefact
+    # depends on. This gates it: a verdict is emitted, a hand-made policy that
+    # re-opens a table IS detected, an assertion failure does not silence the run,
+    # and nothing persists.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL 16
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-16
+      - name: Verify the dry run emits a verdict and keeps nothing
+        run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_dryrun_emits.sh
+
   rls:
     name: Supabase — RLS anon-access probe
     runs-on: ubuntu-latest
