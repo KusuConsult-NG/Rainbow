@@ -527,17 +527,16 @@ jobs:
         run: |
           set -uo pipefail
 
-          # KNOWN AND PENDING REMOVAL — this list may only ever shrink.
-          #
-          # Every entry is legacy Firebase code slated for deletion under M-7,
-          # blocked behind the C-6 console audit. The key in them is already
-          # flagged for rotation under H-6. Adding a line here is a visible,
-          # reviewable act; that is the point.
-          ALLOW='^(E2E_AUDIT_REPORT\.md|\.github/workflows/ci\.yml|hq-dashboard/src/firebase\.ts|hq-dashboard/src/AdminDirectory\.tsx|functions/provision-hq-002\.js|functions/test_providers\.js|scripts/provision-respondents\.js)$'
+          # There is no allowlist any more. Six files used to be exempted because
+          # they carried a Firebase API key that had already been rotated — the
+          # exemption was a reviewable act, and it was reviewed out of existence:
+          # the git-history purge (H-6) redacted every copy of every leaked value,
+          # in the working tree and in every prior commit. Any match now is a
+          # NEW leak and fails the build.
 
           HITS=$(git ls-files -z \
             | xargs -0 grep -lEI 'AIza[A-Za-z0-9_-]{20,}|sb_secret_[A-Za-z0-9_-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY' 2>/dev/null \
-            | grep -vE "$ALLOW" || true)
+            || true)
 
           if [ -n "$HITS" ]; then
             echo "::error::Credential material found in newly tracked files:"
