@@ -2,23 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rainbow_app/app.dart';
+import 'package:rainbow_app/features/agent/agent_dashboard_screen.dart';
+import 'package:rainbow_app/features/auth/login_screen.dart';
+import 'package:rainbow_app/features/citizen/safe_zone_screen.dart';
+import 'package:rainbow_app/features/home/home_screen.dart';
+import 'package:rainbow_app/features/report/report_category_screen.dart';
+import 'package:rainbow_app/features/splash/splash_screen.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/navigation_provider.dart';
+import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/services/push_notification_service.dart';
 import 'package:rainbow_app/services/sync_service.dart';
 import 'package:rainbow_app/services/user_service.dart';
-import 'package:rainbow_app/services/location_service.dart';
-import 'package:rainbow_app/features/splash/splash_screen.dart';
-import 'package:rainbow_app/features/auth/login_screen.dart';
-import 'package:rainbow_app/features/home/home_screen.dart';
-import 'package:rainbow_app/features/agent/agent_dashboard_screen.dart';
-import 'package:rainbow_app/features/citizen/safe_zone_screen.dart';
-import 'package:rainbow_app/features/emergency/emergency_active_screen.dart';
-import 'package:rainbow_app/features/report/report_category_screen.dart';
-import 'package:rainbow_app/features/settings/settings_screen.dart';
-import 'package:rainbow_app/features/history/incident_history_screen.dart';
-import 'package:rainbow_app/shared/widgets/tactical_drawer.dart';
 import 'package:rainbow_app/shared/widgets/system_alert_listener.dart';
+import 'package:rainbow_app/shared/widgets/tactical_drawer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
 // ─── Fake service implementations ──────────────────────────────────────────
@@ -57,7 +54,7 @@ class FakeAuthNotifier extends AuthNotifier {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 Future<void> pumpSettleWithMax(WidgetTester tester, {int maxPumps = 30}) async {
-  for (int i = 0; i < maxPumps; i++) {
+  for (var i = 0; i < maxPumps; i++) {
     await tester.pump(const Duration(milliseconds: 100));
   }
 }
@@ -70,7 +67,7 @@ final fakeUser = User(
   createdAt: DateTime.now().toIso8601String(),
 );
 
-final commonOverrides = [
+final List<Override> commonOverrides = [
   pushNotificationServiceProvider.overrideWithValue(FakePushNotificationService()),
   syncServiceProvider.overrideWithValue(FakeSyncService()),
   userLocationStreamProvider.overrideWith((ref) => const Stream.empty()),
@@ -83,8 +80,6 @@ final commonOverrides = [
 void main() {
   testWidgets('E2E: Splash screen shows and transitions to LoginScreen', (tester) async {
     final authState = AuthState(
-      user: null,
-      role: UserRole.unknown,
       isLoading: false,
     );
 
@@ -111,8 +106,6 @@ void main() {
 
   testWidgets('E2E: Unauthenticated user sees LoginScreen', (tester) async {
     final authState = AuthState(
-      user: null,
-      role: UserRole.unknown,
       isLoading: false,
     );
 
@@ -134,8 +127,6 @@ void main() {
 
   testWidgets('E2E: Login screen has phone field and authorize button', (tester) async {
     final authState = AuthState(
-      user: null,
-      role: UserRole.unknown,
       isLoading: false,
     );
 
@@ -160,8 +151,6 @@ void main() {
 
   testWidgets('E2E: Login screen phone field accepts text input', (tester) async {
     final authState = AuthState(
-      user: null,
-      role: UserRole.unknown,
       isLoading: false,
     );
 

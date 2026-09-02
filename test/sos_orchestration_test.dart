@@ -15,8 +15,8 @@
 //     channel that only works when the primary succeeded is not redundancy;
 //   * a local/offline id is never quoted to a dispatcher as a real reference;
 //   * a missing GPS fix propagates as null and is never substituted (C-5).
-import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
@@ -179,7 +179,7 @@ void main() {
 
       final s = c.read(emergencyProvider);
       expect(s.isEmergencyActive, isTrue,
-          reason: 'A failed write must not cancel the emergency.');
+          reason: 'A failed write must not cancel the emergency.',);
       expect(s.errorMessage, isNotNull);
       expect(s.alertId, isNull);
     });
@@ -251,7 +251,7 @@ void main() {
         ),
       ).captured;
       expect(alertCoords, [null, null],
-          reason: 'No fix must stay null — 9.9167/8.8917 was a real dispatch bug.');
+          reason: 'No fix must stay null — 9.9167/8.8917 was a real dispatch bug.',);
 
       final smsCoords = verify(
         () => sms.dispatchSos(
@@ -283,7 +283,7 @@ void main() {
         ),
       ).captured;
       expect(captured, ['JOS NORTH', 'NARAGUTA'],
-          reason: 'An unlocated alert is still routable by jurisdiction.');
+          reason: 'An unlocated alert is still routable by jurisdiction.',);
     });
 
     test('the alert is marked critical', () async {

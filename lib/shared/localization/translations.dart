@@ -6,11 +6,11 @@ enum AppLanguage {
   english('en', 'English', 'EN 🇬🇧'),
   hausa('ha', 'Hausa', 'HA 🇳🇬'),
   pidgin('pcm', 'Pidgin', 'PG 🇳🇬');
+  const AppLanguage(this.code, this.label, this.flagLabel);
 
   final String code;
   final String label;
   final String flagLabel;
-  const AppLanguage(this.code, this.label, this.flagLabel);
 }
 
 class LanguageNotifier extends StateNotifier<AppLanguage> {

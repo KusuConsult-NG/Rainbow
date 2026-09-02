@@ -4,18 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rainbow_app/core/constants/alert_categories.dart';
 import 'package:rainbow_app/features/agent/admin_broadcast_screen.dart';
-import 'package:rainbow_app/features/agent/agent_dashboard_screen.dart';
-import 'package:rainbow_app/features/agent/mission_intel_screen.dart';
 import 'package:rainbow_app/features/agent/mission_resolution_screen.dart';
 import 'package:rainbow_app/features/citizen/safe_zone_screen.dart';
 import 'package:rainbow_app/features/history/incident_history_screen.dart';
-import 'package:rainbow_app/features/onboarding/onboarding_contacts_screen.dart';
 import 'package:rainbow_app/features/report/report_category_screen.dart';
 import 'package:rainbow_app/features/report/report_details_screen.dart';
 import 'package:rainbow_app/features/report/report_subtype_screen.dart';
 import 'package:rainbow_app/features/settings/settings_screen.dart';
 import 'package:rainbow_app/features/settings/uninstall_request_screen.dart';
-import 'package:rainbow_app/features/tracking/live_tracking_screen.dart';
 import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/navigation_provider.dart';
@@ -108,7 +104,7 @@ final fakeAgentUser = User(
 );
 
 Future<void> settleFast(WidgetTester tester, {int pumps = 25}) async {
-  for (int i = 0; i < pumps; i++) {
+  for (var i = 0; i < pumps; i++) {
     await tester.pump(const Duration(milliseconds: 100));
   }
 }
@@ -122,15 +118,13 @@ void main() {
   setUpAll(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
       const MethodChannel('dev.fluttercommunity.plus/connectivity'),
-      (MethodCall methodCall) async {
+      (methodCall) async {
         return ['wifi'];
       },
     );
   });
 
-  setUp(() {
-    fakeAlertService.submittedAlertTypes.clear();
-  });
+  setUp(fakeAlertService.submittedAlertTypes.clear);
 
   List<Override> getBaseOverrides(AuthState authState) {
     return [
@@ -173,7 +167,7 @@ void main() {
 
   group('E2E Category & Reporting UI Performance Suite', () {
     testWidgets('1. All 10 Categories render with labels, icons, & priorities in ReportCategoryScreen', (tester) async {
-      final Stopwatch stopwatch = Stopwatch()..start();
+      final stopwatch = Stopwatch()..start();
 
       await tester.pumpWidget(
         ProviderScope(
@@ -337,7 +331,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: getBaseOverrides(agentState),
-          child: MaterialApp(
+          child: const MaterialApp(
             home: MissionResolutionScreen(
               alertData: {
                 'id': 'alert-1234',

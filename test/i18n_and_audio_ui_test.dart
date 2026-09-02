@@ -1,17 +1,18 @@
 import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rainbow_app/features/home/home_screen.dart';
-import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/alert_service.dart';
+import 'package:rainbow_app/services/broadcast_service.dart';
 import 'package:rainbow_app/services/push_notification_service.dart';
 import 'package:rainbow_app/services/sync_service.dart';
-import 'package:rainbow_app/services/broadcast_service.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // Mocks to isolate screen widget from hardware/services
 class FakePushNotificationService implements PushNotificationService {
@@ -44,7 +45,6 @@ class FakeAlertService implements AlertService {
 class FakeAuthNotifier extends AuthNotifier {
   FakeAuthNotifier() {
     state = AuthState(
-      user: null,
       role: UserRole.citizen,
       isLoading: false,
     );
@@ -55,7 +55,7 @@ class FakeAuthNotifier extends AuthNotifier {
 }
 
 Future<void> pumpSettleWithMax(WidgetTester tester, {int maxPumps = 10}) async {
-  for (int i = 0; i < maxPumps; i++) {
+  for (var i = 0; i < maxPumps; i++) {
     await tester.pump(const Duration(milliseconds: 100));
   }
 }

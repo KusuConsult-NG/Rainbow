@@ -81,7 +81,7 @@ class CloudinaryService {
   Future<List<String>> uploadBatch(List<File> files) async {
     final urls = <String>[];
     for (final file in files) {
-      if (await file.exists()) {
+      if (file.existsSync()) {
         final url = await uploadMedia(file);
         if (url != null) {
           urls.add(url);

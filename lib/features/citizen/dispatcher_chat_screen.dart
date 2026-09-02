@@ -1,5 +1,6 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -8,8 +9,8 @@ import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/speech_service.dart';
 import 'package:rainbow_app/services/tts_service.dart';
-import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
+import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
 /// Documentation for this public member.
 
@@ -101,7 +102,7 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
           _controller.text = text;
           _isListening = false;
         });
-      }));
+      },),);
     }
   }
 

@@ -207,7 +207,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
       state = AuthState(
         user: user,
         role: role,
-        resolutionError: null,
         tier: tier,
         jurisdiction: jurisdiction,
         profile: profile,

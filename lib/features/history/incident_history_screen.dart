@@ -14,18 +14,18 @@ class IncidentHistoryScreen extends ConsumerWidget {
   Future<List<Map<String, dynamic>>> _fetchAlerts(String? userId, bool isOfficer) async {
     if (userId == null || userId.isEmpty) return [];
     try {
-      List<Map<String, dynamic>> results = [];
+      var results = <Map<String, dynamic>>[];
 
       if (isOfficer) {
         // Officers see alerts they reported OR are assigned to
         final reported = await SupabaseConfig.client
             .from('alerts')
-            .select('*')
+            .select()
             .eq('reported_by', userId)
             .order('created_at', ascending: false);
         final assigned = await SupabaseConfig.client
             .from('alerts')
-            .select('*')
+            .select()
             .contains('assigned_responders', [userId])
             .order('created_at', ascending: false);
         final combined = [...(reported as List), ...(assigned as List)].cast<Map<String, dynamic>>();
@@ -36,7 +36,7 @@ class IncidentHistoryScreen extends ConsumerWidget {
         // Citizens only see their own reported alerts
         final response = await SupabaseConfig.client
             .from('alerts')
-            .select('*')
+            .select()
             .eq('reported_by', userId)
             .order('created_at', ascending: false);
         results = (response as List<dynamic>).cast<Map<String, dynamic>>();
@@ -107,7 +107,7 @@ class IncidentHistoryScreen extends ConsumerWidget {
                     context: context,
                     backgroundColor: AppColors.surface,
                     builder: (ctx) => Padding(
-                      padding: const EdgeInsets.all(24.0),
+                      padding: const EdgeInsets.all(24),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -130,9 +130,9 @@ class IncidentHistoryScreen extends ConsumerWidget {
                                 child: ListView(
                                   scrollDirection: Axis.horizontal,
                                   children: (item['media_urls'] as List).map((url) => Padding(
-                                    padding: const EdgeInsets.only(right: 8.0),
+                                    padding: const EdgeInsets.only(right: 8),
                                     child: Image.network(url.toString(), width: 80, height: 80, fit: BoxFit.cover),
-                                  )).toList(),
+                                  ),).toList(),
                                 ),
                               ),
                               const SizedBox(height: 24),
@@ -152,7 +152,7 @@ class IncidentHistoryScreen extends ConsumerWidget {
                         ],
                       ),
                     ),
-                  ));
+                  ),);
                 },
                 child: Container(
                   margin: const EdgeInsets.only(bottom: 12),

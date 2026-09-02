@@ -8,7 +8,6 @@
 //      request, the fix has been undone and the APK is leaking again.
 //   2. Nothing on this path can throw or hang into the SOS flow. This is a
 //      redundant channel; the alert row is the system of record.
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -101,7 +100,7 @@ void main() {
     });
 
     test('real coordinates survive the round trip intact', () async {
-      await dispatch(latitude: 9.8965, longitude: 8.8583);
+      await dispatch();
       final body = jsonDecode(captured.body) as Map<String, dynamic>;
       expect(body['latitude'], 9.8965);
       expect(body['longitude'], 8.8583);
@@ -152,7 +151,7 @@ void main() {
 
     test('an error status is a failure, not a silent success', () async {
       expect(await respond('{"error":"Authentication required"}', 401),
-          SosDispatchResult.failed);
+          SosDispatchResult.failed,);
       expect(await respond('{"error":"Too many"}', 429), SosDispatchResult.failed);
       expect(await respond('{"error":"boom"}', 500), SosDispatchResult.failed);
     });
@@ -181,7 +180,7 @@ void main() {
         return http.Response('{"sms":"SENT"}', 200);
       }).dispatchSos();
       expect(result, SosDispatchResult.failed);
-    }, timeout: const Timeout(Duration(seconds: 30)));
+    }, timeout: const Timeout(Duration(seconds: 30)),);
   });
 
   group('configuration', () {

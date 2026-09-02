@@ -78,7 +78,7 @@ class _AdminBroadcastScreenState extends State<AdminBroadcastScreen> {
           Text('Severity', style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
-            value: _severity,
+            initialValue: _severity,
             dropdownColor: AppColors.surfaceContainer,
             decoration: InputDecoration(
               filled: true,
@@ -98,7 +98,7 @@ class _AdminBroadcastScreenState extends State<AdminBroadcastScreen> {
           Text('Audience', style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
-            value: _audience,
+            initialValue: _audience,
             dropdownColor: AppColors.surfaceContainer,
             decoration: InputDecoration(
               filled: true,
@@ -118,7 +118,7 @@ class _AdminBroadcastScreenState extends State<AdminBroadcastScreen> {
           Text('Expiry', style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           DropdownButtonFormField<int>(
-            value: _expiryHours,
+            initialValue: _expiryHours,
             dropdownColor: AppColors.surfaceContainer,
             decoration: InputDecoration(
               filled: true,

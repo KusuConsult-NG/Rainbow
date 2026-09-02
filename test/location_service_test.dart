@@ -125,7 +125,7 @@ void main() {
           .thenAnswer((_) async => LocationPermission.always);
       when(() => geo.getCurrentPosition(
             locationSettings: any(named: 'locationSettings'),
-          )).thenAnswer((_) async => _position());
+          ),).thenAnswer((_) async => _position());
 
       final pos = await service.getCurrentPosition(force: true);
 
@@ -141,7 +141,7 @@ void main() {
       expect(await service.getCurrentPosition(force: true), isNull);
       verifyNever(() => geo.getCurrentPosition(
             locationSettings: any(named: 'locationSettings'),
-          ));
+          ),);
     });
 
     // A live fix is preferred, but a recent cached one beats nothing for an SOS.
@@ -152,7 +152,7 @@ void main() {
           .thenAnswer((_) async => LocationPermission.always);
       when(() => geo.getCurrentPosition(
             locationSettings: any(named: 'locationSettings'),
-          )).thenThrow(const LocationServiceDisabledException());
+          ),).thenThrow(const LocationServiceDisabledException());
       when(() => geo.getLastKnownPosition())
           .thenAnswer((_) async => _position(lat: 9.5, lng: 8.5));
 
@@ -168,7 +168,7 @@ void main() {
           .thenAnswer((_) async => LocationPermission.always);
       when(() => geo.getCurrentPosition(
             locationSettings: any(named: 'locationSettings'),
-          )).thenThrow(const LocationServiceDisabledException());
+          ),).thenThrow(const LocationServiceDisabledException());
       when(() => geo.getLastKnownPosition()).thenAnswer((_) async => null);
 
       expect(await service.getCurrentPosition(force: true), isNull);
@@ -188,10 +188,10 @@ void main() {
           .thenAnswer((_) async => LocationPermission.always);
       when(() => geo.getCurrentPosition(
             locationSettings: any(named: 'locationSettings'),
-          )).thenAnswer((_) async => _position());
+          ),).thenAnswer((_) async => _position());
       when(() => geo.getPositionStream(
             locationSettings: any(named: 'locationSettings'),
-          )).thenAnswer((_) => const Stream<Position>.empty());
+          ),).thenAnswer((_) => const Stream<Position>.empty());
 
       final first = await service.streamLocation().first;
 

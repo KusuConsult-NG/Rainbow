@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
-import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/models/alert_model.dart';
+import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/speech_service.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
@@ -92,8 +93,8 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
       return;
     }
 
-    unawaited(_waveformController.repeat(reverse: true));
-    unawaited(_pulseController.repeat(reverse: true));
+    _waveformController.repeat(reverse: true);
+    _pulseController.repeat(reverse: true);
 
     try {
       await SpeechService.instance.startListening(
@@ -128,7 +129,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                           : '$_accumulatedText $_currentChunk';
                     });
                   },
-                ));
+                ),);
               }
             });
           }
@@ -207,6 +208,8 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
       if (alertId != null) {
         // Report successfully created/queued
         await HapticFeedback.heavyImpact();
+        // The mounted check above is spent: this await reopens the async gap.
+        if (!mounted) return;
         Navigator.of(context).pop(); // Close dialog
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

@@ -39,7 +39,7 @@ class AuthService {
   Future<bool> signInWithPhone(String phoneNumber, String otpCode) async {
     _lastAuthError = null;
 
-    final cleanPhone = phoneNumber.replaceAll(RegExp(r'[^0-9+]'), '');
+    final cleanPhone = phoneNumber.replaceAll(RegExp('[^0-9+]'), '');
 
     // Demo Citizen Bypass
     if (cleanPhone == '08000000000' ||
@@ -112,7 +112,7 @@ class AuthService {
   }
 
   static bool isDemoNumber(String phone) {
-    final clean = phone.trim().replaceAll(RegExp(r'[^0-9+]'), '');
+    final clean = phone.trim().replaceAll(RegExp('[^0-9+]'), '');
     return clean == '08000000000' ||
         clean == '2348000000000' ||
         clean == '+2348000000000';
@@ -123,7 +123,7 @@ class AuthService {
   /// Step 1: Store phone number and trigger OTP send (or flag demo bypass).
   Future<void> verifyPhoneNumber(String phone) async {
     _lastAuthError = null;
-    final cleanPhone = phone.trim().replaceAll(RegExp(r'[^0-9+]'), '');
+    final cleanPhone = phone.trim().replaceAll(RegExp('[^0-9+]'), '');
     _pendingPhone = cleanPhone;
 
     debugPrint('[AUTH] verifyPhoneNumber: $cleanPhone');

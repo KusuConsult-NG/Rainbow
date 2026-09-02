@@ -24,6 +24,62 @@ analyzer:
     # REJECT: Null Safety Violations
     null_check_on_nullable_type_parameter: error
     unnecessary_null_comparison: error
+    # A known false positive, not a lint we are ducking. The models are
+    # `freezed` classes, so `@JsonKey` sits on a CONSTRUCTOR PARAMETER of the
+    # factory rather than on a field. The analyzer rejects that target, but
+    # `freezed` forwards the annotation onto the generated field, which is
+    # exactly where json_serializable needs it — and the generated code proves
+    # it works. There is no way to place these annotations that satisfies both.
+    invalid_annotation_target: ignore
+
+    # ── RATCHET, tightened 2026-09-02 ────────────────────────────────────────
+    # These were info-level and are now at ZERO. Promoting them to error means
+    # they can never come back: `flutter analyze` fails the build on the first
+    # reintroduction. Each one is a real defect class, not a style preference.
+    use_build_context_synchronously: error   # 4 fixed: a BuildContext used after
+                                             # an await throws once the widget is
+                                             # gone, on screens shown mid-incident
+    avoid_slow_async_io: error               # 3 fixed
+    avoid_print: error                       # 4 fixed
+    prefer_null_aware_method_calls: error     # 1 fixed
+    use_setters_to_change_properties: error   # 1 fixed — and finding it revealed
+                                              # that nothing ever set the navigator
+                                              # key, so notification taps navigate
+                                              # nowhere. Recorded, not silenced.
+    avoid_setters_without_getters: error
+    unnecessary_getters_setters: error
+    sort_pub_dependencies: error
+    eol_at_end_of_file: error
+
+    # ── DELIBERATELY NOT BLOCKING ────────────────────────────────────────────
+    # Left at info WITH REASONS, rather than fixed into noise or silently
+    # ignored. Revisit if the reasoning stops holding.
+    #
+    # lines_longer_than_80_chars (~320): 27 files already carry a blanket
+    #   `ignore_for_file` for it, so the codebase has effectively rejected this
+    #   rule file-by-file already. Rewrapping ~320 lines is a large diff of pure
+    #   churn across screens that are mostly widget trees.
+    #
+    # public_member_api_docs (~140): the tree is already full of
+    #   `/// Documentation for this public member.` — someone satisfied this rule
+    #   once by generating text that says nothing. Adding 140 more such stubs
+    #   makes the code worse, not better; real docs are worth writing where a
+    #   member is subtle, and this rule cannot tell the difference.
+    #
+    # avoid_catches_without_on_clauses (~80): in an app whose job is to keep
+    #   working during an emergency, a broad `catch (e)` is frequently the
+    #   correct choice. Narrowing 80 of them to `on Exception` would let Errors
+    #   propagate and crash screens that currently degrade — a behaviour change
+    #   dressed as a lint fix.
+    #
+    # deprecated_member_use (2): riverpod's `.stream`, in the responder feed.
+    #   Migrating to AsyncValue is a real refactor of code that dispatches
+    #   responders. Left visible rather than made build-breaking, because a
+    #   dependency bump should not fail CI on someone else's schedule.
+    #
+    # unreachable_from_main (5): false positives. Four are test doubles that ARE
+    #   used in the same file, and one is a service used from main.dart in a
+    #   different library than the one the rule analyses.
 
   exclude:
     - "bin/**"

@@ -348,6 +348,12 @@ export default function DashboardPage() {
   // Below this width the 280px sidebar left the map — the console's primary
   // instrument — a ~60px strip at 390px and squeezed at 768px. It becomes a
   // slide-over drawer instead of permanently claiming the width.
+  // Declared before the effects that call setActiveTab. It used to sit ~30
+  // lines below its first use, which only works because effect bodies run
+  // after the component body — a temporal-dead-zone hazard the linter was
+  // right to flag.
+  const [activeTab, setActiveTab] = useState<Tab>('map');
+
   const isNarrow = useMediaQuery('(max-width: 1024px)');
   const [navOpen, setNavOpen] = useState(false);
 
@@ -386,7 +392,6 @@ export default function DashboardPage() {
   const [history, setHistory] = useState<Alert[]>([]);
   const [agentLocations, setAgentLocations] = useState<any[]>([]);
   const agentPathsRef = useRef<Map<string, {lat: number; lng: number; timestamp: string}[]>>(new Map());
-  const [activeTab, setActiveTab] = useState<Tab>('map');
   const [unreadAgencyReports, setUnreadAgencyReports] = useState(0);
 
   // Load unread agency report count for HQ notification badge

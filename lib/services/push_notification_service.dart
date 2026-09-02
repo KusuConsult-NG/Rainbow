@@ -4,20 +4,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
-import 'package:rainbow_app/services/auth_service.dart';
 
 final pushNotificationServiceProvider = Provider<PushNotificationService>((ref) {
-  return PushNotificationService(ref.read(authServiceProvider));
+  return PushNotificationService();
 });
 
 class PushNotificationService {
-  PushNotificationService(this._authService);
-  final AuthService _authService;
+  PushNotificationService();
 
-  static GlobalKey<NavigatorState>? _navigatorKey;
-  static void setNavigatorKey(GlobalKey<NavigatorState> key) {
-    _navigatorKey = key;
-  }
+  // NOTHING CALLS THIS, which the lint is how we found out.
+  //
+  // `navigatorKey` is read on notification tap to `pushNamed` the alert, but
+  // no caller ever assigns it, so that key is always null and the deep link is
+  // a silent no-op: tapping an emergency push notification navigates nowhere.
+  // Wiring it means giving the router a navigatorKey and setting it at startup;
+  // that needs a device to verify, so it is recorded rather than guessed at.
+  static GlobalKey<NavigatorState>? navigatorKey;
 
   static const String _oneSignalAppId = '885be8b2-5f31-4627-a618-685f54dd266a';
 
@@ -70,7 +72,7 @@ class PushNotificationService {
           final alertId = data['alertId'] as String?;
           final type = data['type'] as String?;
           if (alertId != null && (type == 'DISPATCH' || type == 'ALERT')) {
-            _navigatorKey?.currentState?.pushNamed(
+            navigatorKey?.currentState?.pushNamed(
               '/mission-intel',
               arguments: {'alertId': alertId},
             );

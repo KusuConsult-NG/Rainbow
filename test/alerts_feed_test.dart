@@ -33,9 +33,9 @@ void main() {
 
       final last = seen.last;
       expect(last.rows.length, 2,
-          reason: 'REST rows must survive a dead realtime channel');
+          reason: 'REST rows must survive a dead realtime channel',);
       expect(last.liveness, FeedLiveness.degraded,
-          reason: 'the feed must not claim to be live when it is not');
+          reason: 'the feed must not claim to be live when it is not',);
     });
 
     test('never reports ALL CLEAR territory: liveness is degraded, not live, '
@@ -44,7 +44,7 @@ void main() {
       final sub = resilientAlertsFeed(
         fetch: () async => throw Exception('SocketException: no route to host'),
         watch: () => Stream<List<Map<String, dynamic>>>.error(
-            Exception('WebSocket refused')),
+            Exception('WebSocket refused'),),
         realtimeGrace: const Duration(milliseconds: 60),
         pollInterval: const Duration(milliseconds: 200),
       ).listen(seen.add);
@@ -55,7 +55,7 @@ void main() {
       expect(seen.last.liveness, FeedLiveness.degraded);
       expect(seen.last.rows, isEmpty);
       expect(seen.last.error, isNotNull,
-          reason: 'the UI needs a reason to show, not just a blank screen');
+          reason: 'the UI needs a reason to show, not just a blank screen',);
       // The distinction the whole change exists for.
       expect(seen.any((f) => f.liveness == FeedLiveness.live), isFalse);
     });
@@ -102,7 +102,7 @@ void main() {
 
       expect(callCount, greaterThan(1), reason: 'it must keep polling');
       expect(seen.last.rows.length, 2,
-          reason: 'a failed refresh must not blank an incident list');
+          reason: 'a failed refresh must not blank an incident list',);
       expect(seen.last.error, isNotNull);
     });
 
@@ -124,9 +124,9 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 150));
 
       expect(seen.last.liveness, FeedLiveness.degraded,
-          reason: 'a dropped channel must stop the feed claiming to be live');
+          reason: 'a dropped channel must stop the feed claiming to be live',);
       expect(seen.last.rows.length, 2,
-          reason: 'and must not empty the list on the way down');
+          reason: 'and must not empty the list on the way down',);
 
       await sub.cancel();
     });
@@ -146,7 +146,7 @@ void main() {
 
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(seen.first.liveness, FeedLiveness.connecting,
-          reason: 'before anything loads, the feed must not say all clear');
+          reason: 'before anything loads, the feed must not say all clear',);
 
       await sub.cancel();
     });

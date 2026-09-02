@@ -53,6 +53,7 @@ export default function TacticalSelect({
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
+        setSearchQuery('');
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -63,9 +64,10 @@ export default function TacticalSelect({
     if (isOpen && isSearchable && searchInputRef.current) {
       setTimeout(() => searchInputRef.current?.focus(), 50);
     }
-    if (!isOpen) {
-      setSearchQuery('');
-    }
+    // The search box used to be cleared here, reactively, whenever `isOpen`
+    // went false — a state update triggered by a state change, which is the
+    // cascading-render pattern the hooks lint exists to catch. It is now
+    // cleared at the two places that actually close the dropdown.
   }, [isOpen, isSearchable]);
 
   return (
@@ -226,6 +228,7 @@ export default function TacticalSelect({
                     onClick={() => {
                       onChange(opt.value);
                       setIsOpen(false);
+                      setSearchQuery('');
                     }}
                     style={{
                       width: '100%',

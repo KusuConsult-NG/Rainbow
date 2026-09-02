@@ -7,22 +7,20 @@ class SpeechService {
 
   final SpeechToText _speech = SpeechToText();
   bool _isInitialized = false;
-  bool _useFallback = false;
+  /// Whether the service is running in its no-plugin fallback mode.
+  bool useFallback = false;
 
-  set useFallback(bool value) {
-    _useFallback = value;
-  }
 
   void Function(String status)? _onStatusCallback;
 
   Future<bool> initialize() async {
-    if (_useFallback) {
+    if (useFallback) {
       _isInitialized = true;
       return true;
     }
     try {
       if (kIsWeb) {
-        _useFallback = true;
+        useFallback = true;
         _isInitialized = true;
         return true;
       }
@@ -34,52 +32,57 @@ class SpeechService {
         },
       );
       if (!_isInitialized) {
-        _useFallback = true;
+        useFallback = true;
         _isInitialized = true;
       }
       return _isInitialized;
     } catch (e) {
       debugPrint('[SPEECH_INIT_ERR] Failed to initialize native speech: $e');
-      _useFallback = true;
+      useFallback = true;
       _isInitialized = true;
       return true;
     }
   }
 
-  bool get isListening => _useFallback ? _simulatedListening : _speech.isListening;
+  bool get isListening => useFallback ? _simulatedListening : _speech.isListening;
 
   bool _simulatedListening = false;
 
   Future<void> startListening({
-    required Function(String text) onResult,
-    Function(String status)? onStatusChange,
+    required void Function(String text) onResult,
+    void Function(String status)? onStatusChange,
     String? languageCode,
   }) async {
     _onStatusCallback = onStatusChange;
-    if (_useFallback) {
+    if (useFallback) {
       _simulatedListening = true;
       // Simulate local dictation results for simulator fallback
       Future.delayed(const Duration(seconds: 1), () {
-        if (_simulatedListening) onResult("Help! Urgent response team needed at my location.");
+        if (_simulatedListening) onResult('Help! Urgent response team needed at my location.');
       });
       Future.delayed(const Duration(seconds: 3), () {
-        if (_simulatedListening) onResult("Help! Urgent response team needed at my location. Protesters blocking road access.");
+        if (_simulatedListening) onResult('Help! Urgent response team needed at my location. Protesters blocking road access.');
       });
     } else {
       await _speech.listen(
         onResult: (result) {
           onResult(result.recognizedWords);
         },
-        localeId: languageCode,
-        listenFor: const Duration(minutes: 10),
-        pauseFor: const Duration(seconds: 10),
-        listenMode: ListenMode.dictation,
+        // speech_to_text 7.x deprecated the top-level listenFor/pauseFor/
+        // localeId/listenMode in favour of SpeechListenOptions, which carries
+        // all four.
+        listenOptions: SpeechListenOptions(
+          listenMode: ListenMode.dictation,
+          listenFor: const Duration(minutes: 10),
+          pauseFor: const Duration(seconds: 10),
+          localeId: languageCode,
+        ),
       );
     }
   }
 
   Future<void> stopListening() async {
-    if (_useFallback) {
+    if (useFallback) {
       _simulatedListening = false;
     } else {
       await _speech.stop();

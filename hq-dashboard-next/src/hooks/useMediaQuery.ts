@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 /**
  * Tracks a CSS media query from React.
@@ -9,21 +9,35 @@ import { useEffect, useState } from 'react';
  * plain `@media` rule cannot reach it. This gives the same information to the
  * component tree.
  *
- * Starts `false` on the server and on first paint, then corrects in an effect.
- * `window.matchMedia` does not exist during prerender, and reading it during
- * render would produce a hydration mismatch — so the desktop layout is the
- * first frame, and a narrow viewport switches immediately after mount.
+ * Built on `useSyncExternalStore` rather than `useState` + `useEffect`.
+ * `matchMedia` is an external store, and that is the API React provides for
+ * subscribing to one: it reads the current value during render on the client
+ * and takes a separate snapshot for the server, so there is no
+ * set-state-inside-an-effect and no extra render on mount to correct a wrong
+ * initial guess. The effect version also tripped `react-hooks/set-state-in-effect`
+ * legitimately — it really was setting state in an effect, it just had no
+ * alternative in that shape.
+ *
+ * The server snapshot is `false`: `window.matchMedia` does not exist during
+ * prerender, so the desktop layout is what gets rendered on the server, and a
+ * narrow viewport corrects on hydration.
  */
 export function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(false);
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      const mql = window.matchMedia(query);
+      mql.addEventListener('change', onStoreChange);
+      return () => mql.removeEventListener('change', onStoreChange);
+    },
+    [query],
+  );
 
-  useEffect(() => {
-    const mql = window.matchMedia(query);
-    setMatches(mql.matches);
-    const onChange = (e: MediaQueryListEvent) => setMatches(e.matches);
-    mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
-  }, [query]);
+  const getSnapshot = useCallback(
+    () => window.matchMedia(query).matches,
+    [query],
+  );
 
-  return matches;
+  const getServerSnapshot = useCallback(() => false, []);
+
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

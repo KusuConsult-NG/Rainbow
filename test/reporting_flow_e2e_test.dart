@@ -1,19 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rainbow_app/app.dart';
-import 'package:rainbow_app/providers/auth_provider.dart';
-import 'package:rainbow_app/providers/navigation_provider.dart';
-import 'package:rainbow_app/services/push_notification_service.dart';
-import 'package:rainbow_app/services/sync_service.dart';
-import 'package:rainbow_app/services/alert_service.dart';
-import 'package:rainbow_app/services/user_service.dart';
-import 'package:rainbow_app/services/location_service.dart';
-import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/core/constants/alert_categories.dart';
 import 'package:rainbow_app/features/report/report_category_screen.dart';
-import 'package:rainbow_app/features/report/report_subtype_screen.dart';
 import 'package:rainbow_app/features/report/report_details_screen.dart';
+import 'package:rainbow_app/features/report/report_subtype_screen.dart';
+import 'package:rainbow_app/models/alert_model.dart';
+import 'package:rainbow_app/providers/auth_provider.dart';
+import 'package:rainbow_app/providers/navigation_provider.dart';
+import 'package:rainbow_app/services/alert_service.dart';
+import 'package:rainbow_app/services/location_service.dart';
+import 'package:rainbow_app/services/push_notification_service.dart';
+import 'package:rainbow_app/services/sync_service.dart';
+import 'package:rainbow_app/services/user_service.dart';
 import 'package:rainbow_app/shared/widgets/system_alert_listener.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
@@ -75,7 +74,7 @@ class FakeAuthNotifier extends AuthNotifier {
 }
 
 Future<void> pumpSettleWithMax(WidgetTester tester, {int maxPumps = 30}) async {
-  for (int i = 0; i < maxPumps; i++) {
+  for (var i = 0; i < maxPumps; i++) {
     await tester.pump(const Duration(milliseconds: 100));
   }
 }

@@ -7,12 +7,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/features/home/widgets/voice_report_dialog.dart';
 import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
@@ -21,7 +21,6 @@ import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/broadcast_hud.dart';
-import 'package:rainbow_app/features/home/widgets/voice_report_dialog.dart';
 
 /// Documentation for this public member.
 
@@ -55,13 +54,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       vsync: this,
       duration: const Duration(milliseconds: 2500),
     );
-    unawaited(_breathingController.repeat(reverse: true));
+    _breathingController.repeat(reverse: true);
 
     _safePulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
     );
-    unawaited(_safePulseController.repeat(reverse: true));
+    _safePulseController.repeat(reverse: true);
 
     // Initial sync
     unawaited(ref.read(alertServiceProvider).flushOfflineQueue());
@@ -134,7 +133,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ],
           ),
-        ));
+        ),);
       }
       return;
     }
@@ -193,14 +192,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return Translations.get('good_evening', lang);
   }
 
-  Future<bool> _isBackgroundServiceRunning() async {
-    try {
-      return await FlutterBackgroundService().isRunning();
-      // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
-    } catch (_) {
-      return false;
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -287,11 +278,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       ],
                     ),
                   ),
-                  onSelected: (AppLanguage selected) async {
+                  onSelected: (selected) async {
                     await HapticFeedback.selectionClick();
                     await ref.read(languageProvider.notifier).setLanguage(selected);
                   },
-                  itemBuilder: (BuildContext context) => AppLanguage.values.map((l) {
+                  itemBuilder: (context) => AppLanguage.values.map((l) {
                     return PopupMenuItem<AppLanguage>(
                       value: l,
                       child: Row(

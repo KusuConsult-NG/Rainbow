@@ -82,7 +82,43 @@ jobs:
       # RATCHET: clear the 54 warnings, then drop `--no-fatal-warnings`; then
       # the infos, then `--no-fatal-infos`.
       - name: Analyze
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        # RATCHET, 2026-09-02: warnings now FAIL the build. They were 53 (30
+        # unused imports, dead code, missing type arguments) and are now ZERO.
+        #
+        # Infos stay non-fatal, but that flag means much less than it did: the
+        # info-level rules that catch real defects were promoted to `error` in
+        # analysis_options.yaml and block regardless. What remains behind it is
+        # three style rules, each exempted there with a written reason.
+        #
+        # The grep, rather than plain `--fatal-warnings`, exists for ONE reason.
+        # Flutter 3.47.2 emits an analyzer warning that no change to this
+        # repository can clear:
+        #
+        #   warning • Support for legacy plugins is deprecated, and will be
+        #             removed in an upcoming version of Dart.
+        #
+        # That is the SDK talking about `custom_lint`'s plugin API — the
+        # mechanism riverpod_lint is loaded through — not about our code. It
+        # appears on 3.47.2 and not on 3.47.0, so it is a toolchain notice that
+        # would otherwise turn this gate permanently red on a schedule we do not
+        # control. Dropping it is narrow, named, and visible in the log; the
+        # alternative was to abandon the ratchet entirely for a message we
+        # cannot act on. Delete this filter once custom_lint migrates.
+        run: |
+          set -uo pipefail
+          flutter analyze --no-fatal-infos 2>&1 | tee analyze.txt || true
+          # `[[:space:]]*`, not `+`: analyze prints some severity lines flush to
+          # column 0 and indents others. Requiring leading whitespace made this
+          # gate unable to fire at all — found by mutation-testing it with a
+          # deliberately unused import, which it waved through.
+          REAL=$(grep -E '^[[:space:]]*(error|warning) •' analyze.txt \
+                 | grep -v 'Support for legacy plugins is deprecated' || true)
+          if [ -n "$REAL" ]; then
+            echo "$REAL"
+            echo "::error::flutter analyze reported an error or warning (see above)"
+            exit 1
+          fi
+          echo "OK: no analyzer errors or warnings."
 
       - name: Test
         run: flutter test

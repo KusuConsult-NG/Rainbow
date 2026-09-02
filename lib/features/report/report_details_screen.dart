@@ -10,19 +10,18 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
-
 import 'package:rainbow_app/core/constants/alert_categories.dart';
 import 'package:rainbow_app/core/constants/tactical_mapping.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/alert_service.dart';
-import 'package:rainbow_app/services/speech_service.dart';
 import 'package:rainbow_app/services/auth_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
+import 'package:rainbow_app/services/speech_service.dart';
 import 'package:rainbow_app/services/sync_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
+import 'package:record/record.dart';
 
 /// Documentation for this public member.
 
@@ -102,9 +101,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         
         await _audioRecorder.start(
           const RecordConfig(
-            encoder: AudioEncoder.aacLc,
-            bitRate: 128000,
-            sampleRate: 44100,
+            
           ),
           path: path,
         );
