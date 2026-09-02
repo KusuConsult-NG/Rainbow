@@ -199,12 +199,34 @@ jobs:
       - name: Assert security headers reach the wire
         run: |
           set -euo pipefail
-          npx next start -p 3200 &
+
+          # Redirect the server's output to a file. A background process that
+          # inherits the step's stdout keeps that pipe open after the shell
+          # exits, and the runner waits on it.
+          npx next start -p 3200 > /tmp/next-ci.log 2>&1 &
           SERVER_PID=$!
-          # Kill the process group: `npx` spawns next-server as a child, so
-          # killing the npx pid alone leaves the server behind as an orphan for
-          # the runner to reap.
-          trap 'kill -- -$(ps -o pgid= "$SERVER_PID" | tr -d " ") 2>/dev/null || kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          # Kill the server's whole descendant tree, BY PID.
+          #
+          # Never `kill -- -$PGID` here. An earlier version of this step did
+          # exactly that, to tidy away an "orphan process" notice, and it took
+          # the runner down with it: the step's own shell and the runner agent
+          # share that process group, so the group kill reached them too. Both
+          # runs died with "The runner has received a shutdown signal" straight
+          # after this step printed its last OK line — every assertion had
+          # passed, and the job still failed.
+          #
+          # `pkill -P` is not enough either: npx spawns `sh -c next start`,
+          # which spawns next-server, so the grandchild survives a one-level
+          # kill. Recurse.
+          kill_tree() {
+            local pid=$1 child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          trap 'kill_tree "$SERVER_PID"' EXIT
 
           for i in $(seq 1 30); do
             curl -sf -o /dev/null http://localhost:3200/login && break
