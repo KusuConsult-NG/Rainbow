@@ -1394,3 +1394,126 @@ clear the warnings, drop `--no-fatal-warnings`; then the infos, then
    hand-created dashboard policies will not be dropped. Not on production until
    staging is green.
 3. **Review Supabase logs** for prior anonymous reads of `profiles` and `telemetry`.
+
+---
+
+## Production-readiness pass
+
+The findings above are about code that was wrong. This pass asked a different
+question — *if you deployed this today, what would fail?* — and found four
+things, three of which are invisible until the moment they matter.
+
+### The console's backend was never in the repository
+
+Four tables the HQ console reads and writes every session — `agency_personnel`,
+`agency_deployments`, `agency_action_reports`, `agency_notifications` — plus
+`profiles.agency`, were created by hand in the Supabase dashboard. No migration
+in this repository creates them.
+
+Two consequences. A staging or disaster-recovery project rebuilt from these
+files silently lacks the entire agency portal; you find out when a commander
+opens the tab. And the RLS migration's agency section was written `GUARDED BY
+EXISTENCE` for exactly that reason, so on every database CI could build, that
+section was **skipped** — the agency policies were the only part of the C-3
+remediation that had never once been executed before reaching production.
+
+`20260812000000_agency_tables.sql` creates them, dated before the RLS migration
+so the policies now apply on every database. Every statement is
+`IF NOT EXISTS`, so on production it changes nothing and keeps production's
+column shapes.
+
+Writing that section down also exposed that it was **wrong**. It granted reads
+to `is_staff()` and writes to `is_command()`. But the people who use the agency
+portal are agency liaisons, who carry role `<AGENCY>_LIAISON` — neither command
+nor citizen. Under those policies a police liaison could read *every* agency's
+personnel, deployments and after-action reports, and write none of their own:
+the portal was simultaneously too open and non-functional for its only users.
+
+It is now: command sees everything; a liaison sees and writes only rows tagged
+with their own agency; responders and citizens see nothing. The agency is taken
+from `role` and not from `profiles.agency` — that column is self-writable, and a
+liaison who could rewrite it could read another agency's deployments. There is
+an assertion for precisely that.
+
+### Three realtime subscriptions were never going to fire
+
+The console subscribes to `postgres_changes` on `agency_action_reports`,
+`agency_deployments` and `uninstall_requests`. None of the three was ever added
+to the `supabase_realtime` publication.
+
+A subscription on an unpublished table does not error. It connects, reports
+success, and never delivers an event. The HQ unread-report badge — the thing
+that tells command an agency has filed a report from the field — only updated on
+a page reload, and nothing anywhere said so.
+
+`20260903000000_realtime_publication.sql` adds them, and a CI gate now extracts
+every table either app subscribes to (the console's `table: '…'` and the mobile
+app's `from('…').stream(…)`, which is the same mechanism) and fails if one is
+missing from that migration. Adding a subscription without publishing the table
+is now a build failure rather than a silent dead channel.
+
+### The evidence bucket had no policies in the repository
+
+Both apps upload incident photos, video and voice reports to the Supabase
+Storage bucket `incident-media` when Cloudinary is unavailable. Nothing in this
+repository created that bucket or a single policy on `storage.objects`. Storage
+RLS is deny-all without policies, so on a fresh project every fallback upload
+fails; on production, whatever was clicked together in the dashboard was
+undocumented and unreviewed.
+
+`20260903000001_incident_media_storage.sql` sets it explicitly: any signed-in
+user may upload (the reporter is usually a citizen), **nobody may update or
+delete through the API roles** — evidence is append-only, and removal is a
+service-role operation — and only staff may list the bucket. Public does not
+mean enumerable: an object is readable by its URL, but handing anyone with the
+anon key a directory of every piece of incident evidence is a different thing
+entirely.
+
+Residual: the bucket is public, so an object URL is unguessable but not secret.
+A private bucket with signed URLs is stronger and needs every media renderer in
+both apps changed first.
+
+### The Android release build could not succeed on a clean checkout
+
+`android/app/build.gradle.kts` applied `com.google.gms.google-services` while
+`pubspec.yaml` carried no Firebase dependency at all. That plugin fails the
+build outright when `android/app/google-services.json` is missing — and that
+file is gitignored, because it holds an API key. So `flutter build apk
+--release` could not work on a CI runner, a new laptop, or anywhere the file had
+not been copied in by hand. The plugin is removed from both Gradle files, the
+four `GoogleService-Info.plist` references are removed from the Xcode project,
+and a CI gate keeps both out. **Not build-verified here** — this container has
+no Android SDK; the gate is static.
+
+Two related things, found while looking: `android/GoogleService-Info1.plist` was
+still present in the working tree (untracked, so the tracked-secrets gate could
+not see it) and is deleted. And release signing reads `key.properties` from the
+repo root; if it is absent the signing config is left with null fields and the
+build produces an **unsigned** artifact — no fallback to the debug key, no
+warning. That is documented in the deployment runbook rather than changed,
+because failing the build there would break `flutter build apk --debug` too.
+
+### What this pass added to CI
+
+* `20260812000000_agency_tables.sql` applied strictly (not best-effort) in the
+  migration harness, so the agency policies are now exercised.
+* `scripts/production_readiness_behaviour_test.sql` — 18 assertions covering
+  agency access by role, cross-agency isolation, that `profiles.agency` grants
+  nothing, the realtime publication, and the storage bucket's append-only
+  behaviour. Both new migrations are applied twice in the harness to prove
+  idempotence.
+* A Supabase Storage shim in `scripts/test_rls_migration.sql` so the storage
+  policies run against a real PostgreSQL.
+* The realtime-subscription gate described above, and the Firebase-config gate.
+
+Mutation-checked: reverting the agency policies to the command-only version
+fails the behaviour test at the first liaison insert.
+
+### Deployment
+
+`docs/PRODUCTION_DEPLOYMENT.md` is new: rotation table, the five migrations in
+order, the fact that **no deploy target is configured in this repository**
+(`deploy.sh` runs `firebase deploy` and there is no `firebase.json`,
+`apphosting.yaml` or `vercel.json` — it fails hard rather than pretending), the
+console's build-time environment, mobile signing and versioning, and what to
+check after the first deploy.
