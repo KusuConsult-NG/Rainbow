@@ -1967,3 +1967,86 @@ success — the same under-reporting failure as the earlier two, caught only
 because the count was zero when three were known to exist. The pattern now
 allows the type argument, and the summary line prints the number of functions
 checked rather than just saying OK.
+
+---
+
+## M-7 closed: the legacy Firebase backend is deleted
+
+`functions/` is gone — 19 files, 25 Cloud Functions, confirmed dead in both
+clients (no Firebase package in `pubspec.yaml`, no `httpsCallable` anywhere, no
+call site in the console).
+
+Deleting it was held back until now for one reason: that source was the last
+written record of what the deployed backend exposes, and C-6 — whether any of
+it is still live — is unsettled. **The record is therefore transcribed here
+before the code goes.** This inventory is what you need in the Firebase console;
+you no longer need the directory for it.
+
+### What that backend exposed
+
+| function | trigger |
+|---|---|
+| `adminDispatchAlert` | callable |
+| `adminEscalateAlert` | callable |
+| `adminResolveAlert` | callable |
+| `agentUpdateMissionStatus` | callable |
+| `approveAppUninstall` | callable |
+| `calculateSafetyIndex` | callable |
+| `createAlert` | callable |
+| `escalateTask` | task queue |
+| `escalationWatchdog` | scheduled, every 5 minutes |
+| `findBestResponders` | callable |
+| `getETA` | callable |
+| `logAlertChanges` | firestore onUpdate `alerts/{alertId}` |
+| `massBroadcast` | callable |
+| `migrateLegacyIncidents` | callable |
+| `onAlertCreatedGIS` | firestore onCreate `alerts/{alertId}` |
+| `processAudioIncidentReport` | firestore onUpdate `alerts/{alertId}` |
+| `pruneTrackingPaths` | scheduled, `0 0 * * *` |
+| `requestAppUninstall` | callable |
+| **`seedMockData`** | **HTTP, public URL** |
+| **`smsWebhook`** | **HTTP, public URL** |
+| `syncUserCustomClaims` | firestore onWrite `users/{userId}` |
+| `triageAndCreateVoiceAlert` | callable |
+| `triggerSLASweep` | callable |
+| `validateAgentAccessCode` | callable |
+| `validateRemovalCode` | callable |
+
+The two in bold are the C-6 finding: `https.onRequest`, so they answer on a
+public URL with no Firebase auth in front of them. The scheduled and Firestore
+triggers matter for a different reason — **they run whether or not anything
+calls them**, so an `escalationWatchdog` firing every five minutes against a
+Firestore that no longer backs the app is a live process acting on stale data.
+
+### Closing it
+
+```bash
+firebase functions:list --project rainbow-97f1e     # what is actually deployed
+firebase functions:delete smsWebhook seedMockData --project rainbow-97f1e --force
+# then the remaining 23, from the table above, once no external caller is confirmed
+```
+
+Do **not** `curl seedMockData` to find out whether it is there. The pre-guard
+version has no method check, so the probe itself writes ten fabricated
+`CRITICAL`/`DURESS` emergencies. `smsWebhook` is inert on anything that is not a
+well-formed POST and is safe to probe; the exact command is in the C-6 section
+above.
+
+### Also removed
+
+The `functions-guards` CI job, which existed to assert those endpoints rejected
+unauthenticated callers. It was already written to skip cleanly once the
+directory went, but a job that can never do anything is dead weight rather than
+a safety net.
+
+Four scripts imported firebase-admin through `../functions/node_modules/`.
+That path has been broken on every fresh clone since `node_modules` was
+untracked (M-6), so they were already dead on arrival; they now use the plain
+specifier and resolve from `scripts/package.json`, which declares the dependency.
+
+**Still Firestore-era, still in the tree:** eleven scripts under `scripts/`
+seed and provision *Firestore*, not Supabase — access codes, jurisdictions,
+safe zones, HQ accounts. They are the same generation as the code just deleted
+and are the obvious next removal, but unlike `functions/` they describe data
+rather than a live attack surface, so they are left until the Firestore project
+itself is decommissioned.

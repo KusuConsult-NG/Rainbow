@@ -9,8 +9,11 @@ process.env.GOOGLE_CLOUD_QUOTA_PROJECT = 'rainbow-97f1e';
  * Bypasses Admin SDK 403 quota errors.
  */
 
-const admin = require('../functions/node_modules/firebase-admin');
-const fetch = require('../functions/node_modules/node-fetch');
+const admin = require('firebase-admin');
+// `fetch` is global from Node 18 on. This used to be pulled from
+// `../functions/node_modules/node-fetch` — a path that has been broken on every
+// fresh clone since node_modules was untracked, and that is gone entirely now
+// the legacy Firebase backend is deleted.
 const fs = require('fs');
 const path = require('path');
 

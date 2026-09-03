@@ -8,7 +8,7 @@
  * Run: node scripts/set-hq-password.js
  */
 
-const admin = require('../functions/node_modules/firebase-admin');
+const admin = require('firebase-admin');
 
 const PROJECT_ID = 'rainbow-97f1e';
 const TARGET_EMAIL = 'hq-001@operationrainbow.plateau.gov.ng';

@@ -6,7 +6,7 @@
  * command tiers and citizen segments for high-precision emergency broadcasts.
  */
 
-const admin = require('../functions/node_modules/firebase-admin');
+const admin = require('firebase-admin');
 
 if (!admin.apps.length) {
     admin.initializeApp({
