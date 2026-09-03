@@ -206,6 +206,43 @@ BEGIN
   IF FOUND THEN RAISE EXCEPTION 'FAIL: HQ deleted an evidence object through the API role'; END IF;
   RAISE NOTICE 'PASS: staff can list evidence; nobody deletes it through the API roles';
 
+  -- ═══ 5. Mass broadcast: the row the console writes must actually insert ══
+  --
+  -- Every broadcast used to fail. The console named six columns that existed in
+  -- no migration and omitted `title`, which is NOT NULL — so the statewide
+  -- warning mechanism was dead, and the operator saw a raw PostgREST error.
+  -- This inserts the EXACT payload MassBroadcast.tsx now sends.
+  PERFORM pg_temp.become(hq, 'authenticated');
+  INSERT INTO public.system_alerts
+    (title, message, severity, target_audience, target_agency,
+     target_lga, target_ward, target_pu, is_active, expires_at)
+  VALUES
+    ('CRITICAL ADVISORY — JOS NORTH LGA', 'Avoid Terminus junction.', 'CRITICAL',
+     'CITIZENS', 'ALL', 'JOS NORTH', 'ALL', 'ALL', true, NOW() + INTERVAL '24 hours');
+  RAISE NOTICE 'PASS: the console broadcast payload inserts';
+
+  -- `title` has a default now, so a writer that forgets it cannot fail the
+  -- insert the way both writers used to.
+  INSERT INTO public.system_alerts (message, severity) VALUES ('No title given.', 'INFO');
+  RAISE NOTICE 'PASS: a titleless broadcast no longer violates NOT NULL';
+
+  -- Broadcasting stays command-only. Fixing delivery must not have widened who
+  -- can address the entire state.
+  PERFORM pg_temp.become(cit, 'authenticated');
+  BEGIN
+    INSERT INTO public.system_alerts (title, message) VALUES ('FAKE', 'Evacuate immediately.');
+    RAISE EXCEPTION 'FAIL: a citizen broadcast to the whole state';
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'PASS: citizens still cannot broadcast';
+  END;
+
+  -- ...and a citizen can still RECEIVE one. `system_alerts` being command-write
+  -- is only correct if it stays everyone-read; a policy mistake here silently
+  -- stops warnings reaching the public.
+  SELECT count(*) INTO n FROM public.system_alerts WHERE severity = 'CRITICAL';
+  IF n < 1 THEN RAISE EXCEPTION 'FAIL: a citizen cannot read the advisory addressed to them'; END IF;
+  RAISE NOTICE 'PASS: citizens receive broadcasts';
+
   RESET ROLE;
   RAISE NOTICE 'ALL PRODUCTION READINESS CHECKS PASSED';
 END $$;

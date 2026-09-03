@@ -1,6 +1,6 @@
 # Applying the migrations to production
 
-Five migrations are proven in CI on every push and **not yet applied** to the
+Six migrations are proven in CI on every push and **not yet applied** to the
 production Supabase project:
 
 | Order | File | Closes |
@@ -10,6 +10,7 @@ production Supabase project:
 | 3 | `supabase/migrations/20260902000000_per_user_emergency_pins.sql` | the shared duress PIN (H-3 residual) |
 | 4 | `supabase/migrations/20260903000000_realtime_publication.sql` | subscriptions on unpublished tables |
 | 5 | `supabase/migrations/20260903000001_incident_media_storage.sql` | the undocumented media bucket |
+| 6 | `supabase/migrations/20260903000002_system_alerts_broadcast.sql` | mass broadcast, which never worked at all |
 
 Apply them in that order. Number 3 depends on the `alerts.resolved_by` /
 `resolved_at` columns and on `auth.users`. Number 1 must precede number 2, which
@@ -80,6 +81,22 @@ a COMMIT happened inside the run. This should be impossible (the generator
 strips the migration's transaction control and checks a marker), but the guard
 exists precisely so you would know.
 
+## Step 1a — apply the agency-tables migration
+
+Paste the whole of `supabase/migrations/20260812000000_agency_tables.sql` and
+run it now, before the RLS migration in step 2. On production every statement is a no-op: the four
+`agency_*` tables and `profiles.agency` were created by hand and already exist,
+and every `CREATE` here is `IF NOT EXISTS`, so production's column shapes are
+kept exactly as they are. Nothing is narrowed and nothing is dropped.
+
+Verify, read-only:
+
+```sql
+-- Expect 4 rows.
+select table_name from information_schema.tables
+ where table_schema = 'public' and table_name like 'agency\_%' order by 1;
+```
+
 ## Step 2 — apply the RLS migration
 
 Paste the whole of `supabase/migrations/20260813000000_rls_least_privilege.sql`
@@ -96,22 +113,6 @@ select count(*) from pg_policies
 
 -- Expect 1: the role-escalation trigger is installed.
 select count(*) from pg_trigger where tgname = 'profiles_no_privilege_escalation';
-```
-
-## Step 2a — apply the agency-tables migration
-
-Paste the whole of `supabase/migrations/20260812000000_agency_tables.sql` and
-run it **before** step 2. On production every statement is a no-op: the four
-`agency_*` tables and `profiles.agency` were created by hand and already exist,
-and every `CREATE` here is `IF NOT EXISTS`, so production's column shapes are
-kept exactly as they are. Nothing is narrowed and nothing is dropped.
-
-Verify, read-only:
-
-```sql
--- Expect 4 rows.
-select table_name from information_schema.tables
- where table_schema = 'public' and table_name like 'agency\_%' order by 1;
 ```
 
 ## Step 3 — apply the emergency-PIN migration
@@ -145,6 +146,11 @@ Paste and run, in this order, both idempotent:
   `incident-media` bucket the mobile app falls back to when Cloudinary is
   unavailable, and puts policies on it: any signed-in user may upload, nobody
   may update or delete through the API roles, and only staff may list it.
+* `supabase/migrations/20260903000002_system_alerts_broadcast.sql` — adds the
+  columns the mass-broadcast screens have always written to, gives `title` a
+  default, and backfills `target_audience` from the legacy `target_type`. Until
+  this runs, **every broadcast fails**: `title` is NOT NULL and neither writer
+  supplied it, and six of the console's columns did not exist.
 
 Verify, read-only:
 
@@ -156,6 +162,12 @@ select tablename from pg_publication_tables
 -- Expect 1 row: public, 52428800, {image/*,video/*,audio/*}.
 select id, public, file_size_limit, allowed_mime_types
   from storage.buckets where id = 'incident-media';
+
+-- Expect 6 rows: the broadcast scoping columns.
+select column_name from information_schema.columns
+ where table_schema = 'public' and table_name = 'system_alerts'
+   and column_name in ('target_audience','target_agency','target_lga',
+                       'target_ward','target_pu','expires_at') order by 1;
 
 -- Expect the two incident_media_* policies and nothing else touching this
 -- bucket. Anything else is an extra PERMISSIVE grant that ORs with them.

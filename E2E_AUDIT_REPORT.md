@@ -1593,3 +1593,97 @@ question rather than a cleanup one: **if the old console is still hosted
 anywhere, it is a second door into the data that none of the RLS migration
 reaches.** Deleting the source does not take it down. Check for it while you
 are in the Firebase console.
+
+---
+
+## Mass broadcast never worked
+
+`system_alerts` is how HQ warns the public and its own responders. It was broken
+in four independent ways, and not one of them surfaced as something an operator
+would read as failure.
+
+**1. Every insert failed.** `title` is `NOT NULL` with no default, and neither
+writer supplied it — not the console's `MassBroadcast.tsx`, not the mobile
+`admin_broadcast_screen.dart`. On any database built from these migrations,
+every broadcast raised a not-null violation.
+
+**2. Six of the console's columns did not exist.** `target_agency`,
+`target_sector`, `target_lga`, `target_ward`, `target_pu` and `active` appear in
+no migration in this repository. PostgREST rejects an insert naming an unknown
+column outright, so the write failed before the constraint was even reached. The
+operator saw a raw PostgREST string where a statewide warning should have been.
+
+**3. Audience targeting was ignored.** The console wrote `target_audience`; the
+mobile reader consulted `target_type`, which defaults to `'ALL'`. So a **FIELD
+RESPONDERS ONLY** advisory arrived addressed to everyone and was shown to every
+citizen — while the console told the operator it had gone to responders only.
+
+**4. Geographic targeting was enforced nowhere.** The console offers LGA, ward
+and polling-unit scoping and reports *"dispatched successfully to JOS NORTH
+LGA"*. No reader has ever filtered on geography. Every advisory went statewide.
+
+Faults 3 and 4 are the dangerous ones, and they are the same class of defect as
+the mission feed rendering ALL CLEAR over a dead stream: **the system reported
+success for something it had not done.** A broadcast that fails loudly gets
+re-sent by radio. One that reports success while reaching the wrong people does
+not — and here that is either a panic pushed to an entire state, or an
+evacuation order that never reaches the ward it was written for.
+
+### One name per concept
+
+`lib/core/models/broadcast_alert.dart` already declared `targetLga`,
+`targetWard`, `targetPu` and `targetAudience`. The wider design was always the
+intended one; only the schema never caught up. So
+`20260903000002_system_alerts_broadcast.sql` adds the columns, and the code now
+agrees on one name for each thing:
+
+| concept | canonical | note |
+|---|---|---|
+| audience | `target_audience` | `target_type` still read as a fallback for rows written before this |
+| live | `is_active` | the console wrote `active`, which was never a column |
+| scope | `target_lga` / `target_ward` / `target_pu` / `target_agency` | new; now enforced on read |
+| heading | `title` | still `NOT NULL`, but now has a default, so no writer can fail on it again |
+
+Delivery moved out of a stream `.map()` into `lib/services/broadcast_targeting.dart`
+as a pure function, because "who receives this" is the part worth testing
+directly. Two judgement calls are recorded in it:
+
+* **Missing recipient geography fails OPEN.** A citizen whose profile has no LGA
+  still receives a scoped advisory. A missed evacuation order costs more than an
+  irrelevant notification. Every other condition fails closed.
+* **An unrecognised audience is treated as ALL**, not dropped. Over-delivery is
+  recoverable; an advisory that reaches nobody because of a typo in a dropdown
+  is not.
+
+Place names are matched loosely in both directions — "Jos North", "JOS NORTH
+LGA", "jos north" are one place — the same rule the HQ board already uses for
+alerts. Under-matching is the expensive direction: it drops a warning for
+somebody standing in the affected area.
+
+### Also fixed
+
+The console's own `SystemAlertListener` asked for the newest row *full stop* —
+no `is_active`, no expiry — so a withdrawn or long-expired advisory stayed
+docked under the header indefinitely. An advisory that is no longer true is
+worse than none, because operators calibrate against it. Expiry is filtered
+client-side on purpose: rows predating the `expires_at` column have it `NULL`,
+and `NULL` fails every SQL comparison, so a server-side filter would have
+silently hidden exactly the standing advisories that have no end date.
+
+The console also never wrote `expires_at` at all and had no control for it. It
+has one now.
+
+### Coverage
+
+* `test/broadcast_targeting_test.dart` — 17 assertions on delivery: audience,
+  the legacy-column fallback, geography at three levels, loose place matching,
+  fail-open on missing geography, withdrawal and expiry.
+* `hq-dashboard-next/src/components/MassBroadcast.test.tsx` — 7 assertions on
+  the payload's *shape* against the schema, including that nothing invented is
+  sent, since one unknown column rejects the whole insert. Restoring the
+  original payload fails 4 of them.
+* `scripts/production_readiness_behaviour_test.sql` — the exact console payload
+  is inserted against a real PostgreSQL; a titleless insert now succeeds;
+  citizens still cannot broadcast, and can still receive. Removing the new
+  columns from the migration reproduces the original production error,
+  `column "target_agency" of relation "system_alerts" does not exist`.
