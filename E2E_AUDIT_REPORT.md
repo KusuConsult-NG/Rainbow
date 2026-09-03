@@ -1872,3 +1872,81 @@ not deletion, so reported line numbers stay true.
 All three detection paths are mutation-checked: a bad select behind a long
 comment, a TypeScript payload passed by name, and a Dart inline literal. Each
 one fails the gate.
+
+---
+
+## Nothing left on the reader's desk
+
+Three items had been written up as decisions for whoever owns the system. Each
+turned out to have a defensible answer, so each is now made.
+
+### The tier had no column, and escalation was failing outright
+
+This was recorded as "a semantic collision, narrowing it belongs with whoever
+owns the escalation model". Looking properly, it was not a naming argument. It
+was two bugs.
+
+`alerts.assigned_to` is `UUID REFERENCES profiles(id)`. The mobile escalation
+wrote `targetCommanderId ?? targetTier` — so whenever the agent did not pick a
+specific commander, it sent the string `'LGA'` to a uuid column. PostgreSQL
+rejects that, and because the escalation is a single `UPDATE`, **the whole thing
+went with it**: status, severity, the escalation log and the audit note. The
+agent saw a failure with nothing to indicate the tier was the cause.
+
+The tier was also written into `escalated_to_agency`, which is the column the
+agency portal filters on, so an internal escalation to LGA sat in the same field
+as a handover to the police.
+
+And the HQ board's tier filter compared `assigned_to` — the uuid column —
+against `'WARD'`/`'LGA'`/`'HQ'`. It could only ever have matched rows the
+database refuses to store, so **that filter has never selected anything**.
+
+One column per concept now: `assigned_to` is who owns it, `assigned_tier` is
+which tier owns it, `escalated_to_agency` is which outside agency it went to.
+The migration moves existing tier labels out of the agency column, touching only
+values that are unambiguously tiers and leaving real agencies where the portal
+expects them. The mobile sends `assigned_to: null` when nobody specific is
+taking it, which is the honest answer.
+
+### An ungraded alert is no longer drawn as HIGH
+
+`priority: d.severity || 'HIGH'` invented a severity for a row that has none —
+the same move as the fabricated coordinates in C-5, one field over. An alert
+nobody had graded was drawn in the same red as one graded HIGH by the person who
+reported it, with no way to tell them apart.
+
+It is `UNKNOWN` now: muted, because the colour maps have no entry for it and
+fall through to `var(--text-muted)`, and not matched by the CRITICAL filter,
+which is correct — we do not know that it is.
+
+### The console has a deploy target
+
+`firebase.json` and `hq-dashboard-next/apphosting.yaml` are in the repository
+and `deploy.sh` runs `firebase deploy --only apphosting`. Firebase App Hosting
+was chosen because the project already exists (`.firebaserc` → rainbow-97f1e):
+it adds no vendor account and no procurement step for a state agency, and
+nothing in the application code is Firebase-specific, so the choice is
+reversible — the Vercel alternative is one paragraph in the runbook.
+
+Every environment value comes from Secret Manager, **including the two public
+ones**. A `value:` in that file would be project configuration committed to git,
+and the last time that happened it took a history purge to undo. `deploy.sh`
+checks all three secrets are readable before spending a build, so a missing
+grant fails in seconds naming the secret rather than as an opaque remote build
+error.
+
+`NEXT_PUBLIC_*` carry BUILD availability because Next inlines them at build
+time; the service key is RUNTIME only, since BUILD availability is exactly how a
+server secret reaches a client chunk — finding C-1.
+
+**Not deploy-verified**: written from the Next.js deployment guide and the App
+Hosting schema, and nothing in this container can run `firebase deploy`. The
+first deploy is the test.
+
+### Still genuinely not mine
+
+Three things need credentials this container does not have and must not have:
+rotating the six leaked secrets, running `firebase functions:list` to settle
+C-6, and asking GitHub Support to purge the 19 `refs/pull/*` refs. Probing
+production from here is forbidden for good reasons, and a rotation performed by
+an agent is a rotation nobody can audit.

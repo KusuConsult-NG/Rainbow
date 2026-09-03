@@ -534,7 +534,15 @@ export default function DashboardPage() {
           // The telemetry path below already does this correctly.
           lat: d.latitude ?? d.lat ?? null,
           lng: d.longitude ?? d.lng ?? null,
-          priority: d.severity || 'HIGH',
+          // Was `|| 'HIGH'`, which invented a severity for a row that has
+          // none — the same move as the fabricated coordinates in C-5, one
+          // field over. An alert nobody has graded was drawn in the same red as
+          // one graded HIGH by the person who reported it, and there was no way
+          // to tell them apart. UNKNOWN renders muted (the colour maps have no
+          // entry for it and fall through to var(--text-muted)) and does not
+          // match the CRITICAL filter, which is correct: we do not know that it
+          // is. Surface the absence rather than paint over it.
+          priority: d.severity || 'UNKNOWN',
         }));
         setAlerts(mapped as Alert[]);
         setHistory(mapped.filter((a: any) => a.status === 'RESOLVED') as Alert[]);

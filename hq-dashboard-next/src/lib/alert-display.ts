@@ -180,7 +180,15 @@ export function filterAlerts(alerts: Alert[], filters: AlertFilters): Alert[] {
       if (!isSmsFallback(a)) return false;
     } else if (filters.status !== 'ALL' && a.status !== filters.status) return false;
 
-    if (filters.tier !== 'ALL' && a.assigned_to !== filters.tier) return false;
+    // Tier, not assignee. This compared `assigned_to` — a uuid column — against
+    // 'WARD'/'LGA'/'HQ', so it could only ever have matched rows the database
+    // refuses to accept: it has never selected anything. `assigned_to` is still
+    // consulted as a fallback, for any row where a tier label did land in it.
+    if (filters.tier !== 'ALL'
+        && a.assigned_tier !== filters.tier
+        && !(a.assigned_tier == null && a.assigned_to === filters.tier)) {
+      return false;
+    }
     if (filters.lga !== 'ALL' && !geoMatches(a.geo_lga, filters.lga)) return false;
     if (filters.ward !== 'ALL' && !geoMatches(a.geo_ward, filters.ward)) return false;
     if (filters.pu !== 'ALL' && !geoMatches(a.geo_pu, filters.pu)) return false;

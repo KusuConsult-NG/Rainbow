@@ -1,6 +1,6 @@
 # Applying the migrations to production
 
-Eight migrations are proven in CI on every push and **not yet applied** to the
+Nine migrations are proven in CI on every push and **not yet applied** to the
 production Supabase project:
 
 | Order | File | Closes |
@@ -13,6 +13,7 @@ production Supabase project:
 | 6 | `supabase/migrations/20260903000002_system_alerts_broadcast.sql` | mass broadcast, which never worked at all |
 | 7 | `supabase/migrations/20260903000003_alert_escalation_columns.sql` | escalation columns that live only in production |
 | 8 | `supabase/migrations/20260903000004_profiles_badge_number.sql` | the officer badge label both apps display |
+| 9 | `supabase/migrations/20260903000005_alerts_assigned_tier.sql` | tier escalation, which was rejected outright |
 
 Apply them in that order. Number 3 depends on the `alerts.resolved_by` /
 `resolved_at` columns and on `auth.users`. Number 1 must precede number 2, which

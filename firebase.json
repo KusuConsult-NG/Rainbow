@@ -1,0 +1,10 @@
+{
+  "//": "App Hosting only. There is deliberately no `hosting` block: hosting serves static files, and this console must run as a Node server or the middleware auth guard is dropped and every page becomes anonymous. There is no `functions` block either — the Firebase functions in functions/ are the orphaned legacy backend (E2E_AUDIT_REPORT.md C-6, M-7) and nothing here should make them deployable again.",
+  "apphosting": [
+    {
+      "backendId": "rainbow-hq",
+      "rootDir": "hq-dashboard-next",
+      "ignore": ["node_modules", ".git", "**/*.log", ".next"]
+    }
+  ]
+}

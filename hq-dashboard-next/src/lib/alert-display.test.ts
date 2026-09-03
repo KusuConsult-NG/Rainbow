@@ -328,3 +328,49 @@ describe('what counts as CRITICAL', () => {
       .toEqual(['c']);
   });
 });
+
+// ── tier ────────────────────────────────────────────────────────────────────
+//
+// The tier filter compared `assigned_to` — a uuid column — against 'WARD',
+// 'LGA' and 'HQ'. The mobile tried to write those strings there and PostgreSQL
+// rejected them, so the filter could only ever have matched rows the database
+// refuses to store: it has never selected anything. The tier has its own column
+// now.
+describe('tier filtering', () => {
+  const ids = (out: Alert[]) => out.map(x => x.id).sort();
+
+  it('matches on assigned_tier, not on the assignee uuid', () => {
+    const rows = [
+      a({ id: 'lga', assigned_tier: 'LGA', assigned_to: '9f1c-uuid' }),
+      a({ id: 'hq', assigned_tier: 'HQ', assigned_to: '3b7a-uuid' }),
+    ];
+    expect(ids(filterAlerts(rows, { ...NO_FILTERS, tier: 'LGA' }))).toEqual(['lga']);
+  });
+
+  it('does not match a uuid that happens to equal the filter', () => {
+    // An assignee is a person, not a tier. Before, any row whose assigned_to
+    // matched the string was pulled in.
+    const rows = [a({ id: 'x', assigned_to: 'LGA' , assigned_tier: 'WARD' })];
+    expect(ids(filterAlerts(rows, { ...NO_FILTERS, tier: 'LGA' }))).toEqual([]);
+  });
+
+  it('falls back to assigned_to for rows with no tier recorded', () => {
+    const legacy = [a({ id: 'old', assigned_to: 'HQ' })];
+    expect(ids(filterAlerts(legacy, { ...NO_FILTERS, tier: 'HQ' }))).toEqual(['old']);
+  });
+
+  it('ALL admits every tier', () => {
+    const rows = [a({ id: '1', assigned_tier: 'WARD' }), a({ id: '2' })];
+    expect(ids(filterAlerts(rows, NO_FILTERS))).toEqual(['1', '2']);
+  });
+});
+
+// An alert nobody has graded must not be drawn as though somebody had.
+describe('ungraded alerts', () => {
+  const ids = (out: Alert[]) => out.map(x => x.id).sort();
+
+  it('UNKNOWN severity is not critical', () => {
+    const rows = [a({ id: 'ungraded', severity: 'UNKNOWN' as Alert['severity'], priority: 'UNKNOWN' })];
+    expect(ids(filterAlerts(rows, { ...NO_FILTERS, status: 'CRITICAL' }))).toEqual([]);
+  });
+});

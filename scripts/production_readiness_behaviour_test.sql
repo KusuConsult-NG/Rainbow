@@ -300,6 +300,38 @@ BEGIN
   PERFORM id, full_name, badge_number, role, geo_lga, geo_ward FROM public.profiles;
   RAISE NOTICE 'PASS: the responder picker selects only real columns';
 
+  -- ═══ 8. Tier escalation: the payload the mobile sends must apply ═════════
+  --
+  -- `assigned_to` is uuid. The mobile sent `targetCommanderId ?? targetTier`,
+  -- so with no specific commander chosen it put 'LGA' in a uuid column —
+  -- rejected, and since it is one UPDATE the whole escalation went with it.
+  PERFORM pg_temp.become(hq, 'authenticated');
+  BEGIN
+    UPDATE public.alerts SET assigned_to = 'LGA'
+     WHERE id = 'cccccccc-cccc-4ccc-8ccc-cccccccccce1';
+    RAISE EXCEPTION 'FAIL: a tier label was accepted into the assigned_to uuid column';
+  EXCEPTION WHEN invalid_text_representation THEN
+    RAISE NOTICE 'PASS: a tier label in assigned_to is still rejected — hence its own column';
+  END;
+
+  -- The corrected payload: nobody specific yet, but the tier owns it.
+  UPDATE public.alerts SET
+    status        = 'ESCALATED',
+    severity      = 'HIGH',
+    assigned_to   = NULL,
+    assigned_tier = 'LGA',
+    updated_at    = NOW()
+  WHERE id = 'cccccccc-cccc-4ccc-8ccc-cccccccccce1';
+  IF NOT FOUND THEN RAISE EXCEPTION 'FAIL: the tier escalation payload did not apply'; END IF;
+  RAISE NOTICE 'PASS: an escalation with no named commander now applies';
+
+  -- The board's tier filter, and the agency portal's, must not see each other.
+  SELECT count(*) INTO n FROM public.alerts WHERE assigned_tier = 'LGA';
+  IF n <> 1 THEN RAISE EXCEPTION 'FAIL: tier filter returns % rows', n; END IF;
+  SELECT count(*) INTO n FROM public.alerts WHERE escalated_to_agency = 'LGA';
+  IF n <> 0 THEN RAISE EXCEPTION 'FAIL: a tier leaked into the agency portal filter'; END IF;
+  RAISE NOTICE 'PASS: tiers and agencies no longer share a column';
+
   RESET ROLE;
   RAISE NOTICE 'ALL PRODUCTION READINESS CHECKS PASSED';
 END $$;
