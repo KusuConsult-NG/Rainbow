@@ -2050,3 +2050,38 @@ safe zones, HQ accounts. They are the same generation as the code just deleted
 and are the obvious next removal, but unlike `functions/` they describe data
 rather than a live attack surface, so they are left until the Firestore project
 itself is decommissioned.
+
+### And the Firestore-era scripts
+
+Eighteen more files, leaving fourteen in `scripts/` — every one of them either
+exercised by CI or part of the Supabase migration tooling.
+
+**Twelve seeded or provisioned Firestore**: access codes, jurisdictions, safe
+zones, mock alerts, HQ and responder accounts, user segments. They are the same
+generation as the Cloud Functions and address a datastore neither app has used
+since the move to Supabase.
+
+**`reset-hq-password.js`** went with them, and it is the one worth naming
+separately: a Firebase Auth REST script carrying `NEW_PASSWORD = '12345Gg!'` in
+plain text — the shared demo credential from H-2, still sitting in the tree
+under a different filename after the login page was cleaned up. It matched no
+pattern in the credential scan because a password is just a string; nothing
+about it looks like a key. That is a limit of the scan worth remembering: it
+catches credential *shapes*, and a weak shared password has none.
+
+**`scripts/package.json` and its lockfile** declared exactly one dependency,
+`firebase-admin`, for those twelve scripts. `verify_rls.js` resolves
+`@supabase/supabase-js` from the dashboard workspace instead, so with the
+Firestore scripts gone the manifest had no purpose.
+
+**Three one-off tools** — `fix_siec.js`, `remove_alpha.py`, `resize_ipad.py` —
+were deleted on different grounds. Each hardcodes an absolute path under
+`/Users/mac/RainBow/`, so none of them can run for anybody but the machine they
+were written on. That is precisely the defect that made the original `deploy.sh`
+undeployable (M-5). A script that cannot execute anywhere is not tooling.
+
+Nothing referenced any of the eighteen — no workflow, no shell script, no
+documentation. What remains: the RLS harness and its generators, the drift
+checker, `verify_rls.js`, `build_web.sh` and the UI automation runner. The
+generated SQL still regenerates byte-identical, and the credential scan is
+clean.
