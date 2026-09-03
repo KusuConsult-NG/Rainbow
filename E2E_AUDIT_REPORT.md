@@ -1764,3 +1764,55 @@ language now fails the build.
 Three new assertions in `scripts/production_readiness_behaviour_test.sql`: the
 escalation update applies, `escalation_log` appends rather than replaces, and an
 escalated incident is visible under the agency filter the portal uses.
+
+
+---
+
+## The CRITICAL filter, and a claim I got wrong
+
+While sweeping the read side, `alerts.priority` looked like a live defect:
+`filterAlerts` and `clusterAlerts` both tested `alert.priority === 'CRITICAL'`,
+and **nothing in either codebase writes `priority` to the database** — the
+mobile maps its priority enum onto `severity`
+(`'severity': priority.name.toUpperCase()`) and the console's own writes set
+`severity` too. On that evidence the board's CRITICAL filter appeared to match
+only DURESS alerts.
+
+It does not. `dashboard/page.tsx:537` copies the field across as rows load —
+`priority: d.severity || 'HIGH'` — and that page is the only caller of either
+function. **The filter works today.** The earlier claim here was wrong and is
+withdrawn.
+
+What is real is thinner, and still worth closing:
+
+* **The coupling is invisible from the module.** `alert-display.ts` is exported
+  and unit-tested on its own, with nothing in it saying the caller must map
+  `severity` onto `priority` two hundred lines away. A second caller passing
+  rows straight from the database gets a CRITICAL filter that silently matches
+  only DURESS. `isCriticalAlert()` now reads both fields, so the module is
+  correct on its own terms.
+
+* **Reading `severity` alone would have been a regression**, which is worth
+  recording because it was the first attempt. `clusterAlerts` promotes a card by
+  setting `priority = 'CRITICAL'`; a severity-first rule let a MEDIUM severity
+  mask that and dropped promoted clusters out of the filter — caught by two
+  pre-existing tests. Either field saying CRITICAL is now enough. On a filter
+  whose job is to surface the worst incidents, showing one too many costs a
+  glance and dropping one costs more.
+
+* **Cluster promotion set only `priority`.** The list read CRITICAL and the
+  opened card read whatever the first report said. Both fields are promoted now.
+
+* **`/api/ai/analyze` selected `priority` explicitly.** PostgREST rejects a
+  select naming an unknown column in full, so on a database without it the
+  triage endpoint returned 400 for every incident. Dropped from the select; the
+  prompt already falls back to `a.severity || a.priority`.
+
+Five tests cover it, including the shape the hidden coupling would have dropped
+— a row with `severity` set and no `priority`. Reverting to the priority-only
+check fails three; dropping the severity half of cluster promotion fails one.
+
+Noted, not changed: `priority: d.severity || 'HIGH'` invents a severity for a
+row that has none. HIGH over-states rather than under-states, so it fails safe,
+but it is the same species as the invented coordinates in C-5 and should
+eventually read as UNKNOWN.

@@ -113,7 +113,12 @@ export async function POST(request: Request) {
     const admin = getSupabaseAdmin();
     const { data: alert, error } = await admin
       .from('alerts')
-      .select('id, type, description, severity, priority, geo_lga, geo_ward')
+      // `priority` was named here too. It is not a column in any migration —
+      // both apps write `severity` — and PostgREST rejects a select naming an
+      // unknown column IN FULL, so on a database without it this route
+      // returned 400 for every incident rather than a triage. The prompt below
+      // already falls back to `a.priority` if a row happens to carry one.
+      .select('id, type, description, severity, geo_lga, geo_ward')
       .eq('id', alertId)
       .maybeSingle();
 
