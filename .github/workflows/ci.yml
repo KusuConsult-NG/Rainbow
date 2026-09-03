@@ -584,12 +584,13 @@ jobs:
           set -euo pipefail
           python3 scripts/build_rls_dryrun.py
           python3 scripts/build_rls_inventory.py
-          if ! git diff --quiet -- scripts/rls_production_dryrun.sql scripts/rls_inventory.sql; then
-            echo "::error::A generated SQL script is stale. Run: python3 scripts/build_rls_dryrun.py && python3 scripts/build_rls_inventory.py"
-            git diff -- scripts/rls_production_dryrun.sql scripts/rls_inventory.sql | head -60
+          python3 scripts/build_apply_all.py
+          if ! git diff --quiet -- scripts/rls_production_dryrun.sql scripts/rls_inventory.sql scripts/apply_all_migrations.sql; then
+            echo "::error::A generated SQL script is stale. Run: python3 scripts/build_rls_dryrun.py && python3 scripts/build_rls_inventory.py && python3 scripts/build_apply_all.py"
+            git diff -- scripts/rls_production_dryrun.sql scripts/rls_inventory.sql scripts/apply_all_migrations.sql | head -60
             exit 1
           fi
-          echo "OK: both generated scripts match the migrations."
+          echo "OK: all three generated scripts match the migrations."
 
       # The inventory's "is this policy ours?" list is extracted from the
       # migration files. A hand-written version was tried first and was
@@ -626,6 +627,24 @@ jobs:
           test "$(grep -cE '^BEGIN\s*;' scripts/rls_production_dryrun.sql)" -eq 1
           test "$(grep -cE '^ROLLBACK\s*;' scripts/rls_production_dryrun.sql)" -eq 1
           echo "OK: exactly one BEGIN, exactly one ROLLBACK, no COMMIT."
+
+  apply-all:
+    name: Supabase — the one-paste apply script actually applies
+    runs-on: ubuntu-latest
+    # scripts/apply_all_migrations.sql is what somebody pastes into a production
+    # SQL editor, so "it contains the right text" is the wrong test. This runs
+    # the whole buffer top to bottom against a production-shaped database, twice
+    # (it claims to be idempotent), and asserts on its own 14-row verdict table.
+    # Mutation-checked: dropping one migration from the generator turns the
+    # matching row into *** FAIL ***.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL 16
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-16
+      - name: Apply it exactly as pasted
+        run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_apply_all.sh
 
   rls-migration:
     name: Supabase — RLS migration correctness

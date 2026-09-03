@@ -80,8 +80,13 @@ runtime warning — the app crashes on first render and serves
 
 ### Database
 
-Nine migrations, applied in filename order. **Do not apply them by hand without
-reading `docs/APPLYING_THE_MIGRATIONS.md`** — the RLS migration drops prior
+Nine migrations. Applying them is two pastes into the Supabase SQL editor —
+`scripts/rls_production_dryrun.sql` (read-only, prints a verdict), then
+`scripts/apply_all_migrations.sql` (all nine, finishing with a PASS/FAIL table).
+Both are generated from the migrations, CI fails if either drifts, and the
+second is executed against a production-shaped PostgreSQL on every push.
+
+**Read `docs/APPLYING_THE_MIGRATIONS.md` before the first one** — the RLS migration drops prior
 policies by exact name, and a policy someone created in the Supabase dashboard
 survives it. PostgreSQL ORs permissive policies together, so one survivor
 re-opens the table and the migration becomes decorative. The runbook's dry run
@@ -105,7 +110,7 @@ citizen, a responder, an agency liaison and a commander can each actually *do*.
 
 ## What CI enforces
 
-Seven jobs, each tied to a defect that reached the default branch at least once.
+Eight jobs, each tied to a defect that reached the default branch at least once.
 
 | job | what it prevents |
 |---|---|
@@ -113,7 +118,8 @@ Seven jobs, each tied to a defect that reached the default branch at least once.
 | HQ dashboard | typecheck, lint, build, tests, security headers, **server secrets in the client bundle**, demo credentials in a production build |
 | Repo — no credential material | any credential-shaped string in a tracked file |
 | Supabase — RLS migration correctness | the migrations, proven behaviourally against real PostgreSQL |
-| Supabase — dry run in sync | the production dry-run script is generated; a stale copy is pasted into a live SQL editor |
+| Supabase — dry run in sync | the generated scripts are what get pasted into a live SQL editor; a stale copy is worse than none, because it looks authoritative |
+| Supabase — one-paste apply script | runs `apply_all_migrations.sql` against a production-shaped database, top to bottom, twice, and asserts on its own PASS/FAIL table |
 | Supabase — dry run reports something | that the dry run emits a verdict rather than silence, which on a "is this safe?" script is the most dangerous output it could give |
 | Supabase — anon-access probe | manual only; fails if anon can read or write a sensitive table |
 
