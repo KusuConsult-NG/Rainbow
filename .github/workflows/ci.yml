@@ -585,12 +585,14 @@ jobs:
           python3 scripts/build_rls_dryrun.py
           python3 scripts/build_rls_inventory.py
           python3 scripts/build_apply_all.py
-          if ! git diff --quiet -- scripts/rls_production_dryrun.sql scripts/rls_inventory.sql scripts/apply_all_migrations.sql; then
-            echo "::error::A generated SQL script is stale. Run: python3 scripts/build_rls_dryrun.py && python3 scripts/build_rls_inventory.py && python3 scripts/build_apply_all.py"
-            git diff -- scripts/rls_production_dryrun.sql scripts/rls_inventory.sql scripts/apply_all_migrations.sql | head -60
+          python3 scripts/build_bootstrap.py
+          GEN="scripts/rls_production_dryrun.sql scripts/rls_inventory.sql scripts/apply_all_migrations.sql scripts/bootstrap_staging.sql"
+          if ! git diff --quiet -- $GEN; then
+            echo "::error::A generated SQL script is stale. Re-run the four build_*.py generators."
+            git diff -- $GEN | head -60
             exit 1
           fi
-          echo "OK: all three generated scripts match the migrations."
+          echo "OK: all four generated scripts match the migrations."
 
       # The inventory's "is this policy ours?" list is extracted from the
       # migration files. A hand-written version was tried first and was
@@ -645,6 +647,26 @@ jobs:
           sudo apt-get install -y -qq postgresql-16
       - name: Apply it exactly as pasted
         run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_apply_all.sh
+
+  bootstrap:
+    name: Supabase — the staging bootstrap builds a correct project from zero
+    runs-on: ubuntu-latest
+    # scripts/bootstrap_staging.sql is pasted into a brand-new Supabase project,
+    # and unlike apply_all it starts from the ORIGINAL schema — whose policies
+    # are open to anon until a later migration removes them. So three things
+    # have to hold, and all three are asserted here rather than assumed:
+    # it produces a correct schema from empty, it REFUSES a database that
+    # already holds data (structurally — the whole file is one transaction, so
+    # the refusal rolls back rather than half-applying), and it lands on exactly
+    # the schema that replaying the migrations one at a time produces.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL 16
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-16
+      - name: Bootstrap an empty project, then try to bootstrap a full one
+        run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_bootstrap.sh
 
   rls-migration:
     name: Supabase — RLS migration correctness

@@ -2135,3 +2135,78 @@ schema changes to a live emergency-response system is not something to do
 without the operator reading the dry run's verdict first. The work that could be
 done here was making the operator's part one paste instead of nine, and proving
 the paste works.
+
+---
+
+## A staging project, and the gap it closes
+
+Everything in this repository is proven against a throwaway PostgreSQL. That
+harness has one blind spot, and it is the one that has cost the most here: **it
+cannot see what a live Supabase does.** No PostgREST, no Auth service, no
+Storage service — and, decisively, none of the policies somebody created by hand
+in the dashboard. Production held 44 policies where a replica rebuilt from these
+files held 21. Twenty-three existed only where no test could look.
+
+`docs/STAGING.md` closes that for the cost of one free project.
+
+### Three artefacts
+
+**`scripts/bootstrap_staging.sql`** — all thirteen migrations, generated, ending
+in a fifteen-row PASS/FAIL table. Not the same file as
+`apply_all_migrations.sql`, and the difference matters in both directions: this
+one includes the four historical migrations because a fresh project has nothing,
+and that one omits them because production already has them and re-running the
+initial schema would re-create the `USING (true)` policies the RLS migration
+exists to remove.
+
+**`scripts/seed_staging.js`** — one account per role the apps branch on, and
+five incidents chosen so that previously-real defects are visible rather than
+described: an SOS with no coordinates that must read UNLOCATED rather than a pin
+in central Jos, an ungraded incident that must read UNKNOWN and stay out of the
+CRITICAL filter, a JOS NORTH broadcast that must not reach a Mangu-based
+liaison, and an escalation that must appear in one agency's portal and no
+other. Auth users cannot be seeded in SQL — Supabase hashes passwords in the
+Auth service, so a row poked into `auth.users` cannot log in — which is why this
+one is JavaScript.
+
+**`scripts/verify_bootstrap.sh`** — a CI job, because a bootstrap that has never
+been run is a hypothesis.
+
+### The guard was wrong twice, and both are recorded
+
+The bootstrap must refuse a database that already holds data, because its path
+to a correct end state runs *through* the original schema's open policies. The
+first version only `RAISE`d an exception. That aborts the buffer in the Supabase
+SQL editor — the documented route — but under plain `psql` the error prints and
+**execution continues**, applying every migration anyway. A guard that warns
+while the damage proceeds is worse than none.
+
+The fix is structural: the whole file is one transaction, with the RLS
+migration's own `BEGIN`/`COMMIT` stripped during generation so a nested `COMMIT`
+cannot end it early. A tripped guard now rolls back whole.
+
+The test was wrong in a matching way — it asserted on psql's exit code, which is
+`0` for a rolled-back run, so it would have passed the very version that applied
+the migrations anyway. It now asserts by outcome: after a refused run, the
+column added by the last migration must not exist.
+
+### One check that was wrong about the schema, not the schema
+
+The verdict table originally asserted that *no* permissive `USING (true)` policy
+survives. Three do, and all three are correct — `system_alerts_read`,
+`safe_zones_read` and `app_config_read_authenticated`, each granted to
+`authenticated` only. Advisories, safe zones and app config are meant to reach
+every signed-in user.
+
+That check confused a *shape* with the risk. The risk is who can reach it, which
+is a separate check and which passes. This repository's own
+`scripts/rls_inventory.sql` already drew that distinction in its `reach` column;
+the check did not. It now pins the exact set of three, which is stricter than
+deleting it: a new permissive policy fails here even when granted only to
+`authenticated`, which the anon check would let through.
+
+### What it still cannot tell you
+
+Stated plainly, because the point of staging is to stop guessing: it does not
+test the deployment (the App Hosting config has still never been executed), the
+mobile release builds (no Android or iOS SDK here), or behaviour under load.
