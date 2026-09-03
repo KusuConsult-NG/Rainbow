@@ -232,7 +232,9 @@ REVOKE EXECUTE ON FUNCTION public.liaison_agency() FROM anon;
 --    (the step phase1_foundation.sql omitted)
 -- ────────────────────────────────────────────────────────────────────────────
 
--- from 20260720000000_initial_schema.sql / supabase_schema_setup.sql
+-- from 20260720000000_initial_schema.sql (and its byte-identical root-level
+-- copy `supabase_schema_setup.sql`, since deleted — two files declaring the
+-- same schema is two sources of truth for it)
 DROP POLICY IF EXISTS "Allow public read access to profiles"          ON public.profiles;
 DROP POLICY IF EXISTS "Allow individual insert/update to own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Allow authenticated users to read alerts"      ON public.alerts;

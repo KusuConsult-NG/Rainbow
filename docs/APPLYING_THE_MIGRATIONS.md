@@ -22,7 +22,7 @@ exist and number 1 does nothing, which is the point: it makes a rebuilt staging
 or disaster-recovery project match production instead of silently lacking the
 agency portal's entire backend.
 
-For the deployment around these — hosting, environment, signing, rotation — see
+For the deployment around these — hosting, environment, signing — see
 `docs/PRODUCTION_DEPLOYMENT.md`.
 
 Everything below runs in **Supabase Dashboard → SQL Editor**, signed in as the
@@ -218,6 +218,6 @@ cannot cancel an SOS, which is the intended fail-closed behaviour.
 
 ## Still outstanding after this
 
-Applying these closes C-3, C-4, H-7 and the shared-PIN finding. It does **not**
-rotate anything. The credentials that were in git history remain compromised
-until rotated, regardless of the purge — see H-6 in `E2E_AUDIT_REPORT.md`.
+Applying these closes C-3, C-4, H-7 and the shared-PIN finding. It does not
+settle C-6 — whether the orphaned Firebase functions are still deployed — which
+is step 0 of `docs/PRODUCTION_DEPLOYMENT.md`.
