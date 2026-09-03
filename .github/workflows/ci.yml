@@ -708,7 +708,7 @@ jobs:
       # statewide warning should have been. The same sweep then found two more
       # (`alerts.has_live_stream`, `profiles.last_feedback`), both wrapped in
       # catches that discarded the rejection.
-      - name: Assert neither app writes a column the schema does not have
+      - name: Assert neither app names a column or function the schema lacks
         run: python3 scripts/check_schema_drift.py
 
       - name: Assert every realtime subscription is on a published table

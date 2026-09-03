@@ -1950,3 +1950,20 @@ rotating the six leaked secrets, running `firebase functions:list` to settle
 C-6, and asking GitHub Support to purge the 19 `refs/pull/*` refs. Probing
 production from here is forbidden for good reasons, and a rotation performed by
 an agent is a rotation nobody can audit.
+
+
+### The third leg: RPC calls
+
+Tables and columns were gated; the functions behind `.rpc()` were not. PostgREST
+answers 404 for a function no migration defines, which fails the same silent way
+— and the three the mobile calls (`resolve_emergency`, `verify_emergency_pin`,
+`set_emergency_pins`) are the entire server-side duress-PIN path, so a rename
+that missed a call site would leave an SOS uncancellable.
+
+All three resolve today. The check is in CI so they keep doing so. Worth noting
+how nearly this was missed: the calls are written `.rpc<dynamic>('name', ...)`,
+and a first pattern without the type argument matched nothing and reported
+success — the same under-reporting failure as the earlier two, caught only
+because the count was zero when three were known to exist. The pattern now
+allows the type argument, and the summary line prints the number of functions
+checked rather than just saying OK.
