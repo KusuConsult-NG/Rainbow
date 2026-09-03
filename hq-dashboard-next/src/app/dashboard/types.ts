@@ -24,6 +24,13 @@ export interface Alert {
   severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   priority?: string;
   assigned_to?: string;
+  /**
+   * Which tier of the command chain owns this incident — POLLING_UNIT, WARD,
+   * LGA, HQ. Separate from `assigned_to`, which is a person's uuid: the tier
+   * used to be crammed into that column and into `escalated_to_agency`, and
+   * fitted neither.
+   */
+  assigned_tier?: string;
   assignedToUid?: string | null;
   latitude?: number;
   longitude?: number;

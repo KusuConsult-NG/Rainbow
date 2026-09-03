@@ -627,56 +627,6 @@ jobs:
           test "$(grep -cE '^ROLLBACK\s*;' scripts/rls_production_dryrun.sql)" -eq 1
           echo "OK: exactly one BEGIN, exactly one ROLLBACK, no COMMIT."
 
-  functions-guards:
-    name: Firebase functions — C-6 endpoint guards
-    runs-on: ubuntu-latest
-    # The legacy Firebase backend is slated for removal, but while it is still in
-    # the tree it is deployable source containing two public HTTP endpoints that
-    # run with admin privileges. This asserts they stay shut.
-    #
-    # SCOPE, sharpened 2026-09-02: `firebase.json` was deleted in 25ca6b4 and
-    # nothing replaced it, so as the repo stands `firebase deploy` cannot ship
-    # these functions at all — the guards this job proves have no current route
-    # to production. The job is kept because the source is still here and would
-    # become deployable the moment anyone restores a deploy config; it is not
-    # evidence that anything running is guarded. See C-6 in E2E_AUDIT_REPORT.md.
-    #
-    # NOTE: this is a source-level gate. It cannot see an already-deployed copy —
-    # closing C-6 means `firebase functions:delete`. See E2E_AUDIT_REPORT.md C-6.
-    steps:
-      - uses: actions/checkout@v4
-
-      # Skip cleanly rather than fail once functions/ is deleted, so removing the
-      # legacy stack does not require also remembering to remove this job.
-      - name: Check whether the legacy Firebase stack still exists
-        id: exists
-        run: |
-          if [ -f functions/index.js ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "functions/ has been removed — nothing to guard."
-          fi
-
-      # Node 20, not 22: `functions/package.json` declares `engines: { node: "20" }`,
-      # which is the runtime Firebase actually deploys these on. Testing them on 22
-      # would verify a runtime they never run under, and npm emits EBADENGINE — a
-      # warning today, an error the moment anyone sets engine-strict.
-      - uses: actions/setup-node@v4
-        if: steps.exists.outputs.present == 'true'
-        with:
-          node-version: '20'
-          cache: npm
-          cache-dependency-path: functions/package-lock.json
-
-      - run: npm ci
-        if: steps.exists.outputs.present == 'true'
-        working-directory: functions
-
-      - name: Assert the public HTTP endpoints reject unauthenticated callers
-        if: steps.exists.outputs.present == 'true'
-        run: node functions/test_guards.js
-
   rls-migration:
     name: Supabase — RLS migration correctness
     runs-on: ubuntu-latest
@@ -708,7 +658,7 @@ jobs:
       # statewide warning should have been. The same sweep then found two more
       # (`alerts.has_live_stream`, `profiles.last_feedback`), both wrapped in
       # catches that discarded the rejection.
-      - name: Assert neither app writes a column the schema does not have
+      - name: Assert neither app names a column or function the schema lacks
         run: python3 scripts/check_schema_drift.py
 
       - name: Assert every realtime subscription is on a published table

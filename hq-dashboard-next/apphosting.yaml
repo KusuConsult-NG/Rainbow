@@ -1,0 +1,92 @@
+# Firebase App Hosting — the HQ console.
+#
+# WHY THIS HOST
+#
+# The repository already owns a Firebase project (`.firebaserc` →
+# rainbow-97f1e), so this adds no vendor account, no new billing relationship
+# and no procurement step for a state agency. `next.config.ts` has named App
+# Hosting as the target since static export was removed; this is the file that
+# was missing, which is why `deploy.sh` had no target to resolve.
+#
+# It MUST be a Node runtime, never a static export: the auth guard is Next.js
+# middleware, and a static export silently drops middleware — the console would
+# serve every page to anonymous visitors with no error anywhere.
+#
+# NOT DEPLOY-VERIFIED. This was written from the Next.js deployment guide and
+# the App Hosting schema; nothing in this container can run `firebase deploy`.
+# The first deploy is the test. See docs/PRODUCTION_DEPLOYMENT.md.
+#
+# ── Configuration ───────────────────────────────────────────────────────────
+#
+# Every value comes from Cloud Secret Manager, including the two public ones.
+# That is deliberate. A `value:` here would be committed to git, and the last
+# time project configuration lived in this repository it took a history purge
+# to get it out (E2E_AUDIT_REPORT.md H-6). The anon key is public by design, but
+# public is not the same as "belongs in version control" — and a placeholder
+# would deploy a console that cannot reach its database while looking fine.
+#
+# Create them once, then grant the App Hosting service account access:
+#
+#   echo -n "https://xxxx.supabase.co" | gcloud secrets create supabase-url --data-file=-
+#   echo -n "<anon key>"               | gcloud secrets create supabase-anon-key --data-file=-
+#   echo -n "<secret key>"             | gcloud secrets create supabase-service-role-key --data-file=-
+#   firebase apphosting:secrets:grantaccess supabase-url supabase-anon-key \
+#     supabase-service-role-key --project rainbow-97f1e
+#
+# NEXT_PUBLIC_* are read at BUILD time and inlined into the bundle, so they need
+# BUILD availability or the console crashes on first render with
+# `<html id="__next_error__">`. The service key is RUNTIME only: giving it BUILD
+# availability is how a server secret ends up in a client chunk, which is
+# finding C-1.
+
+runConfig:
+  # A console for a handful of officers, not a public site. Small and cheap,
+  # but minInstances 1 because a cold start during an incident is the wrong
+  # moment to be paying for one.
+  cpu: 1
+  memoryMiB: 512
+  minInstances: 1
+  maxInstances: 5
+  concurrency: 80
+
+env:
+  - variable: NEXT_PUBLIC_SUPABASE_URL
+    secret: supabase-url
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_SUPABASE_ANON_KEY
+    secret: supabase-anon-key
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # SECRET. Bypasses every RLS policy. RUNTIME only — never BUILD.
+  - variable: SUPABASE_SERVICE_ROLE_KEY
+    secret: supabase-service-role-key
+    availability:
+      - RUNTIME
+
+  # Optional. Each of these disables a feature when unset rather than breaking
+  # the console, so they are commented out until you create the secret. See
+  # .env.example for what each one does.
+  #
+  # - variable: TERMII_API_KEY
+  #   secret: termii-api-key
+  #   availability: [RUNTIME]
+  # - variable: SOS_DISPATCH_PHONE
+  #   secret: sos-dispatch-phone
+  #   availability: [RUNTIME]
+  # - variable: GEMINI_API_KEY
+  #   secret: gemini-api-key
+  #   availability: [RUNTIME]
+  # - variable: ONESIGNAL_APP_ID
+  #   secret: onesignal-app-id
+  #   availability: [RUNTIME]
+  # - variable: ONESIGNAL_REST_API_KEY
+  #   secret: onesignal-rest-api-key
+  #   availability: [RUNTIME]
+  # - variable: RAINBOW_WEBHOOK_SECRET
+  #   secret: rainbow-webhook-secret
+  #   availability: [RUNTIME]

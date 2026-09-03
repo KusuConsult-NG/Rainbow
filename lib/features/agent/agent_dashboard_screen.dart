@@ -1684,9 +1684,18 @@ class _EscalationDialogState extends State<_EscalationDialog> {
       final updatePayload = <String, dynamic>{
         'status': 'ESCALATED',
         'severity': targetTier == 'HQ' ? 'CRITICAL' : 'HIGH',
-        // Write UUID if we have a specific officer, else fall back to tier string
-        'assigned_to': targetCommanderId ?? targetTier,
-        'escalated_to_agency': targetTier, // tier label for filtering
+        // `assigned_to` is a uuid column. This used to send
+        // `targetCommanderId ?? targetTier`, so with no specific commander
+        // chosen it wrote 'LGA' to it — PostgreSQL rejects that, and because
+        // this is one UPDATE the whole escalation went down with it: status,
+        // severity, the log and the audit note. Null when nobody specific is
+        // taking it; the tier below says who owns it.
+        'assigned_to': targetCommanderId,
+        // The tier now has its own column. It was written to
+        // `escalated_to_agency`, which is what the agency portal filters on —
+        // so an internal escalation to LGA sat in the same field as a handover
+        // to the police, and neither read cleanly.
+        'assigned_tier': targetTier,
         'escalation_log': newLog,
         'ai_summary': existingSummary.isEmpty ? note : '$existingSummary\n$note',
         'updated_at': DateTime.now().toIso8601String(),

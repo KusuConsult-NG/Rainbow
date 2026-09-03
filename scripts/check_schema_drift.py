@@ -270,6 +270,53 @@ def selected_columns() -> list[tuple[str, str, str, int]]:
     return found
 
 
+# `.rpc('resolve_emergency', ...)` — a call to a function no migration defines
+# returns 404 from PostgREST and fails the same silent way a bad column does.
+# The type argument matters: these are written `.rpc<dynamic>('name', ...)` in
+# Dart, and a pattern without it finds nothing while reporting success — which
+# is what a first look at this actually did.
+RPC_CALL = re.compile(r"\.rpc\s*(?:<[^>]*>)?\s*\(\s*['\"]([a-z_][a-z0-9_]*)['\"]")
+
+# CREATE [OR REPLACE] FUNCTION public.name(
+FUNCTION_DEF = re.compile(
+    r"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?([a-z_][a-z0-9_]*)",
+    re.IGNORECASE,
+)
+
+
+def defined_functions() -> set[str]:
+    names: set[str] = set()
+    for path in MIGRATIONS:
+        names.update(
+            m.group(1).lower()
+            for m in FUNCTION_DEF.finditer(strip_comments(path.read_text()))
+        )
+    return names
+
+
+def called_functions() -> list[tuple[str, str, int]]:
+    """(function, file, line) for every .rpc() call."""
+    found = []
+    for base, globs in (
+        (ROOT / "hq-dashboard-next/src", ("*.ts", "*.tsx")),
+        (ROOT / "lib", ("*.dart",)),
+    ):
+        for pattern in globs:
+            for path in base.rglob(pattern):
+                if path.name.endswith((".test.ts", ".test.tsx", "_test.dart")):
+                    continue
+                text = blank_comments(path.read_text())
+                for m in RPC_CALL.finditer(text):
+                    found.append(
+                        (
+                            m.group(1),
+                            str(path.relative_to(ROOT)),
+                            text.count("\n", 0, m.start()) + 1,
+                        )
+                    )
+    return found
+
+
 def main() -> int:
     schema = schema_columns()
     problems: list[str] = []
@@ -297,6 +344,20 @@ def main() -> int:
             print(f"  {t}")
         print()
 
+    functions = defined_functions()
+    missing_fns = [
+        f"  {path}:{line}  {fn}()"
+        for fn, path, line in sorted(set(called_functions()))
+        if fn not in functions
+    ]
+    if missing_fns:
+        print("RPC functions called that no migration defines:")
+        print("\n".join(missing_fns))
+        print()
+        print("PostgREST answers 404 for an undefined function, so each of these")
+        print("fails at runtime and nowhere else.")
+        print()
+
     if problems:
         print("Columns read or written that no migration creates:")
         print("\n".join(sorted(set(problems))))
@@ -306,11 +367,13 @@ def main() -> int:
         print("and nowhere else. Add the column in a migration, or stop naming it.")
         return 1
 
-    if unknown_tables:
+    if unknown_tables or missing_fns:
         return 1
 
     print(f"OK: every column read or written by either app exists in the "
-          f"schema ({len(schema)} tables).")
+          f"schema ({len(schema)} tables), and all "
+          f"{len(set(f for f, _, _ in called_functions()))} RPC functions "
+          f"called are defined.")
     return 0
 
 

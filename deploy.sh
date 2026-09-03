@@ -69,17 +69,32 @@ ok "No server secrets in client bundle"
 
 # ── Deploy ───────────────────────────────────────────────────────────────────
 log "Deploying HQ dashboard"
-if [ ! -f "$ROOT/firebase.json" ]; then
-  fail "No firebase.json in the repository, so 'firebase deploy' has no target.
-       Either add one, or deploy the Next.js app through whatever host actually
-       serves it. next.config.ts says Firebase App Hosting (Node runtime, since
-       static export was removed for the auth proxy) — but nothing in this repo
-       configures it. This step is intentionally a hard failure rather than a
-       command that looks like it worked."
-fi
+
+# App Hosting, not Hosting. `firebase deploy --only hosting` serves static
+# files; this console must run as a Node server or Next.js middleware — which is
+# the entire auth guard — is dropped and every page is served to anonymous
+# visitors with no error anywhere.
+[ -f "$ROOT/firebase.json" ] || fail "firebase.json is missing; nothing to deploy to."
+[ -f "$DASHBOARD/apphosting.yaml" ] || fail "hq-dashboard-next/apphosting.yaml is missing."
 
 command -v firebase >/dev/null || fail "firebase CLI not found on PATH"
-firebase deploy --only hosting --project "$PROJECT"
+
+# The build above already proved the public env is present locally. On App
+# Hosting it comes from Secret Manager, and a missing secret fails the remote
+# build with a message about the variable rather than about access — so check
+# the grants are in place before spending a build on it.
+log "Checking Secret Manager access"
+for SECRET in supabase-url supabase-anon-key supabase-service-role-key; do
+  if ! firebase apphosting:secrets:describe "$SECRET" --project "$PROJECT" >/dev/null 2>&1; then
+    fail "Secret '$SECRET' is not readable by App Hosting in $PROJECT.
+       Create it and grant access — see hq-dashboard-next/apphosting.yaml,
+       which lists the exact commands. Deploying without it produces a console
+       that builds and cannot reach its database."
+  fi
+done
+ok "All three required secrets are accessible"
+
+firebase deploy --only apphosting --project "$PROJECT"
 ok "Deploy complete"
 
 cat <<'EOF'

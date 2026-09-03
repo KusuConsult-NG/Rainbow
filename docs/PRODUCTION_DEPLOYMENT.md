@@ -40,7 +40,7 @@ emergencies. The full instructions are in `E2E_AUDIT_REPORT.md`.
 
 ## 1. Database
 
-Eight migrations, in filename order. `docs/APPLYING_THE_MIGRATIONS.md` is the
+Nine migrations, in filename order. `docs/APPLYING_THE_MIGRATIONS.md` is the
 step-by-step runbook, including the mandatory read-only dry run; do not apply
 the RLS migration without it.
 
@@ -54,8 +54,9 @@ the RLS migration without it.
 | 6 | `20260903000002_system_alerts_broadcast.sql` | Makes mass broadcast work. Until it runs, every broadcast fails on a NOT NULL `title` and six non-existent columns. |
 | 7 | `20260903000003_alert_escalation_columns.sql` | Adds `alerts.escalated_to_agency` and `escalation_log`. Already present on production; a no-op there. |
 | 8 | `20260903000004_profiles_badge_number.sql` | Adds `profiles.badge_number`, the label both apps show for an officer. A no-op if production has it. |
+| 9 | `20260903000005_alerts_assigned_tier.sql` | Adds `alerts.assigned_tier` and moves tier labels out of `escalated_to_agency`. Until it runs, a mobile escalation with no named commander is **rejected in full**. |
 
-All eight are idempotent and every one of them is proven on a real PostgreSQL by
+All nine are idempotent and every one of them is proven on a real PostgreSQL by
 the `rls-migration` CI job before it reaches you.
 
 ### After applying, verify (read-only)
@@ -83,25 +84,45 @@ and OR together with these. Drop them, or the append-only guarantee is not one.
 
 ## 2. HQ console
 
-### There is no deploy target configured in this repository
+### Firebase App Hosting
 
-`next.config.ts` says Firebase App Hosting, and `deploy.sh` runs `firebase
-deploy --only hosting` — but **there is no `firebase.json`, no
-`apphosting.yaml`, and no `vercel.json`**. `deploy.sh` therefore stops with a
-hard failure at the deploy step rather than running a command that looks like it
-worked. That is deliberate: pick a host, then add its config file.
+`firebase.json` and `hq-dashboard-next/apphosting.yaml` are in the repository,
+and `./deploy.sh` runs `firebase deploy --only apphosting`. App Hosting was
+chosen because the project already exists (`.firebaserc` → `rainbow-97f1e`), so
+it adds no vendor account and no procurement step.
 
-Whichever you choose, it must run **Node.js, not static export**. `output:
-'export'` was removed because the auth guard is Next.js middleware, and a static
-export silently drops middleware — the console would serve every page to
-anonymous visitors with no error anywhere.
+It runs a **Node server, not a static export**. That is not a preference:
+`output: 'export'` was removed because the auth guard is Next.js middleware, and
+a static export silently drops middleware — the console would serve every page
+to anonymous visitors with no error anywhere.
 
-* **Firebase App Hosting** — add `apphosting.yaml` at the repo root, set the
-  environment variables in it (secrets via Secret Manager, never in the file),
-  and change `deploy.sh` to `firebase deploy --only apphosting`.
-* **Vercel** — connect the repo with root directory `hq-dashboard-next`; the env
-  vars go in the project settings. `deploy.sh` is then unnecessary.
-* **A container** — `npm ci && npm run build && npm start`, port from `$PORT`.
+**Not deploy-verified.** The config was written from the Next.js deployment
+guide and the App Hosting schema; nothing in the audit container can run
+`firebase deploy`. The first deploy is the test.
+
+First time only — create the three secrets and grant App Hosting access. Every
+value comes from Secret Manager, including the two public ones, so that no
+project configuration is committed to git again (H-6):
+
+```bash
+echo -n "https://xxxx.supabase.co" | gcloud secrets create supabase-url --data-file=-
+echo -n "<anon key>"               | gcloud secrets create supabase-anon-key --data-file=-
+echo -n "<service role key>"       | gcloud secrets create supabase-service-role-key --data-file=-
+firebase apphosting:secrets:grantaccess supabase-url supabase-anon-key \
+  supabase-service-role-key --project rainbow-97f1e
+
+firebase apphosting:backends:create --project rainbow-97f1e   # once
+./deploy.sh                                                   # thereafter
+```
+
+`deploy.sh` checks all three secrets are readable before it spends a build, so a
+missing grant fails in seconds with the name of the secret rather than as an
+opaque remote build error.
+
+**If you would rather use Vercel:** connect the repo with root directory
+`hq-dashboard-next` and set the same three variables in project settings;
+`deploy.sh` becomes unnecessary, since Vercel builds on push. Nothing in the
+application code is Firebase-specific — the choice is reversible.
 
 ### Environment
 
