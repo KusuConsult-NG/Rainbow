@@ -40,7 +40,7 @@ emergencies. The full instructions are in `E2E_AUDIT_REPORT.md`.
 
 ## 1. Database
 
-Five migrations, in filename order. `docs/APPLYING_THE_MIGRATIONS.md` is the
+Eight migrations, in filename order. `docs/APPLYING_THE_MIGRATIONS.md` is the
 step-by-step runbook, including the mandatory read-only dry run; do not apply
 the RLS migration without it.
 
@@ -51,8 +51,11 @@ the RLS migration without it.
 | 3 | `20260902000000_per_user_emergency_pins.sql` | Per-user, server-verified duress PINs. |
 | 4 | `20260903000000_realtime_publication.sql` | Adds the three tables the console subscribes to that were never published. |
 | 5 | `20260903000001_incident_media_storage.sql` | Creates and secures the `incident-media` bucket. |
+| 6 | `20260903000002_system_alerts_broadcast.sql` | Makes mass broadcast work. Until it runs, every broadcast fails on a NOT NULL `title` and six non-existent columns. |
+| 7 | `20260903000003_alert_escalation_columns.sql` | Adds `alerts.escalated_to_agency` and `escalation_log`. Already present on production; a no-op there. |
+| 8 | `20260903000004_profiles_badge_number.sql` | Adds `profiles.badge_number`, the label both apps show for an officer. A no-op if production has it. |
 
-All five are idempotent and every one of them is proven on a real PostgreSQL by
+All eight are idempotent and every one of them is proven on a real PostgreSQL by
 the `rls-migration` CI job before it reaches you.
 
 ### After applying, verify (read-only)
@@ -171,6 +174,9 @@ flutter build ipa --release            # App Store
   that is the realtime publication working.
 * Raise a test SOS with a photo and confirm the image renders in the console;
   that is the storage bucket and its policies working.
+* Send a test broadcast scoped to one LGA and confirm it reaches a device in
+  that LGA and **not** one outside it. Audience and geography were both silently
+  ignored before; a success message from the console is not evidence.
 * Set an emergency PIN under Settings → Emergency PIN on a device, then cancel a
   test SOS with it. Until a user sets one, cancellation reports `UNSET` and
   refuses — intended fail-closed behaviour, but worth seeing once.

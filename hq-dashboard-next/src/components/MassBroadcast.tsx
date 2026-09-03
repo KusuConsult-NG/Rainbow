@@ -15,6 +15,10 @@ export default function MassBroadcast() {
   const [severity, setSeverity] = useState<'INFO' | 'WARNING' | 'CRITICAL'>('CRITICAL');
   const [targetAudience, setTargetAudience] = useState<'ALL' | 'CITIZENS' | 'AGENTS'>('ALL');
   const [targetAgency, setTargetAgency] = useState<string>('ALL');
+  // How long the advisory stands. The console had no control for this and never
+  // wrote `expires_at`, so every broadcast lived on the default until somebody
+  // deactivated it by hand — which nothing in this UI can do either.
+  const [expiryHours, setExpiryHours] = useState(24);
   const [targetLga, setTargetLga] = useState('ALL');
   const [targetWard, setTargetWard] = useState('ALL');
   const [targetPu, setTargetPu] = useState('ALL');
@@ -43,16 +47,30 @@ export default function MassBroadcast() {
       : 'STATEWIDE (ALL SECTORS)';
 
     try {
+      // Every field here is a real column (see
+      // supabase/migrations/20260903000002_system_alerts_broadcast.sql).
+      // It previously was not: `active` and `target_sector` existed nowhere, so
+      // PostgREST rejected the whole insert, and `title` was omitted while being
+      // NOT NULL. No broadcast sent from this console ever reached anybody.
       const payload = {
+        // NOT NULL. Neither this screen nor the mobile one asks the operator for
+        // a heading, so it is derived — severity and scope are what an advisory
+        // needs at a glance.
+        title: `${severity} ADVISORY — ${fullSectorScope}`,
         message: message.trim(),
         severity,
         target_audience: targetAudience,
         target_agency: targetAgency,
-        target_sector: fullSectorScope,
         target_lga: targetLga,
         target_ward: targetWard,
         target_pu: targetPu,
-        active: true,
+        // The mobile listener filters on `is_active`. The old payload set
+        // `active`, which is not a column — and even had it been, nothing read it.
+        is_active: true,
+        // Was never set, so console advisories relied on the column default and
+        // could not be given a duration. An advisory that outlives the situation
+        // it describes is how a board full of stale warnings starts.
+        expires_at: new Date(Date.now() + expiryHours * 3600_000).toISOString(),
         created_at: new Date().toISOString()
       };
 
@@ -123,6 +141,24 @@ export default function MassBroadcast() {
               <option value="ALL">🌐 ALL (Citizens + Security Units)</option>
               <option value="CITIZENS">📱 CITIZENS MOBILE APP ONLY</option>
               <option value="AGENTS">👮 FIELD RESPONDERS ONLY</option>
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="broadcast-expiry" style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', display: 'block', marginBottom: 8, letterSpacing: 0.5 }}>
+              ADVISORY STANDS FOR
+            </label>
+            <select
+              id="broadcast-expiry"
+              className="input-tactical"
+              style={{ width: '100%', padding: '10px 14px', borderRadius: 10, fontSize: 12, fontWeight: 700 }}
+              value={expiryHours}
+              onChange={(e) => setExpiryHours(Number(e.target.value))}
+            >
+              <option value={6}>6 HOURS</option>
+              <option value={12}>12 HOURS</option>
+              <option value={24}>24 HOURS</option>
+              <option value={72}>72 HOURS (3 DAYS)</option>
             </select>
           </div>
 

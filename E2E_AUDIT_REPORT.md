@@ -1593,3 +1593,282 @@ question rather than a cleanup one: **if the old console is still hosted
 anywhere, it is a second door into the data that none of the RLS migration
 reaches.** Deleting the source does not take it down. Check for it while you
 are in the Firebase console.
+
+---
+
+## Mass broadcast never worked
+
+`system_alerts` is how HQ warns the public and its own responders. It was broken
+in four independent ways, and not one of them surfaced as something an operator
+would read as failure.
+
+**1. Every insert failed.** `title` is `NOT NULL` with no default, and neither
+writer supplied it — not the console's `MassBroadcast.tsx`, not the mobile
+`admin_broadcast_screen.dart`. On any database built from these migrations,
+every broadcast raised a not-null violation.
+
+**2. Six of the console's columns did not exist.** `target_agency`,
+`target_sector`, `target_lga`, `target_ward`, `target_pu` and `active` appear in
+no migration in this repository. PostgREST rejects an insert naming an unknown
+column outright, so the write failed before the constraint was even reached. The
+operator saw a raw PostgREST string where a statewide warning should have been.
+
+**3. Audience targeting was ignored.** The console wrote `target_audience`; the
+mobile reader consulted `target_type`, which defaults to `'ALL'`. So a **FIELD
+RESPONDERS ONLY** advisory arrived addressed to everyone and was shown to every
+citizen — while the console told the operator it had gone to responders only.
+
+**4. Geographic targeting was enforced nowhere.** The console offers LGA, ward
+and polling-unit scoping and reports *"dispatched successfully to JOS NORTH
+LGA"*. No reader has ever filtered on geography. Every advisory went statewide.
+
+Faults 3 and 4 are the dangerous ones, and they are the same class of defect as
+the mission feed rendering ALL CLEAR over a dead stream: **the system reported
+success for something it had not done.** A broadcast that fails loudly gets
+re-sent by radio. One that reports success while reaching the wrong people does
+not — and here that is either a panic pushed to an entire state, or an
+evacuation order that never reaches the ward it was written for.
+
+### One name per concept
+
+`lib/core/models/broadcast_alert.dart` already declared `targetLga`,
+`targetWard`, `targetPu` and `targetAudience`. The wider design was always the
+intended one; only the schema never caught up. So
+`20260903000002_system_alerts_broadcast.sql` adds the columns, and the code now
+agrees on one name for each thing:
+
+| concept | canonical | note |
+|---|---|---|
+| audience | `target_audience` | `target_type` still read as a fallback for rows written before this |
+| live | `is_active` | the console wrote `active`, which was never a column |
+| scope | `target_lga` / `target_ward` / `target_pu` / `target_agency` | new; now enforced on read |
+| heading | `title` | still `NOT NULL`, but now has a default, so no writer can fail on it again |
+
+Delivery moved out of a stream `.map()` into `lib/services/broadcast_targeting.dart`
+as a pure function, because "who receives this" is the part worth testing
+directly. Two judgement calls are recorded in it:
+
+* **Missing recipient geography fails OPEN.** A citizen whose profile has no LGA
+  still receives a scoped advisory. A missed evacuation order costs more than an
+  irrelevant notification. Every other condition fails closed.
+* **An unrecognised audience is treated as ALL**, not dropped. Over-delivery is
+  recoverable; an advisory that reaches nobody because of a typo in a dropdown
+  is not.
+
+Place names are matched loosely in both directions — "Jos North", "JOS NORTH
+LGA", "jos north" are one place — the same rule the HQ board already uses for
+alerts. Under-matching is the expensive direction: it drops a warning for
+somebody standing in the affected area.
+
+### Also fixed
+
+The console's own `SystemAlertListener` asked for the newest row *full stop* —
+no `is_active`, no expiry — so a withdrawn or long-expired advisory stayed
+docked under the header indefinitely. An advisory that is no longer true is
+worse than none, because operators calibrate against it. Expiry is filtered
+client-side on purpose: rows predating the `expires_at` column have it `NULL`,
+and `NULL` fails every SQL comparison, so a server-side filter would have
+silently hidden exactly the standing advisories that have no end date.
+
+The console also never wrote `expires_at` at all and had no control for it. It
+has one now.
+
+### Coverage
+
+* `test/broadcast_targeting_test.dart` — 17 assertions on delivery: audience,
+  the legacy-column fallback, geography at three levels, loose place matching,
+  fail-open on missing geography, withdrawal and expiry.
+* `hq-dashboard-next/src/components/MassBroadcast.test.tsx` — 7 assertions on
+  the payload's *shape* against the schema, including that nothing invented is
+  sent, since one unknown column rejects the whole insert. Restoring the
+  original payload fails 4 of them.
+* `scripts/production_readiness_behaviour_test.sql` — the exact console payload
+  is inserted against a real PostgreSQL; a titleless insert now succeeds;
+  citizens still cannot broadcast, and can still receive. Removing the new
+  columns from the migration reproduces the original production error,
+  `column "target_agency" of relation "system_alerts" does not exist`.
+
+---
+
+## The same fault, swept for mechanically
+
+The broadcast failure above was found by reading, months after it shipped.
+Nothing about it was hard to detect: a column name is either in the schema or it
+is not, and both sides live in this repository. So `scripts/check_schema_drift.py`
+now extracts every column either app writes — from inline literals and from
+payloads built as a variable and passed by name — and compares them against
+every `CREATE TABLE` and `ADD COLUMN` in the migrations. It runs in CI.
+
+It found three more, in two different shapes.
+
+### Dead writes, removed
+
+| write | read by | outcome |
+|---|---|---|
+| `alerts.has_live_stream` | nothing | rejected, and the rejection discarded by `catch (_) {}` |
+| `profiles.last_feedback` | nothing | rejected; logged "Safety feedback write failed" for a write that had in fact succeeded |
+
+Both are gone rather than given columns. Adding a column would only have made a
+write that changes nothing succeed. The live-stream flag in particular gated
+nothing: the console renders `LiveFeedViewer` for whichever incident is open,
+without consulting it. If HQ should be able to see which incidents have a live
+stream, that is a feature to build deliberately — the column alone would not
+have given it to anyone.
+
+Removing the first left `stopStream([String? alertId])` with a parameter that
+did nothing while every caller dutifully passed one, which reads as though
+teardown were scoped to that alert. It is not; the parameter is gone too.
+
+The `safety_feedback_dialog` case had a second-order effect worth naming. The
+profile write ran *after* the alert write in the same `try`, so the alert
+feedback was recorded, the block then threw, and the operator-facing log said
+the write had failed. A log that reports failure for a success is its own defect.
+
+### Real columns missing from the repository
+
+`alerts.escalated_to_agency` and `alerts.escalation_log` are a different case:
+both are **read**, and the agency portal's entire incident feed is
+`.eq('escalated_to_agency', agency)`. They are production columns added by hand
+and never written down — the same drift that left the four `agency_*` tables
+out. On a replica rebuilt from these files, escalation failed *in full*:
+PostgREST rejects an update naming an unknown column outright, so the status,
+severity, assignment and audit note went down with it.
+`20260903000003_alert_escalation_columns.sql` adds them, with `escalation_log`
+defaulting to `[]` — both writers read the array back and append to it, and a
+NULL default would silently drop the history on first escalation.
+
+Recorded but not changed: **the two writers disagree about what
+`escalated_to_agency` holds.** The console writes an agency (`POLICE`), which is
+what the portal filters on; the mobile agent dashboard writes a *tier* (`HQ`,
+`LGA`) — its own comment says "tier label for filtering". A mobile escalation is
+therefore invisible to every agency portal, though it still shows as ESCALATED
+on the HQ board. That is a semantic collision in one column rather than a schema
+fault, and narrowing it belongs with whoever owns the escalation model.
+
+### The checker under-reported, and that was the point
+
+Its first version understood only inline object literals, so it gave the console
+a clean bill of health — the mass-broadcast payload is built as a `const` and
+passed by name, which is exactly the shape of the bug it exists to catch. Its
+second version then reported `alerts.escalated_to_agency` while missing
+`alerts.escalation_log` four lines below it, because a `//` comment sat between
+the two entries and the key pattern anchors on the preceding comma.
+
+Both are fixed, and both are recorded in the script, because a gate that
+under-reports is worse than no gate: it converts "nobody has checked" into
+"something checked and found nothing". Re-introducing a bad column in either
+language now fails the build.
+
+### Coverage
+
+Three new assertions in `scripts/production_readiness_behaviour_test.sql`: the
+escalation update applies, `escalation_log` appends rather than replaces, and an
+escalated incident is visible under the agency filter the portal uses.
+
+
+---
+
+## The CRITICAL filter, and a claim I got wrong
+
+While sweeping the read side, `alerts.priority` looked like a live defect:
+`filterAlerts` and `clusterAlerts` both tested `alert.priority === 'CRITICAL'`,
+and **nothing in either codebase writes `priority` to the database** — the
+mobile maps its priority enum onto `severity`
+(`'severity': priority.name.toUpperCase()`) and the console's own writes set
+`severity` too. On that evidence the board's CRITICAL filter appeared to match
+only DURESS alerts.
+
+It does not. `dashboard/page.tsx:537` copies the field across as rows load —
+`priority: d.severity || 'HIGH'` — and that page is the only caller of either
+function. **The filter works today.** The earlier claim here was wrong and is
+withdrawn.
+
+What is real is thinner, and still worth closing:
+
+* **The coupling is invisible from the module.** `alert-display.ts` is exported
+  and unit-tested on its own, with nothing in it saying the caller must map
+  `severity` onto `priority` two hundred lines away. A second caller passing
+  rows straight from the database gets a CRITICAL filter that silently matches
+  only DURESS. `isCriticalAlert()` now reads both fields, so the module is
+  correct on its own terms.
+
+* **Reading `severity` alone would have been a regression**, which is worth
+  recording because it was the first attempt. `clusterAlerts` promotes a card by
+  setting `priority = 'CRITICAL'`; a severity-first rule let a MEDIUM severity
+  mask that and dropped promoted clusters out of the filter — caught by two
+  pre-existing tests. Either field saying CRITICAL is now enough. On a filter
+  whose job is to surface the worst incidents, showing one too many costs a
+  glance and dropping one costs more.
+
+* **Cluster promotion set only `priority`.** The list read CRITICAL and the
+  opened card read whatever the first report said. Both fields are promoted now.
+
+* **`/api/ai/analyze` selected `priority` explicitly.** PostgREST rejects a
+  select naming an unknown column in full, so on a database without it the
+  triage endpoint returned 400 for every incident. Dropped from the select; the
+  prompt already falls back to `a.severity || a.priority`.
+
+Five tests cover it, including the shape the hidden coupling would have dropped
+— a row with `severity` set and no `priority`. Reverting to the priority-only
+check fails three; dropping the severity half of cluster promotion fails one.
+
+Noted, not changed: `priority: d.severity || 'HIGH'` invents a severity for a
+row that has none. HIGH over-states rather than under-states, so it fails safe,
+but it is the same species as the invented coordinates in C-5 and should
+eventually read as UNKNOWN.
+
+---
+
+## The read side drifts too
+
+`check_schema_drift.py` only looked at writes. PostgREST rejects a **select**
+naming an unknown column just as completely, so the same fault hides on the
+read side — and it was there.
+
+`dashboard/page.tsx` loaded the console's profile map with
+`select('id, full_name, role, lga, ward, sector_id')`. None of `lga`, `ward` or
+`sector_id` is a column: the schema has `geo_lga`, `geo_ward` and `geo_pu`, and
+`sector_id` appears nowhere else in either app. So the query was rejected, the
+map stayed empty, and nothing was logged.
+
+What that map does is resolve people. With it empty:
+
+* every officer on the board renders as `TACTICAL SQUAD #A1B2C3` instead of a
+  name and badge, and
+* every incident dossier shows "Registered Citizen" and **"No Phone
+  Registered"** — so HQ cannot ring back the person who raised the SOS.
+
+The select was also missing the fields its own consumers read. `badge_number`,
+`email` and `phone` are read off that map in eight places and were never
+selected into it, so they were undefined even on the rows that did arrive.
+Corrected to `id, full_name, email, phone, role, badge_number, geo_lga,
+geo_ward, geo_pu`.
+
+`badge_number` is not in any migration either, and the mobile responder picker
+names it explicitly — so on a database without it that query fails outright and
+an agent has nobody to dispatch. `20260903000004_profiles_badge_number.sql` adds
+it; on production it exists already and the migration is a no-op. It is a label,
+not a credential: the login screen derives an email from the badge an operator
+types and reads nothing from this column.
+
+### The gate had to be fixed twice more to find this
+
+Extending the checker to selects did not work first time, and both failures are
+worth recording because both were the gate lying rather than the code being
+clean.
+
+The pattern allowed 300 characters between `from('x')` and `.select(...)`. The
+explanatory comment written above the corrected select was longer than that, so
+the check passed on code that still had the bug — the comment about the fault
+hid the fault. Widening to 2000 then walked past the *next* `from(` and reported
+three false positives, blaming `telemetry` and `agency_deployments` for columns
+belonging to queries beside them.
+
+A character budget was simply the wrong constraint. The rule is that **no other
+`from(` may intervene**, which is now what the patterns say, and comments are
+blanked to spaces before matching so they can never hide a call again — spaces,
+not deletion, so reported line numbers stay true.
+
+All three detection paths are mutation-checked: a bad select behind a long
+comment, a TypeScript payload passed by name, and a Dart inline literal. Each
+one fails the gate.

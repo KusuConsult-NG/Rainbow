@@ -270,3 +270,61 @@ describe('filterAlerts', () => {
     expect(ids(out)).toEqual(['a']);
   });
 });
+
+// ── severity vs priority ────────────────────────────────────────────────────
+//
+// `severity` is the column. Nothing writes `priority` to the database: the
+// mobile maps its priority enum onto `severity`, and so do the console's own
+// writes. `priority` exists on these objects only because dashboard/page.tsx
+// copies it across as it loads rows — `priority: d.severity || 'HIGH'` — some
+// 200 lines from the module under test.
+//
+// That mapping is why the CRITICAL filter works today. It is also invisible
+// from here, and these functions are exported: a second caller passing rows
+// straight from the database would get a CRITICAL filter that silently matched
+// only DURESS. These pin the behaviour to `severity` so that cannot happen.
+describe('what counts as CRITICAL', () => {
+  const ids = (out: Alert[]) => out.map(x => x.id).sort();
+
+  it('matches on severity, with no help from the caller', () => {
+    // Exactly what a row from the database looks like: severity set, no
+    // priority. This is the case the hidden coupling would have dropped.
+    const raw = [
+      a({ id: 'crit', severity: 'CRITICAL' }),
+      a({ id: 'mild', severity: 'LOW' }),
+    ];
+    expect(ids(filterAlerts(raw, { ...NO_FILTERS, status: 'CRITICAL' })))
+      .toEqual(['crit']);
+  });
+
+  it('still honours priority, for rows the page has mapped', () => {
+    const mapped = [
+      a({ id: 'crit', severity: 'MEDIUM', priority: 'CRITICAL' }),
+    ];
+    expect(ids(filterAlerts(mapped, { ...NO_FILTERS, status: 'CRITICAL' })))
+      .toEqual(['crit']);
+  });
+
+  it('treats DURESS as critical whatever the severity says', () => {
+    const duress = [a({ id: 'd', status: 'DURESS', severity: 'LOW' })];
+    expect(ids(filterAlerts(duress, { ...NO_FILTERS, status: 'CRITICAL' })))
+      .toEqual(['d']);
+  });
+
+  it('clusters promote on severity too, and promote both fields', () => {
+    const out = clusterAlerts(
+      [a({ id: '1', severity: 'LOW' }), a({ id: '2', severity: 'CRITICAL' })],
+      true,
+    );
+    expect(out).toHaveLength(1);
+    // Both, or the card reads CRITICAL in the list and milder when opened.
+    expect(out[0].severity).toBe('CRITICAL');
+    expect(out[0].priority).toBe('CRITICAL');
+  });
+
+  it('is case-insensitive — severity is free text in the database', () => {
+    const lower = [a({ id: 'c', severity: 'critical' as Alert['severity'] })];
+    expect(ids(filterAlerts(lower, { ...NO_FILTERS, status: 'CRITICAL' })))
+      .toEqual(['c']);
+  });
+});

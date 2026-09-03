@@ -23,10 +23,19 @@ class _AdminBroadcastScreenState extends State<AdminBroadcastScreen> {
     try {
       final expiresAt = DateTime.now().add(Duration(hours: _expiryHours)).toIso8601String();
       await SupabaseConfig.client.from('system_alerts').insert({
+        // `title` is NOT NULL and this screen has never collected one, so every
+        // broadcast sent from here failed on a not-null violation and reported
+        // it as a raw exception in a snackbar. Derived, not asked for.
+        'title': '$_severity ADVISORY',
         'message': _messageCtrl.text.trim(),
         'severity': _severity,
-        'target_type': _audience,
-        'expires_at': expiresAt, // Column added by migration v2
+        // Canonical audience column. This screen wrote `target_type`, the HQ
+        // console wrote `target_audience`, and the reader consulted only
+        // `target_type` — so console advisories arrived addressed to nobody in
+        // particular and went to everyone. One name now, everywhere.
+        'target_audience': _audience,
+        'is_active': true,
+        'expires_at': expiresAt,
       });
 
       if (mounted) {

@@ -100,8 +100,13 @@ export function clusterAlerts(
       order.push(c);
     } else {
       target.ids.push(alert.id);
-      if (alert.status === 'DURESS' || alert.priority === 'CRITICAL') {
+      if (isCriticalAlert(alert)) {
         target.master.status = alert.status;
+        // Promote BOTH: `severity` is what this module and the database agree
+        // on, `priority` is what the page renders on the incident card. Setting
+        // only one leaves a card that reads CRITICAL in the list and something
+        // milder when opened.
+        target.master.severity = 'CRITICAL';
         target.master.priority = 'CRITICAL';
       }
     }
@@ -112,6 +117,35 @@ export function clusterAlerts(
     master.witness_count = ids.length;
     return master;
   });
+}
+
+/**
+ * Whether HQ should treat this as a critical incident.
+ *
+ * Checks BOTH fields, and that is deliberate.
+ *
+ * `severity` is the column: both apps write it, and nothing writes `priority`
+ * to the database — the mobile maps its own priority enum onto `severity`
+ * (`'severity': priority.name.toUpperCase()`), and the console's writes set
+ * `severity` too. `priority` reaches this module only because the dashboard
+ * page copies it across as it loads rows (`priority: d.severity || 'HIGH'`),
+ * some 200 lines from here. That mapping is why the filter works today, and it
+ * is invisible from this file — these functions are exported and tested on
+ * their own, so a caller passing rows straight from the database would get a
+ * CRITICAL filter that quietly matched only DURESS.
+ *
+ * Reading only `severity` was the first attempt and it was wrong: it let a
+ * MEDIUM severity mask a CRITICAL priority, which is how `clusterAlerts`
+ * promotes a card. On a filter whose job is to surface the worst incidents,
+ * either field saying CRITICAL has to be enough — showing one incident too
+ * many costs an operator a glance, and dropping one costs more than that.
+ *
+ * A duress alert is critical whatever its severity says; that is the point of
+ * a duress code.
+ */
+export function isCriticalAlert(a: Alert): boolean {
+  const critical = (v?: string) => (v || '').toUpperCase() === 'CRITICAL';
+  return a.status === 'DURESS' || critical(a.severity) || critical(a.priority);
 }
 
 /** True when the alert appears to have arrived over the SMS fallback path. */
@@ -141,7 +175,7 @@ function geoMatches(alertValue: string | undefined, target: string): boolean {
 export function filterAlerts(alerts: Alert[], filters: AlertFilters): Alert[] {
   return alerts.filter(a => {
     if (filters.status === 'CRITICAL') {
-      if (a.status !== 'DURESS' && a.priority !== 'CRITICAL') return false;
+      if (!isCriticalAlert(a)) return false;
     } else if (filters.status === 'SMS_FALLBACK') {
       if (!isSmsFallback(a)) return false;
     } else if (filters.status !== 'ALL' && a.status !== filters.status) return false;

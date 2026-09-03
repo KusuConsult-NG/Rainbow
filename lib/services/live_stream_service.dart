@@ -126,25 +126,29 @@ class LiveStreamService {
         },
       );
 
-      // Update alert record to flag active stream
-      try {
-        await SupabaseConfig.client.from('alerts').update({
-          'has_live_stream': true,
-        }).eq('id', alertId);
-      } catch (_) {}
-
+      // A write setting `alerts.has_live_stream` used to sit here, with a
+      // matching clear in stopStream. It is not a column in any migration, so
+      // both were rejected — and both were wrapped in `catch (_) {}`, so the
+      // rejection went nowhere. Nothing read the flag either; the console shows
+      // LiveFeedViewer for whichever incident is open. Removed rather than
+      // given a column, which would only have made a no-op succeed.
       _isStreaming = true;
       debugPrint('[LIVE_STREAM] Stream initialized and offer broadcasted.');
       return true;
     } catch (e) {
       debugPrint('[LIVE_STREAM_ERR] Failed to start live stream: $e');
-      await stopStream(alertId);
+      await stopStream();
       return false;
     }
   }
 
-  /// Stops current live stream and cleans up resources.
-  Future<void> stopStream([String? alertId]) async {
+  /// Stops the current live stream and cleans up resources.
+  ///
+  /// Took an optional `alertId` which, once the dead `has_live_stream` write
+  /// was removed, did nothing — while every caller dutifully passed one, making
+  /// teardown read as though it were scoped to that alert. It is not: there is
+  /// one stream per service instance.
+  Future<void> stopStream() async {
     try {
       debugPrint('[LIVE_STREAM] Stopping video stream...');
       _isStreaming = false;
@@ -170,14 +174,6 @@ class LiveStreamService {
         );
         unawaited(SupabaseConfig.client.removeChannel(_channel!));
         _channel = null;
-      }
-
-      if (alertId != null) {
-        try {
-          await SupabaseConfig.client.from('alerts').update({
-            'has_live_stream': false,
-          }).eq('id', alertId);
-        } catch (_) {}
       }
     } catch (e) {
       debugPrint('[LIVE_STREAM_ERR] Error during stopStream: $e');

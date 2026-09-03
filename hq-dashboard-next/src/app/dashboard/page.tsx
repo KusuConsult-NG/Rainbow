@@ -648,7 +648,24 @@ export default function DashboardPage() {
     const fetchProfiles = async () => {
       const { data } = await supabase
         .from('profiles')
-        .select('id, full_name, role, lga, ward, sector_id')
+        // This asked for `lga, ward, sector_id`. None of the three is a column
+        // — the schema has `geo_lga`/`geo_ward`/`geo_pu`, and `sector_id`
+        // appears nowhere else in either app — so PostgREST rejected the query
+        // in full and `usersMap` stayed empty. Nothing errored: every officer
+        // then rendered as `TACTICAL SQUAD #A1B2C3` and every reporter as
+        // "Registered Citizen / No Phone Registered".
+        //
+        // It was also missing the fields its consumers actually read.
+        // `badge_number` is what formatOfficerBadge() and
+        // getOfficerDisplayName() label officers with, `email` is what both
+        // fall back to and match on, and `phone` is what the incident dossier
+        // shows as the reporter's contact — the number HQ rings back. All three
+        // were read off a map they were never selected into.
+        //
+        // The geography columns are selected under their real names and kept:
+        // nothing reads them off this map today, but they are what the map is
+        // for if it ever scopes by area.
+        .select('id, full_name, email, phone, role, badge_number, geo_lga, geo_ward, geo_pu')
         .limit(1000);
       if (data) {
         const mapping: Record<string, any> = {};

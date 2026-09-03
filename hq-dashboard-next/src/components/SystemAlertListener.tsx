@@ -7,11 +7,28 @@ export default function SystemAlertListener() {
   const [activeAlert, setActiveAlert] = useState<any>(null);
 
   useEffect(() => {
+    // "The newest row" is not the same as "a live advisory". This asked for the
+    // newest row full stop, so a withdrawn or long-expired advisory stayed
+    // docked under the header indefinitely — and an advisory that is no longer
+    // true is worse than none, because operators calibrate against it.
+    //
+    // `expires_at` is filtered client-side rather than with `.lt()`: rows
+    // written before the expiry column existed have it NULL, and a NULL fails
+    // every SQL comparison, so a server-side filter would silently hide exactly
+    // the standing advisories that have no end date.
     const fetchActiveAlert = async () => {
-      const { data } = await supabase.from('system_alerts').select('*').order('created_at', { ascending: false }).limit(1);
-      if (data && data.length > 0) {
-        setActiveAlert(data[0]);
-      }
+      const { data } = await supabase
+        .from('system_alerts')
+        .select('*')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      const now = Date.now();
+      const live = (data ?? []).find(row => {
+        const expiry = row.expires_at ? Date.parse(row.expires_at as string) : NaN;
+        return Number.isNaN(expiry) || expiry > now;
+      });
+      setActiveAlert(live ?? null);
     };
 
     fetchActiveAlert();
