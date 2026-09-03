@@ -1,6 +1,6 @@
 # Applying the migrations to production
 
-Six migrations are proven in CI on every push and **not yet applied** to the
+Seven migrations are proven in CI on every push and **not yet applied** to the
 production Supabase project:
 
 | Order | File | Closes |
@@ -11,6 +11,7 @@ production Supabase project:
 | 4 | `supabase/migrations/20260903000000_realtime_publication.sql` | subscriptions on unpublished tables |
 | 5 | `supabase/migrations/20260903000001_incident_media_storage.sql` | the undocumented media bucket |
 | 6 | `supabase/migrations/20260903000002_system_alerts_broadcast.sql` | mass broadcast, which never worked at all |
+| 7 | `supabase/migrations/20260903000003_alert_escalation_columns.sql` | escalation columns that live only in production |
 
 Apply them in that order. Number 3 depends on the `alerts.resolved_by` /
 `resolved_at` columns and on `auth.users`. Number 1 must precede number 2, which
@@ -151,6 +152,11 @@ Paste and run, in this order, both idempotent:
   default, and backfills `target_audience` from the legacy `target_type`. Until
   this runs, **every broadcast fails**: `title` is NOT NULL and neither writer
   supplied it, and six of the console's columns did not exist.
+* `supabase/migrations/20260903000003_alert_escalation_columns.sql` — adds
+  `alerts.escalated_to_agency` and `alerts.escalation_log`. Both are written by
+  both apps and read by the agency portal, and neither was in any migration.
+  **On production they already exist** (added by hand) and this is a no-op; on a
+  rebuilt project, escalation fails in full without them.
 
 Verify, read-only:
 
@@ -162,6 +168,11 @@ select tablename from pg_publication_tables
 -- Expect 1 row: public, 52428800, {image/*,video/*,audio/*}.
 select id, public, file_size_limit, allowed_mime_types
   from storage.buckets where id = 'incident-media';
+
+-- Expect 2 rows: the escalation columns.
+select column_name from information_schema.columns
+ where table_schema = 'public' and table_name = 'alerts'
+   and column_name in ('escalated_to_agency','escalation_log') order by 1;
 
 -- Expect 6 rows: the broadcast scoping columns.
 select column_name from information_schema.columns

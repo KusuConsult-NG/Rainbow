@@ -44,12 +44,15 @@ class _SafetyFeedbackDialogState extends State<_SafetyFeedbackDialog> {
         }).eq('id', widget.alertId!);
       }
 
-      // Also write to user profile in Supabase
-      if (uid != null) {
-        await SupabaseConfig.client.from('profiles').update({
-          'last_feedback': status,
-        }).eq('id', uid);
-      }
+      // A mirror of the same status onto `profiles.last_feedback` used to
+      // follow. That is not a column in any migration, so the update was
+      // rejected — and because it ran after the write above, the alert was
+      // updated and then the whole block threw, logging "Safety feedback write
+      // failed" for a write that had in fact succeeded.
+      //
+      // Not restored under a new column: the feedback belongs to the incident,
+      // where `citizen_feedback` and `feedback_at` already record it, and
+      // nothing read the profile copy.
       // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (e) {
       debugPrint('[SYS_WARN] Safety feedback write failed: $e');

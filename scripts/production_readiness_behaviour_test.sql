@@ -243,6 +243,46 @@ BEGIN
   IF n < 1 THEN RAISE EXCEPTION 'FAIL: a citizen cannot read the advisory addressed to them'; END IF;
   RAISE NOTICE 'PASS: citizens receive broadcasts';
 
+  -- ═══ 6. Escalation: the update the console sends must actually apply ═════
+  --
+  -- escalated_to_agency and escalation_log are written by both apps and read by
+  -- the agency portal, and neither existed in this repository's schema — so on
+  -- a rebuilt database every escalation failed IN FULL, taking the status,
+  -- severity and assignment with it.
+  RESET ROLE;
+  INSERT INTO public.alerts (id, reported_by, status, type)
+  VALUES ('cccccccc-cccc-4ccc-8ccc-cccccccccce1',
+          'dddddddd-dddd-4ddd-8ddd-ddddddddddd5', 'PENDING', 'SOS')
+  ON CONFLICT (id) DO NOTHING;
+
+  PERFORM pg_temp.become(hq, 'authenticated');
+  UPDATE public.alerts SET
+    severity            = 'CRITICAL',
+    status              = 'ESCALATED',
+    escalated_to_agency = 'POLICE',
+    escalation_log      = escalation_log || jsonb_build_array(
+                            jsonb_build_object('from_tier', 'HQ', 'to_agency', 'POLICE')),
+    ai_summary          = 'escalated',
+    updated_at          = NOW()
+  WHERE id = 'cccccccc-cccc-4ccc-8ccc-cccccccccce1';
+  IF NOT FOUND THEN RAISE EXCEPTION 'FAIL: HQ could not escalate an incident'; END IF;
+  RAISE NOTICE 'PASS: the escalation update applies';
+
+  -- The log is a chain of custody: appending must not replace what is there.
+  UPDATE public.alerts SET
+    escalation_log = escalation_log || jsonb_build_array(
+                       jsonb_build_object('from_tier', 'POLICE', 'to_agency', 'ARMY'))
+  WHERE id = 'cccccccc-cccc-4ccc-8ccc-cccccccccce1';
+  SELECT jsonb_array_length(escalation_log) INTO n
+    FROM public.alerts WHERE id = 'cccccccc-cccc-4ccc-8ccc-cccccccccce1';
+  IF n <> 2 THEN RAISE EXCEPTION 'FAIL: escalation_log holds % entries, expected 2', n; END IF;
+  RAISE NOTICE 'PASS: escalation_log appends rather than replaces';
+
+  -- The agency portal's entire feed is this filter.
+  SELECT count(*) INTO n FROM public.alerts WHERE escalated_to_agency = 'POLICE';
+  IF n <> 1 THEN RAISE EXCEPTION 'FAIL: the agency portal filter returns % rows', n; END IF;
+  RAISE NOTICE 'PASS: escalated incidents are visible to the agency they went to';
+
   RESET ROLE;
   RAISE NOTICE 'ALL PRODUCTION READINESS CHECKS PASSED';
 END $$;

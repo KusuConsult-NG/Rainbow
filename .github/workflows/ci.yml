@@ -700,6 +700,17 @@ jobs:
       # contains a fixed list; this asserts that list still covers what the code
       # actually subscribes to, so adding a new subscription cannot quietly skip
       # the migration.
+      # A column name is either in the schema or it is not, and both sides are
+      # in this repository — so there was never a good reason for this to be
+      # found by reading. The HQ mass-broadcast screen wrote six columns that
+      # existed in no migration; PostgREST rejects such an insert IN FULL, so
+      # every broadcast HQ sent failed and the operator saw a raw error where a
+      # statewide warning should have been. The same sweep then found two more
+      # (`alerts.has_live_stream`, `profiles.last_feedback`), both wrapped in
+      # catches that discarded the rejection.
+      - name: Assert neither app writes a column the schema does not have
+        run: python3 scripts/check_schema_drift.py
+
       - name: Assert every realtime subscription is on a published table
         run: |
           set -euo pipefail

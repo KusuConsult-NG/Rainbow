@@ -96,7 +96,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
       return;
     }
     if (_isLiveStreaming) {
-      await LiveStreamService().stopStream(alertId);
+      await LiveStreamService().stopStream();
       if (mounted) setState(() => _isLiveStreaming = false);
     } else {
       final success = await LiveStreamService().startStream(alertId);

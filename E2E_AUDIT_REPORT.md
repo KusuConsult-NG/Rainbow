@@ -1687,3 +1687,80 @@ has one now.
   citizens still cannot broadcast, and can still receive. Removing the new
   columns from the migration reproduces the original production error,
   `column "target_agency" of relation "system_alerts" does not exist`.
+
+---
+
+## The same fault, swept for mechanically
+
+The broadcast failure above was found by reading, months after it shipped.
+Nothing about it was hard to detect: a column name is either in the schema or it
+is not, and both sides live in this repository. So `scripts/check_schema_drift.py`
+now extracts every column either app writes — from inline literals and from
+payloads built as a variable and passed by name — and compares them against
+every `CREATE TABLE` and `ADD COLUMN` in the migrations. It runs in CI.
+
+It found three more, in two different shapes.
+
+### Dead writes, removed
+
+| write | read by | outcome |
+|---|---|---|
+| `alerts.has_live_stream` | nothing | rejected, and the rejection discarded by `catch (_) {}` |
+| `profiles.last_feedback` | nothing | rejected; logged "Safety feedback write failed" for a write that had in fact succeeded |
+
+Both are gone rather than given columns. Adding a column would only have made a
+write that changes nothing succeed. The live-stream flag in particular gated
+nothing: the console renders `LiveFeedViewer` for whichever incident is open,
+without consulting it. If HQ should be able to see which incidents have a live
+stream, that is a feature to build deliberately — the column alone would not
+have given it to anyone.
+
+Removing the first left `stopStream([String? alertId])` with a parameter that
+did nothing while every caller dutifully passed one, which reads as though
+teardown were scoped to that alert. It is not; the parameter is gone too.
+
+The `safety_feedback_dialog` case had a second-order effect worth naming. The
+profile write ran *after* the alert write in the same `try`, so the alert
+feedback was recorded, the block then threw, and the operator-facing log said
+the write had failed. A log that reports failure for a success is its own defect.
+
+### Real columns missing from the repository
+
+`alerts.escalated_to_agency` and `alerts.escalation_log` are a different case:
+both are **read**, and the agency portal's entire incident feed is
+`.eq('escalated_to_agency', agency)`. They are production columns added by hand
+and never written down — the same drift that left the four `agency_*` tables
+out. On a replica rebuilt from these files, escalation failed *in full*:
+PostgREST rejects an update naming an unknown column outright, so the status,
+severity, assignment and audit note went down with it.
+`20260903000003_alert_escalation_columns.sql` adds them, with `escalation_log`
+defaulting to `[]` — both writers read the array back and append to it, and a
+NULL default would silently drop the history on first escalation.
+
+Recorded but not changed: **the two writers disagree about what
+`escalated_to_agency` holds.** The console writes an agency (`POLICE`), which is
+what the portal filters on; the mobile agent dashboard writes a *tier* (`HQ`,
+`LGA`) — its own comment says "tier label for filtering". A mobile escalation is
+therefore invisible to every agency portal, though it still shows as ESCALATED
+on the HQ board. That is a semantic collision in one column rather than a schema
+fault, and narrowing it belongs with whoever owns the escalation model.
+
+### The checker under-reported, and that was the point
+
+Its first version understood only inline object literals, so it gave the console
+a clean bill of health — the mass-broadcast payload is built as a `const` and
+passed by name, which is exactly the shape of the bug it exists to catch. Its
+second version then reported `alerts.escalated_to_agency` while missing
+`alerts.escalation_log` four lines below it, because a `//` comment sat between
+the two entries and the key pattern anchors on the preceding comma.
+
+Both are fixed, and both are recorded in the script, because a gate that
+under-reports is worse than no gate: it converts "nobody has checked" into
+"something checked and found nothing". Re-introducing a bad column in either
+language now fails the build.
+
+### Coverage
+
+Three new assertions in `scripts/production_readiness_behaviour_test.sql`: the
+escalation update applies, `escalation_log` appends rather than replaces, and an
+escalated incident is visible under the agency filter the portal uses.
