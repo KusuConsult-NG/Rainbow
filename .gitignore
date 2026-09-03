@@ -53,10 +53,6 @@ app.*.map.json
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
 
-# HQ Dashboard secrets
-hq-dashboard/.env.local
-hq-dashboard/.env
-
 # Temporary Agent Brain & Scratch Artifacts
 brain/
 scratch/
@@ -69,9 +65,9 @@ scratch/
 node_modules/
 **/node_modules/
 
-# Build output — hq-dashboard/dist contained a committed bundle with a live
-# Firebase API key baked in.
-hq-dashboard/dist/
+# Build output. The legacy Vite console (hq-dashboard/) is gone, but its
+# committed `dist/` — a bundle with a live Firebase API key baked in — is why
+# build output is ignored at all.
 hq-dashboard-next/.next/
 .firebase/
 

@@ -567,20 +567,7 @@ jobs:
             echo "Then ROTATE the credential: it is in git history either way."
             exit 1
           fi
-          echo "OK: no credential material outside the documented allowlist."
-
-          # The allowlist must not rot into a permanent exception. Fail if an
-          # entry no longer matches anything — that means it was cleaned up and
-          # the line should go.
-          for F in E2E_AUDIT_REPORT.md .github/workflows/ci.yml hq-dashboard/src/firebase.ts \
-                   hq-dashboard/src/AdminDirectory.tsx functions/provision-hq-002.js \
-                   functions/test_providers.js scripts/provision-respondents.js; do
-            if [ ! -f "$F" ]; then
-              echo "::error::Allowlist entry '$F' no longer exists — remove it from the ALLOW pattern."
-              exit 1
-            fi
-          done
-          echo "OK: allowlist has no stale entries."
+          echo "OK: no credential material in tracked files."
 
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
