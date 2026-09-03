@@ -2085,3 +2085,53 @@ documentation. What remains: the RLS harness and its generators, the drift
 checker, `verify_rls.js`, `build_web.sh` and the UI automation runner. The
 generated SQL still regenerates byte-identical, and the credential scan is
 clean.
+
+---
+
+## Applying the migrations, in two pastes
+
+Nine migrations meant nine trips to the SQL editor, each with its own
+verification snippet to run and read — nine chances to skip one, apply them out
+of order, or believe a step worked because no error appeared.
+
+`scripts/apply_all_migrations.sql` is generated from the migration files and
+contains all nine in order, ending in a fourteen-row PASS/FAIL table. One paste
+in, one answer out.
+
+It does **not** replace the dry run, and says so in its own header. The RLS
+migration drops prior policies by exact name, a hand-made dashboard policy
+survives it, and PostgreSQL ORs permissive policies together — so one survivor
+re-opens the table and the migration becomes decorative. Only the dry run, run
+against the real database, can detect that.
+
+### Why the verification is part of the file
+
+The runbook's per-step checks were correct and nobody would run all of them.
+Folding them into the script makes verification the default rather than an act
+of diligence, and it checks facts that matter rather than that statements ran:
+that **no policy grants anon or public anything**, that the escalation columns
+exist — their absence made every escalation fail in full — that the tier has its
+own column, that no tier label is left in the agency column, and that incident
+media has no UPDATE or DELETE policy.
+
+### Proven as a paste, not as a concatenation
+
+`scripts/verify_apply_all.sh` builds a production-shaped database — the four
+historical migrations production already has — then runs the generated file
+exactly as pasted, top to bottom, and asserts on its own verdict table. Then
+runs it **again**, because the file claims idempotence and a partial run must be
+safe to repeat. Both are a CI job.
+
+Mutation-checked: removing one migration from the generator turns the matching
+row into `*** FAIL ***` and fails the build. A verdict table that could only
+ever say PASS would be worse than no verdict table, since it would convert "not
+checked" into "checked and fine".
+
+### What this does not do
+
+It cannot be run from here. This container holds no database credentials — the
+local `.env.local` carries placeholders written for a test build — and applying
+schema changes to a live emergency-response system is not something to do
+without the operator reading the dry run's verdict first. The work that could be
+done here was making the operator's part one paste instead of nine, and proving
+the paste works.

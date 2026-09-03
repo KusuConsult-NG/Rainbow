@@ -25,6 +25,26 @@ agency portal's entire backend.
 For the deployment around these — hosting, environment, signing — see
 `docs/PRODUCTION_DEPLOYMENT.md`.
 
+## The short way
+
+Two pastes, in this order:
+
+1. **`scripts/rls_production_dryrun.sql`** — read-only, rolls everything back,
+   prints a verdict. If it says `>>> DO NOT APPLY`, stop: the PROBLEM lines name
+   a hand-made policy that would survive the migration and re-open a table.
+2. **`scripts/apply_all_migrations.sql`** — all nine, in order, finishing with a
+   14-row PASS/FAIL table. Every row PASS means you are done.
+
+Both are generated from the migrations and CI fails if either drifts. The
+`apply-all` job runs the second one against a production-shaped PostgreSQL on
+every push — the whole buffer, top to bottom, twice, asserting on its own
+verdict table — so what you paste is a script that has been executed, not just
+concatenated.
+
+Everything below is the same nine migrations one at a time, with the reasoning
+for each. Use it if a step fails, or if you would rather see them go in
+individually.
+
 Everything below runs in **Supabase Dashboard → SQL Editor**, signed in as the
 project owner. Nothing here needs a connection string, and none of it should be
 pasted into a chat, ticket or log — the point of C-3 is that credentials have
