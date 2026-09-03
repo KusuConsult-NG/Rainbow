@@ -1,16 +1,190 @@
-# rainbow_app
+# Operation Rainbow
 
-A new Flutter project.
+Emergency security response for Plateau State, Nigeria. A citizen and responder
+mobile app, a command console for HQ, and a Supabase backend they share.
 
-## Getting Started
+When someone presses SOS, an alert reaches the HQ board with their live
+location; HQ dispatches responders, escalates up the command chain or hands the
+incident to an outside agency, and the citizen can cancel with a PIN — or with
+a *different* PIN that cancels the visible alarm while quietly keeping HQ
+tracking them.
 
-This project is a starting point for a Flutter application.
+That last detail is the shape of the whole system: **the difference between
+"nothing is happening" and "something is broken" has to be visible.** A blank
+board, an empty feed and a quiet night must never look alike. Most of the
+engineering below exists to keep that true.
 
-A few resources to get you started if this is your first Flutter project:
+---
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## The three pieces
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+| | | |
+|---|---|---|
+| **Mobile app** | `lib/`, Flutter 3 / Dart 3 | Citizens report incidents and raise SOS; responders receive dispatches, run missions and stream live video |
+| **HQ console** | `hq-dashboard-next/`, Next.js 16 + React 19 | The operations board: live map, incident feed, dispatch, escalation, agency portal, mass broadcast |
+| **Backend** | `supabase/migrations/` | PostgreSQL with row-level security, realtime subscriptions, storage for incident media, and SECURITY DEFINER functions for the duress PINs |
+
+There is no other backend. A Firebase/Firestore stack preceded this one and was
+deleted once confirmed orphaned; if you find a reference to it, it is a leftover
+and should go too.
+
+## Layout
+
+```
+lib/                      Flutter app
+test/                     23 Flutter test files
+hq-dashboard-next/        Next.js console (its own package.json)
+  src/app/                routes, API handlers, error boundaries
+  src/components/         board widgets, map, agency portal
+  src/lib/                pure logic — extracted so it can be tested
+supabase/migrations/      the schema, in filename order
+scripts/                  migration harness, generators, drift checker
+docs/                     runbooks
+E2E_AUDIT_REPORT.md       findings, fixes, and what remains
+```
+
+---
+
+## Running it
+
+### Mobile
+
+```bash
+cp .env.example .env       # required: pubspec declares .env as a Flutter ASSET,
+                           # so the build fails outright without it
+flutter pub get
+flutter test               # 23 test files
+flutter analyze            # warnings fail CI, so keep it clean
+flutter run
+```
+
+**Nothing secret goes in `.env`.** Flutter assets ship verbatim inside the
+APK and extract with `unzip`. That file once held the SMS provider key, the
+Cloudinary secret and the shared duress PIN; all of them are gone, and a CI gate
+stops them coming back.
+
+### HQ console
+
+```bash
+cd hq-dashboard-next
+cp .env.example .env.local # fill in before building, not after
+npm ci
+npm run dev
+npm test                   # 118 tests
+npx tsc --noEmit && npx eslint
+```
+
+`NEXT_PUBLIC_*` values are inlined **at build time**. A missing one is not a
+runtime warning — the app crashes on first render and serves
+`<html id="__next_error__">`.
+
+### Database
+
+Nine migrations, applied in filename order. **Do not apply them by hand without
+reading `docs/APPLYING_THE_MIGRATIONS.md`** — the RLS migration drops prior
+policies by exact name, and a policy someone created in the Supabase dashboard
+survives it. PostgreSQL ORs permissive policies together, so one survivor
+re-opens the table and the migration becomes decorative. The runbook's dry run
+is how you find that out without a staging project.
+
+To prove the migrations against a real PostgreSQL, with no credentials and no
+live data:
+
+```bash
+sudo ./scripts/verify_rls_migration.sh
+```
+
+It builds a throwaway database, replays the history, applies every migration
+twice to prove idempotence, and runs 36 behavioural assertions — what anon, a
+citizen, a responder, an agency liaison and a commander can each actually *do*.
+
+> `scripts/verify_rls.js` INSERTs probe rows. **Never run it against
+> production.** Staging only.
+
+---
+
+## What CI enforces
+
+Seven jobs, each tied to a defect that reached the default branch at least once.
+
+| job | what it prevents |
+|---|---|
+| Flutter — analyze & test | analyzer warnings, and SMS-provider credentials returning to the handset |
+| HQ dashboard | typecheck, lint, build, tests, security headers, **server secrets in the client bundle**, demo credentials in a production build |
+| Repo — no credential material | any credential-shaped string in a tracked file |
+| Supabase — RLS migration correctness | the migrations, proven behaviourally against real PostgreSQL |
+| Supabase — dry run in sync | the production dry-run script is generated; a stale copy is pasted into a live SQL editor |
+| Supabase — dry run reports something | that the dry run emits a verdict rather than silence, which on a "is this safe?" script is the most dangerous output it could give |
+| Supabase — anon-access probe | manual only; fails if anon can read or write a sensitive table |
+
+Two gates worth knowing about because they catch a whole class rather than a
+single bug:
+
+- **`scripts/check_schema_drift.py`** — every column either app reads or writes,
+  and every `.rpc()` function it calls, must exist in a migration. PostgREST
+  rejects a query naming an unknown column *in full*, so drift here fails at
+  runtime and nowhere else. It found a mass-broadcast screen writing six columns
+  that did not exist, an escalation path writing two more, and a profile lookup
+  selecting three.
+- **the realtime-subscription gate** — every table either app subscribes to must
+  be in the `supabase_realtime` publication. A subscription on an unpublished
+  table does not error; it simply never fires.
+
+---
+
+## Deploying
+
+`docs/PRODUCTION_DEPLOYMENT.md` is the runbook. In short: Firebase App Hosting
+(`firebase.json` + `hq-dashboard-next/apphosting.yaml`), then `./deploy.sh`.
+
+It must run as a **Node server, never a static export** — the auth guard is
+Next.js middleware, and a static export silently drops middleware, serving every
+page to anonymous visitors with no error anywhere.
+
+Every environment value comes from Secret Manager, including the two public
+ones, so no project configuration is committed to git. `deploy.sh` checks the
+secrets are readable before spending a build, and re-scans the built bundle for
+server secrets before it will deploy.
+
+Mobile release builds need `key.properties` at the repo root, or the release
+artefact is **unsigned** — Gradle does not fall back to the debug key and does
+not warn.
+
+---
+
+## Security
+
+`E2E_AUDIT_REPORT.md` is the long version: every finding, what was done, and
+what was deliberately not. The parts worth knowing before you touch anything:
+
+- **Row-level security is the whole access model.** The anon key is public by
+  design — it ships in the app bundle and the browser — so a policy mistake is
+  not a degraded experience, it is an open database. Nothing may be granted to
+  `anon`.
+- **Roles come from `profiles.role`**, which a database trigger makes
+  non-self-writable. Nothing reads `user_metadata`, which the client can set.
+- **Duress PINs are per-user and verified server-side**, bcrypt-hashed in a
+  table no API role can read, with lockout after five failures. The device
+  never sees PIN material. Under duress the alert is marked and tracking
+  deliberately continues.
+- **Incident media is append-only.** Any signed-in user may upload; nobody may
+  update or delete through the API roles, and only staff may list the bucket.
+- **Credential scanning catches credential *shapes***, not weak passwords. A
+  shared demo password sat in the tree for months because a password is just a
+  string. Do not assume the gate covers it.
+
+---
+
+## Outstanding
+
+The code is current. These need production access and are tracked in the audit
+report:
+
+1. **`firebase functions:list --project rainbow-97f1e`, then delete the
+   deployment.** Two functions answer on public URLs, and a watchdog fires every
+   five minutes against a datastore nothing backs any more. Do **not** `curl`
+   `seedMockData` to check — the probe itself writes ten fabricated emergencies.
+2. **Apply the nine migrations** — dry run first.
+3. **First deploy**, which is also the first test of the deploy config.
+4. **Ask GitHub Support** to purge the `refs/pull/*` refs still holding
+   pre-purge objects.

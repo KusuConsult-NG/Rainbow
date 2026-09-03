@@ -13,23 +13,9 @@ UI or a local `.env.local` that is never committed.
 
 ---
 
-## 0. Before anything: rotate what leaked
+## 0. Before anything: shut down the orphaned backend
 
-The git-history purge (H-6) removed the leaked material from every commit, but
-**a purge is not a rotation**. Anyone who cloned the repository before it still
-holds working credentials. Rotate these first, because the deployment steps
-below will ask you to paste the new values into the hosting environment anyway:
-
-| Credential | Where it is rotated | Where the new value goes |
-|---|---|---|
-| Supabase secret (service role) key | Supabase → Project Settings → API | `SUPABASE_SERVICE_ROLE_KEY` in the console's host env |
-| Firebase Android API key | Google Cloud console → Credentials | nowhere — the app no longer uses Firebase |
-| Firebase iOS API key | Google Cloud console → Credentials | nowhere — same |
-| Cloudinary API secret | Cloudinary → Settings → Security | server only; the app uses an unsigned preset |
-| Termii API key | Termii dashboard | `TERMII_API_KEY` in the console's host env |
-| `HQ-001` / `HQ-002` / `COMMANDER-TEST` passwords | Supabase → Authentication → Users | nowhere; they are login credentials |
-
-Also settle **C-6** while you are in the Google console: `firebase functions:list
+Settle **C-6**: `firebase functions:list
 --project rainbow-97f1e`. If `smsWebhook` or `seedMockData` is listed, an
 unauthenticated stranger can inject `DURESS`-flagged emergencies today. Delete
 the deployment — nothing in either client calls any of those 25 functions. Do
