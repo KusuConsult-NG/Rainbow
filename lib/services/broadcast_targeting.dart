@@ -13,6 +13,7 @@ library;
 
 /// The recipient, as far as delivery is concerned.
 class BroadcastRecipient {
+  /// Everything delivery needs to know about one user.
   const BroadcastRecipient({
     required this.isResponder,
     this.geoLga,
@@ -20,9 +21,17 @@ class BroadcastRecipient {
     this.geoPu,
   });
 
+  /// True for field responders; false for citizens. Decides AGENTS vs CITIZENS.
   final bool isResponder;
+
+  /// The user's own geography, from their profile. Any of these may be null —
+  /// see [broadcastReaches] for why that delivers rather than withholds.
   final String? geoLga;
+
+  /// The user's ward.
   final String? geoWard;
+
+  /// The user's polling unit.
   final String? geoPu;
 }
 

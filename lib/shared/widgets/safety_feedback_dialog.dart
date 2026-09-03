@@ -35,8 +35,6 @@ class _SafetyFeedbackDialogState extends State<_SafetyFeedbackDialog> {
   Future<void> _submitFeedback(String status) async {
     setState(() => _saving = true);
     try {
-      final uid = SupabaseConfig.client.auth.currentUser?.id;
-
       if (widget.alertId != null && !widget.alertId!.startsWith('OFFLINE_')) {
         await SupabaseConfig.client.from('alerts').update({
           'citizen_feedback': status,
