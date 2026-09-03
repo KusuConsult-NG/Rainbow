@@ -4,7 +4,12 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    id("com.google.gms.google-services")
+    // The Google Services Gradle plugin was applied here with no Firebase
+    // dependency left in pubspec.yaml. It fails the build outright when
+    // android/app/google-services.json is missing — and that file is gitignored
+    // (it carries an API key), so every clean checkout failed `flutter build
+    // apk --release`. Removed with the rest of the Firebase stack; a CI gate
+    // keeps it out.
 }
 
 android {

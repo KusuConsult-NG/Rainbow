@@ -152,6 +152,26 @@ jobs:
       # by default), and `GET /assets/.env` returned the file with SAFE_PIN and
       # DURESS_PIN in it. build_web.sh bundles the resources and strips the env
       # file, then asserts both. Running it here keeps the web target honest.
+      # The Android release build applied com.google.gms.google-services while
+      # pubspec.yaml carried no Firebase dependency at all. That plugin fails the
+      # build outright when android/app/google-services.json is absent — and that
+      # file is gitignored because it holds an API key — so `flutter build apk
+      # --release` could not succeed on any clean checkout, including a CI
+      # runner or a new machine. There is no Flutter build of the Android target
+      # in this job (it needs a full Android SDK), so guard it statically.
+      - name: Assert the Android build needs no Firebase config
+        run: |
+          set -euo pipefail
+          if grep -rn "com.google.gms.google-services" android/; then
+            echo "::error::the google-services Gradle plugin is back; a clean checkout cannot build a release APK without android/app/google-services.json, which is gitignored."
+            exit 1
+          fi
+          if git ls-files | grep -iE 'google-services\.json|GoogleService-Info.*\.plist'; then
+            echo "::error::a Firebase config file is tracked again — it carries an API key (H-6)."
+            exit 1
+          fi
+          echo "OK: no Firebase config needed to build the mobile app."
+
       - name: Build web safely (bundled resources, no .env in the bundle)
         run: ./scripts/build_web.sh
 
@@ -685,6 +705,39 @@ jobs:
           sudo apt-get install -y -qq postgresql-16
       - name: Verify the RLS migration against a real PostgreSQL
         run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_rls_migration.sh
+
+      # Every table either app subscribes to for realtime must be in the
+      # supabase_realtime publication, or the subscription silently never fires
+      # — no error, just a view that only updates on reload. Three were missing
+      # for exactly that reason. The behaviour test above asserts the publication
+      # contains a fixed list; this asserts that list still covers what the code
+      # actually subscribes to, so adding a new subscription cannot quietly skip
+      # the migration.
+      - name: Assert every realtime subscription is on a published table
+        run: |
+          set -euo pipefail
+          MISSING=0
+          # Two syntaxes reach realtime: the console's postgres_changes
+          # subscriptions (`table: 'alerts'`) and the mobile app's
+          # `from('alerts').stream(...)`, which is a realtime subscription too
+          # and fails the same silent way.
+          CONSOLE=$(grep -rhoE "table: '[a-z_]+'" \
+                      hq-dashboard-next/src --include=*.tsx --include=*.ts \
+                    | grep -oE "'[a-z_]+'")
+          # The table name and `.stream(` are often on different lines, so take
+          # the three lines before each `.stream(` and read the name out of them.
+          MOBILE=$(grep -rhE -B3 '\.stream\(' lib --include=*.dart \
+                   | grep -oE "from\('[a-z_]+'\)" | grep -oE "'[a-z_]+'" || true)
+          TABLES=$(printf '%s\n%s\n' "$CONSOLE" "$MOBILE" | tr -d "'" | grep -v '^$' | sort -u)
+          echo "subscribed tables: $(echo $TABLES)"
+          for T in $TABLES; do
+            grep -q "'$T'" supabase/migrations/20260903000000_realtime_publication.sql || {
+              echo "::error::table '$T' is subscribed to for realtime but is not in the supabase_realtime publication migration."
+              MISSING=1
+            }
+          done
+          [ "$MISSING" -eq 0 ] || exit 1
+          echo "OK: every realtime subscription targets a published table."
 
   dryrun-speaks:
     name: Supabase — the production dry run actually reports something

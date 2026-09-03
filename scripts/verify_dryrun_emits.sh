@@ -72,7 +72,8 @@ for f in test_rls_migration.sql \
          20260720000000_initial_schema.sql \
          phase1_foundation.sql \
          phase2_assigned_responders.sql \
-         phase3_profile_columns_and_config.sql; do
+         phase3_profile_columns_and_config.sql \
+         20260812000000_agency_tables.sql; do
   # `supabase_realtime` does not exist off-Supabase; those ALTER PUBLICATION
   # lines are the only expected failures and are irrelevant to RLS.
   psql_f "$f" | grep -E '^(psql:.*)?ERROR' | grep -v 'supabase_realtime' || true

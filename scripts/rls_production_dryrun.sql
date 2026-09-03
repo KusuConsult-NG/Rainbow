@@ -201,9 +201,31 @@ AS $$
   );
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.auth_role()  FROM anon;
-REVOKE EXECUTE ON FUNCTION public.is_staff()   FROM anon;
-REVOKE EXECUTE ON FUNCTION public.is_command() FROM anon;
+-- The agency an outside-agency liaison belongs to, or NULL for everyone else.
+--
+-- Liaisons are the actual users of the agency portal: the console registers
+-- them with role `<AGENCY>_LIAISON` (POLICE_LIAISON, ARMY_LIAISON, ...) and
+-- derives their agency from that role. This does the same, from the same
+-- column, and NOT from `profiles.agency`: that column is self-writable, while
+-- `role` is guarded by the trigger in section 4. A liaison who could rewrite
+-- their own agency could read another agency's deployments.
+CREATE OR REPLACE FUNCTION public.liaison_agency()
+RETURNS TEXT
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = public
+AS $$
+  SELECT CASE
+           WHEN role LIKE '%\_LIAISON' THEN left(role, length(role) - length('_LIAISON'))
+         END
+    FROM public.profiles WHERE id = auth.uid();
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.auth_role()      FROM anon;
+REVOKE EXECUTE ON FUNCTION public.is_staff()       FROM anon;
+REVOKE EXECUTE ON FUNCTION public.is_command()     FROM anon;
+REVOKE EXECUTE ON FUNCTION public.liaison_agency() FROM anon;
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- 2. DROP EVERY PRE-EXISTING POLICY BY EXACT NAME
@@ -514,45 +536,75 @@ CREATE POLICY "app_config_read_authenticated" ON public.app_config
 --    profiles.role, which the trigger in section 4 makes non-self-writable.
 -- ────────────────────────────────────────────────────────────────────────────
 
---    GUARDED BY EXISTENCE. These four tables live in production but no migration
---    in this repository creates them, so a replica rebuilt from these files does
---    not have them — and an unguarded ALTER TABLE aborts the whole migration
---    with "relation does not exist". Caught by the rls-migration CI job, which
---    went red the moment this section was added unguarded.
+--    WHO USES THESE TABLES. The first version of this section granted writes to
+--    is_command() only. That would have broken the portal for the people it is
+--    for: agency liaisons carry role `<AGENCY>_LIAISON`, which is neither a
+--    command tier nor a citizen, so under that version they could read every
+--    agency's records and write none of their own. Now:
 --
---    to_regclass() returns NULL rather than raising for a missing relation, so
---    it is the safe way to ask.
-DO $agency$
-DECLARE
-  t   TEXT;
-  tbl TEXT;
-BEGIN
-  FOREACH t IN ARRAY ARRAY['agency_action_reports','agency_deployments','agency_personnel'] LOOP
-    IF to_regclass('public.' || t) IS NULL THEN
-      RAISE NOTICE 'skipping %: table not present in this database', t;
-      CONTINUE;
-    END IF;
-    tbl := format('public.%I', t);
-    EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', tbl);
-    EXECUTE format(
-      'CREATE POLICY %I ON %s FOR SELECT TO authenticated USING (public.is_staff())',
-      t || '_staff_read', tbl);
-    EXECUTE format(
-      'CREATE POLICY %I ON %s FOR ALL TO authenticated USING (public.is_command()) WITH CHECK (public.is_command())',
-      t || '_command_write', tbl);
-  END LOOP;
+--      command tiers          read and write every agency's rows
+--      the agency's liaisons  read and write rows tagged with THEIR agency,
+--                             agency taken from the role (liaison_agency())
+--      other staff            nothing here — responders have no business in
+--                             another agency's personnel roster
+--      citizens / anon        nothing
+--
+--    The tables are created by 20260812000000_agency_tables.sql, which runs
+--    before this file, so they exist on every database this migration meets.
+--    Each policy is dropped before it is created: this migration is documented
+--    as safe to re-run, and CREATE POLICY has no IF NOT EXISTS.
 
-  -- Escalations to Police/Army/DSS. Command only, both directions.
-  IF to_regclass('public.agency_notifications') IS NOT NULL THEN
-    ALTER TABLE public.agency_notifications ENABLE ROW LEVEL SECURITY;
-    CREATE POLICY "agency_notifications_command_read" ON public.agency_notifications
-      FOR SELECT TO authenticated USING (public.is_command());
-    CREATE POLICY "agency_notifications_command_write" ON public.agency_notifications
-      FOR ALL TO authenticated USING (public.is_command()) WITH CHECK (public.is_command());
-  ELSE
-    RAISE NOTICE 'skipping agency_notifications: table not present in this database';
-  END IF;
-END $agency$;
+DROP POLICY IF EXISTS "agency_personnel_liaison_read"          ON public.agency_personnel;
+DROP POLICY IF EXISTS "agency_personnel_liaison_write"         ON public.agency_personnel;
+DROP POLICY IF EXISTS "agency_deployments_liaison_read"        ON public.agency_deployments;
+DROP POLICY IF EXISTS "agency_deployments_liaison_write"       ON public.agency_deployments;
+DROP POLICY IF EXISTS "agency_action_reports_liaison_read"     ON public.agency_action_reports;
+DROP POLICY IF EXISTS "agency_action_reports_liaison_write"    ON public.agency_action_reports;
+-- names used by an earlier revision of this file
+DROP POLICY IF EXISTS "agency_personnel_staff_read"           ON public.agency_personnel;
+DROP POLICY IF EXISTS "agency_personnel_command_write"        ON public.agency_personnel;
+DROP POLICY IF EXISTS "agency_deployments_staff_read"         ON public.agency_deployments;
+DROP POLICY IF EXISTS "agency_deployments_command_write"      ON public.agency_deployments;
+DROP POLICY IF EXISTS "agency_action_reports_staff_read"      ON public.agency_action_reports;
+DROP POLICY IF EXISTS "agency_action_reports_command_write"   ON public.agency_action_reports;
+
+ALTER TABLE public.agency_personnel      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agency_deployments    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agency_action_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agency_notifications  ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "agency_personnel_liaison_read" ON public.agency_personnel
+  FOR SELECT TO authenticated
+  USING (public.is_command() OR agency = public.liaison_agency());
+CREATE POLICY "agency_personnel_liaison_write" ON public.agency_personnel
+  FOR ALL TO authenticated
+  USING      (public.is_command() OR agency = public.liaison_agency())
+  WITH CHECK (public.is_command() OR agency = public.liaison_agency());
+
+CREATE POLICY "agency_deployments_liaison_read" ON public.agency_deployments
+  FOR SELECT TO authenticated
+  USING (public.is_command() OR agency = public.liaison_agency());
+CREATE POLICY "agency_deployments_liaison_write" ON public.agency_deployments
+  FOR ALL TO authenticated
+  USING      (public.is_command() OR agency = public.liaison_agency())
+  WITH CHECK (public.is_command() OR agency = public.liaison_agency());
+
+CREATE POLICY "agency_action_reports_liaison_read" ON public.agency_action_reports
+  FOR SELECT TO authenticated
+  USING (public.is_command() OR agency = public.liaison_agency());
+CREATE POLICY "agency_action_reports_liaison_write" ON public.agency_action_reports
+  FOR ALL TO authenticated
+  USING      (public.is_command() OR agency = public.liaison_agency())
+  WITH CHECK (public.is_command() OR agency = public.liaison_agency());
+
+-- Escalation delivery log. Written by the console's server-side route with the
+-- service key (bypasses RLS); command may read it. Nobody else needs it.
+DROP POLICY IF EXISTS "agency_notifications_command_read"  ON public.agency_notifications;
+DROP POLICY IF EXISTS "agency_notifications_command_write" ON public.agency_notifications;
+CREATE POLICY "agency_notifications_command_read" ON public.agency_notifications
+  FOR SELECT TO authenticated USING (public.is_command());
+CREATE POLICY "agency_notifications_command_write" ON public.agency_notifications
+  FOR ALL TO authenticated USING (public.is_command()) WITH CHECK (public.is_command());
 
 
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;

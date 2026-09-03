@@ -45,7 +45,8 @@ sleep 2
 cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/test_rls_migration.sql \
    "$REPO"/scripts/rls_behaviour_test.sql \
-   "$REPO"/scripts/emergency_pins_behaviour_test.sql "$PGROOT/"
+   "$REPO"/scripts/emergency_pins_behaviour_test.sql \
+   "$REPO"/scripts/production_readiness_behaviour_test.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
 psql_run() {
@@ -68,6 +69,13 @@ for f in 20260720000000_initial_schema phase1_foundation phase2_assigned_respond
     "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -q -f $PGROOT/$f.sql" >/dev/null 2>&1 || true
 done
 
+# The agency tables the console uses were only ever created by hand in
+# production. This file creates them on any database that lacks them, and runs
+# BEFORE the RLS migration so that the agency policies are exercised here
+# rather than skipped. Strict: it must apply cleanly.
+echo "▶ Applying 20260812000000_agency_tables.sql"
+psql_run "-f $PGROOT/20260812000000_agency_tables.sql" >/dev/null
+
 BEFORE=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
   \"select count(*) from pg_policies where schemaname='public' and (qual='true' or with_check='true');\"")
 echo "  permissive USING(true)/WITH CHECK(true) policies before: $BEFORE"
@@ -84,7 +92,9 @@ psql_run "-f $PGROOT/20260902000000_per_user_emergency_pins.sql" >/dev/null
 echo "▶ Emergency PIN behaviour test"
 # Run ONCE, keeping both the output and the exit code. (Running it twice, as the
 # RLS test below is, broke on the second pass: the first had already set PINs.)
-PIN_OUT=$(psql_run "-f $PGROOT/emergency_pins_behaviour_test.sql" 2>&1); PIN_RC=$?
+# `V=$(cmd)` on its own trips errexit when cmd fails, exiting before the
+# diagnostic below prints. The `&& … ||` form keeps the exit code instead.
+PIN_OUT=$(psql_run "-f $PGROOT/emergency_pins_behaviour_test.sql" 2>&1) && PIN_RC=0 || PIN_RC=$?
 printf '%s\n' "$PIN_OUT" | grep -E "PASS|FAIL|ALL EMERGENCY" || true
 if [ "$PIN_RC" -ne 0 ]; then
   printf '%s\n' "$PIN_OUT" | grep -vE "PASS" | tail -20
@@ -103,6 +113,23 @@ echo "▶ Asserting behaviour (anon / citizen / command)"
 psql_run "-f $PGROOT/rls_behaviour_test.sql" 2>&1 | grep -E "PASS|FAIL|ALL RLS" || true
 psql_run "-f $PGROOT/rls_behaviour_test.sql" >/dev/null 2>&1 || {
   echo "✗ Behavioural assertions FAILED — do not run this migration." >&2; exit 1; }
+
+# Production-readiness migrations: realtime publication and incident-media
+# storage, then one behaviour test covering them and the agency policies.
+echo "▶ Applying 20260903000000_realtime_publication.sql"
+psql_run "-f $PGROOT/20260903000000_realtime_publication.sql" >/dev/null
+echo "▶ Applying 20260903000001_incident_media_storage.sql"
+psql_run "-f $PGROOT/20260903000001_incident_media_storage.sql" >/dev/null
+echo "▶ Re-applying both (they must be idempotent)"
+psql_run "-f $PGROOT/20260903000000_realtime_publication.sql" >/dev/null
+psql_run "-f $PGROOT/20260903000001_incident_media_storage.sql" >/dev/null
+echo "▶ Agency access / realtime / storage behaviour test"
+PR_OUT=$(psql_run "-f $PGROOT/production_readiness_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?
+printf '%s\n' "$PR_OUT" | grep -E "PASS|FAIL|ALL PRODUCTION" || true
+if [ "$PR_RC" -ne 0 ]; then
+  printf '%s\n' "$PR_OUT" | grep -vE "PASS" | tail -20
+  echo "::error::production readiness behaviour test FAILED"; exit 1
+fi
 
 cat <<'EOF'
 
