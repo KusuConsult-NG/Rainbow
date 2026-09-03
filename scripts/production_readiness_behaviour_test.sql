@@ -283,6 +283,23 @@ BEGIN
   IF n <> 1 THEN RAISE EXCEPTION 'FAIL: the agency portal filter returns % rows', n; END IF;
   RAISE NOTICE 'PASS: escalated incidents are visible to the agency they went to';
 
+  -- ═══ 7. The board's profile lookup must actually return rows ═════════════
+  --
+  -- This select asked for `lga, ward, sector_id` — none of them columns — so
+  -- PostgREST rejected it in full and the console's usersMap stayed empty:
+  -- every officer rendered as `TACTICAL SQUAD #A1B2C3` and every reporter as
+  -- "No Phone Registered", with nothing logged. It also omitted the fields its
+  -- consumers read. This is the corrected list.
+  PERFORM pg_temp.become(hq, 'authenticated');
+  PERFORM id, full_name, email, phone, role, badge_number, geo_lga, geo_ward, geo_pu
+     FROM public.profiles LIMIT 1000;
+  RAISE NOTICE 'PASS: the board profile lookup selects only real columns';
+
+  -- The mobile names badge_number explicitly when listing responders to
+  -- dispatch, so without the column that query fails and the list is empty.
+  PERFORM id, full_name, badge_number, role, geo_lga, geo_ward FROM public.profiles;
+  RAISE NOTICE 'PASS: the responder picker selects only real columns';
+
   RESET ROLE;
   RAISE NOTICE 'ALL PRODUCTION READINESS CHECKS PASSED';
 END $$;

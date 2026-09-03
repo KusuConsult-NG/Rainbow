@@ -40,7 +40,7 @@ emergencies. The full instructions are in `E2E_AUDIT_REPORT.md`.
 
 ## 1. Database
 
-Seven migrations, in filename order. `docs/APPLYING_THE_MIGRATIONS.md` is the
+Eight migrations, in filename order. `docs/APPLYING_THE_MIGRATIONS.md` is the
 step-by-step runbook, including the mandatory read-only dry run; do not apply
 the RLS migration without it.
 
@@ -53,8 +53,9 @@ the RLS migration without it.
 | 5 | `20260903000001_incident_media_storage.sql` | Creates and secures the `incident-media` bucket. |
 | 6 | `20260903000002_system_alerts_broadcast.sql` | Makes mass broadcast work. Until it runs, every broadcast fails on a NOT NULL `title` and six non-existent columns. |
 | 7 | `20260903000003_alert_escalation_columns.sql` | Adds `alerts.escalated_to_agency` and `escalation_log`. Already present on production; a no-op there. |
+| 8 | `20260903000004_profiles_badge_number.sql` | Adds `profiles.badge_number`, the label both apps show for an officer. A no-op if production has it. |
 
-All seven are idempotent and every one of them is proven on a real PostgreSQL by
+All eight are idempotent and every one of them is proven on a real PostgreSQL by
 the `rls-migration` CI job before it reaches you.
 
 ### After applying, verify (read-only)

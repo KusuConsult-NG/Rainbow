@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail if either app writes a column that no migration creates.
+"""Fail if either app reads or writes a column that no migration creates.
 
 WHY THIS EXISTS
 ---------------
@@ -107,14 +107,22 @@ def schema_columns() -> dict[str, set[str]]:
 
 # ── What the apps write ─────────────────────────────────────────────────────
 
+# What may sit between `from('x')` and the call on it. A character budget was
+# the wrong constraint in both directions: 300 was small enough that an
+# explanatory comment above a `.select` hid it, and widening to 2000 walked
+# into the NEXT `from(` and blamed one table for another's columns. Requiring
+# that no other `from(` intervenes is the actual rule.
+GAP = r"((?:(?!\bfrom\s*\().)*?)"
+
+
 # .from('alerts') ... .insert({ ... }) — the call and its literal may be far
 # apart and span lines, so the table is tracked separately from the payload.
 TS_CALL = re.compile(
-    r"from\(\s*['\"]([a-z_]+)['\"]\s*\)(.{0,400}?)\.(insert|update|upsert)\s*\(\s*\{",
+    r"from\(\s*['\"]([a-z_]+)['\"]\s*\)" + GAP + r"\.(insert|update|upsert)\s*\(\s*\{",
     re.DOTALL,
 )
 DART_CALL = re.compile(
-    r"from\(\s*['\"]([a-z_]+)['\"]\s*\)(.{0,400}?)\.(insert|update|upsert)\s*\(\s*(?:<String,\s*dynamic>)?\s*\{",
+    r"from\(\s*['\"]([a-z_]+)['\"]\s*\)" + GAP + r"\.(insert|update|upsert)\s*\(\s*(?:<String,\s*dynamic>)?\s*\{",
     re.DOTALL,
 )
 
@@ -126,11 +134,11 @@ DART_CALL = re.compile(
 # which is EXACTLY the shape of the bug this script exists for. A first version
 # only understood inline literals and gave the console a clean bill of health.
 TS_CALL_VAR = re.compile(
-    r"from\(\s*['\"]([a-z_]+)['\"]\s*\)(.{0,400}?)\.(insert|update|upsert)\s*\(\s*([A-Za-z_$][\w$]*)\s*[),]",
+    r"from\(\s*['\"]([a-z_]+)['\"]\s*\)" + GAP + r"\.(insert|update|upsert)\s*\(\s*([A-Za-z_$][\w$]*)\s*[),]",
     re.DOTALL,
 )
 DART_CALL_VAR = re.compile(
-    r"from\(\s*['\"]([a-z_]+)['\"]\s*\)(.{0,400}?)\.(insert|update|upsert)\s*\(\s*([A-Za-z_][\w]*)\s*[),]",
+    r"from\(\s*['\"]([a-z_]+)['\"]\s*\)" + GAP + r"\.(insert|update|upsert)\s*\(\s*([A-Za-z_][\w]*)\s*[),]",
     re.DOTALL,
 )
 TS_DECL = r"(?:const|let|var)\s+{name}\s*(?::[^=]+)?=\s*\{{"
@@ -148,6 +156,18 @@ DART_KEY = re.compile(
 # lines above it. An under-reporting gate is worse than none, so comments are
 # stripped from a literal before its keys are read.
 LINE_COMMENT = re.compile(r"(?<![:'\"])//[^\n]*")
+
+
+def blank_comments(text: str) -> str:
+    """Replace `//` comments with spaces, keeping every offset and line intact.
+
+    Matching runs over this rather than the raw source. A comment between
+    `.from('x')` and `.select(...)` otherwise pushes them past the window the
+    patterns allow between the two — which is exactly how the read-side check
+    first failed to fire: the explanatory comment added above the fixed select
+    was itself long enough to hide it.
+    """
+    return LINE_COMMENT.sub(lambda m: " " * len(m.group(0)), text)
 
 
 def literal_after(text: str, open_brace: int) -> str:
@@ -192,7 +212,7 @@ def written_columns() -> list[tuple[str, str, str, int]]:
             for path in base.rglob(pattern):
                 if path.name.endswith((".test.ts", ".test.tsx", "_test.dart")):
                     continue
-                text = path.read_text()
+                text = blank_comments(path.read_text())
                 rel = str(path.relative_to(ROOT))
 
                 # Inline literal: .insert({ ... })
@@ -213,10 +233,55 @@ def written_columns() -> list[tuple[str, str, str, int]]:
     return found
 
 
+# `.select('id, full_name, role')` — a column named here that does not exist
+# fails the read the same way a bad write fails: PostgREST rejects the whole
+# query. That is how the HQ board's profile map came back empty, leaving every
+# officer rendered as `TACTICAL SQUAD #A1B2C3` with nothing logged anywhere.
+SELECT_CALL = re.compile(
+    r"from\(\s*['\"]([a-z_]+)['\"]\s*\)" + GAP + r"\.select\(\s*['\"]([^'\"]*)['\"]",
+    re.DOTALL,
+)
+
+
+def selected_columns() -> list[tuple[str, str, str, int]]:
+    """(table, column, file, line) for every explicit select list."""
+    found = []
+    for base, globs in (
+        (ROOT / "hq-dashboard-next/src", ("*.ts", "*.tsx")),
+        (ROOT / "lib", ("*.dart",)),
+    ):
+        for pattern in globs:
+            for path in base.rglob(pattern):
+                if path.name.endswith((".test.ts", ".test.tsx", "_test.dart")):
+                    continue
+                text = blank_comments(path.read_text())
+                for m in SELECT_CALL.finditer(text):
+                    table, cols = m.group(1), m.group(3)
+                    # `*`, an embedded resource (`profiles(name)`) or an alias
+                    # (`x:y`) — not a plain column list; left alone rather than
+                    # guessed at.
+                    if "*" in cols or "(" in cols or ":" in cols:
+                        continue
+                    line = text.count("\n", 0, m.start()) + 1
+                    for col in re.findall(r"[a-z_][a-z0-9_]*", cols):
+                        found.append(
+                            (table, col, str(path.relative_to(ROOT)), line)
+                        )
+    return found
+
+
 def main() -> int:
     schema = schema_columns()
     problems: list[str] = []
     unknown_tables: set[str] = set()
+
+    for table, column, path, line in sorted(set(selected_columns())):
+        if table not in schema:
+            unknown_tables.add(table)
+            continue
+        if column in ALWAYS_OK or column in schema[table]:
+            continue
+        problems.append(f"  {path}:{line}  {table}.{column}   (selected)")
 
     for table, column, path, line in sorted(set(written_columns())):
         if table not in schema:
@@ -233,19 +298,19 @@ def main() -> int:
         print()
 
     if problems:
-        print("Columns written that no migration creates:")
+        print("Columns read or written that no migration creates:")
         print("\n".join(sorted(set(problems))))
         print()
-        print("PostgREST rejects an insert naming an unknown column IN FULL, so")
-        print("each of these is a write that fails at runtime and nowhere else.")
-        print("Add the column in a migration, or stop writing it.")
+        print("PostgREST rejects a query naming an unknown column IN FULL — a")
+        print("select as much as an insert — so each of these fails at runtime")
+        print("and nowhere else. Add the column in a migration, or stop naming it.")
         return 1
 
     if unknown_tables:
         return 1
 
-    print(f"OK: every column written by either app exists in the schema "
-          f"({len(schema)} tables).")
+    print(f"OK: every column read or written by either app exists in the "
+          f"schema ({len(schema)} tables).")
     return 0
 
 

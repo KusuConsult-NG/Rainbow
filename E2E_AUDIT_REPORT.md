@@ -1816,3 +1816,59 @@ Noted, not changed: `priority: d.severity || 'HIGH'` invents a severity for a
 row that has none. HIGH over-states rather than under-states, so it fails safe,
 but it is the same species as the invented coordinates in C-5 and should
 eventually read as UNKNOWN.
+
+---
+
+## The read side drifts too
+
+`check_schema_drift.py` only looked at writes. PostgREST rejects a **select**
+naming an unknown column just as completely, so the same fault hides on the
+read side — and it was there.
+
+`dashboard/page.tsx` loaded the console's profile map with
+`select('id, full_name, role, lga, ward, sector_id')`. None of `lga`, `ward` or
+`sector_id` is a column: the schema has `geo_lga`, `geo_ward` and `geo_pu`, and
+`sector_id` appears nowhere else in either app. So the query was rejected, the
+map stayed empty, and nothing was logged.
+
+What that map does is resolve people. With it empty:
+
+* every officer on the board renders as `TACTICAL SQUAD #A1B2C3` instead of a
+  name and badge, and
+* every incident dossier shows "Registered Citizen" and **"No Phone
+  Registered"** — so HQ cannot ring back the person who raised the SOS.
+
+The select was also missing the fields its own consumers read. `badge_number`,
+`email` and `phone` are read off that map in eight places and were never
+selected into it, so they were undefined even on the rows that did arrive.
+Corrected to `id, full_name, email, phone, role, badge_number, geo_lga,
+geo_ward, geo_pu`.
+
+`badge_number` is not in any migration either, and the mobile responder picker
+names it explicitly — so on a database without it that query fails outright and
+an agent has nobody to dispatch. `20260903000004_profiles_badge_number.sql` adds
+it; on production it exists already and the migration is a no-op. It is a label,
+not a credential: the login screen derives an email from the badge an operator
+types and reads nothing from this column.
+
+### The gate had to be fixed twice more to find this
+
+Extending the checker to selects did not work first time, and both failures are
+worth recording because both were the gate lying rather than the code being
+clean.
+
+The pattern allowed 300 characters between `from('x')` and `.select(...)`. The
+explanatory comment written above the corrected select was longer than that, so
+the check passed on code that still had the bug — the comment about the fault
+hid the fault. Widening to 2000 then walked past the *next* `from(` and reported
+three false positives, blaming `telemetry` and `agency_deployments` for columns
+belonging to queries beside them.
+
+A character budget was simply the wrong constraint. The rule is that **no other
+`from(` may intervene**, which is now what the patterns say, and comments are
+blanked to spaces before matching so they can never hide a call again — spaces,
+not deletion, so reported line numbers stay true.
+
+All three detection paths are mutation-checked: a bad select behind a long
+comment, a TypeScript payload passed by name, and a Dart inline literal. Each
+one fails the gate.
