@@ -1517,3 +1517,79 @@ order, the fact that **no deploy target is configured in this repository**
 `apphosting.yaml` or `vercel.json` — it fails hard rather than pretending), the
 console's build-time environment, mobile signing and versioning, and what to
 check after the first deploy.
+
+---
+
+## The console had no error boundary
+
+Continuing the production-readiness pass, and the same failure mode as the
+mission-feed liveness fix, one layer up.
+
+`hq-dashboard-next/src/app` had no `error.tsx`, no `global-error.tsx` and no
+`not-found.tsx`. In production Next.js renders its own blank page for an
+uncaught render error, so any crash anywhere in the 3,000-line dashboard tree —
+a malformed alert row, a Leaflet failure, a null in a deeply nested card — took
+out the entire board and left the operator looking at nothing.
+
+On an emergency console, nothing is the most dangerous thing to draw. **A blank
+board and a board with nothing to report are the same picture**, and at 3am the
+second reading is the one that gets taken. That is precisely the defect that was
+fixed on the mobile side, where a dead alerts stream used to render ALL CLEAR.
+
+Three boundaries now exist, sharing one `ConsoleFailure` panel:
+
+| File | Catches |
+|---|---|
+| `app/dashboard/error.tsx` | anything in the operations board — the one that matters, and the only one that can genuinely recover |
+| `app/error.tsx` | login and any route added later that forgets its own |
+| `app/global-error.tsx` | a crash in the ROOT LAYOUT, which `error.tsx` cannot catch |
+
+The panel is loud, says CONSOLE FAILED, and — before any technical detail —
+states that incidents may be arriving unseen, that the board should be treated
+as offline, and that radio is the fallback. It also says the recorded data is
+intact, so nobody re-reports incidents that were already logged. It carries
+`role="alert"` with `aria-live="assertive"`, so it interrupts rather than
+waiting to be noticed.
+
+It shows `error.digest` and never `error.message`. Next replaces the message
+with a generic string in production specifically so internals do not reach a
+screen other people may be standing behind; rendering it anyway would undo
+that. The digest is what makes a fault report actionable.
+
+Recovery uses `unstable_retry()`, which is this Next version's replacement for
+`reset()` (16.2.0+). The difference matters here: `reset()` only clears the
+error state without re-fetching, so on a data-driven board it usually crashes
+straight back; `unstable_retry()` re-fetches and re-renders the segment, so a
+transient Supabase or map failure clears without the operator losing their
+place. A plain reload is always offered as well.
+
+`not-found.tsx` is deliberately plain and deliberately *not* the crash screen. A
+mistyped URL is not an incident, and dressing it in the same red panel would
+train operators to ignore the one that matters.
+
+Seven tests cover it, and they are about the property rather than the markup:
+softening the panel into "Nothing to display right now" and downgrading
+`role="alert"` fails two of them.
+
+### Two things found on the way
+
+**A stale CI guard was pinning seven files in existence.** When the
+tracked-secrets allowlist was removed, the loop that checked *the allowlist for
+stale entries* was left behind. It asserted that seven named files still exist —
+including two in the legacy console — so deleting any of them failed the build
+with `Allowlist entry '…' no longer exists — remove it from the ALLOW pattern`,
+naming a pattern that no longer exists. Removed.
+
+**The legacy Vite console is deleted** (`hq-dashboard/`, 13 files). It is
+referenced by no build, test or deploy script, and it talks to **Firestore**
+directly — `collection(db, 'alerts')`, `collection(db, 'users')` — which is
+outside every control the Supabase RLS work put in place. This is the client
+half of M-7 and is not gated on C-6: the C-6 hold exists so the *deployed
+backend's* source is not destroyed before the deployment is checked, and
+`functions/` is untouched for exactly that reason.
+
+That leaves a question worth settling with C-6, and it is a live-access
+question rather than a cleanup one: **if the old console is still hosted
+anywhere, it is a second door into the data that none of the RLS migration
+reaches.** Deleting the source does not take it down. Check for it while you
+are in the Firebase console.
