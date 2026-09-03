@@ -9,7 +9,9 @@ log. Where a secret is involved, it is set in a hosting provider's environment
 UI or a local `.env.local` that is never committed.
 
 > **`scripts/verify_rls.js` INSERTs probe rows. Never run it against
-> production** — a throwaway staging project only.
+> production** — a throwaway staging project only. `docs/STAGING.md` stands one
+> up in about ten minutes, and it is the only place the deployed system's RLS
+> can actually be tested rather than reasoned about.
 
 ---
 

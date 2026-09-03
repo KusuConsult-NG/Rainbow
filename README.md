@@ -106,11 +106,26 @@ citizen, a responder, an agency liaison and a commander can each actually *do*.
 > `scripts/verify_rls.js` INSERTs probe rows. **Never run it against
 > production.** Staging only.
 
+### Staging
+
+`docs/STAGING.md` — one free Supabase project, about ten minutes. It is the only
+way to test what a local replica cannot: a real PostgREST, a real Auth service,
+and the policies somebody added by hand in a dashboard. Production had 44
+policies where a replica rebuilt from this repo had 21.
+
+```bash
+# 1. paste scripts/bootstrap_staging.sql into a NEW project
+# 2. seed one account per role, plus incidents chosen to expose old defects
+RAINBOW_ENV=staging SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… node scripts/seed_staging.js
+# 3. the point of the exercise
+NEXT_PUBLIC_SUPABASE_URL=… NEXT_PUBLIC_SUPABASE_ANON_KEY=… node scripts/verify_rls.js
+```
+
 ---
 
 ## What CI enforces
 
-Eight jobs, each tied to a defect that reached the default branch at least once.
+Nine jobs, each tied to a defect that reached the default branch at least once.
 
 | job | what it prevents |
 |---|---|
@@ -120,6 +135,7 @@ Eight jobs, each tied to a defect that reached the default branch at least once.
 | Supabase — RLS migration correctness | the migrations, proven behaviourally against real PostgreSQL |
 | Supabase — dry run in sync | the generated scripts are what get pasted into a live SQL editor; a stale copy is worse than none, because it looks authoritative |
 | Supabase — one-paste apply script | runs `apply_all_migrations.sql` against a production-shaped database, top to bottom, twice, and asserts on its own PASS/FAIL table |
+| Supabase — staging bootstrap | builds a project from zero, checks the bootstrap refuses a database that already holds data, and proves both routes reach the same schema |
 | Supabase — dry run reports something | that the dry run emits a verdict rather than silence, which on a "is this safe?" script is the most dangerous output it could give |
 | Supabase — anon-access probe | manual only; fails if anon can read or write a sensitive table |
 
