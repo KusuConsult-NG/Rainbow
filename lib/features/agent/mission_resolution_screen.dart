@@ -38,14 +38,19 @@ class _MissionResolutionScreenState
       final alertId = widget.alertData['id'] as String;
       final user = SupabaseConfig.client.auth.currentUser;
       final email = user?.email ?? 'OFFICER';
-      final existingNotes = widget.alertData['ai_summary'] as String? ?? '';
-      final debriefNote = '[RESOLVED DEBRIEF] $text (by $email)';
+      final now = DateTime.now().toIso8601String();
 
+      // The debrief goes in its own columns. It used to be appended into
+      // `ai_summary` alongside machine-generated text and dispatch notes, which
+      // left the officer's own account of an incident indistinguishable from
+      // anything else that had written to that field.
       await SupabaseConfig.client.from('alerts').update({
         'status': 'RESOLVED',
         'resolved_by': email,
-        'resolved_at': DateTime.now().toIso8601String(),
-        'ai_summary': existingNotes.isEmpty ? debriefNote : '$existingNotes\n$debriefNote',
+        'resolved_at': now,
+        'debrief': text,
+        'debrief_by': email,
+        'debrief_at': now,
       }).eq('id', alertId);
 
       if (!mounted) return;

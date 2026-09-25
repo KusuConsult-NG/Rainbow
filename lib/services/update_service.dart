@@ -43,8 +43,9 @@ class UpdateService {
         if (row['key'] == 'update_url') updateUrl = row['value']?.toString() ?? '';
       }
 
-      final isForceUpdateResult = forceUpdate || currentVersion.compareTo(minVersion) < 0;
-      final hasUpdate = currentVersion.compareTo(latestVersion) < 0;
+      final isForceUpdateResult =
+          forceUpdate || compareVersions(currentVersion, minVersion) < 0;
+      final hasUpdate = compareVersions(currentVersion, latestVersion) < 0;
 
       return UpdateInfo(
         hasUpdate: hasUpdate,
@@ -64,5 +65,36 @@ class UpdateService {
 
   Future<UpdateInfo> checkForUpdates() async {
     return checkAppVersion();
+  }
+
+  /// Compares two dotted version strings numerically.
+  ///
+  /// Returns a negative number when [a] is older than [b], zero when they are
+  /// equivalent, and a positive number when [a] is newer.
+  ///
+  /// A plain `String.compareTo` orders versions lexically, which gets every
+  /// multi-digit segment wrong — `'1.0.10'.compareTo('1.0.9')` is negative, so
+  /// 1.0.10 was treated as older than 1.0.9 and the update prompt stopped
+  /// firing at double-digit patch numbers. Missing segments are treated as
+  /// zero, and any non-numeric suffix (`1.2.3+45`, `1.2.3-beta`) is ignored.
+  static int compareVersions(String a, String b) {
+    final left = _segments(a);
+    final right = _segments(b);
+    final length = left.length > right.length ? left.length : right.length;
+
+    for (var i = 0; i < length; i++) {
+      final l = i < left.length ? left[i] : 0;
+      final r = i < right.length ? right[i] : 0;
+      if (l != r) return l < r ? -1 : 1;
+    }
+    return 0;
+  }
+
+  static List<int> _segments(String version) {
+    final core = version.trim().split(RegExp('[+-]')).first;
+    return core
+        .split('.')
+        .map((part) => int.tryParse(part.trim()) ?? 0)
+        .toList();
   }
 }

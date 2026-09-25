@@ -93,8 +93,8 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
       return;
     }
 
-    _waveformController.repeat(reverse: true);
-    _pulseController.repeat(reverse: true);
+    unawaited(_waveformController.repeat(reverse: true));
+    unawaited(_pulseController.repeat(reverse: true));
 
     try {
       await SpeechService.instance.startListening(

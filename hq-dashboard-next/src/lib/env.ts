@@ -57,6 +57,9 @@ export function serverEnv() {
     geminiApiKey: process.env.GEMINI_API_KEY ?? '',
     oneSignalAppId: process.env.ONESIGNAL_APP_ID ?? '',
     oneSignalRestKey: process.env.ONESIGNAL_REST_API_KEY ?? '',
+    // `Key` is the scheme for current OneSignal REST keys; a project still on a
+    // legacy key sets ONESIGNAL_AUTH_SCHEME=Basic. All three senders read this.
+    oneSignalAuthScheme: (process.env.ONESIGNAL_AUTH_SCHEME ?? 'Key').trim(),
     webhookSecret: process.env.RAINBOW_WEBHOOK_SECRET ?? '',
   };
 }

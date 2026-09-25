@@ -114,6 +114,12 @@ void main() {
     // throws in debug builds so it cannot reach a tester unnoticed.
     AppConfig.validate();
 
+    // Crash reporting. Three call sites already report to Sentry — the two
+    // handlers in this file and one in the router — but SentryFlutter.init was
+    // never called, so all of them were no-ops and no production crash has ever
+    // been reported.
+    await _initSentry();
+
     // Force orientation lock for security HUD consistency
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
@@ -141,6 +147,27 @@ void main() {
     debugPrint('[CRITICAL_UNCAUGHT_ERR] $error');
     unawaited(Sentry.captureException(error, stackTrace: stackTrace));
   });
+}
+
+Future<void> _initSentry() async {
+  final dsn = dotenv.isInitialized ? (dotenv.env['SENTRY_DSN'] ?? '') : '';
+  if (dsn.isEmpty) {
+    debugPrint(
+      '⚠️ [MAIN] SENTRY_DSN not set — crash reporting disabled for this run.',
+    );
+    return;
+  }
+  try {
+    await SentryFlutter.init((options) {
+      options
+        ..dsn = dsn
+        ..tracesSampleRate = 0.2
+        ..environment = kReleaseMode ? 'production' : 'development';
+    });
+    debugPrint('🚀 [MAIN] Sentry initialized.');
+  } catch (e) {
+    debugPrint('⚠️ [MAIN] Sentry init failed: $e');
+  }
 }
 
 class _LifecycleEventHandler extends WidgetsBindingObserver {

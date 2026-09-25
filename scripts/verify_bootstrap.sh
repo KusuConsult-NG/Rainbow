@@ -130,7 +130,9 @@ for f in 20260812000000_agency_tables 20260813000000_rls_least_privilege \
          20260902000000_per_user_emergency_pins 20260903000000_realtime_publication \
          20260903000001_incident_media_storage 20260903000002_system_alerts_broadcast \
          20260903000003_alert_escalation_columns 20260903000004_profiles_badge_number \
-         20260903000005_alerts_assigned_tier; do
+         20260903000005_alerts_assigned_tier \
+         20260925000000_escalation_engine \
+         20260925000001_escalation_followups; do
   psql_f replayed "$f.sql" >/dev/null
 done
 

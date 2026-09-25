@@ -51,6 +51,14 @@ class AlertService {
     var finalLat = latitude;
     var finalLng = longitude;
 
+    // A critical report always outranks the caller-supplied priority. The
+    // `isCritical` flag was accepted and then discarded, so every panic SOS —
+    // emergency_provider.dart passes isCritical: true — was filed with the
+    // default MEDIUM severity, and so never matched the dashboard's CRITICAL
+    // filter or the notification worker's rule that HQ is copied on anything
+    // critical.
+    final severity = isCritical ? 'CRITICAL' : priority.name.toUpperCase();
+
     try {
       if (finalLat == null || finalLng == null) {
         final pos = await LocationService().getCurrentPosition(force: true);
@@ -84,7 +92,7 @@ class AlertService {
           description: description,
           lat: finalLat,
           lng: finalLng,
-          priority: priority.name.toUpperCase(),
+          priority: severity,
           isAnonymous: false,
           createdAt: DateTime.now().toIso8601String(),
         );
@@ -143,12 +151,15 @@ class AlertService {
         'local_id': localId,
         'type': type,
         'description': description,
+        // Only the snake_case column exists. Sending 'reportedBy' as well made
+        // PostgREST reject the whole insert ("column alerts.reportedBy does not
+        // exist"), so every online alert threw and silently degraded to the
+        // offline queue — the online path never worked.
         'reported_by': reportedBy,
-        'reportedBy': reportedBy,
         'latitude': finalLat,
         'longitude': finalLng,
         'status': 'PENDING',
-        'severity': priority.name.toUpperCase(),
+        'severity': severity,
         'geo_lga': geoLga,
         'geo_ward': geoWard,
         'geo_siec_ward': geoSiecWard,
@@ -176,7 +187,7 @@ class AlertService {
           description: description,
           lat: finalLat,
           lng: finalLng,
-          priority: priority.name.toUpperCase(),
+          priority: severity,
           isAnonymous: false,
           createdAt: DateTime.now().toIso8601String(),
         );

@@ -128,13 +128,19 @@ echo "▶ Applying 20260903000004_profiles_badge_number.sql"
 psql_run "-f $PGROOT/20260903000004_profiles_badge_number.sql" >/dev/null
 echo "▶ Applying 20260903000005_alerts_assigned_tier.sql"
 psql_run "-f $PGROOT/20260903000005_alerts_assigned_tier.sql" >/dev/null
-echo "▶ Re-applying all six (they must be idempotent)"
+echo "▶ Applying 20260925000000_escalation_engine.sql"
+psql_run "-f $PGROOT/20260925000000_escalation_engine.sql" >/dev/null
+echo "▶ Applying 20260925000001_escalation_followups.sql"
+psql_run "-f $PGROOT/20260925000001_escalation_followups.sql" >/dev/null
+echo "▶ Re-applying all eight (they must be idempotent)"
 psql_run "-f $PGROOT/20260903000000_realtime_publication.sql" >/dev/null
 psql_run "-f $PGROOT/20260903000001_incident_media_storage.sql" >/dev/null
 psql_run "-f $PGROOT/20260903000002_system_alerts_broadcast.sql" >/dev/null
 psql_run "-f $PGROOT/20260903000003_alert_escalation_columns.sql" >/dev/null
 psql_run "-f $PGROOT/20260903000004_profiles_badge_number.sql" >/dev/null
 psql_run "-f $PGROOT/20260903000005_alerts_assigned_tier.sql" >/dev/null
+psql_run "-f $PGROOT/20260925000000_escalation_engine.sql" >/dev/null
+psql_run "-f $PGROOT/20260925000001_escalation_followups.sql" >/dev/null
 echo "▶ Agency access / realtime / storage behaviour test"
 PR_OUT=$(psql_run "-f $PGROOT/production_readiness_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?
 printf '%s\n' "$PR_OUT" | grep -E "PASS|FAIL|ALL PRODUCTION" || true

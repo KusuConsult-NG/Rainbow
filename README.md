@@ -80,9 +80,9 @@ runtime warning — the app crashes on first render and serves
 
 ### Database
 
-Nine migrations. Applying them is two pastes into the Supabase SQL editor —
+Eleven migrations. Applying them is two pastes into the Supabase SQL editor —
 `scripts/rls_production_dryrun.sql` (read-only, prints a verdict), then
-`scripts/apply_all_migrations.sql` (all nine, finishing with a PASS/FAIL table).
+`scripts/apply_all_migrations.sql` (all eleven, finishing with a PASS/FAIL table).
 Both are generated from the migrations, CI fails if either drifts, and the
 second is executed against a production-shaped PostgreSQL on every push.
 
@@ -106,6 +106,63 @@ citizen, a responder, an agency liaison and a commander can each actually *do*.
 > `scripts/verify_rls.js` INSERTs probe rows. **Never run it against
 > production.** Staging only.
 
+### The escalation engine
+
+`20260925000000_escalation_engine.sql` puts the SLA escalation logic in the
+database: an unacknowledged alert climbs POLLING_UNIT → WARD → LGA → HQ on a
+clock, one tier per sweep, and a dispatched responder who misses the response
+window is flagged. It runs as database functions rather than a worker, so it
+does not depend on a phone being awake, an officer choosing to escalate, or a
+notification being delivered — and the escalation commits separately from the
+push, so a notification outage delays a message and never loses an escalation.
+
+It **ships switched off**. Applying it installs the schema and (where pg_cron
+exists) schedules the sweep, but every cycle exits until someone sets
+`app_config.escalation_enabled` to `'true'`. Tier timings live in `app_config`
+too and are read every cycle, so retuning an SLA needs no redeploy. Manual
+escalation via the `request_escalation` RPC works either way.
+
+`20260925000001_escalation_followups.sql` adds three things the engine exposed:
+
+* **Oversight routing.** A report accusing security personnel enters at HQ and is
+  readable and actionable only by oversight roles and the reporter. Routed by
+  jurisdiction like any other incident, such a report could land with — and be
+  resolved by — the command tier holding the officers complained of. The
+  categories are `app_config.oversight_categories`.
+* **Position history.** `telemetry` holds one current row per user, so a track
+  was discarded on every update and a closed incident could not be reconstructed
+  geographically. A trigger appends to `telemetry_history`; retention is
+  `app_config.telemetry_history_retention_days`.
+* **Mission debriefs** get their own columns instead of being appended into
+  `ai_summary` beside machine-generated text.
+
+Behaviour is asserted against real PostgreSQL — 65 assertions across the two
+suites in `supabase/tests/`:
+
+```bash
+DATABASE_URL='postgresql://…' ./scripts/setup-test-db.sh
+DATABASE_URL='postgresql://…' ./scripts/test-escalation-engine.sh
+```
+
+### One jurisdiction vocabulary
+
+The app writes `alerts.geo_lga` / `geo_ward` / `geo_pu` from
+`lib/core/constants/tactical_mapping.dart`, and the console filters on those
+values. The two had diverged completely — 17 LGAs against 16, one LGA spelled
+differently, and ward lists that barely overlapped — so the console's ward and
+beat filters could not match anything the app wrote. The Dart map is now the
+source of truth and the console's copy is generated from it:
+
+```bash
+./scripts/sync-tactical-map.py          # regenerate
+./scripts/sync-tactical-map.py --check  # CI fails if they drift
+```
+
+Coverage is 17 LGAs, 207 wards, 4,987 polling units, asserted by
+`test/tactical_map_coverage_test.dart` rather than claimed in a comment — the
+comment claiming 17 and a name sweep finding 16 were both wrong, because one
+LGA's name is written with double quotes for its apostrophe.
+
 ### Staging
 
 `docs/STAGING.md` — one free Supabase project, about ten minutes. It is the only
@@ -125,7 +182,7 @@ NEXT_PUBLIC_SUPABASE_URL=… NEXT_PUBLIC_SUPABASE_ANON_KEY=… node scripts/veri
 
 ## What CI enforces
 
-Nine jobs, each tied to a defect that reached the default branch at least once.
+Ten jobs, each tied to a defect that reached the default branch at least once.
 
 | job | what it prevents |
 |---|---|
@@ -137,6 +194,7 @@ Nine jobs, each tied to a defect that reached the default branch at least once.
 | Supabase — one-paste apply script | runs `apply_all_migrations.sql` against a production-shaped database, top to bottom, twice, and asserts on its own PASS/FAIL table |
 | Supabase — staging bootstrap | builds a project from zero, checks the bootstrap refuses a database that already holds data, and proves both routes reach the same schema |
 | Supabase — dry run reports something | that the dry run emits a verdict rather than silence, which on a "is this safe?" script is the most dangerous output it could give |
+| Supabase — escalation engine behaviour | applies every migration to a real PostgreSQL and runs 65 assertions: the tier ladder, both clocks, idempotency, the kill switch, oversight routing, position history and retention |
 | Supabase — anon-access probe | manual only; fails if anon can read or write a sensitive table |
 
 Two gates worth knowing about because they catch a whole class rather than a
@@ -151,6 +209,9 @@ single bug:
 - **the realtime-subscription gate** — every table either app subscribes to must
   be in the `supabase_realtime` publication. A subscription on an unpublished
   table does not error; it simply never fires.
+- **`scripts/sync-tactical-map.py --check`** — the app and the console must name
+  Plateau's jurisdictions identically, or the console's filters silently match
+  nothing. They had already diverged into two different vocabularies once.
 
 ---
 
@@ -206,7 +267,9 @@ report:
    deployment.** Two functions answer on public URLs, and a watchdog fires every
    five minutes against a datastore nothing backs any more. Do **not** `curl`
    `seedMockData` to check — the probe itself writes ten fabricated emergencies.
-2. **Apply the nine migrations** — dry run first.
+2. **Apply the eleven migrations** — dry run first. The escalation engine is the
+   last two and ships disabled; turn it on deliberately once a cycle has been
+   watched running clean.
 3. **First deploy**, which is also the first test of the deploy config.
 4. **Ask GitHub Support** to purge the `refs/pull/*` refs still holding
    pre-purge objects.

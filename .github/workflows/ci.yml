@@ -81,6 +81,13 @@ jobs:
       # (line length, directive ordering, unused imports in the test suite).
       # RATCHET: clear the 54 warnings, then drop `--no-fatal-warnings`; then
       # the infos, then `--no-fatal-infos`.
+      # The app and the dashboard must describe Plateau's jurisdictions with the
+      # same words, or the dashboard's LGA/ward/beat filters match nothing the
+      # app actually wrote. They had diverged completely once already: 17 LGAs
+      # against 16, one spelled differently, and two disjoint ward lists.
+      - name: Tactical map is in sync across both front-ends
+        run: ./scripts/sync-tactical-map.py --check
+
       - name: Analyze
         # RATCHET, 2026-09-02: warnings now FAIL the build. They were 53 (30
         # unused imports, dead code, missing type arguments) and are now ZERO.
@@ -530,6 +537,36 @@ jobs:
             || { echo "::error::login error banner is not a live region"; FAIL=1; }
           if [ "$FAIL" -ne 0 ]; then exit 1; fi
           echo "OK: login form is labelled for assistive technology."
+
+  escalation:
+    name: Supabase — escalation engine behaviour
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL 16
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-16 postgresql-client-16
+
+      # Builds the full schema on a plain PostgreSQL (the Supabase auth shim
+      # first), then runs the engine and follow-up assertions against it. The
+      # suites are transactional and roll back, so the database is reusable.
+      - name: Apply every migration, then assert the engine behaves
+        run: |
+          set -euo pipefail
+          export PATH=/usr/lib/postgresql/16/bin:$PATH
+          D=$(mktemp -d)
+          sudo chmod 777 "$D"
+          sudo -u postgres initdb -D "$D/data" -U postgres --no-sync >/dev/null
+          sudo -u postgres pg_ctl -D "$D/data" \
+            -o "-p 55432 -c listen_addresses=127.0.0.1" -l "$D/log" start
+          for i in 1 2 3 4 5; do pg_isready -h 127.0.0.1 -p 55432 && break; sleep 2; done
+          psql "postgresql://postgres@127.0.0.1:55432/postgres" -c "CREATE DATABASE engine;"
+          export DATABASE_URL="postgresql://postgres@127.0.0.1:55432/engine"
+          ./scripts/setup-test-db.sh
+          ./scripts/test-escalation-engine.sh
 
   tracked-secrets:
     name: Repo — no credential material in tracked files

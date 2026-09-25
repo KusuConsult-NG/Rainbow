@@ -1,4 +1,12 @@
-// Canonical Tactical Mapping for Plateau State (Complete 17 LGAs + INEC Wards/PUs)
+// Canonical tactical mapping for Plateau State: LGA / ward / polling unit.
+//
+// This is the operative vocabulary for the whole system. The values here are
+// what the app writes into alerts.geo_lga / geo_ward / geo_pu, so the HQ
+// dashboard's filters are generated from this file by
+// scripts/sync-tactical-map.py — do not hand-edit the dashboard's copy.
+//
+// Coverage is asserted at runtime against plateauStatutoryLgas below rather than
+// claimed in a comment, because the claim in this comment was previously wrong.
 // ignore_for_file: public_member_api_docs, lines_longer_than_80_chars
 
 class TacticalJurisdiction {
@@ -52,8 +60,8 @@ class TacticalWard {
 
 const List<TacticalJurisdiction> plateauTacticalMap = [
   TacticalJurisdiction(
-    id: 'LGA_BARIKIN_LADI',
-    name: 'BARIKIN LADI',
+    id: 'LGA_BARKIN_LADI',
+    name: 'BARKIN LADI',
     wards: [
       TacticalWard(
         id: 'WARD_BARAKIN_LADI',
@@ -6383,3 +6391,66 @@ const List<TacticalJurisdiction> plateauTacticalMap = [
     ],
   ),
 ];
+
+/// The 17 Local Government Areas Plateau State is statutorily divided into.
+///
+/// Held separately from [plateauTacticalMap] so coverage is a checkable fact
+/// rather than a claim in a comment.
+const List<String> plateauStatutoryLgas = [
+  'BARKIN LADI',
+  'BASSA',
+  'BOKKOS',
+  'JOS EAST',
+  'JOS NORTH',
+  'JOS SOUTH',
+  'KANAM',
+  'KANKE',
+  'LANGTANG NORTH',
+  'LANGTANG SOUTH',
+  'MANGU',
+  'MIKANG',
+  'PANKSHIN',
+  "QUA'AN PAN",
+  'RIYOM',
+  'SHENDAM',
+  'WASE',
+];
+
+/// Statutory LGAs with no entry in [plateauTacticalMap] at all.
+List<String> get unmappedLgas {
+  final mapped = plateauTacticalMap.map((j) => j.name.toUpperCase()).toSet();
+  return plateauStatutoryLgas
+      .where((name) => !mapped.contains(name.toUpperCase()))
+      .toList();
+}
+
+/// Mapped LGAs that have wards but no polling units on any of them.
+///
+/// These can be selected down to ward level but not to a beat, so an alert from
+/// one carries no `geo_pu` and cannot be dispatched to a specific post.
+List<String> get unmappedPollingUnitLgas => plateauTacticalMap
+    .where((j) => j.wards.every((w) => w.pollingUnits.isEmpty))
+    .map((j) => j.name)
+    .toList();
+
+/// True when every statutory LGA is mapped down to polling-unit level.
+bool get isTacticalMapComplete =>
+    unmappedLgas.isEmpty && unmappedPollingUnitLgas.isEmpty;
+
+/// One line describing current coverage, for startup logs and the HQ dashboard.
+String tacticalMapCoverageSummary() {
+  final lgas = plateauTacticalMap.length;
+  final wards =
+      plateauTacticalMap.fold<int>(0, (n, j) => n + j.wards.length);
+  final pus = plateauTacticalMap.fold<int>(
+    0,
+    (n, j) => n + j.wards.fold<int>(0, (m, w) => m + w.pollingUnits.length),
+  );
+  final gaps = <String>[
+    if (unmappedLgas.isNotEmpty) 'unmapped LGAs: ${unmappedLgas.join(', ')}',
+    if (unmappedPollingUnitLgas.isNotEmpty)
+      'no polling units: ${unmappedPollingUnitLgas.join(', ')}',
+  ];
+  return '$lgas/${plateauStatutoryLgas.length} LGAs, $wards wards, $pus '
+      'polling units${gaps.isEmpty ? '' : ' — ${gaps.join('; ')}'}';
+}

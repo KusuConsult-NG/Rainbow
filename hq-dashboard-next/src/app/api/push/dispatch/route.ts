@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin, requireRole, COMMAND_ROLES } from '@/lib/supabase-server';
 import { serverEnv } from '@/lib/env';
+import { ONESIGNAL_ENDPOINT, oneSignalHeaders } from '@/lib/onesignal';
 
 export async function POST(request: Request) {
   try {
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
     }
 
     // 2. Dispatch push notification via OneSignal REST API
-    const { oneSignalAppId, oneSignalRestKey } = serverEnv();
+    const { oneSignalAppId, oneSignalRestKey, oneSignalAuthScheme } = serverEnv();
 
     if (!oneSignalAppId || !oneSignalRestKey) {
       console.warn('[PUSH_API_WARN] OneSignal REST API Key not configured. Push skipped.');
@@ -64,12 +65,9 @@ export async function POST(request: Request) {
       });
     }
 
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
+    const response = await fetch(ONESIGNAL_ENDPOINT, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Basic ${oneSignalRestKey}`,
-      },
+      headers: oneSignalHeaders(oneSignalRestKey, oneSignalAuthScheme),
       body: JSON.stringify({
         app_id: oneSignalAppId,
         include_player_ids: playerIds,

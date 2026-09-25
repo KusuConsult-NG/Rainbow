@@ -1831,7 +1831,7 @@ class _PulseMarkerState extends State<_PulseMarker>
     super.initState();
     _ctrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 2));
-    _ctrl.repeat();
+    unawaited(_ctrl.repeat());
   }
 
   @override

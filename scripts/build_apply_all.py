@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate scripts/apply_all_migrations.sql — the nine unapplied migrations,
+"""Generate scripts/apply_all_migrations.sql — the outstanding migrations,
 in order, as one paste, with a pass/fail readout at the end.
 
 WHY THIS IS GENERATED RATHER THAN HAND-WRITTEN
@@ -41,6 +41,8 @@ MIGRATIONS = [
     "20260903000003_alert_escalation_columns.sql",
     "20260903000004_profiles_badge_number.sql",
     "20260903000005_alerts_assigned_tier.sql",
+    "20260925000000_escalation_engine.sql",
+    "20260925000001_escalation_followups.sql",
 ]
 
 HEADER = """-- ============================================================================
@@ -48,7 +50,7 @@ HEADER = """-- =================================================================
 --   Regenerate with: python3 scripts/build_apply_all.py
 --
 -- Paste the WHOLE of this file into the Supabase dashboard -> SQL Editor and
--- run it. It applies the nine outstanding migrations in order and finishes by
+-- run it. It applies the outstanding migrations in order and finishes by
 -- SELECTing a pass/fail table, so one paste in gives you one answer out.
 --
 -- ---------------------------------------------------------------------------
@@ -87,7 +89,7 @@ VERIFY = """
 -- DID IT WORK?
 --
 -- One row per thing that had to be true. `result` is PASS or FAIL; nothing here
--- writes. If every row says PASS, the nine migrations are applied.
+-- writes. If every row says PASS, the migrations are applied.
 --
 -- These check BEHAVIOUR-ADJACENT FACTS, not just that statements ran: that anon
 -- holds no policy at all, that the escalation columns exist (their absence made

@@ -48,6 +48,8 @@ OUTSTANDING = [
     "20260903000003_alert_escalation_columns.sql",
     "20260903000004_profiles_badge_number.sql",
     "20260903000005_alerts_assigned_tier.sql",
+    "20260925000000_escalation_engine.sql",
+    "20260925000001_escalation_followups.sql",
 ]
 
 HEADER = """-- ============================================================================

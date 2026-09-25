@@ -140,6 +140,10 @@ Future<void> onStart(ServiceInstance service) async {
     final prefs = await SharedPreferences.getInstance();
     var modeStr = prefs.getString('trackingMode');
     var currentUserId = prefs.getString('activeTrackingUserId');
+    // The incident this track belongs to. Without it every position is
+    // attributable to a responder but not to the emergency they attended, so an
+    // incident cannot be reconstructed geographically afterwards.
+    var currentAlertId = prefs.getString('activeTrackingAlertId');
     String? currentStatus = prefs.getString('responderStatus') ??
         (modeStr == 'sos' ? 'EMERGENCY' : 'PATROLLING');
 
@@ -219,6 +223,8 @@ Future<void> onStart(ServiceInstance service) async {
               'accuracy': pos.accuracy,
               'speed': pos.speed,
               'updated_at': DateTime.now().toIso8601String(),
+              if (currentAlertId != null && currentAlertId!.isNotEmpty)
+                'alert_id': currentAlertId,
             };
 
             await SupabaseConfig.client
@@ -253,6 +259,7 @@ Future<void> onStart(ServiceInstance service) async {
     if (event != null) {
       modeStr = event['mode'] as String?;
       currentUserId = event['userId'] as String?;
+      currentAlertId = event['alertId'] as String?;
       startTelemetry();
     }
   });

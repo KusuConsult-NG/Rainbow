@@ -4,8 +4,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.16.0";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-const ONESIGNAL_APP_ID = Deno.env.get("ONESIGNAL_APP_ID") || "885be8b2-5f31-4627-a618-685f54dd266a";
+// No hardcoded fallback: a wrong app id sends real emergency notifications
+// into another project's OneSignal app and reports success.
+const ONESIGNAL_APP_ID = Deno.env.get("ONESIGNAL_APP_ID") || "";
 const ONESIGNAL_REST_API_KEY = Deno.env.get("ONESIGNAL_REST_API_KEY") || "";
+const ONESIGNAL_AUTH_SCHEME = (Deno.env.get("ONESIGNAL_AUTH_SCHEME") || "Key").trim();
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -60,7 +63,7 @@ serve(async (req) => {
     const severity = record.severity || "CRITICAL";
     const lga = record.geo_lga || "PLATEAU STATE";
 
-    if (!ONESIGNAL_REST_API_KEY) {
+    if (!ONESIGNAL_REST_API_KEY || !ONESIGNAL_APP_ID) {
       console.warn('[NOTIFY_ALERT] ONESIGNAL_REST_API_KEY not configured in Supabase secrets.');
       return new Response(JSON.stringify({ success: false, error: 'Push key not configured' }), {
         status: 503,
@@ -89,7 +92,7 @@ serve(async (req) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        Authorization: `Key ${ONESIGNAL_REST_API_KEY}`,
+        Authorization: `${ONESIGNAL_AUTH_SCHEME} ${ONESIGNAL_REST_API_KEY}`,
       },
       body: JSON.stringify(notificationBody),
     });
