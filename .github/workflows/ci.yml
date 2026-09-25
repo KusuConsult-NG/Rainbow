@@ -83,8 +83,9 @@ jobs:
       # the infos, then `--no-fatal-infos`.
       # The app and the dashboard must describe Plateau's jurisdictions with the
       # same words, or the dashboard's LGA/ward/beat filters match nothing the
-      # app actually wrote. They had diverged completely once already: 17 LGAs
-      # against 16, one spelled differently, and two disjoint ward lists.
+      # app actually wrote. Both listed all 17 LGAs once already and not one of
+      # the 17 matched: upper case against title case, one LGA misspelled, two
+      # ids different, and 142 wards against 207.
       - name: Tactical map is in sync across both front-ends
         run: ./scripts/sync-tactical-map.py --check
 

@@ -148,10 +148,21 @@ DATABASE_URL='postgresql://…' ./scripts/test-escalation-engine.sh
 
 The app writes `alerts.geo_lga` / `geo_ward` / `geo_pu` from
 `lib/core/constants/tactical_mapping.dart`, and the console filters on those
-values. The two had diverged completely — 17 LGAs against 16, one LGA spelled
-differently, and ward lists that barely overlapped — so the console's ward and
-beat filters could not match anything the app wrote. The Dart map is now the
-source of truth and the console's copy is generated from it:
+values. Both files listed all 17 LGAs — and **not one of the 17 matched**:
+
+| | app | console |
+|---|---|---|
+| case | `JOS NORTH` | `Jos North` |
+| Barkin Ladi | `BARIKIN LADI` | `Barkin Ladi` |
+| ids | `LGA_BARIKIN_LADI`, `LGA_QUA_AN_PAN` | `LGA_BARKIN_LADI`, `LGA_QUAN_PAN` |
+| wards | 207 | 142 |
+| polling units | 4,987 | 378 |
+
+Case alone was enough: the comparison is string equality, so every ward and beat
+filter in the console matched nothing the app had ever written. The Dart map is
+now the source of truth, the misspelling is corrected to the statutory BARKIN
+LADI, and the console's copy — title comment included, counts and all — is
+generated from it:
 
 ```bash
 ./scripts/sync-tactical-map.py          # regenerate
@@ -159,9 +170,11 @@ source of truth and the console's copy is generated from it:
 ```
 
 Coverage is 17 LGAs, 207 wards, 4,987 polling units, asserted by
-`test/tactical_map_coverage_test.dart` rather than claimed in a comment — the
-comment claiming 17 and a name sweep finding 16 were both wrong, because one
-LGA's name is written with double quotes for its apostrophe.
+`test/tactical_map_coverage_test.dart` rather than claimed in a comment. Both
+files had carried a title comment stating counts that nothing checked, and the
+console's was wrong about its own contents. A hand count of the Dart file can be
+wrong too: a sweep for single-quoted LGA names returns 16, because `"QUA'AN PAN"`
+is written with double quotes for its apostrophe.
 
 ### Staging
 

@@ -1,9 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rainbow_app/core/constants/tactical_mapping.dart';
 
-/// Coverage of the tactical map used to be asserted only in a source comment,
-/// which was wrong: it claimed 17 LGAs while a name-matching sweep found 16,
-/// because one LGA's name is written with double quotes for its apostrophe.
+/// Coverage of the tactical map used to be asserted only in a source comment.
+/// The comment was right — 17 LGAs — but nothing checked it, and a hand sweep
+/// for single-quoted LGA names returns 16, because `"QUA'AN PAN"` is written
+/// with double quotes for its apostrophe. The dashboard's copy of the map
+/// carried a title comment that was wrong about its own contents: it claimed
+/// 142 wards and 378 posts against the 207 and 4,987 it actually held.
 /// These tests make coverage a fact the suite checks rather than a claim.
 void main() {
   group('tactical map coverage', () {

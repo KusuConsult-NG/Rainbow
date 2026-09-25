@@ -4,8 +4,15 @@
 The app writes alerts.geo_lga / geo_ward / geo_pu from
 lib/core/constants/tactical_mapping.dart. The dashboard filters incidents by
 those same values, so if the two files carry different jurisdiction names the
-filters silently match nothing. They had diverged completely: 16 LGAs against
-17, one spelled differently, and two disjoint sets of ward names.
+filters silently match nothing.
+
+Both files did list all 17 LGAs — but not one of the 17 matched. The app writes
+upper case ('JOS NORTH'), the dashboard held title case ('Jos North'), so every
+comparison failed on case alone. On top of that the app spelled one LGA
+'BARIKIN LADI' for the statutory BARKIN LADI, two ids disagreed
+(LGA_BARIKIN_LADI vs LGA_BARKIN_LADI, LGA_QUA_AN_PAN vs LGA_QUAN_PAN), and the
+dashboard's ward data was a fraction of the app's: 142 wards and 378 polling
+units against 207 and 4,987.
 
 The Dart file is the source of truth because it is what reaches the database.
 This script projects it into hq-dashboard-next/src/lib/tactical_mapping.ts,
@@ -103,8 +110,16 @@ def parse_dart() -> list[dict]:
     return jurisdictions
 
 
-def render_ts(data: list[dict]) -> str:
-    banner = (
+def render_banner(summary: str) -> str:
+    """The file's whole leading comment, title line included.
+
+    The hand-written title claimed "142 Official Wards, 378 Verified Local
+    Security Posts" while the array below it held 207 and 4,987 — a comment
+    asserting counts that nothing checked. These come from the data.
+    """
+    return (
+        f"// Plateau State tactical mapping — {summary}.\n"
+        "//\n"
         "// GENERATED — do not edit by hand.\n"
         "//\n"
         "// Projected from lib/core/constants/tactical_mapping.dart by\n"
@@ -114,13 +129,18 @@ def render_ts(data: list[dict]) -> str:
         "// so the two must use the same words or the filters match nothing.\n"
         "//\n"
         "// Run ./scripts/sync-tactical-map.py after changing the Dart map.\n"
+        "\n"
     )
-    return banner + TS_ANCHOR + json.dumps(data, indent=2, ensure_ascii=False) + ";\n"
 
 
 def main() -> int:
     check = "--check" in sys.argv
     data = parse_dart()
+
+    lgas = len(data)
+    wards = sum(len(j["wards"]) for j in data)
+    pus = sum(len(w["pollingUnits"]) for j in data for w in j["wards"])
+    summary = f"{lgas} LGAs, {wards} wards, {pus} polling units"
 
     src = io.open(TS, encoding="utf-8").read()
     at = src.index(TS_ANCHOR)
@@ -132,19 +152,26 @@ def main() -> int:
     # Swallow the trailing semicolon and newline of the old declaration.
     tail = src[after:].lstrip(";")
 
-    # Drop any previous banner directly above the anchor.
+    # Everything between the two generated comment blocks — the interfaces and
+    # STATE_SECURITY_AGENCIES — is hand-maintained and passes through untouched.
     head = src[:at]
-    head_lines = head.rstrip("\n").split("\n")
-    while head_lines and head_lines[-1].startswith("//"):
+    head_lines = head.split("\n")
+    # Drop the generated leading comment block...
+    while head_lines and (head_lines[0].startswith("//") or not head_lines[0].strip()):
+        head_lines.pop(0)
+    # ...and the generated banner sitting directly above the anchor.
+    while head_lines and (head_lines[-1].startswith("//") or not head_lines[-1].strip()):
         head_lines.pop()
-    head = "\n".join(head_lines).rstrip() + "\n\n"
+    middle = "\n".join(head_lines).strip()
 
-    rendered = head + render_ts(data) + tail.lstrip("\n")
-
-    lgas = len(data)
-    wards = sum(len(j["wards"]) for j in data)
-    pus = sum(len(w["pollingUnits"]) for j in data for w in j["wards"])
-    summary = f"{lgas} LGAs, {wards} wards, {pus} polling units"
+    rendered = (
+        render_banner(summary)
+        + (middle + "\n\n" if middle else "")
+        + TS_ANCHOR
+        + json.dumps(data, indent=2, ensure_ascii=False)
+        + ";\n"
+        + tail.lstrip("\n")
+    )
 
     if check:
         if rendered != src:

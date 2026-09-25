@@ -1,4 +1,14 @@
-// Official Real Security Mapping for Plateau State (Complete 17 LGAs, 142 Official Wards, 378 Verified Local Security Posts)
+// Plateau State tactical mapping — 17 LGAs, 207 wards, 4987 polling units.
+//
+// GENERATED — do not edit by hand.
+//
+// Projected from lib/core/constants/tactical_mapping.dart by
+// scripts/sync-tactical-map.py. That Dart file is the source of truth
+// because it is what the app writes into alerts.geo_lga / geo_ward /
+// geo_pu; these values are what the dashboard's filters compare against,
+// so the two must use the same words or the filters match nothing.
+//
+// Run ./scripts/sync-tactical-map.py after changing the Dart map.
 
 export interface TacticalWard {
   id: string;
@@ -31,15 +41,6 @@ export const STATE_SECURITY_AGENCIES: SecurityAgency[] = [
   { id: 'VGN', name: 'Vigilante Group of Nigeria / Community Watch', shortCode: 'VGN', color: '#d97706', badge: '🛡️', description: 'Community Peace & Neighbourhood Watch Outfits' }
 ];
 
-// GENERATED — do not edit by hand.
-//
-// Projected from lib/core/constants/tactical_mapping.dart by
-// scripts/sync-tactical-map.py. That Dart file is the source of truth
-// because it is what the app writes into alerts.geo_lga / geo_ward /
-// geo_pu; these values are what the dashboard's filters compare against,
-// so the two must use the same words or the filters match nothing.
-//
-// Run ./scripts/sync-tactical-map.py after changing the Dart map.
 export const plateauTacticalMap: TacticalJurisdiction[] = [
   {
     "id": "LGA_BARKIN_LADI",
