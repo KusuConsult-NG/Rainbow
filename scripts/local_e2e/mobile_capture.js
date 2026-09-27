@@ -113,7 +113,7 @@ async function semanticsText(page) {
   console.log(`[mobile] serving build/web on ${origin}`);
 
   const { browser, newPage, problems, state, tiles } = await launch({ viewport: PHONE, canvaskitDir: path.join(WEB, 'canvaskit') });
-  const page = await newPage();
+  let page = await newPage();
 
   // A release build fetches CanvasKit from gstatic, which the egress policy
   // refuses. The same files are already in build/web/canvaskit, so serve those:
@@ -215,13 +215,33 @@ async function semanticsText(page) {
    * citizen is redirected away from all of it.
    */
   async function signIn(role) {
-    await page.evaluate(() => {
-      try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ }
-    });
+    // A FRESH PAGE per role, not a reload.
+    //
+    // Reusing one page meant booting the whole Flutter app a fourth time in a
+    // tab that had already rendered ~100 screenshots, and on a CI runner the
+    // fourth boot never finished: `waitForFunction` timed out after 90s and the
+    // HQ role was never captured. Locally, with more memory, the same code
+    // passed — which is the CI-only failure this project keeps producing.
+    //
+    // A new page also clears storage for free, so the session cannot leak from
+    // one role into the next.
+    try { await page.close(); } catch { /* already gone */ }
+    page = await newPage();
+
+    // A new PAGE does not mean new storage: localStorage is per origin per
+    // browser context, so the previous role's Supabase session is still there
+    // and the app signs straight back in as them. Dropping the explicit clear
+    // when this stopped reloading is exactly what happened — every staff role
+    // came back as the citizen and landed on /home, and the run reported the
+    // agent dashboard as unreachable by anyone.
     await page.goto(origin, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(
       () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-      { timeout: 90000 },
+      { timeout: 120000 },
     );
     await sleep(6000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
@@ -285,13 +305,16 @@ async function semanticsText(page) {
   // it is the only state in which those screens are real.
   for (const [route, slug] of [['/splash', 'splash'], ['/login', 'login']]) {
     state.screen = `mobile:signed-out:${slug}`;
+    try { await page.close(); } catch { /* already gone */ }
+    page = await newPage();
+    await page.goto(origin, { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
-      try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ }
+      try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
     });
     await page.goto(`${origin}/#${route}`, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(
       () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-      { timeout: 90000 },
+      { timeout: 120000 },
     );
     await sleep(6000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
