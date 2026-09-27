@@ -26,6 +26,10 @@ const PASSWORD = 'staging-only-password';
 const PEOPLE = [
   { key: 'citizen',   id: 'bbbb2222-0000-4000-8000-00000000b001', role: 'CITIZEN',        full_name: 'Amina Bello',        geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: null,         agency: null, tier: null },
   { key: 'responder', id: 'bbbb2222-0000-4000-8000-00000000b002', role: 'RESPONDER',      full_name: 'Sgt. Danjuma Yusuf', geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'RSP-014',    agency: null, tier: 'POLLING_UNIT' },
+  // The command chain has four rungs and only three were ever seeded, so the
+  // polling-unit and ward tiers had never been rendered or exercised.
+  { key: 'unit',      id: 'bbbb2222-0000-4000-8000-00000000b007', role: 'UNIT_COMMAND',    full_name: 'Sgt. Bitrus Gyang',   geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'PU-014',     agency: null, tier: 'POLLING_UNIT' },
+  { key: 'ward',      id: 'bbbb2222-0000-4000-8000-00000000b008', role: 'WARD_COMMAND',    full_name: 'Insp. Ladi Dung',     geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'WRD-007',    agency: null, tier: 'WARD' },
   { key: 'lga',       id: 'bbbb2222-0000-4000-8000-00000000b003', role: 'LGA_COMMAND',    full_name: 'Insp. Grace Pam',    geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'LGA-002',    agency: null, tier: 'LGA' },
   { key: 'hq',        id: 'bbbb2222-0000-4000-8000-00000000b004', role: 'HQ_COMMAND',     full_name: 'ACP Musa Ibrahim',   geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'HQ-001',     agency: null, tier: 'HQ' },
   { key: 'police',    id: 'bbbb2222-0000-4000-8000-00000000b005', role: 'POLICE_LIAISON', full_name: 'DSP Audu Bala',      geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'NP/JOS/001', agency: 'POLICE', tier: null },

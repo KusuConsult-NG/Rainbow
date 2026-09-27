@@ -295,7 +295,13 @@ async function semanticsText(page) {
     ['/admin-broadcast', 'admin-broadcast', 'admin_broadcast_screen.dart'],
   ];
 
-  const ROLES = ['citizen', 'responder', 'lga', 'hq'];
+  // The whole command chain, bottom to top, plus a citizen and an untiered
+  // responder. Capturing only responder/LGA/HQ left the polling-unit and ward
+  // rungs — two of the four — never rendered.
+  // Every account type that can sign in. The command chain bottom to top,
+  // the untiered responder, and both agency liaisons — all of them land in the
+  // responder app, and only three of the eight had ever been rendered.
+  const ROLES = ['citizen', 'responder', 'unit', 'ward', 'lga', 'hq', 'police', 'army'];
   const coverage = new Map();   // route -> the roles that reached it
   const roleReport = {};
 
@@ -343,6 +349,10 @@ async function semanticsText(page) {
     }
     if (!signedIn) { roleReport[role] = { landed, reached: [] }; continue; }
 
+    // The dashboard banner names the tier; grab it before walking the routes.
+    const banner = (await semanticsText(page)).split('\n').map((l) => l.trim())
+      .find((l) => /COMMAND|OPERATIONAL UNIT|CITIZEN/.test(l)) || '';
+
     const reached = [];
     let n = 0;
     for (const [route, slug] of ROUTES) {
@@ -364,7 +374,7 @@ async function semanticsText(page) {
         `      shot  ${name}.png  ${here === route ? 'reached' : `-> ${here}`}, ${chars} chars`,
       );
     }
-    roleReport[role] = { landed, reached };
+    roleReport[role] = { landed, banner, reached };
     console.log(`  ${role}: ${reached.length}/${ROUTES.length} routes reached`);
   }
 
@@ -379,6 +389,24 @@ async function semanticsText(page) {
     never.length
       ? `never rendered: ${never.map(([r, , f]) => `${r} (${f})`).join(', ')}`
       : `${coverage.size}/${ROUTES.length}`,
+  );
+
+  // Each rung of the chain must identify itself. HQ used to read "OPERATIONAL
+  // UNIT" here — the top of the chain wearing the label of an untiered
+  // responder, because both mapped to ResponderTier.unknown.
+  const EXPECTED_BANNER = {
+    unit: 'UNIT COMMAND',
+    ward: 'WARD COMMAND',
+    lga: 'LGA COMMAND',
+    hq: 'HQ COMMAND',
+  };
+  const wrongBanner = Object.entries(EXPECTED_BANNER)
+    .filter(([role, banner]) => !(roleReport[role]?.banner || '').includes(banner))
+    .map(([role, banner]) => `${role} should read ${banner}, read "${roleReport[role]?.banner || '(nothing)'}"`);
+  check(
+    'every rung of the command chain identifies itself on the dashboard',
+    wrongBanner.length === 0,
+    wrongBanner.join('; ') || Object.values(EXPECTED_BANNER).join(' / '),
   );
 
   // A screen only a citizen can open and a screen only staff can open are both

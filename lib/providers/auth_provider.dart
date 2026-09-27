@@ -30,7 +30,17 @@ enum ResponderTier {
   /// Documentation for local government area.
   lga,
 
-  /// Documentation for unknown responder tier.
+  /// State command. The TOP of the chain, and distinct from [unknown].
+  ///
+  /// HQ used to map to [unknown], which it shares with a plain RESPONDER who
+  /// has no tier at all — so the two ends of the command chain were the same
+  /// value, and everything that switched on tier fell to its default for both.
+  /// That produced an HQ dashboard titled "OPERATIONAL UNIT", and an HQ
+  /// escalation tagged 'UNIT' by one code path and 'LGA' by another on the
+  /// same screen.
+  hq,
+
+  /// No tier: a responder who is not part of the PU/WARD/LGA/HQ chain.
   unknown,
 }
 
@@ -183,7 +193,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         } else {
           role = UserRole.responder;
           if (roleStr.contains('HQ')) {
-            tier = ResponderTier.unknown;
+            tier = ResponderTier.hq;
           } else if (roleStr.contains('LGA')) {
             tier = ResponderTier.lga;
           } else if (roleStr.contains('WARD')) {

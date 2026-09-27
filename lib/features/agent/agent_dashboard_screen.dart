@@ -14,6 +14,7 @@ import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/alerts_feed.dart';
+import 'package:rainbow_app/features/agent/responder_tier.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/auth_service.dart';
 import 'package:rainbow_app/services/tts_service.dart';
@@ -107,6 +108,8 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
           return 'WARD COMMAND';
         case ResponderTier.pu:
           return 'UNIT COMMAND';
+        case ResponderTier.hq:
+          return 'HQ COMMAND';
         // ignore: no_default_cases, Stylistic override to match system design
         default:
           return 'OPERATIONAL UNIT';
@@ -115,20 +118,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
     return 'CITIZEN';
   }
 
-  String get _assignedTier {
-    final auth = ref.watch(authProvider);
-    switch (auth.tier) {
-      case ResponderTier.pu:
-        return 'UNIT';
-      case ResponderTier.ward:
-        return 'WARD';
-      case ResponderTier.lga:
-        return 'LGA';
-      // ignore: no_default_cases, Stylistic override to match system design
-      default:
-        return 'UNIT';
-    }
-  }
+  String get _assignedTier => assignedTierLabel(ref.watch(authProvider).tier);
 
   bool _showMap = false;
 
@@ -795,9 +785,7 @@ class _MissionCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authProvider);
-    final assignedTier = auth.tier == ResponderTier.pu
-        ? 'UNIT'
-        : (auth.tier == ResponderTier.ward ? 'WARD' : 'LGA');
+    final assignedTier = assignedTierLabel(auth.tier);
 
     final status = alert['status'] ?? 'OPEN';
     final severity = alert['severity'] ?? 'MEDIUM';
@@ -1380,9 +1368,7 @@ class _EscalationDialogState extends State<_EscalationDialog> {
   }
 
   Future<void> _loadTargetCommanders() async {
-    var targetTier = 'WARD';
-    if (widget.assignedTier == 'WARD') targetTier = 'LGA';
-    if (widget.assignedTier == 'LGA') targetTier = 'HQ';
+    final targetTier = escalationTargetFor(widget.assignedTier) ?? 'HQ';
 
     // Map tier to role string
     final roleMap = {'WARD': 'WARD_COMMAND', 'LGA': 'LGA_COMMAND', 'HQ': 'HQ_COMMAND'};
@@ -1424,9 +1410,7 @@ class _EscalationDialogState extends State<_EscalationDialog> {
 
   @override
   Widget build(BuildContext context) {
-    var targetTier = 'WARD';
-    if (widget.assignedTier == 'WARD') targetTier = 'LGA';
-    if (widget.assignedTier == 'LGA') targetTier = 'HQ';
+    final targetTier = escalationTargetFor(widget.assignedTier) ?? 'HQ';
 
     return AlertDialog(
       backgroundColor: AppColors.surfaceContainer,
@@ -1642,9 +1626,7 @@ class _EscalationDialogState extends State<_EscalationDialog> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSubmitting = true);
 
-    var targetTier = 'WARD';
-    if (widget.assignedTier == 'WARD') targetTier = 'LGA';
-    if (widget.assignedTier == 'LGA') targetTier = 'HQ';
+    final targetTier = escalationTargetFor(widget.assignedTier) ?? 'HQ';
 
     try {
       final alertId = widget.alertDoc['id'] as String?;
