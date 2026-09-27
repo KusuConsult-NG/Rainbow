@@ -80,6 +80,16 @@ flutter:
     # reaching a Google CDN. `main.dart` sets allowRuntimeFetching = false so a
     # missing weight fails loudly in development instead of silently at 3am.
     - assets/google_fonts/
+    # Jurisdiction geometry, so an incident's coordinates can be resolved to
+    # the LGA and ward that own it. Bundled rather than fetched: routing an
+    # emergency must not depend on reaching a network that may be the reason
+    # the emergency is being reported.
+    #
+    #   plateau_boundaries.json  17 real LGA polygons
+    #                            (geoBoundaries gbOpen NGA ADM2, CC BY 4.0)
+    #   plateau_wards.json       207 ward CENTROIDS, not polygons
+    #                            (temikeezy/nigeria-geojson-data, MIT)
+    - assets/geo/
 
 flutter_launcher_icons:
   android: true

@@ -56,3 +56,40 @@ String? escalationTargetFor(String assignedTier) {
       return 'HQ';
   }
 }
+
+/// Rank of a tier in the chain, bottom to top. UNIT=0 ... HQ=3.
+int tierRank(String tier) {
+  switch (tier.toUpperCase()) {
+    case 'UNIT':
+      return 0;
+    case 'WARD':
+      return 1;
+    case 'LGA':
+      return 2;
+    case 'HQ':
+      return 3;
+    default:
+      return 0;
+  }
+}
+
+/// Can an officer at [viewerTier] see an alert owned by [alertTier]?
+///
+/// The rule is **owner tier and everyone above**. A PU alert is actionable by
+/// that PU and visible to its ward, its LGA and HQ; a ward alert is not
+/// visible to the units below it.
+///
+/// Oversight downward, privacy upward. A commander who cannot see what their
+/// units are handling cannot command; a unit that can see every other unit's
+/// traffic is back to the fail-open noise this replaces.
+///
+/// HQ sees everything, which is what makes "HQ overrides where the chain is
+/// not accessible" possible at all.
+bool tierCanSee({required String viewerTier, required String? alertTier}) {
+  // An alert with no tier is visible to everyone. That is deliberate: an
+  // unowned emergency must not be invisible while the routing that should
+  // have owned it is being fixed. Fail OPEN on the alert, never on the
+  // viewer.
+  if (alertTier == null || alertTier.trim().isEmpty) return true;
+  return tierRank(viewerTier) >= tierRank(alertTier);
+}

@@ -78,6 +78,43 @@ void main() {
     });
   });
 
+  // Owner tier and everyone above. Before this the dashboard filtered on
+  // geography alone, and every branch ended in a `geo_* == null` fail-open —
+  // which, since nothing populated the geography, was the only path that ever
+  // ran. Every alert was visible to every responder at every tier.
+  group('who can see an alert', () {
+    test('the owning tier sees its own', () {
+      expect(tierCanSee(viewerTier: 'UNIT', alertTier: 'UNIT'), isTrue);
+      expect(tierCanSee(viewerTier: 'WARD', alertTier: 'WARD'), isTrue);
+    });
+
+    test('every tier above the owner sees it', () {
+      expect(tierCanSee(viewerTier: 'WARD', alertTier: 'UNIT'), isTrue);
+      expect(tierCanSee(viewerTier: 'LGA', alertTier: 'UNIT'), isTrue);
+      expect(tierCanSee(viewerTier: 'HQ', alertTier: 'UNIT'), isTrue);
+    });
+
+    test('a tier below the owner does not', () {
+      expect(tierCanSee(viewerTier: 'UNIT', alertTier: 'WARD'), isFalse);
+      expect(tierCanSee(viewerTier: 'UNIT', alertTier: 'HQ'), isFalse);
+      expect(tierCanSee(viewerTier: 'WARD', alertTier: 'LGA'), isFalse);
+    });
+
+    test('HQ sees everything — that is what makes an override possible', () {
+      for (final t in ['UNIT', 'WARD', 'LGA', 'HQ']) {
+        expect(tierCanSee(viewerTier: 'HQ', alertTier: t), isTrue,
+            reason: 'HQ could not see a \$t alert');
+      }
+    });
+
+    test('an alert with no tier is visible to everyone, deliberately', () {
+      // Fail OPEN on the alert, never on the viewer: an unowned emergency
+      // must not be invisible while the routing that should own it is fixed.
+      expect(tierCanSee(viewerTier: 'UNIT', alertTier: null), isTrue);
+      expect(tierCanSee(viewerTier: 'UNIT', alertTier: ''), isTrue);
+    });
+  });
+
   // The role string on the profile is what decides all of this, so the mapping
   // from role to tier is part of the same claim.
   group('role strings map to the right rung', () {

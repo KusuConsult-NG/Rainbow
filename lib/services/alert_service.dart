@@ -8,6 +8,7 @@ import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
+import 'package:rainbow_app/core/geo/jurisdiction_resolver.dart';
 import 'package:rainbow_app/services/sqlite_service.dart';
 
 /// Documentation for this public member.
@@ -83,6 +84,53 @@ class AlertService {
         'jurisdiction (geo_lga/geo_ward/geo_pu) is still attached.',
       );
     }
+
+    // ── Which jurisdiction owns this incident ───────────────────────────
+    //
+    // The command chain starts at the tier responsible for the GROUND the
+    // incident happened on, so an alert has to carry that ground. Nothing
+    // attached it: a citizen report carried no geography at all unless the
+    // reporter opened the manual override, and the panic SOS carried the
+    // reporter's REGISTERED lga/ward — where they live, not where they are.
+    // Every tier filter then fell through its `IS NULL` fail-open and showed
+    // every alert to everybody, so the routing existed but never ran.
+    //
+    // Order of preference, most trustworthy first:
+    //   1. what the caller passed  — a manual override by the reporter
+    //   2. the coordinates          — measured, and the point of all this
+    //   3. nothing                  — unresolved is a real answer
+    //
+    // The reporter's profile is deliberately NOT a fallback here. Filing an
+    // incident against the address someone registered at is how a report from
+    // Mangu is routed to a unit in Jos, and it would be indistinguishable
+    // afterwards from a measured position. C-5 was this mistake with
+    // coordinates; this is the same mistake with jurisdiction.
+    var finalLga = geoLga;
+    var finalWard = geoWard;
+    final finalPu = geoPu;
+
+    if (finalLga == null || finalWard == null) {
+      try {
+        await JurisdictionResolver.instance.ensureLoaded();
+        final j = JurisdictionResolver.instance.resolve(finalLat, finalLng);
+        if (j.isResolved) {
+          finalLga ??= j.lga;
+          finalWard ??= j.ward;
+          debugPrint('[ALERT_SERVICE] jurisdiction from GPS: $j');
+        } else {
+          debugPrint(
+            '[ALERT_SERVICE] coordinates did not resolve to a Plateau LGA — '
+            'submitting without jurisdiction rather than guessing one.',
+          );
+        }
+      } catch (e) {
+        debugPrint('[ALERT_SERVICE] jurisdiction lookup failed: $e');
+      }
+    }
+
+    // There is no polling unit from coordinates, and there cannot be: no open
+    // dataset gives polling units a position. A PU arrives only when the
+    // reporter picks one.
 
     final localId = 'OFFLINE_${DateTime.now().millisecondsSinceEpoch}';
 
@@ -174,10 +222,10 @@ class AlertService {
         'longitude': finalLng,
         'status': 'PENDING',
         'severity': effectivePriority.name.toUpperCase(),
-        'geo_lga': geoLga,
-        'geo_ward': geoWard,
+        'geo_lga': finalLga,
+        'geo_ward': finalWard,
         'geo_siec_ward': geoSiecWard,
-        'geo_pu': geoPu,
+        'geo_pu': finalPu,
         'media_urls': mediaUrls,
       };
 

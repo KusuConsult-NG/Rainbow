@@ -497,6 +497,23 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
 
       final auth = ref.watch(authProvider);
 
+      // OWNER TIER AND EVERYONE ABOVE.
+      //
+      // Before this the filter was geography alone, and every branch of it
+      // ended in an `alert['geo_*'] == null` fail-open. Since nothing
+      // populated the geography, that fallback was the ONLY path that ever
+      // ran: every alert was visible to every responder at every tier, and
+      // the chain's ownership meant nothing on screen.
+      //
+      // Geography still scopes WHERE an officer looks; the tier now scopes
+      // WHAT they are shown of it.
+      if (!tierCanSee(
+        viewerTier: assignedTierLabel(auth.tier),
+        alertTier: alert['assigned_tier'] as String?,
+      )) {
+        return false;
+      }
+
       if (auth.tier == ResponderTier.lga) {
         return assignedLgas.contains(alert['geo_lga']) ||
             assignedLgas.contains('ALL') ||
