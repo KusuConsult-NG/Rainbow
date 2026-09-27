@@ -52,8 +52,8 @@ class TacticalWard {
 
 const List<TacticalJurisdiction> plateauTacticalMap = [
   TacticalJurisdiction(
-    id: 'LGA_BARIKIN_LADI',
-    name: 'BARIKIN LADI',
+    id: 'LGA_BARKIN_LADI',
+    name: 'BARKIN LADI',
     wards: [
       TacticalWard(
         id: 'WARD_BARAKIN_LADI',
@@ -4673,7 +4673,7 @@ const List<TacticalJurisdiction> plateauTacticalMap = [
     wards: [
       TacticalWard(
         id: 'WARD_BWALL',
-        name: 'BWALL',
+        name: "QUA'AN PAN",
         pollingUnits: [
           'BWALL CENTRAL/TANBA',
           'GEOPIL',

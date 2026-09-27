@@ -2682,3 +2682,60 @@ Also noted: the dashboard prefers plural `geo_lgas` / `geo_wards` / `geo_pus`
 columns for an officer covering several patches, falling back to the singular.
 None of those three columns exist in any migration, so the fallback is the only
 path that ever runs and a multi-ward officer cannot be expressed.
+
+## Two of Plateau's seventeen LGAs could not be matched
+
+The two apps each carry their own copy of the state's jurisdiction map, and
+they disagreed.
+
+| | console | mobile app |
+|---|---|---|
+| | `Barkin Ladi` | `BARIKIN LADI` |
+| | `Qua'an Pan` | `BWALL` |
+
+`BARIKIN LADI` is a transposition of Barkin Ladi. `BWALL` is not a local
+government area at all — Bwall is a district *inside* Qua'an Pan, and Qua'an
+Pan was missing from the mobile app entirely.
+
+**Why it matters.** The console matches an alert to an LGA with `geoMatches`,
+which lowercases both sides and accepts a substring in either direction. That
+generosity absorbs `JOS NORTH` vs `Jos North` — it cannot rescue a name that is
+simply different. `barikin ladi` is not a substring of `barkin ladi`, and
+`bwall` shares nothing with `qua'an pan`. So an incident tagged by the mobile
+app in either of those two LGAs could not be matched to them: not by the
+console's LGA filter, and not by the dashboard scope of the commander
+responsible for that ground. A citizen in Qua'an Pan also could not select
+their own LGA, because the app did not list it.
+
+Two of seventeen LGAs, and the reason both apps looked correct in isolation is
+that each was self-consistent. Only comparing them shows it.
+
+Fixed in the mobile map, and pinned by `test/jurisdiction_names_test.dart`,
+which asserts the app knows exactly the seventeen real LGAs — no extras, none
+missing — and that every name survives the console's own matching function.
+
+## The map boundaries were rectangles
+
+`plateau_boundaries.json` held 17 features. All 17 were **axis-aligned
+rectangles**: four corners, two distinct longitudes, two distinct latitudes.
+They are the dashed grid visible behind the markers in every map screenshot,
+and they are not the shape of anything.
+
+That is why resolving an incident's GPS to an LGA was refused earlier in this
+audit: a point-in-polygon test against a rectangle returns an answer with total
+confidence and no relationship to where the boundary actually runs.
+
+Replaced with the real ADM2 polygons for all seventeen Plateau LGAs, extracted
+from **geoBoundaries gbOpen NGA ADM2 (CC BY 4.0, www.geoboundaries.org)** —
+92 KB, attribution carried inside the file. The names are the same seventeen
+the test above pins, which is what lets a resolved polygon be matched back to a
+jurisdiction the apps understand.
+
+### Wards and polling units are still missing
+
+geoBoundaries publishes no ADM3 for Nigeria, so ward polygons are not available
+from that source, and polling units are points that no open release in reach
+provides. The chain can therefore resolve an incident to its **LGA**, and no
+finer. Routing an alert to the correct *polling unit* — the bottom rung, and
+the one the whole chain hangs off — still needs INEC ward and PU geometry as an
+input.
