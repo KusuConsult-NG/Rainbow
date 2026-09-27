@@ -170,6 +170,10 @@ async function launch({ viewport, canvaskitDir = null }) {
         kind: 'pageerror',
         text: String(e).slice(0, 300),
         stack: (e && e.stack ? String(e.stack) : '').slice(0, 1200),
+        // Whether a synthetic keystroke was in flight. Minified line numbers
+        // change with every build, so a stack-line allowlist rots silently;
+        // WHEN an error fires is stable.
+        whileTyping: !!state.typing,
       });
     });
 

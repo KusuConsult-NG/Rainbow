@@ -211,8 +211,10 @@ async function logMark() {
     if (!box) return false;
     await page.mouse.click(box.x, box.y);
     await sleep(350);
+    state.typing = true;
     await page.keyboard.type(text, { delay: 25 });
     await sleep(400);
+    state.typing = false;
     return true;
   }
 
@@ -553,12 +555,15 @@ async function logMark() {
    * engine's keyboard binding reacting to an event with no real key, and that
    * binding does not exist on Android or iOS.
    *
-   * Excluded by stack, not by message: an app error that happened to share the
-   * wording would still be reported.
+   * Excluded by BOTH the message and the fact that a synthetic keystroke was
+   * in flight when it fired. An earlier version matched minified stack lines
+   * instead, which rotted the moment the app was rebuilt — the line numbers
+   * move, the filter stops matching, and the run fails on noise it had already
+   * classified. An app error with the same wording, raised at any other
+   * moment, is still reported.
    */
   const isEngineKeyboardNoise = (p) =>
-    /Cannot read properties of null \(reading 'toString'\)/.test(p.text) &&
-    /main\.dart\.js:(38913|38943|39011|39023|39057|39077)/.test(p.stack || '');
+    /Cannot read properties of null \(reading 'toString'\)/.test(p.text) && p.whileTyping;
 
   const engineNoise = problems.filter(isEngineKeyboardNoise);
   const fatal = problems.filter(
