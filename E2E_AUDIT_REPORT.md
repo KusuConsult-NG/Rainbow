@@ -2739,3 +2739,60 @@ provides. The chain can therefore resolve an incident to its **LGA**, and no
 finer. Routing an alert to the correct *polling unit* — the bottom rung, and
 the one the whole chain hangs off — still needs INEC ward and PU geometry as an
 input.
+
+## Deep search for ward and polling-unit geometry
+
+The routing decision was GPS → polling unit. This is what is actually
+obtainable, after searching the open sources reachable from here. Most are
+not: HDX, geoboundaries.org, Overpass and Nominatim are all refused by the
+egress policy. `raw.githubusercontent.com` is open, which is what made the
+rest possible.
+
+| layer | status | source |
+|---|---|---|
+| **LGA polygons** | **obtained, integrated** | geoBoundaries gbOpen NGA ADM2, CC BY 4.0 — 774 national, 17 extracted for Plateau |
+| **Ward centroids** | **obtained, added** | `temikeezy/nigeria-geojson-data`, MIT — 8,809 national, 207 for Plateau, all 17 LGAs |
+| **PU list** (names, codes, ward) | available, not taken | `sadiqsalau/inec-ng-data` — 35 MB, complete, but see below |
+| **PU coordinates** | **does not exist openly** | — |
+
+### Wards are centroids, not boundaries
+
+The ward data is one lat/long per ward, not a polygon. A point can therefore be
+resolved to the **nearest ward centroid inside its LGA polygon** — an
+approximation, and it will be wrong near a boundary between two wards of very
+different size. That is honest routing with a stated error mode, which is a
+different thing from the rectangles it replaces: those were wrong everywhere
+and said so nowhere.
+
+`public/plateau_wards.json` carries the 207 centroids and states this limit in
+the file itself.
+
+### Polling-unit coordinates are not open data
+
+`sadiqsalau/inec-ng-data` has the complete INEC hierarchy — every state, LGA,
+ward and polling unit — and each unit carries only `name` and `abbreviation`.
+No coordinates. The geocoded polling-unit sets that do exist are per-state
+research datasets for election analysis (Lagos, Abia, Anambra), built by
+geocoding unit names after the fact; none covers Plateau and none is
+authoritative. INEC's own per-unit coordinates sit behind a single-voter lookup
+on the CVR portal, not a bulk download.
+
+**So GPS cannot resolve a polling unit, and the bottom rung of the chain
+cannot be reached from coordinates alone.** What is achievable today is
+GPS → LGA (real polygons) → nearest ward centroid. Assigning an alert to a
+specific PU requires either the reporter selecting it, or INEC PU geometry
+supplied as an input.
+
+### A ward-list discrepancy that was not one
+
+An initial comparison suggested the app was missing five Mangu wards. It is
+not. The app writes `GINDIRI 1`, `GINDIRI 11`, `MANGU 1`, `MANGU 11` where the
+official list writes `Gindiri I`, `Gindiri II`, `Mangu I`, `Mangu II`, and a
+normaliser that strips non-letters collapsed each pair to one key. The app's
+ward list is complete at 207.
+
+Worth noting for a future reader rather than as a defect: `GINDIRI 11` and
+`MANGU 11` are Arabic-numeral renderings of the Roman `II`, so they read as
+eleven. They match nothing in the official list except by the numeral-stripping
+comparison above, which is the kind of near-miss that produced the two real LGA
+mismatches.
