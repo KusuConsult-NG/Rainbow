@@ -168,7 +168,7 @@ production — in full, taking the select, the filters and the order with it.
 
 ## What CI enforces
 
-Ten jobs, each tied to a defect that reached the default branch at least once.
+Eleven jobs, each tied to a defect that reached the default branch at least once.
 
 | job | what it prevents |
 |---|---|
@@ -181,6 +181,7 @@ Ten jobs, each tied to a defect that reached the default branch at least once.
 | Supabase — staging bootstrap | builds a project from zero, checks the bootstrap refuses a database that already holds data, and proves both routes reach the same schema |
 | Supabase — dry run reports something | that the dry run emits a verdict rather than silence, which on a "is this safe?" script is the most dangerous output it could give |
 | HQ console — every screen and every control | a screen that crashes or renders empty, a query for a column that does not exist, and an action that appears to work while writing nothing. Screenshots are kept as a build artifact, pass or fail |
+| Mobile app — every screen and every control | the same, for the app: SOS both ways, the AI report, all ten reporting categories end to end, emergency PINs. It found that **every alert the app submitted was refused by the database** — the offline fallback made a rejected insert look like a sent report |
 | Supabase — anon-access probe | manual only; fails if anon can read or write a sensitive table |
 
 Two gates worth knowing about because they catch a whole class rather than a

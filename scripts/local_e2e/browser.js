@@ -21,8 +21,18 @@
  * asking for the right ground.
  */
 
+const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+
+const pathJoin = path.join;
+const fsExists = (p) => fs.existsSync(p);
+const readFile = (p) => fs.readFileSync(p);
+const CONTENT_TYPES = {
+  '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm',
+  '.json': 'application/json', '.symbols': 'text/plain', '.map': 'application/json',
+};
+const contentTypeFor = (p) => CONTENT_TYPES[path.extname(p)] || 'application/octet-stream';
 
 const puppeteer = require(path.join(
   __dirname, '..', '..', 'hq-dashboard-next', 'node_modules', 'puppeteer',
@@ -91,7 +101,7 @@ const DARK_TILE = tilePng(true);
  * Launch a browser whose pages serve map tiles locally and record every tile
  * asked for. Returns { browser, newPage, tiles, problems }.
  */
-async function launch({ viewport }) {
+async function launch({ viewport, canvaskitDir = null }) {
   const browser = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
@@ -108,8 +118,30 @@ async function launch({ viewport }) {
     const page = await browser.newPage();
     await page.setRequestInterception(true);
 
+    // ONE request handler. Registering a second one elsewhere does not layer:
+    // both fire, both try to resolve the same request, and whichever calls
+    // `continue()` first lets it out to the network. That is how map tiles
+    // escaped this interception and failed with CORS errors in the mobile run,
+    // while this handler believed it was serving them.
     page.on('request', (req) => {
       const url = req.url();
+
+      // A Flutter release build fetches CanvasKit from gstatic, which the
+      // egress policy refuses. The same files ship in build/web/canvaskit.
+      if (canvaskitDir) {
+        const ck = url.match(/gstatic\.com\/flutter-canvaskit\/[^/]+\/(.+)$/);
+        if (ck) {
+          const local = pathJoin(canvaskitDir, ck[1]);
+          if (fsExists(local)) {
+            return req.respond({
+              status: 200,
+              contentType: contentTypeFor(local),
+              body: readFile(local),
+            });
+          }
+        }
+      }
+
       if (TILE_HOSTS.test(url)) {
         const dark = url.includes('cartocdn');
         const m = url.match(/\/(\d+)\/(\d+)\/(\d+)\.png/);
@@ -129,7 +161,16 @@ async function launch({ viewport }) {
       }
     });
     page.on('pageerror', (e) => {
-      problems.push({ screen: state.screen, kind: 'pageerror', text: String(e).slice(0, 300) });
+      // The stack matters as much as the message: a minified TypeError with no
+      // stack cannot be attributed to anything, and an unattributed error gets
+      // reported as either "the app is broken" or "it is probably fine",
+      // neither of which is a finding.
+      problems.push({
+        screen: state.screen,
+        kind: 'pageerror',
+        text: String(e).slice(0, 300),
+        stack: (e && e.stack ? String(e.stack) : '').slice(0, 1200),
+      });
     });
 
     return page;

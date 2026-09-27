@@ -41,6 +41,19 @@ class AlertService {
     String? geoPu,
     String syncStatus = 'COMPLETED',
   }) async {
+    /// `isCritical` was a parameter that did nothing.
+    ///
+    /// It was declared, callers set it, and the body never read it — so
+    /// `startEmergency()`, which passes `isCritical: true` and no `priority`,
+    /// filed every PANIC SOS at the default: MEDIUM. The most urgent thing a
+    /// citizen can do arrived on the HQ board graded medium, below a report of
+    /// a blocked drain, and outside the CRITICAL filter entirely.
+    ///
+    /// Caught by pressing the button and reading the row that came out
+    /// (`severity: MEDIUM`), not by reading the code — the parameter is right
+    /// there in the call and looks like it works.
+    final effectivePriority = isCritical ? AlertPriority.critical : priority;
+
     // Coordinates stay NULL when there is no real fix.
     //
     // This previously defaulted to (9.9167, 8.8917) — the centre of Jos — so an
@@ -84,7 +97,7 @@ class AlertService {
           description: description,
           lat: finalLat,
           lng: finalLng,
-          priority: priority.name.toUpperCase(),
+          priority: effectivePriority.name.toUpperCase(),
           isAnonymous: false,
           createdAt: DateTime.now().toIso8601String(),
         );
@@ -144,11 +157,23 @@ class AlertService {
         'type': type,
         'description': description,
         'reported_by': reportedBy,
-        'reportedBy': reportedBy,
+        // `'reportedBy': reportedBy` used to sit here too — a camelCase twin of
+        // the line above, and not a column. PostgREST rejects an insert naming
+        // an unknown column IN FULL, so EVERY alert this app submitted was
+        // refused: every SOS, every incident report.
+        //
+        // It was invisible because the failure path is a fallback, not an
+        // error: the catch below enqueues the alert into offline SQLite, and
+        // the UI says the report was sent. It looked like an app that worked
+        // offline. It was an app that was always offline.
+        //
+        // The drift gate missed it too — its Dart key pattern was
+        // `[a-z_][a-z0-9_]*` with no IGNORECASE, so a camelCase key did not
+        // match and was skipped in silence. Fixed in check_schema_drift.py.
         'latitude': finalLat,
         'longitude': finalLng,
         'status': 'PENDING',
-        'severity': priority.name.toUpperCase(),
+        'severity': effectivePriority.name.toUpperCase(),
         'geo_lga': geoLga,
         'geo_ward': geoWard,
         'geo_siec_ward': geoSiecWard,
@@ -176,7 +201,7 @@ class AlertService {
           description: description,
           lat: finalLat,
           lng: finalLng,
-          priority: priority.name.toUpperCase(),
+          priority: effectivePriority.name.toUpperCase(),
           isAnonymous: false,
           createdAt: DateTime.now().toIso8601String(),
         );

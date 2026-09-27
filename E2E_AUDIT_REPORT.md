@@ -2477,3 +2477,112 @@ thrown, and no query naming a column the migrations do not define:
 | agency portal | add officer, change status, deploy personnel, file a report — all four insert |
 | HQ ↔ agency | HQ acknowledging a report writes `read_by_hq` and who acknowledged it |
 | sign out | returns to the login screen |
+
+## The mobile app, rendered and used
+
+No screen of the mobile app had ever been rendered either: there is no emulator
+here, and for most of this audit there was no Flutter SDK, so "it builds and its
+tests pass" was the whole of the evidence.
+
+Flutter's web target builds the same widget tree from the same Dart, so the
+screens can be rendered and the buttons pressed. `scripts/local_e2e/`:
+
+* `mobile_capture.js` — every route at phone size (390×844), screenshotted
+* `mobile_interact.js` — SOS both ways, the AI report, all ten reporting
+  categories end to end, emergency PINs, the uninstall request, and a sweep of
+  every remaining button
+
+**What that is and is not.** It is the real screens, the real router, the real
+state, against the stand-in backend. It is **not** an Android or iOS build:
+platform plugins behave differently or not at all on web. It does not prove
+row-level security.
+
+### Every SOS this app has ever sent was refused by the database
+
+`AlertService.submitAlert` built its insert payload with both of these:
+
+```dart
+'reported_by': reportedBy,
+'reportedBy': reportedBy,      // not a column
+```
+
+PostgREST rejects an insert naming an unknown column **in full**. So every alert
+the mobile app submitted — every SOS, every incident report, from every
+citizen — was refused.
+
+It was invisible because the failure path is a *fallback*, not an error: the
+catch enqueues the alert into offline SQLite and the UI reports the alert sent.
+It looked like an app with good offline support. It was an app that was always
+offline.
+
+**Why the drift gate missed it.** `check_schema_drift.py` matched Dart payload
+keys with `[a-z_][a-z0-9_]*` and no `IGNORECASE`, so `'reportedBy'` did not
+match the pattern at all and was skipped in silence — and a camelCase key is
+precisely what a wrong column name looks like when the surrounding code is
+Dart. The pattern now accepts any identifier, and the gate reports
+`alerts.reportedby` on the original code.
+
+### Every panic SOS was filed as MEDIUM
+
+`submitAlert` took an `isCritical` flag and never read it. The body graded
+alerts from `priority`, which defaults to `AlertPriority.medium`. So
+`EmergencyNotifier.startEmergency()` — which passes `isCritical: true` and no
+`priority` — filed every PANIC SOS at MEDIUM.
+
+On the HQ board that put the most urgent thing a citizen can do below a report
+of a blocked drain, and outside the CRITICAL filter entirely. The console-side
+work earlier in this audit *verified* that the CRITICAL filter correctly drops
+anything not graded CRITICAL; this is what was arriving mis-graded.
+
+Nothing caught it. `sos_orchestration_test.dart` verifies the provider *passes*
+`isCritical: true`, which it did — the parameter is right there in the call and
+looks like it works. It was found by pressing the button in a browser and
+reading the row that came out: `severity: MEDIUM`.
+
+Fixed by honouring the flag, and pinned by three tests in
+`offline_queue_test.dart` that go through the real `submitAlert` (its offline
+fallback writes the same severity the insert would). Restoring the bug makes
+them fail with `Expected: 'CRITICAL'  Actual: 'MEDIUM'`. The browser run now
+reports `type=PANIC SOS severity=CRITICAL`.
+
+### What the mobile run now proves
+
+16 of 16 assertions:
+
+| | |
+|---|---|
+| silent SOS (tap) | inserts `EMERGENCY - Silent SOS` with reporter and real coordinates |
+| panic SOS (long press) | inserts `PANIC SOS` at **CRITICAL**, and opens the emergency screen |
+| AI report | opens, listens, and produces a transcript |
+| all ten categories | Kidnap … Community attack, each through category → subtype → dossier → transmit, **10/10 inserted**, each carrying its own type and severity (e.g. `Kidnap - Immediate Abduction` / `CRITICAL`) |
+| emergency PIN | the four-step wizard reaches `rpc/set_emergency_pins` — the device never stores PIN material |
+| uninstall request | inserts into `uninstall_requests` |
+| incident history, safe zones | read the tables they display |
+| every other button | 13 exercised, none dead |
+
+### One error that is NOT the app's
+
+An uncaught `TypeError: Cannot read properties of null (reading 'toString')`
+fires 22 times, whenever the harness synthesises a keystroke. Resolved through
+`main.dart.js.map`, its stack is entirely inside
+`org-dartlang-sdk:///lib/_engine/engine/keyboard_binding.dart` — Flutter's own
+web keyboard binding — with no frame in `lib/`, and that binding does not exist
+on Android or iOS. It is excluded by stack rather than by message, so an app
+error with the same wording would still be reported.
+
+### Two more harness faults worth recording
+
+* **"Login is broken."** It was not. The fake appended on `upsert` instead of
+  merging, so `profiles` held two rows for one id; the app's own profile lookup
+  uses `.single()`, got "Results contain 2 rows", left the role unknown and
+  parked the user on the login screen. An hour of it looking like an auth bug.
+* **"Nine of ten categories are broken."** The report flow is three screens —
+  category, subtype, dossier — and the harness had collapsed the middle one,
+  typing a narrative into a screen with no narrative field and then looking for
+  a button that lives on the screen after it.
+
+### Still not covered
+
+* **A real device.** Web is the same Dart, not the same platform.
+* **Row-level security**, which only a staging project can show.
+* **The release build and the store artefacts**, which are gated statically only.

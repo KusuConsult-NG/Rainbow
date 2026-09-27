@@ -184,8 +184,15 @@ DART_DECL = r"(?:final|var|const)\s+(?:Map<String,\s*dynamic>\s+)?{name}\s*=\s*(
 TS_KEY = re.compile(
     r"(?:^|[{,])\s*(?:\.\.\.)?([a-z_][a-z0-9_]*)\s*:", re.IGNORECASE | re.MULTILINE
 )
+# Case matters here, and getting it wrong made this gate blind to the most
+# likely mistake in a Dart file. The pattern was `[a-z_][a-z0-9_]*` with no
+# IGNORECASE, so a camelCase key simply did not match and was skipped in
+# silence — and a camelCase key is precisely what a wrong column name looks
+# like when the surrounding code is Dart. `'reportedBy'` sat in the SOS insert
+# payload that way, next to the correct `'reported_by'`, and PostgREST rejects
+# an insert naming an unknown column IN FULL.
 DART_KEY = re.compile(
-    r"(?:^|[{,])\s*['\"]([a-z_][a-z0-9_]*)['\"]\s*:", re.MULTILINE
+    r"(?:^|[{,])\s*['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\s*:", re.MULTILINE
 )
 # A `//` comment between two entries hides the entry after it: the key regex
 # anchors on the preceding `{` or `,`, and a comment line sits between them.

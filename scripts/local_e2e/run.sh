@@ -79,3 +79,45 @@ echo "==> pressing the buttons"
 # render?"; this answers "does it do anything?" — and a button that looks right,
 # logs nothing and writes nothing is invisible to a screenshot.
 CONSOLE_URL="http://127.0.0.1:$PORT" E2E_OUT="$OUT" node scripts/local_e2e/interact.js
+
+# ── The mobile app ───────────────────────────────────────────────────────────
+#
+# Flutter's web target builds the same widget tree from the same Dart, so the
+# app's screens can be rendered here. Skipped rather than failed when the SDK is
+# absent: this script's first job is the console, and a missing Flutter should
+# not stop that being checked.
+if command -v flutter >/dev/null 2>&1; then
+  echo "==> building the mobile app for the browser"
+
+  # The demo citizen path signs in with these; pointed at the seeded fixture
+  # account so the run can get past the login screen.
+  [ -f "$ROOT/.env" ] || cp "$ROOT/.env.example" "$ROOT/.env"
+  for kv in "DEMO_CITIZEN_EMAIL=citizen@staging.operationrainbow.test" \
+            "DEMO_CITIZEN_PASS=staging-only-password" \
+            "AGENT_DEFAULT_PASS=staging-only-password"; do
+    key="${kv%%=*}"
+    if grep -q "^$key=" "$ROOT/.env"; then
+      sed -i "s|^$key=.*|$kv|" "$ROOT/.env"
+    else
+      printf '%s\n' "$kv" >> "$ROOT/.env"
+    fi
+  done
+
+  cd "$ROOT"
+  flutter pub get
+  # --no-web-resources-cdn keeps CanvasKit local; the gstatic copy is blocked
+  # here and an app that never paints photographs as a blank page.
+  # --dart-define points the build at the stand-in: the project URL is
+  # otherwise compiled in, and it is production's.
+  flutter build web --release --no-web-resources-cdn \
+    --dart-define=SUPABASE_URL="http://127.0.0.1:$FAKE_PORT" \
+    --dart-define=SUPABASE_ANON_KEY=local-e2e-anon-key-not-a-real-credential
+
+  echo "==> rendering the mobile screens at phone size"
+  E2E_OUT="$OUT" node scripts/local_e2e/mobile_capture.js
+
+  echo "==> using the mobile app: SOS, AI report, every category, every button"
+  E2E_OUT="$OUT" node scripts/local_e2e/mobile_interact.js
+else
+  echo "==> flutter not installed — skipping the mobile screens"
+fi

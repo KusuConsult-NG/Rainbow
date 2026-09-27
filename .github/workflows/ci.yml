@@ -795,6 +795,77 @@ jobs:
           path: local_e2e_screenshots/
           retention-days: 14
 
+  mobile-screens:
+    name: Mobile app — every screen and every control, at phone size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: hq-dashboard-next/package-lock.json
+
+      # puppeteer and its browser come from the console's lockfile; the mobile
+      # capture drives the Flutter web build with the same tooling.
+      - run: npm ci
+        working-directory: hq-dashboard-next
+
+      # No screen of the mobile app had ever been rendered before this job
+      # existed: there is no emulator here, so "it builds and its tests pass"
+      # was the whole of the evidence. Flutter's web target builds the same
+      # widget tree from the same Dart, which is not a device but is the real
+      # screens.
+      #
+      # The build is pointed at the local stand-in. Without --dart-define the
+      # project URL compiled into the app is PRODUCTION's, and a screenshot run
+      # would sign in to the live system and write to it.
+      - name: Provision .env and point the build at the stand-in
+        run: |
+          cp .env.example .env
+          {
+            echo "DEMO_CITIZEN_EMAIL=citizen@staging.operationrainbow.test"
+            echo "DEMO_CITIZEN_PASS=staging-only-password"
+            echo "AGENT_DEFAULT_PASS=staging-only-password"
+          } >> .env
+
+      - name: Build the app for the browser
+        run: |
+          flutter pub get
+          flutter build web --release --no-web-resources-cdn \
+            --dart-define=SUPABASE_URL=http://127.0.0.1:54321 \
+            --dart-define=SUPABASE_ANON_KEY=local-e2e-anon-key-not-a-real-credential
+
+      # Two passes, as for the console. The second is the one that matters
+      # here: the app's alert submission FALLS BACK to an offline SQLite queue
+      # and tells the user the report was sent, so an insert the database
+      # refuses looks identical to one that succeeded. Only watching the
+      # database can tell them apart — which is how `alerts.reportedBy`, a
+      # column that does not exist, was found sitting in every SOS payload.
+      - name: Render every screen, then use the app
+        run: |
+          node scripts/local_e2e/fake_supabase.js &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
+            sleep 0.5
+          done
+          node scripts/local_e2e/mobile_capture.js
+          node scripts/local_e2e/mobile_interact.js
+
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-screens
+          path: local_e2e_screenshots/
+          retention-days: 14
+
   rls:
     name: Supabase — RLS anon-access probe
     runs-on: ubuntu-latest

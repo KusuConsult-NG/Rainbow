@@ -493,12 +493,40 @@ const server = http.createServer(async (req, res) => {
         return send(200, [...ids].map((id) => (tables[table] || []).find((x) => x.id === id)));
       }
 
-      const created = rows.map((r) => ({
-        id: r.id || crypto.randomUUID(),
-        created_at: new Date().toISOString(),
-        ...r,
-      }));
-      if (tables[table]) tables[table].push(...created);
+      // An upsert must MERGE, not append. PostgREST decides that from
+      // `Prefer: resolution=merge-duplicates` (what supabase-js sends for
+      // `.upsert()`) together with the conflict target, defaulting to the
+      // primary key.
+      //
+      // Appending instead produced two `profiles` rows with the same id, and
+      // the app's own profile lookup uses `.single()` — so it failed with
+      // "Results contain 2 rows", the role stayed unknown, and the router
+      // parked the user on the login screen forever. That read as a broken
+      // login for an hour. It was this fake.
+      const prefer = String(req.headers.prefer || '');
+      const merging = prefer.includes('resolution=merge-duplicates');
+      const conflictKey = url.searchParams.get('on_conflict') || 'id';
+
+      const created = [];
+      for (const r of rows) {
+        const row = { id: r.id || crypto.randomUUID(), created_at: new Date().toISOString(), ...r };
+        const existing = (tables[table] || []).find(
+          (x) => row[conflictKey] !== undefined && x[conflictKey] === row[conflictKey],
+        );
+        if (existing) {
+          if (merging) {
+            Object.assign(existing, row);
+            created.push(existing);
+            continue;
+          }
+          return send(409, {
+            code: '23505',
+            message: `duplicate key value violates unique constraint "${table}_pkey"`,
+          });
+        }
+        if (tables[table]) tables[table].push(row);
+        created.push(row);
+      }
       return send(201, single ? created[0] : created);
     }
 
