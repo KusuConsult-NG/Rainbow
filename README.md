@@ -123,9 +123,36 @@ NEXT_PUBLIC_SUPABASE_URL=… NEXT_PUBLIC_SUPABASE_ANON_KEY=… node scripts/veri
 
 ---
 
+### Every screen, in a real browser
+
+```bash
+./scripts/local_e2e/run.sh      # ~2 minutes, no credentials, no network
+```
+
+A stand-in Supabase, a production build of the console, a real Chromium, and a
+screenshot of every screen for every role — 51 of them, into
+`local_e2e_screenshots/`, with `report.json` beside them.
+
+It needs nothing from outside the machine, which is the point: until it existed
+**no console screen in this repository had ever been rendered.** Every console
+finding came from reading code or from unit tests of logic lifted out so it
+could be tested, and the wiring between them — where the worst defects lived —
+was never exercised. The first run found a panel that had been broken on the
+default branch the whole time.
+
+The stand-in builds its tables from `supabase/migrations/`, so a query naming a
+column no migration defines is rejected here exactly as PostgREST rejects it in
+production — in full, taking the select, the filters and the order with it.
+
+> It proves the **screens**, not the policies. The fake answers every query. Row
+> level security can only be proven against a real PostgREST — `verify_rls.js`
+> against a staging project.
+
+---
+
 ## What CI enforces
 
-Nine jobs, each tied to a defect that reached the default branch at least once.
+Ten jobs, each tied to a defect that reached the default branch at least once.
 
 | job | what it prevents |
 |---|---|
@@ -137,17 +164,26 @@ Nine jobs, each tied to a defect that reached the default branch at least once.
 | Supabase — one-paste apply script | runs `apply_all_migrations.sql` against a production-shaped database, top to bottom, twice, and asserts on its own PASS/FAIL table |
 | Supabase — staging bootstrap | builds a project from zero, checks the bootstrap refuses a database that already holds data, and proves both routes reach the same schema |
 | Supabase — dry run reports something | that the dry run emits a verdict rather than silence, which on a "is this safe?" script is the most dangerous output it could give |
+| HQ console — every screen, in a real browser | a screen that crashes, renders empty, or asks the database for something it does not have. Screenshots are kept as a build artifact, pass or fail |
 | Supabase — anon-access probe | manual only; fails if anon can read or write a sensitive table |
 
 Two gates worth knowing about because they catch a whole class rather than a
 single bug:
 
 - **`scripts/check_schema_drift.py`** — every column either app reads or writes,
-  and every `.rpc()` function it calls, must exist in a migration. PostgREST
-  rejects a query naming an unknown column *in full*, so drift here fails at
-  runtime and nowhere else. It found a mass-broadcast screen writing six columns
-  that did not exist, an escalation path writing two more, and a profile lookup
-  selecting three.
+  every column it *orders by*, every embedded resource it asks PostgREST to
+  join, and every `.rpc()` function it calls, must exist in a migration.
+  PostgREST rejects a query naming an unknown column *in full*, so drift here
+  fails at runtime and nowhere else. It found a mass-broadcast screen writing
+  six columns that did not exist, an escalation path writing two more, and a
+  profile lookup selecting three.
+
+  It also used to have two holes, both closed after the browser run found what
+  they hid: it waved through `id`, `created_at` and `updated_at` on every table
+  as "columns any table has" — they are not, and that exemption is shaped
+  exactly like the most common column names in the codebase — and it skipped
+  any select containing `(`, `*` or `:` as too awkward to parse, which meant
+  skipping the queries most likely to be wrong.
 - **the realtime-subscription gate** — every table either app subscribes to must
   be in the `supabase_realtime` publication. A subscription on an unpublished
   table does not error; it simply never fires.

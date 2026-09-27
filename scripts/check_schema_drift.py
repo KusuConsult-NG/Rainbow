@@ -51,9 +51,19 @@ ALTER_TABLE = re.compile(
     r"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:public\.)?([a-z_]+)", re.IGNORECASE
 )
 
-# Columns every PostgREST caller may legitimately name even though a migration
-# never spells them out.
-ALWAYS_OK = {"id", "created_at", "updated_at"}
+# There is no such thing as a column every table has.
+#
+# This used to be `{"id", "created_at", "updated_at"}`, waved through on the
+# reasoning that a migration might not spell them out. It does spell them out —
+# and the exemption is what let `uninstall_requests.created_at` through, a table
+# whose timestamp is `submitted_at` and always has been. The console ordered by
+# it, PostgREST rejected the query in full, and the Uninstall Requests panel
+# showed its could-not-load state to everyone, permanently. Found by rendering
+# the panel in a browser; this gate had passed it on every push.
+#
+# An exemption on a gate like this is not a convenience. It is a hole shaped
+# exactly like the most common column names in the codebase.
+ALWAYS_OK: set[str] = set()
 
 
 def strip_comments(sql: str) -> str:
@@ -103,6 +113,34 @@ def schema_columns() -> dict[str, set[str]]:
                 tables.setdefault(prior[-1].group(1), set()).add(m.group(1).lower())
 
     return tables
+
+
+def schema_relationships() -> dict[str, set[str]]:
+    """table -> set of tables it declares a foreign key to."""
+    refs: dict[str, set[str]] = {}
+    for path in MIGRATIONS:
+        sql = strip_comments(path.read_text())
+        for m in CREATE.finditer(sql):
+            table = m.group(1)
+            depth, i = 1, m.end()
+            while i < len(sql) and depth:
+                if sql[i] == "(":
+                    depth += 1
+                elif sql[i] == ")":
+                    depth -= 1
+                i += 1
+            body = sql[m.end() : i - 1]
+            for r in REFERENCES.finditer(body):
+                refs.setdefault(table, set()).add(r.group(1).lower())
+        # ALTER TABLE x ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES y
+        for m in re.finditer(
+            r"alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:public\.)?\"?([a-z_][a-z0-9_]*)\"?"
+            r"[^;]*?foreign\s+key[^;]*?references\s+(?:public\.)?\"?([a-z_][a-z0-9_]*)\"?",
+            sql,
+            re.IGNORECASE | re.DOTALL,
+        ):
+            refs.setdefault(m.group(1).lower(), set()).add(m.group(2).lower())
+    return refs
 
 
 # ── What the apps write ─────────────────────────────────────────────────────
@@ -242,6 +280,19 @@ SELECT_CALL = re.compile(
     re.DOTALL,
 )
 
+# `profiles(full_name, role)` inside a select list — an embedded resource.
+EMBED = re.compile(r"([a-z_][a-z0-9_]*)\s*\(([^)]*)\)")
+
+# `.order('submitted_at', { ascending: false })`
+ORDER_CALL = re.compile(
+    r"from\(\s*['\"]([a-z_]+)['\"]\s*\)" + GAP + r"\.order\(\s*['\"]([a-z_][a-z0-9_]*)['\"]",
+    re.DOTALL,
+)
+
+# A foreign key is the whole of what PostgREST needs before it will embed one
+# resource in another. Without one it answers PGRST200 and drops the query.
+REFERENCES = re.compile(r"references\s+(?:public\.)?\"?([a-z_][a-z0-9_]*)\"?", re.IGNORECASE)
+
 
 def selected_columns() -> list[tuple[str, str, str, int]]:
     """(table, column, file, line) for every explicit select list."""
@@ -257,15 +308,69 @@ def selected_columns() -> list[tuple[str, str, str, int]]:
                 text = blank_comments(path.read_text())
                 for m in SELECT_CALL.finditer(text):
                     table, cols = m.group(1), m.group(3)
-                    # `*`, an embedded resource (`profiles(name)`) or an alias
-                    # (`x:y`) — not a plain column list; left alone rather than
-                    # guessed at.
-                    if "*" in cols or "(" in cols or ":" in cols:
-                        continue
                     line = text.count("\n", 0, m.start()) + 1
-                    for col in re.findall(r"[a-z_][a-z0-9_]*", cols):
+                    # An embedded resource — `profiles(full_name, role)` — is
+                    # not a column of this table; its columns belong to the
+                    # embedded one, and whether the embed is possible at all is
+                    # checked separately against the foreign keys.
+                    #
+                    # This whole branch used to be `continue`: a select
+                    # containing `(`, `*` or `:` was skipped in full. So
+                    # `'*, profiles(full_name, role, geo_lga)'` was never
+                    # examined — not the embed, and not the rest of the list.
+                    # Skipping the awkward shape meant skipping the query most
+                    # likely to be wrong.
+                    for emb_table, emb_cols in EMBED.findall(cols):
+                        for col in re.findall(r"[a-z_][a-z0-9_]*", emb_cols):
+                            found.append(
+                                (emb_table, col, str(path.relative_to(ROOT)), line)
+                            )
+                    flat = EMBED.sub("", cols)
+                    for part in flat.split(","):
+                        part = part.strip()
+                        if not part or part == "*":
+                            continue
+                        # `alias:column` — the real column is on the right.
+                        col_text = part.split(":")[-1].strip()
+                        col = re.match(r"[a-z_][a-z0-9_]*", col_text)
+                        if col:
+                            found.append(
+                                (table, col.group(0), str(path.relative_to(ROOT)), line)
+                            )
+
+                # `.order('created_at')` names a column too. It is the easiest
+                # place for a bad name to hide, because the select list beside
+                # it can be perfectly correct — and PostgREST still rejects the
+                # whole query.
+                for m in ORDER_CALL.finditer(text):
+                    found.append(
+                        (
+                            m.group(1),
+                            m.group(3),
+                            str(path.relative_to(ROOT)),
+                            text.count("\n", 0, m.start()) + 1,
+                        )
+                    )
+    return found
+
+
+def embedded_resources() -> list[tuple[str, str, str, int]]:
+    """(table, embedded_table, file, line) for every embedded select."""
+    found = []
+    for base, globs in (
+        (ROOT / "hq-dashboard-next/src", ("*.ts", "*.tsx")),
+        (ROOT / "lib", ("*.dart",)),
+    ):
+        for pattern in globs:
+            for path in base.rglob(pattern):
+                if path.name.endswith((".test.ts", ".test.tsx", "_test.dart")):
+                    continue
+                text = blank_comments(path.read_text())
+                for m in SELECT_CALL.finditer(text):
+                    line = text.count("\n", 0, m.start()) + 1
+                    for emb_table, _ in EMBED.findall(m.group(3)):
                         found.append(
-                            (table, col, str(path.relative_to(ROOT)), line)
+                            (m.group(1), emb_table, str(path.relative_to(ROOT)), line)
                         )
     return found
 
@@ -338,6 +443,26 @@ def main() -> int:
             continue
         problems.append(f"  {path}:{line}  {table}.{column}")
 
+    relationships = schema_relationships()
+    bad_embeds: list[str] = []
+    for table, embedded, path, line in sorted(set(embedded_resources())):
+        if table not in schema or embedded not in schema:
+            continue
+        joined = embedded in relationships.get(table, set()) or table in relationships.get(
+            embedded, set()
+        )
+        if not joined:
+            bad_embeds.append(f"  {path}:{line}  {table} → {embedded}(…)")
+
+    if bad_embeds:
+        print("Embedded selects with no foreign key to join them:")
+        print("\n".join(bad_embeds))
+        print()
+        print("PostgREST embeds one resource in another only across a declared")
+        print("foreign key. Without one it answers PGRST200 and rejects the whole")
+        print("query — the select, the filters and the order with it.")
+        print()
+
     if unknown_tables:
         print("Tables written to that no migration creates:")
         for t in sorted(unknown_tables):
@@ -367,11 +492,12 @@ def main() -> int:
         print("and nowhere else. Add the column in a migration, or stop naming it.")
         return 1
 
-    if unknown_tables or missing_fns:
+    if unknown_tables or missing_fns or bad_embeds:
         return 1
 
     print(f"OK: every column read or written by either app exists in the "
-          f"schema ({len(schema)} tables), and all "
+          f"schema ({len(schema)} tables), every embedded select has a foreign "
+          f"key to travel, and all "
           f"{len(set(f for f, _, _ in called_functions()))} RPC functions "
           f"called are defined.")
     return 0

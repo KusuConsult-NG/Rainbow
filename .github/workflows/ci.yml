@@ -755,6 +755,42 @@ jobs:
       - name: Verify the dry run emits a verdict and keeps nothing
         run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_dryrun_emits.sh
 
+  console-e2e:
+    name: HQ console — every screen, in a real browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: hq-dashboard-next/package-lock.json
+
+      - run: npm ci
+        working-directory: hq-dashboard-next
+
+      # Every console screen in this repository went unrendered until this job
+      # existed, because rendering one looked as though it needed a live
+      # Supabase. It does not: the run serves a stand-in built from the
+      # migrations, so a query naming a column that no migration defines is
+      # rejected here exactly as PostgREST rejects it in production.
+      #
+      # This job proves the SCREENS. It does not prove row-level security —
+      # that is the `rls` job, against a real staging project.
+      - name: Render every screen for every role and assert on what is there
+        run: ./scripts/local_e2e/run.sh
+
+      # The screenshots are the evidence. Keep them whether or not the run
+      # passed: a failure is exactly when somebody wants to see the screen.
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: console-screens
+          path: local_e2e_screenshots/
+          retention-days: 14
+
   rls:
     name: Supabase — RLS anon-access probe
     runs-on: ubuntu-latest

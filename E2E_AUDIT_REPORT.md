@@ -2210,3 +2210,128 @@ deleting it: a new permissive policy fails here even when granted only to
 Stated plainly, because the point of staging is to stop guessing: it does not
 test the deployment (the App Hosting config has still never been executed), the
 mobile release builds (no Android or iOS SDK here), or behaviour under load.
+
+## Every screen, rendered
+
+Until this pass, **no console screen in this repository had ever been
+rendered.** Every console finding above came from reading code, or from unit
+tests of logic deliberately lifted out of the components so it could be tested
+at all. That was an honest limit — a widget test cannot build a screen that
+touches the database — but it left the wiring between logic and screen
+completely unexercised, and that is where this system's worst defects have
+lived.
+
+`scripts/local_e2e/run.sh` closes it. A stand-in Supabase, a production build of
+the console, a real Chromium, 51 screenshots and 32 assertions, in about two
+minutes, needing no credentials and no network.
+
+The stand-in is the part that matters. Its tables are built from
+`supabase/migrations/`, so a query naming a column no migration defines is
+rejected exactly as PostgREST rejects it — in full, taking the select, the
+filters and the order with it. A tolerant fake would have turned this system's
+most expensive defect class into a pass.
+
+**What it proves, and what it does not.** It proves the screens. It does not
+prove row-level security and cannot: the fake answers every query as the
+service role would. Policies are still only provable against a real PostgREST,
+which is `scripts/verify_rls.js` against a staging project.
+
+### What the first run found
+
+**The Uninstall Requests panel had never worked.** `UninstallRequests.tsx` asked
+for:
+
+```ts
+.select('*, profiles(full_name, role, geo_lga)')
+.order('created_at', { ascending: false })
+```
+
+Both halves are refused by PostgREST, each on its own sufficient to kill the
+query:
+
+* `uninstall_requests` has no `created_at`. Its timestamp is `submitted_at`,
+  and has been since the table was created in `phase1_foundation.sql`.
+* Embedding needs a declared foreign key. `user_id` references `auth.users`,
+  not `public.profiles`, so there is no relationship to travel: PGRST200.
+
+`loadRequests()` therefore returned `null` on every call, and the panel showed
+its could-not-load state to every operator, permanently. Nobody could authorise
+an uninstall request through this console.
+
+The fail-closed design is the only reason this was survivable rather than a
+lie — the panel distinguishes "the query failed" from "there is nothing here",
+so it never claimed an empty queue. That distinction is the README's first
+principle, and it held.
+
+Fixed by ordering on `submitted_at` and fetching the reporter's name in a second
+query. A foreign key to `profiles` would have saved the round trip, but
+`user_id` is nullable `ON DELETE SET NULL` and rows may reference users with no
+profile row — a migration that can fail on real data is a bad trade for one
+request.
+
+### Why three gates had all passed it
+
+* **`check_schema_drift.py` exempted `id`, `created_at` and `updated_at`** on
+  every table, on the reasoning that a migration might not spell them out. It
+  does spell them out. The exemption was shaped exactly like the most common
+  column names in the codebase, and `created_at` walked straight through it.
+  The exemption set is now empty.
+* **The same script skipped any select containing `(`, `*` or `:`** as not a
+  plain column list. `'*, profiles(full_name, role, geo_lga)'` contains all
+  three. Skipping the awkward shape meant skipping the query most likely to be
+  wrong. Embedded resources are now parsed, their columns checked against the
+  embedded table, and the relationship checked against the foreign keys.
+* **`.order()` was never examined at all.** It is the easiest place for a bad
+  column name to hide, because the select list beside it can be perfectly
+  correct and the query still dies. Now gated.
+
+Both new gates were verified by restoring the original query and watching the
+checker fail on each half, then restoring the fix.
+
+### Three failures in the first run that were the harness, not the app
+
+Recorded because the difference is the whole value of the exercise, and because
+each one nearly became a false finding in this report.
+
+* **The ARMY portal looked empty.** The migration parser read only the first
+  clause of `ALTER TABLE … ADD COLUMN a, ADD COLUMN b`, so it never saw
+  `alerts.escalation_log`, so the fake rejected the portal's query, so the
+  portal correctly showed its empty state. The portal was fine. Worse, the
+  matching assertion on the POLICE portal *passed* for the same broken reason —
+  a green check produced by a broken harness.
+* **C-5 appeared to have regressed.** It had not: the unlocated callout is on
+  the map, which is where a fabricated pin would have been, and the assertion
+  was looking at the incident feed. The map states it twice — a `1 UNLOCATED`
+  counter and an amber `NO GPS FIX — NOT ON MAP` badge on the card.
+* **Every screen failed at once**, showing the console's error boundary. The
+  previous `next start` was still holding port 3000, so the browser loaded the
+  old build's HTML against the new build's chunk names. An environment mistake.
+  It did demonstrate the error boundary working on a real `ChunkLoadError`,
+  which no test had shown before.
+
+### What the run confirms still works
+
+Recorded because several of these were repairs made earlier in this audit on
+reasoning alone, and this is the first time any of them has been observed:
+
+| | |
+|---|---|
+| the proxy guard | an anonymous `/dashboard` lands on `/login` |
+| C-5 | the SOS with null coordinates is counted as `1 UNLOCATED` and badged `NO GPS FIX — NOT ON MAP`, not pinned in central Jos |
+| ungraded severity | reads `UNKNOWN` in the dossier, and the CRITICAL filter drops it — severity is not assumed |
+| the CRITICAL filter | keeps both CRITICAL incidents, drops the two HIGH ones and the ungraded one |
+| mass broadcast | inserts into `system_alerts` with all eleven columns accepted, and a derived non-null `title` — the `NOT NULL` that used to fail |
+| the agency portal | the ARMY-escalated incident appears in the ARMY portal and in no other |
+| login failure | a wrong password reads as a credential error, never as `Failed to fetch` |
+| the error boundary | catches a real chunk failure and says the board is offline rather than showing a blank page |
+
+32 of 32 assertions pass. The screenshots are kept by CI as a build artifact on
+every run, pass or fail — a failure is exactly when somebody wants to see the
+screen.
+
+### Still not covered by any of this
+
+* **Row-level security as deployed.** Only staging can show it.
+* **The mobile app on a device.** Its test suite runs in CI; no screen has been
+  rendered on a handset or an emulator, and no release build has been produced.
+* **The deploy.** The App Hosting config has still never been executed.
