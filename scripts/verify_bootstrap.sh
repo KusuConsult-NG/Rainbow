@@ -75,7 +75,7 @@ printf '%s\n' "$OUT" | grep -E '^\s*(PASS|\*\*\* FAIL)' || true
 FAILED=$(printf '%s\n' "$OUT" | grep -c '\*\*\* FAIL \*\*\*' || true)
 PASSED=$(printf '%s\n' "$OUT" | grep -c '^ PASS' || true)
 echo "  checks passed: $PASSED   failed: $FAILED"
-[ "$FAILED" -eq 0 ] && [ "$PASSED" -ge 16 ] || {
+[ "$FAILED" -eq 0 ] && [ "$PASSED" -ge 19 ] || {
   echo "::error::the bootstrap's own verification reported a failure"; exit 1; }
 
 # ── 2. The guard must refuse a database that already holds data ──────────────
@@ -163,7 +163,7 @@ echo "  ok: identical policy sets ($(printf '%s\n' "$A" | wc -l) policies)"
 
 cat <<EOF
 
-✓ bootstrap_staging.sql builds a correct project from zero ($PASSED/16 PASS),
+✓ bootstrap_staging.sql builds a correct project from zero ($PASSED/19 PASS),
   refuses a database that already holds data, and produces exactly the schema
   the migration replay produces.
 EOF

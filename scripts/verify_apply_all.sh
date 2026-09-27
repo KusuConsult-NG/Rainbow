@@ -80,7 +80,7 @@ FAILED=$(printf '%s\n' "$OUT" | grep -c '\*\*\* FAIL \*\*\*' || true)
 PASSED=$(printf '%s\n' "$OUT" | grep -c '^ PASS' || true)
 printf '%s\n' "$OUT" | grep -E '^\s*(PASS|\*\*\* FAIL)' || true
 echo "  checks passed: $PASSED   failed: $FAILED"
-if [ "$FAILED" -ne 0 ] || [ "$PASSED" -lt 15 ]; then
+if [ "$FAILED" -ne 0 ] || [ "$PASSED" -lt 18 ]; then
   echo "::error::the apply script's own verification reported a failure"; exit 1
 fi
 
@@ -96,4 +96,4 @@ FAILED2=$(printf '%s\n' "$OUT2" | grep -c '\*\*\* FAIL \*\*\*' || true)
 
 echo
 echo "✓ apply_all_migrations.sql applies cleanly in one paste, twice over,"
-echo "  and its own verification reports $PASSED/15 PASS."
+echo "  and its own verification reports $PASSED/18 PASS."

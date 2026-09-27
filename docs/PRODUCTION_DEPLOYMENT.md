@@ -28,7 +28,7 @@ emergencies. The full instructions are in `E2E_AUDIT_REPORT.md`.
 
 ## 1. Database
 
-Ten migrations, in filename order. `docs/APPLYING_THE_MIGRATIONS.md` is the
+Eleven migrations, in filename order. `docs/APPLYING_THE_MIGRATIONS.md` is the
 step-by-step runbook, including the mandatory read-only dry run; do not apply
 the RLS migration without it.
 
@@ -43,9 +43,10 @@ the RLS migration without it.
 | 7 | `20260903000003_alert_escalation_columns.sql` | Adds `alerts.escalated_to_agency` and `escalation_log`. Already present on production; a no-op there. |
 | 8 | `20260903000004_profiles_badge_number.sql` | Adds `profiles.badge_number`, the label both apps show for an officer. A no-op if production has it. |
 | 9 | `20260903000005_alerts_assigned_tier.sql` | Adds `alerts.assigned_tier` and moves tier labels out of `escalated_to_agency`. Until it runs, a mobile escalation with no named commander is **rejected in full**. |
+| 11 | `20260928000000_command_chain_escalation.sql` | Makes the command chain real: an alert lands at the **polling unit**, and unacknowledged alerts climb UNIT→WARD→LGA→HQ on the timeouts that `app_config` has always held and nothing has ever enforced. Schedules the job with pg_cron where available. |
 | 10 | `20260927000000_signup_cannot_choose_role.sql` | **Closes a privilege escalation.** `handle_new_user()` copied `raw_user_meta_data->>'role'` onto the new profile, so anyone holding the anon key — which ships in the APK and the browser — could sign up as `HQ_COMMAND`. Apply this one first if you apply nothing else. |
 
-All ten are idempotent and every one of them is proven on a real PostgreSQL by
+All eleven are idempotent and every one of them is proven on a real PostgreSQL by
 the `rls-migration` CI job before it reaches you.
 
 ### After applying migration 10, audit who is already staff

@@ -32,7 +32,7 @@ Supabase dashboard → **SQL Editor**, paste the whole of:
 scripts/bootstrap_staging.sql
 ```
 
-All fourteen migrations, in order, ending in a sixteen-row PASS/FAIL table.
+All fifteen migrations, in order, ending in a nineteen-row PASS/FAIL table.
 Every row should say PASS.
 
 **This file is for an empty project only.** It starts with the original schema,

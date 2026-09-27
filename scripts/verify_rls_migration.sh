@@ -47,7 +47,8 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/rls_behaviour_test.sql \
    "$REPO"/scripts/emergency_pins_behaviour_test.sql \
    "$REPO"/scripts/production_readiness_behaviour_test.sql \
-   "$REPO"/scripts/signup_role_escalation_test.sql "$PGROOT/"
+   "$REPO"/scripts/signup_role_escalation_test.sql \
+   "$REPO"/scripts/command_chain_behaviour_test.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
 psql_run() {
@@ -152,6 +153,27 @@ psql_run "-f $PGROOT/20260903000002_system_alerts_broadcast.sql" >/dev/null
 psql_run "-f $PGROOT/20260903000003_alert_escalation_columns.sql" >/dev/null
 psql_run "-f $PGROOT/20260903000004_profiles_badge_number.sql" >/dev/null
 psql_run "-f $PGROOT/20260903000005_alerts_assigned_tier.sql" >/dev/null
+
+# The command chain needs alerts.escalation_log, which 20260903000003 adds, so
+# it applies after that set rather than with the RLS migration.
+echo "▶ Applying 20260928000000_command_chain_escalation.sql"
+psql_run "-f $PGROOT/20260928000000_command_chain_escalation.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20260928000000_command_chain_escalation.sql" >/dev/null
+
+# UNIT -> WARD -> LGA -> HQ, on a timeout, with HQ terminal. The timeouts were
+# configured and dead before this; a test is the only thing that keeps them alive.
+echo "▶ Asserting the command chain climbs, and stops"
+CHAIN_OUT=$(psql_run "-f $PGROOT/command_chain_behaviour_test.sql" 2>&1) && CHAIN_RC=0 || CHAIN_RC=$?
+printf '%s\n' "$CHAIN_OUT" | grep -E "PASS|FAIL|ALL COMMAND" || true
+if [ "$CHAIN_RC" -ne 0 ]; then
+  # The ERROR line first: a statement dump is ~20 lines and pushes the actual
+  # message out of a tail window, which is how a failure arrives with no reason.
+  printf '%s\n' "$CHAIN_OUT" | grep -E "ERROR|WARNING|FAIL" | head -10
+  printf '%s\n' "$CHAIN_OUT" | grep -vE "PASS" | tail -25
+  echo "::error::the command chain does not behave as specified"; exit 1
+fi
+
 echo "▶ Agency access / realtime / storage behaviour test"
 PR_OUT=$(psql_run "-f $PGROOT/production_readiness_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?
 printf '%s\n' "$PR_OUT" | grep -E "PASS|FAIL|ALL PRODUCTION" || true

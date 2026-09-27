@@ -49,6 +49,7 @@ OUTSTANDING = [
     "20260903000004_profiles_badge_number.sql",
     "20260903000005_alerts_assigned_tier.sql",
     "20260927000000_signup_cannot_choose_role.sql",
+    "20260928000000_command_chain_escalation.sql",
 ]
 
 HEADER = """-- ============================================================================
@@ -217,7 +218,18 @@ WITH checks(ord, name, ok) AS (
     (16, 'a signup cannot choose its own role',
         (SELECT pg_get_functiondef(p.oid) NOT LIKE '%raw_user_meta_data->>''role''%'
            FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-          WHERE n.nspname = 'public' AND p.proname = 'handle_new_user'))
+          WHERE n.nspname = 'public' AND p.proname = 'handle_new_user')),
+    (17, 'new alerts land at the polling unit',
+        (SELECT column_default LIKE '%UNIT%' FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'alerts'
+            AND column_name = 'assigned_tier')),
+    (18, 'the escalation job exists and is service-role only',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.escalate_overdue_alerts()', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'escalate_overdue_alerts')),
+    (19, 'the chain terminates at HQ',
+        (SELECT public.next_tier('HQ') IS NULL AND public.next_tier('UNIT') = 'WARD'))
 )
 SELECT
   CASE WHEN ok THEN 'PASS' ELSE '*** FAIL ***' END AS result,

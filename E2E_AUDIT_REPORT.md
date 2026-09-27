@@ -2586,3 +2586,99 @@ error with the same wording would still be reported.
 * **A real device.** Web is the same Dart, not the same platform.
 * **Row-level security**, which only a staging project can show.
 * **The release build and the store artefacts**, which are gated statically only.
+
+## The command chain
+
+The intended model, stated by the system's owner: **an alert reaches the
+polling unit; the PU escalates to the ward, the ward to the LGA, the LGA to
+HQ; and HQ overrides where the chain below it is not accessible.**
+
+Three things had to be true for that, and none of them were.
+
+### The timeouts were configured, visible, and dead
+
+`app_config` has seeded escalation timeouts — PU 2 minutes, WARD 5, LGA 10 —
+and the console's System Logic screen lets an operator edit and save them. The
+only code that touched those keys was the screen that displays and saves them.
+**Nothing ever escalated on a timeout.**
+
+That is the worst kind of dead setting. It is not missing, it is reassuring: an
+operator who sets "PU timeout: 2 minutes" comes away believing unanswered
+alerts climb the chain, and nothing tells them otherwise. It is also exactly
+the mechanism the owner's model needs, since a tier that is "not accessible" is
+detected by a clock.
+
+`escalate_overdue_alerts()` now enforces them, in the database, on a pg_cron
+schedule. Server-side because a tier that is not responding is very often a
+tier that is offline — an escalation that only runs while somebody has the
+console open cannot fire in the case it exists for.
+
+### Nothing put an alert at the bottom of the chain
+
+`assigned_tier` was nullable with no default, so an alert arrived owned by
+nobody. The ladder existed with no bottom rung. The default is now `'UNIT'`,
+set in the DATABASE rather than in a client, because an alert inserted by the
+mobile app, the console, the offline queue replaying, or any future integration
+must all land in the same place. A client-side default is one forgotten call
+site away from an unowned emergency.
+
+### There was no clock on ownership
+
+Nothing recorded *when* a tier took an alert, so "has this tier had it too
+long?" could not be asked. `tier_assigned_at` starts on insert and restarts on
+every escalation, so an alert escalated to the ward gets the ward's full window
+rather than whatever was left of the PU's.
+
+### What the chain now does, proven on real PostgreSQL
+
+14 assertions in `scripts/command_chain_behaviour_test.sql`:
+
+| | |
+|---|---|
+| a new alert lands at the polling unit, with the clock started |
+| an alert inside its window is left alone |
+| an overdue UNIT alert climbs to WARD |
+| it climbs **one rung per timeout**, never straight to the top |
+| the move is appended to `escalation_log` with `reason: TIMEOUT` |
+| an **acknowledged** alert never moves — somebody has it |
+| a resolved alert never moves |
+| **HQ is terminal**: `next_tier('HQ')` is NULL, so the chain stops rather than looping |
+| a malformed timeout falls back to the seeded value, not to zero |
+| a zero timeout is refused rather than escalating everything instantly |
+| the job is service-role only — no signed-in client can reassign every emergency |
+
+The two dangerous defaults are deliberate. A missing or malformed
+`app_config` value must not mean "escalate immediately" (timeout 0) or "never
+escalate" (NULL read as infinite); both are silent, and both are wrong in an
+emergency queue.
+
+### Still missing: alerts do not reach the RIGHT polling unit
+
+They now reach *a* tier. They do not reach the *correct* PU, because nothing
+populates the geography an alert would be routed by:
+
+* a citizen incident report attaches **no** `geo_lga`, `geo_ward` or `geo_pu`
+  at all unless the reporter ticks "manual override";
+* the panic SOS attaches `geo_lga` and `geo_ward` from the reporter's profile
+  and **never `geo_pu`**, though the profile has one;
+* the unit filter's PU comparison is therefore never reached, and the
+  `geo_pu IS NULL` fail-open shows every alert to every unit in the state.
+
+The decision taken was to resolve the incident's **GPS coordinates** to a
+PU/ward/LGA, which is the right answer — it reflects where the incident is
+rather than where the reporter is registered. **The data to do it does not
+exist in this repository:**
+
+* all 17 "LGA boundaries" in `plateau_boundaries.json` are axis-aligned
+  rectangles — placeholders, not real shapes;
+* `TacticalWard` carries `id`, `name` and `pollingUnits: List<String>`. There
+  are **no coordinates for any ward or polling unit anywhere**.
+
+Resolving against the rectangles would confidently route an SOS to the wrong
+LGA, which is worse than not routing it. Real INEC ward and polling-unit
+geometry is a prerequisite, and it is an input this repository has to be given.
+
+Also noted: the dashboard prefers plural `geo_lgas` / `geo_wards` / `geo_pus`
+columns for an officer covering several patches, falling back to the singular.
+None of those three columns exist in any migration, so the fallback is the only
+path that ever runs and a multi-ward officer cannot be expressed.

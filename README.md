@@ -80,9 +80,9 @@ runtime warning — the app crashes on first render and serves
 
 ### Database
 
-Ten migrations. Applying them is two pastes into the Supabase SQL editor —
+Eleven migrations. Applying them is two pastes into the Supabase SQL editor —
 `scripts/rls_production_dryrun.sql` (read-only, prints a verdict), then
-`scripts/apply_all_migrations.sql` (all ten, finishing with a PASS/FAIL table).
+`scripts/apply_all_migrations.sql` (all eleven, finishing with a PASS/FAIL table).
 Both are generated from the migrations, CI fails if either drifts, and the
 second is executed against a production-shaped PostgreSQL on every push.
 
@@ -265,7 +265,7 @@ report:
    deployment.** Two functions answer on public URLs, and a watchdog fires every
    five minutes against a datastore nothing backs any more. Do **not** `curl`
    `seedMockData` to check — the probe itself writes ten fabricated emergencies.
-2. **Apply the ten migrations** — dry run first. One of them closes a
+2. **Apply the eleven migrations** — dry run first. One of them closes a
    privilege escalation and should not wait.
 3. **First deploy**, which is also the first test of the deploy config.
 4. **Ask GitHub Support** to purge the `refs/pull/*` refs still holding
