@@ -100,10 +100,26 @@ ROWS=$(psql_q occupied "SELECT count(*) FROM public.alerts")
 
 GUARD=$(su postgres -s /bin/bash -c \
   "$PGBIN/psql -h $PGROOT/sock -p $PORT -U postgres -d occupied -f $PGROOT/bootstrap_staging.sql" 2>&1) || true
-printf '%s\n' "$GUARD" | grep -q "REFUSING TO RUN" || {
-  echo "::error::the guard did not announce itself on a non-empty database"
-  printf '%s\n' "$GUARD" | tail -25
-  exit 1; }
+# A bash string match, NOT `printf ... | grep -q`.
+#
+# `grep -q` exits the moment it matches, which closes the pipe; `printf` is
+# still writing, gets EPIPE, and returns non-zero. Under `set -o pipefail` the
+# pipeline is then non-zero EVEN THOUGH GREP MATCHED, so this branch ran and
+# declared the guard broken while the guard had worked perfectly.
+#
+# It is a race on the pipe buffer: with short output printf finishes first and
+# the check passes. That is why it failed in CI, passed locally on the retry,
+# and was briefly written off as stale state. A gate that fails a green build
+# at random is worse than no gate — people start re-running it until it is
+# green, which is the same as deleting it.
+case "$GUARD" in
+  *"REFUSING TO RUN"*) ;;
+  *)
+    echo "::error::the guard did not announce itself on a non-empty database"
+    printf '%s\n' "$GUARD" | tail -25 || true
+    exit 1
+    ;;
+esac
 
 # The real assertion: nothing was applied. assigned_tier is added by the LAST
 # migration in the file, so its absence proves the run was rolled back whole.
