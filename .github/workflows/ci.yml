@@ -826,14 +826,13 @@ jobs:
       # The build is pointed at the local stand-in. Without --dart-define the
       # project URL compiled into the app is PRODUCTION's, and a screenshot run
       # would sign in to the live system and write to it.
+      # The same script run.sh uses. Writing this out longhand here is what
+      # broke it: appending the demo keys on top of the empty ones
+      # .env.example already declares left the first, empty value winning, so
+      # the demo login had no credentials and every screenshot in CI was the
+      # login page while every local run was fine.
       - name: Provision .env and point the build at the stand-in
-        run: |
-          cp .env.example .env
-          {
-            echo "DEMO_CITIZEN_EMAIL=citizen@staging.operationrainbow.test"
-            echo "DEMO_CITIZEN_PASS=staging-only-password"
-            echo "AGENT_DEFAULT_PASS=staging-only-password"
-          } >> .env
+        run: ./scripts/local_e2e/provision_env.sh
 
       - name: Build the app for the browser
         run: |

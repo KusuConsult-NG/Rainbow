@@ -89,19 +89,8 @@ CONSOLE_URL="http://127.0.0.1:$PORT" E2E_OUT="$OUT" node scripts/local_e2e/inter
 if command -v flutter >/dev/null 2>&1; then
   echo "==> building the mobile app for the browser"
 
-  # The demo citizen path signs in with these; pointed at the seeded fixture
-  # account so the run can get past the login screen.
-  [ -f "$ROOT/.env" ] || cp "$ROOT/.env.example" "$ROOT/.env"
-  for kv in "DEMO_CITIZEN_EMAIL=citizen@staging.operationrainbow.test" \
-            "DEMO_CITIZEN_PASS=staging-only-password" \
-            "AGENT_DEFAULT_PASS=staging-only-password"; do
-    key="${kv%%=*}"
-    if grep -q "^$key=" "$ROOT/.env"; then
-      sed -i "s|^$key=.*|$kv|" "$ROOT/.env"
-    else
-      printf '%s\n' "$kv" >> "$ROOT/.env"
-    fi
-  done
+  # One script, shared with the CI job, so the two cannot drift again.
+  "$ROOT/scripts/local_e2e/provision_env.sh"
 
   cd "$ROOT"
   flutter pub get
