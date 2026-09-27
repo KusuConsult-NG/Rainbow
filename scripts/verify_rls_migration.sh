@@ -46,7 +46,8 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/test_rls_migration.sql \
    "$REPO"/scripts/rls_behaviour_test.sql \
    "$REPO"/scripts/emergency_pins_behaviour_test.sql \
-   "$REPO"/scripts/production_readiness_behaviour_test.sql "$PGROOT/"
+   "$REPO"/scripts/production_readiness_behaviour_test.sql \
+   "$REPO"/scripts/signup_role_escalation_test.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
 psql_run() {
@@ -108,6 +109,22 @@ ANONPOL=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres
 echo "  permissive policies still reachable by anon: $AFTER"
 echo "  policies granting anon/public at all:        $ANONPOL"
 [ "$AFTER" -eq 0 ] && [ "$ANONPOL" -eq 0 ] || { echo "✗ anon still has policy access." >&2; exit 1; }
+
+echo "▶ Applying 20260927000000_signup_cannot_choose_role.sql"
+psql_run "-f $PGROOT/20260927000000_signup_cannot_choose_role.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20260927000000_signup_cannot_choose_role.sql" >/dev/null
+
+# A stranger holding the anon key — which ships in the APK and the browser —
+# must not be able to sign up AS A COMMANDER. The role guard is BEFORE UPDATE,
+# and a signup never updates: it inserts.
+echo "▶ Asserting a signup cannot choose its own role"
+SIGNUP_OUT=$(psql_run "-f $PGROOT/signup_role_escalation_test.sql" 2>&1) && SIGNUP_RC=0 || SIGNUP_RC=$?
+printf '%s\n' "$SIGNUP_OUT" | grep -E "PASS|FAIL|ALL SIGNUP" || true
+if [ "$SIGNUP_RC" -ne 0 ]; then
+  printf '%s\n' "$SIGNUP_OUT" | grep -vE "PASS" | tail -20
+  echo "::error::a signup can choose its own role — privilege escalation"; exit 1
+fi
 
 echo "▶ Asserting behaviour (anon / citizen / command)"
 psql_run "-f $PGROOT/rls_behaviour_test.sql" 2>&1 | grep -E "PASS|FAIL|ALL RLS" || true

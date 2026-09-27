@@ -29,6 +29,14 @@ const { columns: schema, relationships } = require('./schema').build();
 
 const PORT = Number(process.env.FAKE_SUPABASE_PORT || 54321);
 
+/**
+ * The fixtures as loaded, kept aside so a flow that dispatches an incident does
+ * not change what the next flow sees. Without this the run's assertions depend
+ * on their own order, which is the kind of test that passes until someone adds
+ * a case in the middle.
+ */
+const PRISTINE = JSON.parse(JSON.stringify(tables));
+
 /** Requests are recorded so the run can assert on what the app actually asked for. */
 const log = [];
 /** Columns the app named that the migrations do not define. Any entry fails the run. */
@@ -365,6 +373,65 @@ const server = http.createServer(async (req, res) => {
     return send(200, user);
   }
 
+  // Admin user management, used by /api/admin/provision. Staff accounts can no
+  // longer be created from the browser — a signup may not choose its own role —
+  // so this is the path a commander's provisioning actually takes.
+  if (url.pathname === '/auth/v1/admin/users' && req.method === 'POST') {
+    const b = await body(req);
+    const email = String(b?.email || '').toLowerCase();
+    if (authUsers.some((u) => u.email === email)) {
+      return send(422, { code: 'email_exists', message: 'A user with this email address has already been registered' });
+    }
+    const user = {
+      id: crypto.randomUUID(),
+      aud: 'authenticated',
+      role: 'authenticated',
+      email,
+      email_confirmed_at: new Date().toISOString(),
+      phone: '',
+      app_metadata: { provider: 'email', providers: ['email'] },
+      user_metadata: b?.user_metadata ?? {},
+      identities: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_anonymous: false,
+    };
+    authUsers.push(user);
+    // The database trigger creates the profile, as a CITIZEN whatever the
+    // metadata asked for. Modelling that here is the point: if the route stopped
+    // setting the role afterwards, the account would silently be a citizen and
+    // the run would catch it.
+    tables.profiles.push({
+      id: user.id,
+      email,
+      full_name: b?.user_metadata?.full_name ?? 'User',
+      role: 'CITIZEN',
+      badge_number: null,
+      agency: null,
+      tier: null,
+      geo_lga: null,
+      geo_ward: null,
+      geo_pu: null,
+      phone: b?.user_metadata?.phone ?? null,
+      fcm_token: null,
+      push_enabled: true,
+      profile_complete: false,
+      is_active: true,
+      last_seen: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    return send(200, { user });
+  }
+
+  if (url.pathname.startsWith('/auth/v1/admin/users/') && req.method === 'DELETE') {
+    const id = url.pathname.split('/').pop();
+    const i = authUsers.findIndex((u) => u.id === id);
+    if (i >= 0) authUsers.splice(i, 1);
+    tables.profiles = tables.profiles.filter((p) => p.id !== id);
+    return send(200, {});
+  }
+
   if (url.pathname === '/auth/v1/logout') {
     const h = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     sessions.delete(h);
@@ -400,7 +467,19 @@ const server = http.createServer(async (req, res) => {
       const err = checkWriteColumns(table, b, noteUnknown);
       if (err) return send(400, err);
       const rows = Array.isArray(b) ? b : [b];
-      writes.push({ table, method: req.method, rows, filters: url.search });
+      // Which key made the write, so a run can tell a browser write from a
+      // server one. "The browser must never set a role" is only checkable if
+      // the two are distinguishable, and they are: the service key never
+      // reaches a browser (supabase-server.ts is import-guarded).
+      const key = req.headers.apikey
+        || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+      writes.push({
+        table,
+        method: req.method,
+        rows,
+        filters: url.search,
+        viaServiceKey: String(key).includes('service'),
+      });
 
       if (req.method === 'PATCH') {
         // Apply the patch to the in-memory fixture so a screenshot taken after
@@ -492,10 +571,17 @@ const control = http.createServer((req, res) => {
   // A run starts from a clean record. Without this, anything a human poked at
   // the fake with beforehand — a curl testing the 400 path, say — is reported
   // as something the application did.
-  if (req.url === '/reset') {
+  if (req.url === '/reset' || req.url === '/reset-data') {
     log.length = 0;
     unknownColumns.length = 0;
     writes.length = 0;
+    if (req.url === '/reset-data') {
+      const fresh = JSON.parse(JSON.stringify(PRISTINE));
+      for (const name of Object.keys(tables)) {
+        tables[name].length = 0;
+        tables[name].push(...fresh[name]);
+      }
+    }
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end('{"reset":true}');
   }

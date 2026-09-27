@@ -80,9 +80,9 @@ runtime warning — the app crashes on first render and serves
 
 ### Database
 
-Nine migrations. Applying them is two pastes into the Supabase SQL editor —
+Ten migrations. Applying them is two pastes into the Supabase SQL editor —
 `scripts/rls_production_dryrun.sql` (read-only, prints a verdict), then
-`scripts/apply_all_migrations.sql` (all nine, finishing with a PASS/FAIL table).
+`scripts/apply_all_migrations.sql` (all ten, finishing with a PASS/FAIL table).
 Both are generated from the migrations, CI fails if either drifts, and the
 second is executed against a production-shaped PostgreSQL on every push.
 
@@ -123,22 +123,38 @@ NEXT_PUBLIC_SUPABASE_URL=… NEXT_PUBLIC_SUPABASE_ANON_KEY=… node scripts/veri
 
 ---
 
-### Every screen, in a real browser
+### Every screen and every control, in a real browser
 
 ```bash
-./scripts/local_e2e/run.sh      # ~2 minutes, no credentials, no network
+./scripts/local_e2e/run.sh      # ~4 minutes, no credentials, no network
 ```
 
-A stand-in Supabase, a production build of the console, a real Chromium, and a
-screenshot of every screen for every role — 51 of them, into
-`local_e2e_screenshots/`, with `report.json` beside them.
+Two passes. The first renders every screen for every role. The second presses
+every control — dispatch, escalate, resolve, broadcast, provision an officer,
+deploy personnel, file and acknowledge an action report, approve an uninstall,
+switch theme, sign out — and checks each one against the database write it is
+supposed to cause, then clicks the remaining 60-odd controls to find any that
+do nothing at all. 80 screenshots into `local_e2e_screenshots/`, with
+`report.json` and `interactions.json` beside them.
+
+A button that looks right, logs nothing and writes nothing is invisible to a
+screenshot. That is why the second pass exists.
+
+**Map tiles are served locally.** OpenStreetMap (and CARTO's dark basemap) are
+unreachable from CI, so every tile request is answered with a generated PNG and
+recorded. That is better evidence than the real thing: the run asserts the tiles
+the app asks for are actually over Plateau State, at a usable zoom, rather than
+trusting the centre it was configured with. It does not prove OSM's own tiles
+render, which needs the real endpoint.
 
 It needs nothing from outside the machine, which is the point: until it existed
-**no console screen in this repository had ever been rendered.** Every console
-finding came from reading code or from unit tests of logic lifted out so it
-could be tested, and the wiring between them — where the worst defects lived —
-was never exercised. The first run found a panel that had been broken on the
-default branch the whole time.
+**no console screen in this repository had ever been rendered and no button had
+ever been pressed.** Every console finding came from reading code or from unit
+tests of logic lifted out so it could be tested, and the wiring between them —
+where the worst defects lived — was never exercised. The first run found a panel
+that had been broken on the default branch the whole time; pressing the buttons
+found that anyone holding the public anon key could enrol themselves as a
+commander.
 
 The stand-in builds its tables from `supabase/migrations/`, so a query naming a
 column no migration defines is rejected here exactly as PostgREST rejects it in
@@ -164,7 +180,7 @@ Ten jobs, each tied to a defect that reached the default branch at least once.
 | Supabase — one-paste apply script | runs `apply_all_migrations.sql` against a production-shaped database, top to bottom, twice, and asserts on its own PASS/FAIL table |
 | Supabase — staging bootstrap | builds a project from zero, checks the bootstrap refuses a database that already holds data, and proves both routes reach the same schema |
 | Supabase — dry run reports something | that the dry run emits a verdict rather than silence, which on a "is this safe?" script is the most dangerous output it could give |
-| HQ console — every screen, in a real browser | a screen that crashes, renders empty, or asks the database for something it does not have. Screenshots are kept as a build artifact, pass or fail |
+| HQ console — every screen and every control | a screen that crashes or renders empty, a query for a column that does not exist, and an action that appears to work while writing nothing. Screenshots are kept as a build artifact, pass or fail |
 | Supabase — anon-access probe | manual only; fails if anon can read or write a sensitive table |
 
 Two gates worth knowing about because they catch a whole class rather than a
@@ -220,7 +236,13 @@ what was deliberately not. The parts worth knowing before you touch anything:
   not a degraded experience, it is an open database. Nothing may be granted to
   `anon`.
 - **Roles come from `profiles.role`**, which a database trigger makes
-  non-self-writable. Nothing reads `user_metadata`, which the client can set.
+  non-self-writable *on update* — and, since
+  `20260927000000_signup_cannot_choose_role.sql`, unchooseable at signup too.
+  It was not: `handle_new_user()` copied `raw_user_meta_data->>'role'` straight
+  onto the new profile, so anyone holding the anon key could sign up as
+  `HQ_COMMAND` and pass every policy in the system. Staff are now provisioned
+  through `/api/admin/provision`, which checks the caller and sets the role with
+  the service key. **The browser never states a role that is believed.**
 - **Duress PINs are per-user and verified server-side**, bcrypt-hashed in a
   table no API role can read, with lockout after five failures. The device
   never sees PIN material. Under duress the alert is marked and tracking
@@ -242,7 +264,8 @@ report:
    deployment.** Two functions answer on public URLs, and a watchdog fires every
    five minutes against a datastore nothing backs any more. Do **not** `curl`
    `seedMockData` to check — the probe itself writes ten fabricated emergencies.
-2. **Apply the nine migrations** — dry run first.
+2. **Apply the ten migrations** — dry run first. One of them closes a
+   privilege escalation and should not wait.
 3. **First deploy**, which is also the first test of the deploy config.
 4. **Ask GitHub Support** to purge the `refs/pull/*` refs still holding
    pre-purge objects.

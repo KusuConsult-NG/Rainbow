@@ -41,6 +41,7 @@ MIGRATIONS = [
     "20260903000003_alert_escalation_columns.sql",
     "20260903000004_profiles_badge_number.sql",
     "20260903000005_alerts_assigned_tier.sql",
+    "20260927000000_signup_cannot_choose_role.sql",
 ]
 
 HEADER = """-- ============================================================================
@@ -155,7 +156,14 @@ WITH checks(ord, name, ok) AS (
             AND column_name = 'assigned_tier')),
     (14, 'no tier label left in the agency column',
         (SELECT count(*) = 0 FROM public.alerts
-          WHERE escalated_to_agency IN ('POLLING_UNIT','PU','WARD','LGA','HQ')))
+          WHERE escalated_to_agency IN ('POLLING_UNIT','PU','WARD','LGA','HQ'))),
+    -- The signup path must not read a role out of client-supplied metadata.
+    -- Anyone holding the anon key could otherwise enrol themselves as
+    -- HQ_COMMAND, and every policy in the system trusts profiles.role.
+    (15, 'a signup cannot choose its own role',
+        (SELECT pg_get_functiondef(p.oid) NOT LIKE '%raw_user_meta_data->>''role''%'
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'handle_new_user'))
 )
 SELECT
   CASE WHEN ok THEN 'PASS' ELSE '*** FAIL ***' END AS result,

@@ -28,7 +28,7 @@ emergencies. The full instructions are in `E2E_AUDIT_REPORT.md`.
 
 ## 1. Database
 
-Nine migrations, in filename order. `docs/APPLYING_THE_MIGRATIONS.md` is the
+Ten migrations, in filename order. `docs/APPLYING_THE_MIGRATIONS.md` is the
 step-by-step runbook, including the mandatory read-only dry run; do not apply
 the RLS migration without it.
 
@@ -43,9 +43,29 @@ the RLS migration without it.
 | 7 | `20260903000003_alert_escalation_columns.sql` | Adds `alerts.escalated_to_agency` and `escalation_log`. Already present on production; a no-op there. |
 | 8 | `20260903000004_profiles_badge_number.sql` | Adds `profiles.badge_number`, the label both apps show for an officer. A no-op if production has it. |
 | 9 | `20260903000005_alerts_assigned_tier.sql` | Adds `alerts.assigned_tier` and moves tier labels out of `escalated_to_agency`. Until it runs, a mobile escalation with no named commander is **rejected in full**. |
+| 10 | `20260927000000_signup_cannot_choose_role.sql` | **Closes a privilege escalation.** `handle_new_user()` copied `raw_user_meta_data->>'role'` onto the new profile, so anyone holding the anon key — which ships in the APK and the browser — could sign up as `HQ_COMMAND`. Apply this one first if you apply nothing else. |
 
-All nine are idempotent and every one of them is proven on a real PostgreSQL by
+All ten are idempotent and every one of them is proven on a real PostgreSQL by
 the `rls-migration` CI job before it reaches you.
+
+### After applying migration 10, audit who is already staff
+
+The migration stops new accounts choosing a role. It cannot tell an account
+that was legitimately provisioned as `HQ_COMMAND` from one that asked to be, so
+the existing roster needs a human who knows who is supposed to be staff:
+
+```sql
+-- Everyone who is not a plain citizen, oldest first. Anyone here who is not a
+-- real officer was able to give themselves that role at signup.
+select p.id, p.email, p.full_name, p.role, p.agency, p.created_at
+  from public.profiles p
+ where p.role <> 'CITIZEN'
+ order by p.created_at;
+```
+
+Demote anything unexpected with `update public.profiles set role = 'CITIZEN'
+where id = '…';` — run as the service role, which the escalation trigger
+exempts.
 
 ### After applying, verify (read-only)
 

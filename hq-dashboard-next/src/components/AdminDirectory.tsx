@@ -89,23 +89,40 @@ export default function AdminDirectory() {
     setSuccess(null);
 
     try {
-      const { data, error: signUpErr } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: fullName,
-            role,
-            agency,
-            phone,
-            geo_lga: (selectedLga as any)?.name || 'STATEWIDE HQ',
-            geo_ward: selectedWard?.name || 'N/A',
-            geo_pu: selectedPu || 'N/A',
-          },
-        },
+      // NOT `supabase.auth.signUp` with the role in `options.data`.
+      //
+      // That is what this form used to do, and it worked because
+      // `handle_new_user()` copied `raw_user_meta_data->>'role'` onto the
+      // profile. So did everyone else's signup: `options.data` is written by
+      // the client, with the anon key that ships in the browser bundle and in
+      // the APK, so any stranger could enrol themselves as HQ_COMMAND and pass
+      // every policy in the system. The migration
+      // 20260927000000_signup_cannot_choose_role.sql makes every signup a
+      // CITIZEN whatever it asks for, which is why provisioning has to happen
+      // on a server that holds the service key and checks who is asking.
+      //
+      // The response is deliberately trusted for nothing but its error text:
+      // the role that took effect is the one the SERVER decided.
+      const res = await fetch('/api/admin/provision', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          fullName,
+          phone,
+          role,
+          agency,
+          geoLga: (selectedLga as any)?.name || 'STATEWIDE HQ',
+          geoWard: selectedWard?.name || 'N/A',
+          geoPu: selectedPu || 'N/A',
+        }),
       });
 
-      if (signUpErr) throw signUpErr;
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload.error || `Provisioning failed (${res.status})`);
+      }
 
       setSuccess(`Account registered successfully for ${email}`);
       setEmail('');

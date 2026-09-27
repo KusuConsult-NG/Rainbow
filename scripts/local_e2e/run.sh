@@ -69,7 +69,13 @@ done
 curl -sf --noproxy '*' -o /dev/null "http://127.0.0.1:$PORT/login" \
   || { echo "the console never came up"; exit 1; }
 
-echo "==> driving it in a browser"
+echo "==> driving it in a browser: every screen, every role"
 rm -rf "$OUT"
 cd "$ROOT"
 CONSOLE_URL="http://127.0.0.1:$PORT" E2E_OUT="$OUT" node scripts/local_e2e/capture.js
+
+echo "==> pressing the buttons"
+# Separate from the screens pass on purpose. `capture.js` answers "does it
+# render?"; this answers "does it do anything?" — and a button that looks right,
+# logs nothing and writes nothing is invisible to a screenshot.
+CONSOLE_URL="http://127.0.0.1:$PORT" E2E_OUT="$OUT" node scripts/local_e2e/interact.js

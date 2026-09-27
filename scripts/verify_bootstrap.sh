@@ -75,7 +75,7 @@ printf '%s\n' "$OUT" | grep -E '^\s*(PASS|\*\*\* FAIL)' || true
 FAILED=$(printf '%s\n' "$OUT" | grep -c '\*\*\* FAIL \*\*\*' || true)
 PASSED=$(printf '%s\n' "$OUT" | grep -c '^ PASS' || true)
 echo "  checks passed: $PASSED   failed: $FAILED"
-[ "$FAILED" -eq 0 ] && [ "$PASSED" -ge 15 ] || {
+[ "$FAILED" -eq 0 ] && [ "$PASSED" -ge 16 ] || {
   echo "::error::the bootstrap's own verification reported a failure"; exit 1; }
 
 # ── 2. The guard must refuse a database that already holds data ──────────────
@@ -101,7 +101,9 @@ ROWS=$(psql_q occupied "SELECT count(*) FROM public.alerts")
 GUARD=$(su postgres -s /bin/bash -c \
   "$PGBIN/psql -h $PGROOT/sock -p $PORT -U postgres -d occupied -f $PGROOT/bootstrap_staging.sql" 2>&1) || true
 printf '%s\n' "$GUARD" | grep -q "REFUSING TO RUN" || {
-  echo "::error::the guard did not announce itself on a non-empty database"; exit 1; }
+  echo "::error::the guard did not announce itself on a non-empty database"
+  printf '%s\n' "$GUARD" | tail -25
+  exit 1; }
 
 # The real assertion: nothing was applied. assigned_tier is added by the LAST
 # migration in the file, so its absence proves the run was rolled back whole.
@@ -145,7 +147,7 @@ echo "  ok: identical policy sets ($(printf '%s\n' "$A" | wc -l) policies)"
 
 cat <<EOF
 
-✓ bootstrap_staging.sql builds a correct project from zero ($PASSED/15 PASS),
+✓ bootstrap_staging.sql builds a correct project from zero ($PASSED/16 PASS),
   refuses a database that already holds data, and produces exactly the schema
   the migration replay produces.
 EOF

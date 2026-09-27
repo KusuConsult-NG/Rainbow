@@ -756,7 +756,7 @@ jobs:
         run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_dryrun_emits.sh
 
   console-e2e:
-    name: HQ console — every screen, in a real browser
+    name: HQ console — every screen and every control, in a real browser
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -778,7 +778,11 @@ jobs:
       #
       # This job proves the SCREENS. It does not prove row-level security —
       # that is the `rls` job, against a real staging project.
-      - name: Render every screen for every role and assert on what is there
+      # Two passes. The first renders every screen for every role; the second
+      # presses every control and checks each action against the database write
+      # it is supposed to cause. A button that looks right and writes nothing is
+      # invisible to a screenshot.
+      - name: Render every screen, then press every button
         run: ./scripts/local_e2e/run.sh
 
       # The screenshots are the evidence. Keep them whether or not the run

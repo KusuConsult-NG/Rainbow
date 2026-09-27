@@ -2335,3 +2335,145 @@ screen.
 * **The mobile app on a device.** Its test suite runs in CI; no screen has been
   rendered on a handset or an emulator, and no release build has been produced.
 * **The deploy.** The App Hosting config has still never been executed.
+
+## Pressing the buttons
+
+Rendering a screen and using one are different claims. The pass above proved
+the first. This one presses every control a commander or an agency liaison can
+reach and checks each action against the database write it is supposed to
+cause — because a button that looks right, logs nothing and writes nothing is
+invisible to a screenshot.
+
+`scripts/local_e2e/interact.js`: sixteen named flows asserted against their
+writes, then a sweep that clicks the remaining sixty-odd controls and records
+what each one did — a request, a DOM change, a navigation, or nothing at all.
+The last is what it is hunting.
+
+### The map was never actually tested
+
+The first pass reported "the map renders". It did not. OpenStreetMap — and
+CARTO's dark basemap, which the console switches to in dark mode — are both
+refused by the egress policy here and on any CI runner, so every map screenshot
+was markers floating on an empty grey page. "The map renders" meant nothing.
+
+Tiles are now served locally from a generated PNG and every request recorded,
+which is better evidence than the real endpoint rather than worse:
+
+* the base layer is visibly present, so a screenshot shows a map;
+* the run asserts the tiles the app asks for are **over Plateau State** — 24
+  of 24 inside the state's bounding box, first corner 10.49°N 9.14°E, all at
+  zoom 9 — rather than trusting the centre it was configured with;
+* switching theme is asserted to repoint the base layer at the dark basemap,
+  not merely recolour the chrome around it;
+* it does not depend on a third party's uptime.
+
+It does **not** prove OpenStreetMap's own tiles render. That needs the real
+endpoint and a network that allows it.
+
+### What pressing the buttons found: anyone could become a commander
+
+The Agent Directory provisions staff accounts. It did it like this:
+
+```ts
+supabase.auth.signUp({ email, password,
+  options: { data: { role: 'HQ_COMMAND', agency, geo_lga, ... } } })
+```
+
+and `handle_new_user()`, unchanged since the initial schema, did this:
+
+```sql
+role := COALESCE(NEW.raw_user_meta_data->>'role', 'CITIZEN')
+```
+
+`raw_user_meta_data` **is** `options.data`. It is written by whoever is signing
+up, with the anon key — which ships inside the APK and inside the browser
+bundle, by design, because row-level security is meant to be the whole access
+model. So this was enough, from anywhere:
+
+```ts
+supabase.auth.signUp({ email, password,
+  options: { data: { role: 'HQ_COMMAND' } } })
+```
+
+`is_staff()` and `is_command()` read `profiles.role`, so that account then
+passes every policy in the RLS migration: the full incident board, live
+telemetry for every citizen who has pressed SOS, dispatch, escalation, and mass
+broadcast to the whole state.
+
+**Why the existing guard did not cover it.** `profiles_no_privilege_escalation`
+is `BEFORE UPDATE`. The escalation is not an update — the role is chosen at
+INSERT, by the signup itself. README.md said "nothing reads `user_metadata`",
+which was true of the policies and not true of the trigger that creates the row
+the policies read. The security model was correct about itself one layer up
+from where the hole was.
+
+**Proven, not argued.** `scripts/signup_role_escalation_test.sql` runs in the
+existing throwaway-PostgreSQL harness. Before the fix:
+
+```
+WARNING:  FAIL  a signup that asked for HQ_COMMAND got HQ_COMMAND
+```
+
+**The fix.** `20260927000000_signup_cannot_choose_role.sql` makes every signup a
+CITIZEN whatever it asks for; `full_name` and `phone` are still honoured,
+because they are not privileges. The function also gains `SET search_path`,
+which a SECURITY DEFINER function should always pin.
+
+That closes the hole and breaks the console's provisioning, which depended on
+it — so provisioning moved to `/api/admin/provision`: it authenticates the
+caller, refuses anyone who is not command, refuses an unknown role by name,
+refuses a non-HQ commander minting an `HQ_COMMAND` or `ADMIN` peer, creates the
+account with the service key, sets the role on the profile, and deletes the
+account if the role write fails — an account that exists with no role is a
+citizen holding staff credentials, which is worse than no account.
+
+The run asserts the whole of it end to end: the form posts to the route, the
+route answers 201, the profile comes back `UNIT_COMMAND` rather than `CITIZEN`,
+and **every write that touches `profiles.role` arrived with the service key,
+never from the browser.** The stand-in records which key each write came with,
+so that last claim is checkable rather than assumed.
+
+**Still outstanding, and it needs a human.** The migration cannot tell an
+account legitimately provisioned as `HQ_COMMAND` from one that asked to be.
+`docs/PRODUCTION_DEPLOYMENT.md` carries the audit query for the existing roster.
+
+### Six more harness faults, again not app faults
+
+Every one of these first presented as a defect in the console:
+
+* **`DISPATCH` "wrote nothing".** It opens a responder picker, and the confirm
+  button stays disabled until somebody is selected. Dispatching to nobody is
+  correctly refused; the harness had not selected anyone.
+* **"Filing an action report wrote nothing".** The pattern `report` matched the
+  **Action Reports tab** rather than `FILE REPORT TO HQ` on the card, so the
+  run navigated to the list and then complained the list did not write.
+* **`DEPLOY` "was missing".** It is on the expanded incident card, and the card
+  collapses when the deployment modal closes.
+* **"The browser writes `profiles.role`".** It does not — that write is the
+  server route's, through the same stand-in. The fake now records which key
+  each write arrived with, which is what makes the claim meaningful.
+* **"`🚔 POLICE` is a dead control".** The sweep compared `innerHTML.length`,
+  and selecting a different agency swapped text of the same length. It hashes
+  the content now.
+* **"`Provision Security Personnel Account` is a dead control".** Three of its
+  fields are `required`, so clicking submit on an empty form is refused by the
+  browser with no DOM change. The sweep now treats failed field validation as
+  the control working, which it is.
+
+### What now passes
+
+21 of 21 interaction assertions, 62 controls exercised, no dead control, nothing
+thrown, and no query naming a column the migrations do not define:
+
+| | |
+|---|---|
+| map | 24/24 tiles over Plateau at zoom 9; markers drawn; theme switch repoints the basemap |
+| dispatch | picks a responder, writes `DISPATCHED` with `assigned_to` and `assigned_responders` |
+| escalate | writes status, agency and an appended `escalation_log` entry |
+| resolve | writes `RESOLVED` with `resolved_by` and `resolved_at` |
+| broadcast | inserts into `system_alerts` with a derived non-null title |
+| provisioning | 201 from the server route; role set with the service key, never from the browser |
+| uninstall queue | `APPROVE` writes status and `reviewed_at` |
+| agency portal | add officer, change status, deploy personnel, file a report — all four insert |
+| HQ ↔ agency | HQ acknowledging a report writes `read_by_hq` and who acknowledged it |
+| sign out | returns to the login screen |
