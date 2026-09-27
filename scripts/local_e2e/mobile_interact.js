@@ -27,6 +27,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
+const { DOMAIN } = require('./fixtures');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -534,6 +535,82 @@ async function logMark() {
       if (after.url !== before.url) await go(route, 2000);
     }
     await shot(`94-mobile-sweep${route.replace(/\//g, '-')}`);
+  }
+
+  // The sweep above is the CITIZEN's app. The responder's is a different
+  // surface entirely — a citizen is redirected away from every screen on it —
+  // so sweeping only as the citizen leaves the staff half of the app with no
+  // button ever pressed.
+  const STAFF_SCREENS = [
+    '/agent-dashboard', '/mission-intel', '/mission-resolution',
+    '/secure-chat', '/admin-broadcast', '/live-tracking',
+  ];
+
+  state.screen = 'mobile:responder:signin';
+  await page.evaluate(() => {
+    try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ }
+  });
+  await page.goto(origin, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(
+    () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
+    { timeout: 90000 },
+  );
+  await sleep(6000);
+  await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
+  await sleep(1500);
+  // Staff sign in with an access code, not a phone: one step, no OTP.
+  await typeInto(`responder@${DOMAIN}`);
+  await tap('authorize access', { role: 'button', settle: 6500 });
+  const responderLanded = await page.evaluate(() => window.location.hash);
+  check(
+    'the responder signs in and lands on the agent dashboard',
+    /agent-dashboard/.test(responderLanded),
+    `landed on ${responderLanded || '#/'}`,
+  );
+
+  if (/agent-dashboard/.test(responderLanded)) {
+    for (const route of STAFF_SCREENS) {
+      state.screen = `sweep:responder:${route}`;
+      await go(route, 2800);
+
+      const buttons = await page.evaluate(() => {
+        window.__mb = [...document.querySelectorAll('flt-semantics[role="button"]')].filter((b) => {
+          const r = b.getBoundingClientRect();
+          return r.width > 4 && r.height > 4;
+        });
+        return window.__mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
+      });
+
+      for (let i = 0; i < buttons.length; i++) {
+        const label = buttons[i];
+        if (/sign ?out|log ?out|terminate|power/i.test(label)) continue;
+
+        const before = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
+        const reqBefore = await logMark();
+        const clicked = await page.evaluate((idx) => {
+          const b = window.__mb?.[idx];
+          if (!b || !b.isConnected) return false;
+          if (b.getBoundingClientRect().width < 4) return false;
+          b.click();
+          return true;
+        }, i);
+        if (!clicked) continue;
+        await sleep(700);
+        const after = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
+        const reqAfter = await logMark();
+
+        const effect = [];
+        if (after.url !== before.url) effect.push(`navigated to ${after.url}`);
+        if (after.len !== before.len) effect.push('changed the screen');
+        if (reqAfter > reqBefore) effect.push(`made ${reqAfter - reqBefore} request(s)`);
+
+        sweepLog.push({ route: `responder${route}`, label, effect: effect.join(', ') || 'nothing' });
+        if (!effect.length) deadControls.push({ route: `responder${route}`, label });
+
+        if (after.url !== before.url) await go(route, 2000);
+      }
+      await shot(`95-mobile-responder-sweep${route.replace(/\//g, '-')}`);
+    }
   }
 
   check(
