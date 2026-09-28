@@ -193,6 +193,20 @@ psql_run "-f $PGROOT/20261001000000_mesh_ingest.sql" >/dev/null
 echo "▶ Re-applying it (must be idempotent)"
 psql_run "-f $PGROOT/20261001000000_mesh_ingest.sql" >/dev/null
 
+echo "▶ Applying 20261002000000_sim_channel_events.sql"
+psql_run "-f $PGROOT/20261002000000_sim_channel_events.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261002000000_sim_channel_events.sql" >/dev/null
+
+# An agency liaison is an officer of ANOTHER organisation, and is_staff() is
+# "role is not CITIZEN" — so every alerts policy that said `OR is_staff()` gave
+# them the whole state, to read AND to write. This narrows it; the production
+# readiness test below is what proves it.
+echo "▶ Applying 20261003000000_liaisons_are_not_staff.sql"
+psql_run "-f $PGROOT/20261003000000_liaisons_are_not_staff.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261003000000_liaisons_are_not_staff.sql" >/dev/null
+
 echo "▶ Asserting the mesh recognises a duplicate, and forgets in time"
 MESH_OUT=$(psql_run "-f $PGROOT/mesh_ingest_behaviour_test.sql" 2>&1) && MESH_RC=0 || MESH_RC=$?
 echo "$MESH_OUT" | grep -E "PASS|FAIL|ERROR" || true

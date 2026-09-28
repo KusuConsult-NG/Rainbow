@@ -131,6 +131,77 @@ BEGIN
   IF n <> 0 THEN RAISE EXCEPTION 'FAIL: army liaison read % police report(s)', n; END IF;
   RAISE NOTICE 'PASS: reports are invisible across agencies';
 
+  -- ═══ 2b. A liaison is not Operation Rainbow staff ════════════════════════
+  --
+  -- `is_staff()` is "role is not CITIZEN", so a POLICE_LIAISON was staff — and
+  -- the alerts policies were `... OR is_staff()`. Every liaison could READ and
+  -- WRITE every incident in Plateau: resolve one in an LGA their agency was
+  -- never called to, reassign it, clear a duress alarm. Nobody decided that;
+  -- the agency roles simply arrived after is_staff() was written.
+  --
+  -- Two incidents: one escalated to the POLICE, one to the ARMY.
+  PERFORM pg_temp.become(hq, 'authenticated');
+  INSERT INTO public.alerts (id, reported_by, status, type, severity, escalated_to_agency)
+  VALUES ('cccccccc-cccc-4ccc-8ccc-ccccccccca01', cit, 'PENDING', 'SOS', 'HIGH', 'POLICE'),
+         ('cccccccc-cccc-4ccc-8ccc-ccccccccca02', cit, 'PENDING', 'SOS', 'HIGH', 'ARMY'),
+         ('cccccccc-cccc-4ccc-8ccc-ccccccccca03', cit, 'PENDING', 'SOS', 'HIGH', NULL)
+  ON CONFLICT (id) DO NOTHING;
+
+  PERFORM pg_temp.become(police, 'authenticated');
+
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca01';
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL: police liaison cannot see the incident escalated to them';
+  END IF;
+
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca02';
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL: police liaison reads an incident escalated to the ARMY';
+  END IF;
+
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca03';
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL: police liaison reads an incident escalated to nobody';
+  END IF;
+  RAISE NOTICE 'PASS: a liaison reads only the incidents handed to their agency';
+
+  -- ...and cannot WRITE to one that was not. This is the half that mattered
+  -- most: reading the board is a confidentiality problem, but resolving
+  -- somebody else's live emergency is an operational one.
+  UPDATE public.alerts SET status = 'RESOLVED'
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca02';
+  IF FOUND THEN
+    RAISE EXCEPTION 'FAIL: police liaison resolved an ARMY incident';
+  END IF;
+  UPDATE public.alerts SET status = 'RESOLVED'
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca03';
+  IF FOUND THEN
+    RAISE EXCEPTION 'FAIL: police liaison resolved an unescalated incident';
+  END IF;
+  RAISE NOTICE 'PASS: a liaison cannot act on another agency''s incident';
+
+  -- But CAN act on their own, or the handover is ceremonial.
+  UPDATE public.alerts SET status = 'DISPATCHED'
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca01';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'FAIL: police liaison cannot act on their own incident';
+  END IF;
+  RAISE NOTICE 'PASS: a liaison can act on the incident handed to them';
+
+  -- Operation Rainbow's own staff keep the statewide board.
+  PERFORM pg_temp.become(hq, 'authenticated');
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE id IN ('cccccccc-cccc-4ccc-8ccc-ccccccccca01',
+                'cccccccc-cccc-4ccc-8ccc-ccccccccca02',
+                'cccccccc-cccc-4ccc-8ccc-ccccccccca03');
+  IF n <> 3 THEN
+    RAISE EXCEPTION 'FAIL: this narrowed the board for HQ too (sees %, expected 3)', n;
+  END IF;
+  RAISE NOTICE 'PASS: command still sees the whole state';
+
   -- A field responder is staff but has no business here.
   PERFORM pg_temp.become(resp, 'authenticated');
   SELECT count(*) INTO n FROM public.agency_personnel;
@@ -279,8 +350,19 @@ BEGIN
   RAISE NOTICE 'PASS: escalation_log appends rather than replaces';
 
   -- The agency portal's entire feed is this filter.
-  SELECT count(*) INTO n FROM public.alerts WHERE escalated_to_agency = 'POLICE';
-  IF n <> 1 THEN RAISE EXCEPTION 'FAIL: the agency portal filter returns % rows', n; END IF;
+  --
+  -- Asserted on THE ROW, not on a count of the whole table. It used to say
+  -- `count(*) = 1`, which made it a test of how many fixtures the file happens
+  -- to contain: adding one more escalated incident anywhere above broke it
+  -- while saying nothing about the filter.
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE escalated_to_agency = 'POLICE'
+     AND id = 'cccccccc-cccc-4ccc-8ccc-cccccccccce1';
+  IF n <> 1 THEN RAISE EXCEPTION 'FAIL: the agency portal filter misses the escalated incident (% rows)', n; END IF;
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE escalated_to_agency = 'POLICE'
+     AND id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca02';
+  IF n <> 0 THEN RAISE EXCEPTION 'FAIL: the agency portal filter picks up an ARMY incident'; END IF;
   RAISE NOTICE 'PASS: escalated incidents are visible to the agency they went to';
 
   -- ═══ 7. The board's profile lookup must actually return rows ═════════════

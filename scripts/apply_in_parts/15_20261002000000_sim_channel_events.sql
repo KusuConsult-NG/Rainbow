@@ -208,5 +208,3 @@ BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE public.sim_channel_events;
 END $realtime$;
 
-
-

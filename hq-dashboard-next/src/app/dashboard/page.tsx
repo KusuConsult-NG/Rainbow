@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import type { Alert } from './types';
 import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
+import { consoleAccess } from '@/lib/console-access';
 import { resolveReporterDetails } from '@/lib/incident-dossier';
 import * as alertActions from '@/lib/alert-actions';
 import type { AlertIds } from '@/lib/alert-actions';
@@ -317,10 +318,14 @@ export default function DashboardPage() {
             .single();
           if (profile?.role) {
             setUserRole(profile.role as string);
-              // Auto-navigate agency liaisons to their portal
-              if ((profile.role as string).endsWith('_LIAISON')) {
-                setActiveTab('agency');
-              }
+              // Land where this role belongs. It used to send liaisons to
+              // the agency tab but leave every other tab reachable, so the
+              // statewide map was one click away for an officer of another
+              // organisation.
+              const resolved = consoleAccess(profile.role as string);
+              setActiveTab((current) =>
+                resolved.tabs.includes(current) ? current : resolved.landing,
+              );
           }
         }
       } catch (e) {
@@ -868,9 +873,13 @@ export default function DashboardPage() {
     </div>
   );
   const isHqUser = userRole === 'HQ_OFFICER' || userRole === 'HQ_COMMAND' || userRole === 'ADMIN';
-  const isAgencyLiaison = userRole.endsWith('_LIAISON');
-  // Derive agency code from role: 'POLICE_LIAISON' -> 'POLICE'
-  const userAgencyCode = isAgencyLiaison ? userRole.replace('_LIAISON', '') : undefined;
+  // One tested answer to "what may this account reach", rather than the
+  // conditionals this had grown. See src/lib/console-access.ts.
+  const access = consoleAccess(userRole, {
+    sector: userProfile?.geo_lga || userProfile?.geo_ward || userProfile?.geo_pu,
+  });
+  const isAgencyLiaison = access.agency !== null;
+  const userAgencyCode = access.agency ?? undefined;
 
   const lgaSelectOptions: SelectOption[] = [
     { value: 'ALL', label: 'ALL LGAS (STATEWIDE)', badge: 'STATE' },
@@ -1002,17 +1011,14 @@ export default function DashboardPage() {
             <ShieldAlert size={24} color="#fff" />
           </div>
           <div>
+            {/* Whose console this is. It said "COMMAND HQ — TACTICAL MONITOR"
+                to an officer of the Nigeria Police Force, which in a system
+                that hands incidents between organisations is not cosmetic. */}
             <h1 style={{ fontSize: 16, fontWeight: 900, letterSpacing: 1, textTransform: 'uppercase' }}>
-              {userRole === 'LGA_COMMAND' || userRole === 'LGA_OFFICER' ? 'LGA Command' :
-               userRole === 'WARD_COMMAND' || userRole === 'WARD_OFFICER' ? 'Ward Command' :
-               userRole === 'UNIT_COMMAND' || userRole === 'POLLING_UNIT_OFFICER' || userRole === 'POLLING_OFFICER' ? 'PU Command' :
-               'Command HQ'}
+              {access.title}
             </h1>
             <p style={{ fontSize: 9, color: 'var(--primary)', fontWeight: 800, letterSpacing: 2.5 }}>
-              {userRole === 'LGA_COMMAND' || userRole === 'LGA_OFFICER' ? (userProfile?.geo_lga || 'LGA').toUpperCase() + ' SECTOR' :
-               userRole === 'WARD_COMMAND' || userRole === 'WARD_OFFICER' ? (userProfile?.geo_ward || 'WARD').toUpperCase() + ' SECTOR' :
-               userRole === 'UNIT_COMMAND' || userRole === 'POLLING_UNIT_OFFICER' || userRole === 'POLLING_OFFICER' ? (userProfile?.geo_pu || 'PU').toUpperCase() + ' SECTOR' :
-               'TACTICAL MONITOR'}
+              {access.subtitle}
             </p>
           </div>
         </div>
@@ -1020,20 +1026,45 @@ export default function DashboardPage() {
         {/* Scrollable Navigation & Metrics Container */}
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 24, paddingRight: 4, marginBottom: 16 }}>
           <nav style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-dim)', letterSpacing: 2, marginBottom: 8, paddingLeft: 12 }}>SYSTEM NAVIGATION</p>
-            <NavItem icon={<MapIcon size={18} />} label="Intelligence Map" active={activeTab === 'map'} onClick={() => setActiveTab('map')} />
-            <NavItem icon={<Activity size={18} />} label="Incident Feed" active={activeTab === 'alerts'} onClick={() => setActiveTab('alerts')} badge={alerts.length > 0 ? alerts.length : undefined} />
-            <NavItem icon={<Clock size={18} />} label="Mission History" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
-            <NavItem icon={<Radio size={18} />} label="Communications & Broadcast" active={activeTab === 'broadcast'} onClick={() => setActiveTab('broadcast')} />
-            <NavItem
-              icon={<Shield size={18} />}
-              label="Inter-Agency Command"
-              active={activeTab === 'agency'}
-              onClick={() => setActiveTab('agency')}
-              badge={unreadAgencyReports > 0 ? unreadAgencyReports : undefined}
-            />
+            <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-dim)', letterSpacing: 2, marginBottom: 8, paddingLeft: 12 }}>
+              {access.agency ? 'AGENCY NAVIGATION' : 'SYSTEM NAVIGATION'}
+            </p>
+            {/* What this account may reach, from one tested place
+                (src/lib/console-access.ts). Hiding a control is not access
+                control — the database decides — but OFFERING one that will be
+                refused is its own defect, and the two have to agree. An agency
+                liaison was being shown Communications & Broadcast, which
+                `system_alerts` INSERT refuses for any non-command role: they
+                could write a statewide advisory and only then be told no. */}
+            {access.tabs.includes('map') && (
+              <NavItem icon={<MapIcon size={18} />} label="Intelligence Map" active={activeTab === 'map'} onClick={() => setActiveTab('map')} />
+            )}
+            {access.tabs.includes('alerts') && (
+              <NavItem
+                icon={<Activity size={18} />}
+                label={access.agency ? 'Incidents For Us' : 'Incident Feed'}
+                active={activeTab === 'alerts'}
+                onClick={() => setActiveTab('alerts')}
+                badge={alerts.length > 0 ? alerts.length : undefined}
+              />
+            )}
+            {access.tabs.includes('history') && (
+              <NavItem icon={<Clock size={18} />} label="Mission History" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
+            )}
+            {access.tabs.includes('broadcast') && (
+              <NavItem icon={<Radio size={18} />} label="Communications & Broadcast" active={activeTab === 'broadcast'} onClick={() => setActiveTab('broadcast')} />
+            )}
+            {access.tabs.includes('agency') && (
+              <NavItem
+                icon={<Shield size={18} />}
+                label={access.agency ? 'Our Deployments' : 'Inter-Agency Command'}
+                active={activeTab === 'agency'}
+                onClick={() => setActiveTab('agency')}
+                badge={unreadAgencyReports > 0 ? unreadAgencyReports : undefined}
+              />
+            )}
             
-            {isHqUser && (
+            {access.administration && (
               <>
                 <div style={{ margin: '16px 0', height: 1, background: 'var(--border)' }}></div>
                 <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-dim)', letterSpacing: 2, marginBottom: 8, paddingLeft: 12 }}>ADMINISTRATION</p>
