@@ -741,7 +741,19 @@ async function writeMark() {
         return !form.checkValidity();
       }, i);
 
+      // Clicking the tab you are already on is CORRECTLY a no-op, and the
+      // sweep used to record it as a control that does nothing. The app now
+      // says which tab is selected (`aria-selected`), so this can be told apart
+      // from a button wired to nothing — which is the distinction that matters,
+      // and the reason the fix went into the component rather than into a
+      // suppression list here.
+      const alreadySelected = await page.evaluate((idx) => {
+        const b = window.__sweep?.[idx];
+        return b?.getAttribute?.('aria-selected') === 'true';
+      }, i);
+
       const effect = [];
+      if (alreadySelected) effect.push('already the selected tab');
       if (blockedByValidation) effect.push('refused by field validation');
       if (after.url !== before.url) effect.push('navigated');
       if (after.html !== before.html) effect.push('changed the page');

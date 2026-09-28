@@ -347,7 +347,8 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
       </div>
 
       {/* Section tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+      <div role="tablist" aria-label="Agency sections"
+           style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
         {([
           { key: 'incidents',     label: 'Situation Feed',   icon: <AlertTriangle size={14} />, badge: incidents.length as number | undefined },
           { key: 'personnel',     label: 'Personnel',        icon: <Users size={14} />,          badge: undefined as number | undefined },
@@ -356,6 +357,14 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
         ] as Array<{ key: string; label: string; icon: React.ReactNode; badge?: number }>).map(tab => (
           <button
             key={tab.key}
+            // A tab has to SAY it is a tab and say which one is chosen. Without
+            // this, the selected section is expressed only as a border colour:
+            // invisible to a screen reader, and invisible to a test — the
+            // browser sweep clicked the already-selected tab, saw the page not
+            // change, and recorded it as a control that does nothing. It was
+            // right that nothing happened and wrong about why.
+            role="tab"
+            aria-selected={activeSection === tab.key}
             onClick={() => setActiveSection(tab.key as 'incidents' | 'personnel' | 'reports' | 'add_personnel')}
             style={{
               padding: '10px 16px', background: 'none',

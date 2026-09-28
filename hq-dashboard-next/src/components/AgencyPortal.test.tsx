@@ -122,7 +122,11 @@ describe('AgencyPortal', () => {
     render(<AgencyPortal {...hqProps} />);
     await screen.findByText(/No active incidents escalated to/i);
 
-    await userEvent.click(screen.getByRole('button', { name: /Action Reports/i }));
+    // `tab`, not `button`: the section tabs carry role="tab" so that the
+    // selected one is stated rather than implied by a border colour. Setting an
+    // explicit role REPLACES the implicit one, so this query had to follow —
+    // which is the accessibility tree changing, exactly as intended.
+    await userEvent.click(screen.getByRole('tab', { name: /Action Reports/i }));
     const ackButton = await screen.findByRole('button', { name: /acknowledge/i });
     const before = db.selectCount('agency_action_reports');
     await userEvent.click(ackButton);
