@@ -24,6 +24,7 @@ void main() {
   });
 
   tearDown(() {
+    AlertService.resetFlushGuard();
     AlertService.alreadyDeliveredOverride = null;
     AlertService.escalateOverride = null;
   });
@@ -221,6 +222,110 @@ void main() {
       await service.flushOfflineQueue();
       final pending = await sqlite.getPendingAlerts();
       expect(pending.map((r) => r['local_id']), contains(localId));
+    });
+  });
+
+  group('two flushes racing each other', () {
+    // The queue is flushed from four places and awaited by none of them:
+    // start-up, app resume, the home screen's initState, and connectivity
+    // returning — and connectivity is listened to TWICE, in main.dart and
+    // again in home_screen.dart. When the network comes back, two flushes
+    // start together, over a backlog that exists precisely then.
+    late SqliteService sqlite;
+
+    setUp(() async {
+      final dir = await databaseFactory.getDatabasesPath();
+      await databaseFactory.deleteDatabase(p.join(dir, 'rainbow_offline.db'));
+      sqlite = SqliteService();
+      AlertService.resetFlushGuard();
+    });
+
+    test('a queued report is considered once, not once per flush', () async {
+      final localId = newOfflineLocalId();
+      await sqlite.enqueueAlert(
+        localId: localId,
+        type: 'Kidnap - Held Hostage',
+        description: 'x',
+        lat: 9.9,
+        lng: 8.9,
+        priority: 'CRITICAL',
+        isAnonymous: false,
+        createdAt: DateTime.utc(2026, 9, 28, 14).toIso8601String(),
+        reportedBy: 'citizen-uuid',
+      );
+
+      // Counting the delivery lookups counts the times the row was taken up for
+      // sending. Without a guard this is 2, and in production that is two
+      // incidents for one emergency and two sets of units sent to one place.
+      var considered = 0;
+      AlertService.alreadyDeliveredOverride = (tag) async {
+        considered += 1;
+        // Long enough that the second flush starts while the first is still
+        // inside the row, which is the race being reproduced.
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+        return 'already-at-hq';
+      };
+
+      // The two listeners do not share an instance: main.dart builds its own
+      // AlertService, the home screen goes through the provider. A guard held
+      // on the instance would not have helped.
+      final a = AlertService(sqlite).flushOfflineQueue();
+      final b = AlertService(SqliteService()).flushOfflineQueue();
+      await Future.wait([a, b]);
+
+      expect(considered, 1);
+    });
+
+    test('the second caller still gets the result', () async {
+      // Joining a flush already running must not mean being told nothing
+      // happened — the caller cannot tell the difference between that and an
+      // empty queue.
+      final localId = newOfflineLocalId();
+      await sqlite.enqueueAlert(
+        localId: localId,
+        type: 'Kidnap - Held Hostage',
+        description: 'x',
+        lat: 9.9,
+        lng: 8.9,
+        priority: 'CRITICAL',
+        isAnonymous: false,
+        createdAt: DateTime.utc(2026, 9, 28, 14).toIso8601String(),
+        reportedBy: 'citizen-uuid',
+      );
+      AlertService.alreadyDeliveredOverride = (tag) async {
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        return 'already-at-hq';
+      };
+
+      final a = AlertService(sqlite).flushOfflineQueue();
+      final b = AlertService(SqliteService()).flushOfflineQueue();
+      final results = await Future.wait([a, b]);
+
+      expect(results[0][localId], 'already-at-hq');
+      expect(results[1][localId], 'already-at-hq');
+    });
+
+    test('a later flush is a real flush, not the old one again', () async {
+      // The guard must last exactly as long as the flush. If it outlived it,
+      // reports queued afterwards would never be sent.
+      AlertService.alreadyDeliveredOverride = (tag) async => 'already-at-hq';
+      await AlertService(sqlite).flushOfflineQueue();
+
+      final localId = newOfflineLocalId();
+      await sqlite.enqueueAlert(
+        localId: localId,
+        type: 'Kidnap - Held Hostage',
+        description: 'x',
+        lat: 9.9,
+        lng: 8.9,
+        priority: 'CRITICAL',
+        isAnonymous: false,
+        createdAt: DateTime.utc(2026, 9, 28, 14).toIso8601String(),
+        reportedBy: 'citizen-uuid',
+      );
+
+      final mappings = await AlertService(sqlite).flushOfflineQueue();
+      expect(mappings[localId], 'already-at-hq');
     });
   });
 }

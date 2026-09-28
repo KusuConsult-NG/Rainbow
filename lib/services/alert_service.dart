@@ -451,7 +451,45 @@ class AlertService {
   }
 
   /// Replays pending alerts once connectivity is restored.
-  Future<Map<String, String>> flushOfflineQueue() async {
+  /// The flush currently running, if any. Static because the callers do not
+  /// share an instance: `main.dart` constructs its own `AlertService()` while
+  /// the home screen goes through `alertServiceProvider`.
+  static Future<Map<String, String>>? _flushInFlight;
+
+  /// Drops the guard between tests.
+  @visibleForTesting
+  static void resetFlushGuard() => _flushInFlight = null;
+
+  /// Sends everything waiting in the local queue, one flush at a time.
+  ///
+  /// ## Why the guard is the whole point
+  ///
+  /// Four call sites fire this and none of them awaits it: start-up, app
+  /// resume, the home screen's initState, and connectivity returning — and
+  /// connectivity is listened to TWICE, in `main.dart` and again in
+  /// `home_screen.dart`. So the moment the network comes back, two flushes
+  /// start together. That is also the exact moment a backlog exists.
+  ///
+  /// Both would call `getPendingAlerts()` and get the same rows, both would
+  /// miss the already-delivered check because neither had inserted yet, and
+  /// both would insert. Five queued emergencies become ten incidents and up to
+  /// five pairs of units sent to one place. The de-duplication below is aimed
+  /// at the same report arriving over DIFFERENT channels; it cannot see a
+  /// second copy of itself racing it through the same one.
+  ///
+  /// A later caller joins the flush already running rather than starting a
+  /// second one, and gets its result.
+  Future<Map<String, String>> flushOfflineQueue() {
+    final running = _flushInFlight;
+    if (running != null) return running;
+
+    final started = _flushOfflineQueueOnce()
+        .whenComplete(() => _flushInFlight = null);
+    _flushInFlight = started;
+    return started;
+  }
+
+  Future<Map<String, String>> _flushOfflineQueueOnce() async {
     final mappings = <String, String>{};
     try {
       final offlineQueue = await _sqliteService.getPendingAlerts();
