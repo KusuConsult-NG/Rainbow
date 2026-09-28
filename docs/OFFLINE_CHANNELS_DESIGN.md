@@ -346,8 +346,25 @@ case it exists for.
    * choose and provision the gateway shortcode, and set
      `SMS_GATEWAY_SECRET` and the destination number;
    * a field test — two handsets, data off, cell on.
-2. **The mesh protocol core**, fully tested against the loopback transport. No
-   radio. At the end of this the whole design above is proven except the radio.
+2. **The mesh protocol core — BUILT.** No radio; everything above the transport
+   seam, proven in unit tests.
+   * `mesh_envelope.dart` — the wire frame, carrying a random id, a hop count,
+     a coarse timestamp, a key id and an opaque body, and nothing else. 16
+     tests, including that nothing operational is legible in a frame and that
+     a stranger's malformed bytes return null rather than crashing a relay.
+   * `mesh_sealer.dart` — ECIES over P-256: ephemeral keypair per message,
+     ECDH to HQ's public key, HKDF, AES-GCM. 11 tests, including the one the
+     design turns on: **two alerts from the same handset share no bytes**, so
+     a hostile relay cannot fingerprint which phones in a crowd are reporting.
+   * `mesh_relay.dart` — deduplication, hop limit, age limit, size cap and a
+     bounded outbox that drops the OLDEST first, so a flood wins a delay and
+     not permanent silence. 16 tests.
+   * `mesh_transport.dart` — the seam. A loopback implementation carries real
+     encoded frames through the real decoder, so a wire-format regression
+     fails here rather than only on a handset.
+   * `mesh_end_to_end_test.dart` — a sealed report crossing three phones to one
+     with a network, with the relays unable to read what they carry, HQ opening
+     it, and the hop limit stopping it dead in a line of twelve.
 3. **The Nearby transport**, written against the interface and marked
    unverified until you have run it on handsets.
 4. **Field test**, which is yours: two phones, aeroplane mode, and a walk.
