@@ -32,12 +32,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
 
 import { getSupabaseAdmin } from '@/lib/supabase-server';
-import {
-  categoryLabel,
-  decodeSmsAlert,
-  readDeviceRef,
-  severityLabel,
-} from '@/lib/sms-alert-codec';
+import { recordOfflineAlert } from '@/lib/offline-alert-ingest';
 
 /**
  * Always the same answer, whatever went wrong.
@@ -87,70 +82,13 @@ export async function POST(req: NextRequest) {
   }
   if (typeof body !== 'string') return ack();
 
-  const deviceRef = readDeviceRef(body);
-  if (!deviceRef) return ack();
-
-  const supabase = getSupabaseAdmin();
-
-  // Which key sealed this? Service-role only; a phone or a browser cannot
-  // reach this function at all.
-  const { data: keyRows, error: keyErr } = await supabase
-    .rpc('sms_key_for_ingest', { p_ref: `\\x${deviceRef}` });
-  if (keyErr || !Array.isArray(keyRows) || keyRows.length === 0) {
-    console.warn('[SMS_INBOUND] rejected: no live key for that device');
-    return ack();
-  }
-  const row = keyRows[0] as { user_id: string; secret: string };
-  const secret = Buffer.from(String(row.secret).replace(/^\\x/, ''), 'hex');
-
-  const alert = decodeSmsAlert(body, secret);
-  if (!alert) {
-    // A forgery, a replay of a revoked key, or corruption in transit. All the
-    // same from here.
-    console.warn('[SMS_INBOUND] rejected: message did not authenticate');
-    return ack();
-  }
-
-  // Deduplicate against the reporter's own offline queue. The same incident
-  // will very often arrive twice: once by SMS now, and again when the phone
-  // regains data and replays its queue. `local_id` is the shared identity, and
-  // the SMS carries its first six bytes.
-  const { data: existing } = await supabase
-    .from('alerts')
-    .select('id')
-    .eq('reported_by', row.user_id)
-    .like('local_id', `%${alert.localRef}%`)
-    .limit(1);
-  if (existing && existing.length > 0) {
-    return NextResponse.json({ ok: true, duplicate: true });
-  }
-
-  const { error: insertErr } = await supabase.from('alerts').insert({
-    type: categoryLabel(alert.categoryCode),
-    description: alert.isDuress
-      ? 'DURESS alert received by SMS. The reporter had no data connection.'
-      : 'Reported by SMS. The reporter had no data connection.',
-    severity: alert.isDuress ? 'CRITICAL' : severityLabel(alert.severityCode),
-    reported_by: alert.isAnonymous ? null : row.user_id,
-    latitude: alert.latitude,
-    longitude: alert.longitude,
-    // WHEN THE PHONE RAISED IT. An SMS can sit in a carrier queue for minutes,
-    // and a dispatcher must not read a ten-minute-old kidnapping as new.
-    created_at: alert.sentAt.toISOString(),
-    local_id: alert.localRef,
-    // So the board can show that this arrived over a degraded channel — not
-    // because the content is untrusted, it is authenticated, but because a
-    // phone that could not reach the network is itself significant.
-    arrived_via: 'SMS',
-  });
-  if (insertErr) {
-    console.error('[SMS_INBOUND] could not record the alert:', insertErr);
-    return ack();
-  }
-
-  console.warn(
-    `[SMS_INBOUND] accepted ${alert.isDuress ? 'DURESS ' : ''}alert from ` +
-      `device ${deviceRef}${from ? ` (${from})` : ''}`,
-  );
+  // Everything from here — which key, does it authenticate, is it a duplicate,
+  // what gets written — is shared with the mesh ingest endpoint, because both
+  // channels carry the same payload and the decisions about recording it must
+  // not be able to drift apart. See lib/offline-alert-ingest.ts.
+  const outcome = await recordOfflineAlert(getSupabaseAdmin(), body, 'SMS');
+  if (outcome === 'duplicate') return NextResponse.json({ ok: true, duplicate: true });
+  if (outcome === 'rejected') return ack();
+  if (from) console.warn(`[SMS_INBOUND] that alert came from ${from}`);
   return NextResponse.json({ ok: true, accepted: true });
 }

@@ -1,0 +1,26 @@
+{
+  "generatedBy": "test/gen_mesh_vectors_test.dart",
+  "note": "TEST KEYPAIR from a fixed seed. Not the production HQ key.",
+  "hqPublicKeyHex": "03d38e5357747a5f23a1d7e248f0dfc452b251975674b1aa502316a7186e445ab8",
+  "hqPrivateKeyHex": "81f397f643cde9bb7140a981fff60cde42d9acd1bc3118458746fa4b386c6c9b",
+  "createdAtIso": "2026-09-28T15:00:00.000Z",
+  "innerBodies": {
+    "ordinary": "OR1AaGyw9QAAQIDBAUGBwgJCguUHyF3yMrpU5Qokc__JD13Fd-QlBC8P4vCf75gZgiwaAiyOyzZ",
+    "duress": "OR1AaGyw9QAAQIDBAUGBwgJCguV6SF3yMrpU5Qokc__JD13Fd-QlBAKnULj46nZgT-OWVSDOc-p"
+  },
+  "frames": {
+    "ordinary": "AVVmd4iZqrvM3e7_ECEyQ1QIAAABoOiHqYABAIkBAtvdeIKWH9S5_3hsexe2Uz3LimEvbHGO7H4KBy-sf2Gm0e4wZkHCwQImBHjdFSY8Lls18e9fdRrvfFIU0bv2Py3pLDhTS99v1pg7PCBrC9oYY4YBk1iG-RTuVrH6FC5g6rhhRMacKsIeCPyOepuz3wh8gt5CXbj0B8JxaV89RiIadBtyXrxiFQ",
+    "duress": "AXSFlqe4ydrr_A0eL0BRYnMIAAABoOiHqYABAIkBA52xcCN3VZYzn-YFDTBFaKQL57_LYd3-ARv4gFIraBrFD5f-bXxp-_PQ0xSWxXKKWPWlYF9MDs5lycksOufg5pu_1PtT75vUvU4Y0ZkLligZnWfb_6PdrCa1SXnitjCbtTyFX68BwuX9rQlalfKCnmbSG6V1v8ocoshv00BLgqtHwSwGJMQ56w",
+    "forwarded": "AVVmd4iZqrvM3e7_ECEyQ1QHAAABoOiHqYABAIkBAtvdeIKWH9S5_3hsexe2Uz3LimEvbHGO7H4KBy-sf2Gm0e4wZkHCwQImBHjdFSY8Lls18e9fdRrvfFIU0bv2Py3pLDhTS99v1pg7PCBrC9oYY4YBk1iG-RTuVrH6FC5g6rhhRMacKsIeCPyOepuz3wh8gt5CXbj0B8JxaV89RiIadBtyXrxiFQ",
+    "tampered": "AVVmd4iZqrvM3e7_ECEyQ1QIAAABoOiHqYABAIkBAtvdeIKWH9S5_3hsexe2Uz3LimEvbHGO7H4KBy-sf2Gm0e4wZkHCwQImBHjdFSY8Lls18e9fdRrvfFIU0bv2Py3pLDhTS99v1pg7PCBrC9oYY4YBk1iG-RTuVrH6FC5g6rhhRMacKsIeCPyOepuz3wh8gt5CXbj0B8JxaV89RiIadBtyXrxi6g",
+    "sealedToAnotherKey": "AZOktcbX6PkKGyw9Tl9wgZIIAAABoOiHqYABAIkBA05XG_Lez5hXqgksgypH_1nl80WtYUjBlB5pyWDfuzEwMdfOQsCuGLGL8lZQpPH0Qv4ghjCnfrjhd00t6zCG3jHyNFSn0Ff6t3v3-iBk7qd9tmYK7fYQz8MBVzn8ONTF8xWnGmHFLVBV26Yo_ywbIa19PaSqomvlArHeoGeU8_EFNDgVaS3muQ"
+  },
+  "ids": {
+    "ordinary": "5566778899aabbccddeeff1021324354",
+    "duress": "748596a7b8c9daebfc0d1e2f40516273"
+  },
+  "frameBytes": {
+    "ordinary": 166,
+    "duress": 166
+  }
+}

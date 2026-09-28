@@ -132,19 +132,96 @@ again from the reporter's own queue when their phone recovers. Two dedup keys:
 Whichever arrives first creates the alert. The rest are counted and discarded.
 The count is worth keeping: it is a rough measure of mesh health.
 
-### The ingest endpoint
+### What goes inside the seal: the SMS body, unchanged
 
-`POST /api/mesh/ingest` accepts opaque ciphertext. It must be:
+Decided while building the ingest endpoint, and it removed a whole payload
+format rather than adding one.
 
-* authenticated where possible (a relay is usually a signed-in citizen or
-  responder), but **able to accept from an unauthenticated relay**, because
-  insisting on a session defeats the purpose during a shutdown;
-* rate-limited and size-capped, since it is an unauthenticated write path;
-* incapable of leaking anything on failure — a decrypt failure returns the same
-  response as a duplicate.
+The mesh seals to HQ's **public** key, which ships in every app build. So
+sealing proves nothing about who sealed it — deliberately, because a signature
+would identify the reporter to every relay. That leaves HQ with a problem the
+SMS channel does not have: if the payload simply named a reporter, anyone could
+manufacture an emergency attributed to anyone.
 
-This is a new attack surface on an emergency system. It is the price of the
-mesh and should be reviewed as such.
+So the mesh plaintext **is the 75-character `OR1…` SMS body**:
+
+```
+  MeshEnvelope { id, ttl, createdAt, keyId,
+                 sealed = ECIES-to-HQ( "OR1AaGyw9QAAQ…" ) }
+                                        └── AES-GCM under the DEVICE key
+```
+
+Two layers, each doing what it is good at. The outer seal makes the envelope
+unreadable to relays with no stable sender identifier on the wire; the inner
+per-device tag proves to HQ which handset raised the alert and is invisible to
+every relay that carried it. What falls out:
+
+* **a mesh alert cannot be forged** — HQ verifies it with the same key, the same
+  tag and the same code path as an SMS;
+* **one wire format, not two**, with one pair of implementations and one set of
+  cross-language vectors;
+* **the channels deduplicate against each other for free**, because both carry
+  the same `local_id` reference.
+
+The cost is about 21 wasted bytes (base64 inside a binary frame) out of a
+512-byte budget, and that a handset with no device key has no offline channel at
+all — provisioning happens once, while the phone is online, and a phone that has
+never been online cannot be helped by any design here.
+
+### The ingest endpoint — BUILT
+
+`POST /api/mesh/ingest`. It accepts opaque ciphertext from **anyone**: no
+session, no header, no identity. That is the one deliberate exception to the rule
+this audit applied everywhere else, and the reason is the scenario — during a
+shutdown the phone that gets a signal back first may be a stranger's, signed
+out, or carrying a token that expired days ago. Requiring a session would mean
+the mesh works only when it is not needed.
+
+What makes that safe is not who is calling but what they can say. The worst an
+anonymous caller can do is waste our time, and each way of doing so is bounded:
+
+| control | value | what it stops |
+|---|---|---|
+| body cap | 64 KB | the endpoint used as a file upload |
+| frames per request | 32 | one POST costing unbounded work |
+| per-IP rate limit | 30/min | one host flooding |
+| envelope-id dedup | 48h memory | one frame becoming many incidents |
+| freshness window | 24h, +1h skew | a captured frame replayed for ever |
+| `local_id` dedup | permanent | the reporter's own queue duplicating |
+
+Two properties worth naming because they are easy to get backwards:
+
+* **The response is the same for every frame.** It lists the ids this endpoint is
+  finished with — accepted, already seen, sealed to another key, or garbage — and
+  a relay drops exactly those. A relay that could tell which frames HQ actually
+  wanted could tell which of the phones around it are reporting.
+* **The envelope-id dedup fails OPEN.** If the dedup table is unavailable the
+  alert is recorded anyway. A duplicate incident is visible to a dispatcher and
+  can be merged; an alert dropped because a bookkeeping table was down is visible
+  to nobody.
+
+Still an operational requirement, not satisfied by code here: the per-IP limit is
+**per running instance**, so on a platform that scales this route out, ten
+instances permit ten times the traffic. A distributed flood has to be handled at
+the edge. Said plainly rather than quietly assumed.
+
+28 endpoint tests, 41 more on the frame decoder and the sealer, all driving
+frames that the Dart app actually sealed.
+
+### A defect this step found in the previous one
+
+`mesh_sealer.dart` shipped seeding its generator from
+`DateTime.now().microsecondsSinceEpoch`. That generator produces every AES-GCM
+nonce the mesh uses **and** HQ's own keypair. Two seals in the same microsecond
+would have seeded identically and emitted the same nonce under the same key —
+which leaks the XOR of the two plaintexts and the authentication subkey, enough
+to forge — and the keypair had a searchable keyspace, for a key that opens every
+mesh alert ever sent.
+
+It decrypts perfectly, so no behaviour test would ever have found it. It is now
+`Random.secure()`, and `scripts/check_crypto_entropy.py` fails the build for a
+clock used as entropy anywhere in the two crypto directories. That gate was
+mutation-tested against the original line.
 
 ## Transport
 
@@ -257,8 +334,13 @@ difference.
 * envelope encode/decode, and that it carries nothing but routing metadata;
 * sealing and opening, and that a relay holding the envelope learns nothing;
 * TTL decrement, hop-limit drop, expiry, deduplication, outbox bounds;
-* the loopback transport carrying an alert from phone A through phone B to
-  ingest, with HQ opening it and writing one alert from three arrivals;
+* the loopback transport carrying an alert from phone A through phone B to a
+  phone with a network, and HQ opening it and writing one alert from several
+  arrivals. Stated precisely, because it is a chain of two runs rather than one:
+  the Dart test drives the crossing and produces the frame, and the TypeScript
+  tests take **that frame's bytes** through the real endpoint. What is NOT
+  proven by either is an HTTP round trip between the two, which is the one link
+  the field test covers anyway;
 * SMS payload encoding, segment count, and that the duress flag is absent;
 * HQ-side dedup against `alerts.local_id`.
 
@@ -365,8 +447,43 @@ case it exists for.
    * `mesh_end_to_end_test.dart` — a sealed report crossing three phones to one
      with a network, with the relays unable to read what they carry, HQ opening
      it, and the hop limit stopping it dead in a line of twelve.
-3. **The Nearby transport**, written against the interface and marked
-   unverified until you have run it on handsets.
-4. **Field test**, which is yours: two phones, aeroplane mode, and a walk.
+3. **The HQ mesh ingest endpoint — BUILT.** `api/mesh/ingest`, plus the two
+   halves it needs:
+   * `mesh-envelope.ts` and `mesh-sealer.ts` — the HQ mirror of the wire format
+     and of ECIES, opening frames the **Dart encoder** produced
+     (`test/fixtures/mesh_envelope_vectors.json`). ECIES has four places where
+     two implementations diverge silently — point compression, the HKDF info
+     string, padding the shared secret, tag position — and all four fail
+     identically as "authentication failed", so this is checked on real bytes
+     rather than on two readings of the same prose.
+   * `offline-alert-ingest.ts` — the recording path, now **shared** by SMS and
+     mesh, so "created_at is when the phone raised it", "a duress alert is
+     CRITICAL" and "an anonymous report is not attributed" cannot be true in one
+     channel and false in the other.
+   * `20261001000000_mesh_ingest.sql` — `mesh_envelopes_seen`, its RPC and its
+     48-hour purge. 12 assertions on real PostgreSQL, one of them structural:
+     the table must have **exactly** four columns, so nobody can later add
+     "which relay uploaded it" and turn a dedup table into a record of who
+     carried whose emergency.
+   * Two new CI gates, both of which caught something before they were
+     committed: `check_vectors_synced.py` (the console's copy of the vectors must
+     equal the Dart-generated one) and `check_crypto_entropy.py` (see above).
+4. **The BLE transport**, written against the interface and marked unverified
+   until it has been run on handsets. Nearby stays optional, Android-only.
+5. **Field test**, which is yours: two phones, aeroplane mode, and a walk.
 
-Nothing in step 2 is wasted if step 3's radio choice changes.
+Nothing in steps 2 and 3 is wasted if step 4's radio choice changes.
+
+### What the mesh still needs before it can be switched on
+
+* **`MESH_HQ_PRIVATE_KEY`.** Generate the pair offline with
+  `MESH_KEYGEN=1 flutter test test/mesh_keygen_test.dart`, which verifies that
+  the pair it prints opens what it seals. The private half goes into the HQ
+  server's environment and nowhere else; the public half ships to handsets
+  through `app_config` so it can be rotated without a release.
+* **A decision on relaying by default**, still open (item 5 below).
+* **The radio**, which is step 4.
+* **Edge rate limiting**, per the note above.
+
+Until the key is set, `/api/mesh/ingest` refuses every frame — and says nothing
+about why.

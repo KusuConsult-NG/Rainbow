@@ -123,6 +123,37 @@ jobs:
       - name: Test
         run: flutter test
 
+      # The two offline channels each have a wire format with two
+      # implementations — Dart on the handset, TypeScript at HQ — checked against
+      # vectors the DART encoder produces. That only works if the committed
+      # vectors are what the current encoder actually writes. Regenerating them
+      # here and failing on a diff means a change to the codec cannot land while
+      # the fixtures still describe the old bytes, with both sides passing their
+      # own tests and disagreeing only on a handset in the field.
+      - name: Assert the wire-format vectors match the encoder that made them
+        run: |
+          set -euo pipefail
+          flutter test test/gen_sms_vectors_test.dart test/gen_mesh_vectors_test.dart
+          if ! git diff --quiet -- test/fixtures; then
+            echo "::error::regenerating the vectors changed them — the committed fixtures do not match the Dart encoder. Commit the regenerated files."
+            git --no-pager diff --stat -- test/fixtures
+            exit 1
+          fi
+          echo "OK: the committed vectors are what the encoder produces."
+
+      # And the console must be reading the same file, not a stale copy of it.
+      - name: Assert the console reads the same vectors
+        run: python3 scripts/check_vectors_synced.py
+
+      # The mesh sealer shipped with DateTime.now().microsecondsSinceEpoch as the
+      # seed for the generator that produces every AES-GCM nonce AND HQ's own
+      # keypair. Two seals in one microsecond would then repeat a nonce, which
+      # leaks the XOR of the plaintexts and the authentication subkey — enough to
+      # forge — and the keypair itself had a searchable keyspace. Nothing about
+      # the resulting ciphertext looks wrong, so no behaviour test finds it.
+      - name: Assert crypto randomness is not derived from a clock
+        run: python3 scripts/check_crypto_entropy.py
+
       # SupabaseConfig.clientOverride exists so widget tests can render screens
       # that reach for the client. It is a static mutable pointing at
       # the whole app's database access, so production code must never call it:

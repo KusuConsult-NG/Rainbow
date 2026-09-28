@@ -36,12 +36,15 @@ dependencies:
   package_info_plus: ^9.0.1
   path: ^1.9.0
   path_provider: ^2.1.3
-  # Already in the tree transitively; declared directly because the SMS
-  # fallback encrypts its payload with AES-GCM from this package. A transitive
-  # dependency can change version under you without notice, and this one is on
-  # the path that carries a duress alert.
-  pointycastle: ^4.0.0
   permission_handler: ^12.0.1
+  # Already in the tree transitively; declared directly because both offline
+  # channels encrypt with AES-GCM, HKDF and P-256 from this package. A
+  # transitive dependency can change version under you without notice, and this
+  # one is on the path that carries a duress alert.
+  #
+  # Alphabetical order is enforced by `sort_pub_dependencies`, which is an ERROR
+  # here, so this went in one line too early and turned the analyze gate red.
+  pointycastle: ^4.0.0
   record: ^6.2.1
   riverpod_annotation: any
   sentry_flutter: ^8.14.2

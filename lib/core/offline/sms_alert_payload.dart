@@ -60,6 +60,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:pointycastle/export.dart';
@@ -208,6 +209,25 @@ String encodeSmsAlert({
   // alphabet, so the message stays one segment instead of being promoted to
   // UCS-2 at 70 characters.
   return smsAlertPrefix + base64Url.encode(body).replaceAll('=', '');
+}
+
+/// A fresh nonce for [encodeSmsAlert], from the platform's CSPRNG.
+///
+/// Exists so that nothing has to decide how to make one. AES-GCM tolerates a
+/// repeated nonce under the same key worse than almost any other primitive:
+/// two messages sharing one leak the XOR of their plaintexts AND the
+/// authentication subkey, which is enough to forge a third. A counter would also
+/// be correct and is harder to get right across reinstalls and clock changes,
+/// and 96 random bits per message is well inside the safe margin for the handful
+/// of messages one handset will ever send.
+///
+/// This is not decoration: the mesh sealer shipped with a clock-seeded generator
+/// for exactly this job, and `scripts/check_crypto_entropy.py` now fails the
+/// build for it. [random] is injectable for tests only.
+Uint8List newSmsNonce([Random? random]) {
+  final rng = random ?? Random.secure();
+  return Uint8List.fromList(
+      List<int>.generate(smsNonceLength, (_) => rng.nextInt(256)));
 }
 
 /// The result of reading a message body.

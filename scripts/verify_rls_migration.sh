@@ -50,7 +50,8 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/signup_role_escalation_test.sql \
    "$REPO"/scripts/command_chain_behaviour_test.sql \
    "$REPO"/scripts/privacy_behaviour_test.sql \
-   "$REPO"/scripts/sms_device_keys_behaviour_test.sql "$PGROOT/"
+   "$REPO"/scripts/sms_device_keys_behaviour_test.sql \
+   "$REPO"/scripts/mesh_ingest_behaviour_test.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
 psql_run() {
@@ -184,6 +185,20 @@ echo "$SMS_OUT" | grep -E "PASS|FAIL|ERROR" || true
 if [ "$SMS_RC" -ne 0 ]; then
   echo "$SMS_OUT"
   echo "✗ SMS device key assertions failed"
+  exit 1
+fi
+
+echo "▶ Applying 20261001000000_mesh_ingest.sql"
+psql_run "-f $PGROOT/20261001000000_mesh_ingest.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261001000000_mesh_ingest.sql" >/dev/null
+
+echo "▶ Asserting the mesh recognises a duplicate, and forgets in time"
+MESH_OUT=$(psql_run "-f $PGROOT/mesh_ingest_behaviour_test.sql" 2>&1) && MESH_RC=0 || MESH_RC=$?
+echo "$MESH_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$MESH_RC" -ne 0 ]; then
+  echo "$MESH_OUT"
+  echo "✗ mesh ingest assertions failed"
   exit 1
 fi
 

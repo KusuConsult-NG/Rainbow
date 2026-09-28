@@ -40,6 +40,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:pointycastle/export.dart';
@@ -164,13 +165,29 @@ Uint8List _bigIntToBytes(BigInt value, int length) {
   return out;
 }
 
+/// Fortuna, seeded from the platform's cryptographic generator.
+///
+/// The first version of this function seeded from
+/// `DateTime.now().microsecondsSinceEpoch`, and that was a serious mistake —
+/// found by reading this file back while writing the HQ key-generation tool,
+/// which uses the same seed. Two consequences, both bad:
+///
+///   * **Nonce reuse.** Two seals in the same microsecond would seed Fortuna
+///     identically and therefore produce the same AES-GCM nonce under the same
+///     derived key. Reusing a GCM nonce does not merely weaken the message; it
+///     leaks the XOR of the two plaintexts and the authentication subkey, which
+///     is enough to forge.
+///   * **A guessable HQ private key.** A keypair whose entropy is the time of
+///     day has a searchable keyspace. That key opens every mesh alert ever sent.
+///
+/// `Random.secure()` is the platform CSPRNG — `/dev/urandom` on Android and
+/// Linux, `SecRandomCopyBytes` on iOS. Fortuna is kept over it only because
+/// pointycastle's key generator wants a `SecureRandom`.
 SecureRandom _secureRandom() {
   final rng = FortunaRandom();
-  final seed = Uint8List(32);
-  final entropy = DateTime.now().microsecondsSinceEpoch;
-  for (var i = 0; i < seed.length; i++) {
-    seed[i] = (entropy >> (i % 8 * 8) & 0xff) ^ (i * 31 & 0xff);
-  }
+  final entropy = Random.secure();
+  final seed =
+      Uint8List.fromList(List<int>.generate(32, (_) => entropy.nextInt(256)));
   rng.seed(KeyParameter(seed));
   return rng;
 }

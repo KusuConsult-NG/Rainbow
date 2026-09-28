@@ -216,4 +216,27 @@ void main() {
       );
     });
   });
+
+  group('the nonce production code will use', () {
+    test('is the right length', () {
+      expect(newSmsNonce().length, smsNonceLength);
+    });
+
+    test('does not repeat', () {
+      // The reason this function exists rather than each caller improvising.
+      // Two AES-GCM messages sharing a nonce under one key leak the XOR of
+      // their plaintexts and the authentication subkey — enough to forge a
+      // third. The mesh sealer shipped with a clock-seeded generator for this
+      // exact job, so this is a mistake this project has already made once.
+      final seen = <String>{};
+      for (var i = 0; i < 500; i++) {
+        seen.add(base64Encode(newSmsNonce()));
+      }
+      expect(seen, hasLength(500));
+    });
+
+    test('is not all zeros, which is what a broken generator produces', () {
+      expect(newSmsNonce().every((b) => b == 0), isFalse);
+    });
+  });
 }
