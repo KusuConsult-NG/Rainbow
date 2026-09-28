@@ -604,6 +604,9 @@ async function logMark() {
   // one — which is exactly how the over-wide pattern above went unnoticed.
   let skipped = 0;
 
+  /** Per screen: how much of the accessibility tree the sweep can reach. */
+  const coverage = [];
+
   for (const route of SCREENS) {
     state.screen = `sweep:${route}`;
     await go(route, 2600);
@@ -630,8 +633,22 @@ async function logMark() {
       // twice — and pressing the wrapper does not necessarily do what pressing
       // the button does.
       window.__mb = all.filter((n) => !all.some((o) => o !== n && n.contains(o)));
+      window.__coverage = {
+        // Every semantics node on the screen, against the ones we can press.
+        // Reported so a low control count is attributable: a sweep that finds
+        // two controls on a screen with forty nodes is a selector problem, and
+        // one that finds two on a screen with eight is the app exposing
+        // nothing — a screen reader would see the same eight.
+        nodes: document.querySelectorAll('flt-semantics').length,
+        matched: all.length,
+        innermost: window.__mb.length,
+      };
       return window.__mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
     });
+
+    const cov = await page.evaluate(() => window.__coverage);
+    coverage.push({ route, ...cov });
+    console.log(`      semantics ${route}: ${cov.nodes} nodes, ${cov.matched} tappable, ${cov.innermost} pressable`);
 
     for (let i = 0; i < buttons.length; i++) {
       const label = buttons[i];
@@ -768,6 +785,15 @@ async function logMark() {
       await shot(`95-mobile-responder-sweep${route.replace(/\//g, '-')}`);
     }
   }
+
+  const totalNodes = coverage.reduce((n, c) => n + c.nodes, 0);
+  const totalPressable = coverage.reduce((n, c) => n + c.innermost, 0);
+  check(
+    'the app exposes its controls to the accessibility tree',
+    totalPressable > 0,
+    `${totalPressable} pressable of ${totalNodes} semantics nodes across ${coverage.length} screens`
+    + ` — ${coverage.map((c) => `${c.route}:${c.innermost}/${c.nodes}`).join(' ')}`,
+  );
 
   check(
     'the sweep actually reached the screens it swept',
