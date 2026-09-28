@@ -51,7 +51,8 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/command_chain_behaviour_test.sql \
    "$REPO"/scripts/privacy_behaviour_test.sql \
    "$REPO"/scripts/sms_device_keys_behaviour_test.sql \
-   "$REPO"/scripts/mesh_ingest_behaviour_test.sql "$PGROOT/"
+   "$REPO"/scripts/mesh_ingest_behaviour_test.sql \
+   "$REPO"/scripts/alert_category_behaviour_test.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
 psql_run() {
@@ -213,6 +214,23 @@ echo "▶ Applying 20261004000000_incident_tracks.sql"
 psql_run "-f $PGROOT/20261004000000_incident_tracks.sql" >/dev/null
 echo "▶ Re-applying it (must be idempotent)"
 psql_run "-f $PGROOT/20261004000000_incident_tracks.sql" >/dev/null
+
+# The category a citizen picked was only ever a prefix inside the free-text
+# `type` column, so a dispatcher could not sort by it. This adds it as a STORED
+# GENERATED column, which also backfills every historical row.
+echo "▶ Applying 20261005000000_alert_category.sql"
+psql_run "-f $PGROOT/20261005000000_alert_category.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261005000000_alert_category.sql" >/dev/null
+
+echo "▶ Asserting the incident category is derived, backfilled and unwritable"
+CAT_OUT=$(psql_run "-f $PGROOT/alert_category_behaviour_test.sql" 2>&1) && CAT_RC=0 || CAT_RC=$?
+echo "$CAT_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$CAT_RC" -ne 0 ]; then
+  echo "$CAT_OUT"
+  echo "✗ alert category assertions failed"
+  exit 1
+fi
 
 echo "▶ Asserting the mesh recognises a duplicate, and forgets in time"
 MESH_OUT=$(psql_run "-f $PGROOT/mesh_ingest_behaviour_test.sql" 2>&1) && MESH_RC=0 || MESH_RC=$?

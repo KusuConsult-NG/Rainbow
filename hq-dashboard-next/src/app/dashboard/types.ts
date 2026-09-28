@@ -27,6 +27,15 @@ export interface Alert {
   local_id?: string;
   type?: string;
   sub_type?: string;
+
+  /**
+   * The reporting category, e.g. 'Kidnap'. A STORED GENERATED column over
+   * `split_part(type, ' - ', 1)` — the database derives it, nothing writes it,
+   * so it cannot drift from `type`. Optional because a console can be running
+   * against a database the migration has not reached yet; `categoryOf` in
+   * alert-category.ts falls back to deriving the same value.
+   */
+  category?: string | null;
   description?: string;
   /**
    * `ESCALATED` and `IN_PROGRESS` are here because src/lib/alert-actions.ts

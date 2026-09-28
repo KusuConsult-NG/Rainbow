@@ -1,4 +1,5 @@
 import type { Alert } from '@/app/dashboard/types';
+import { matchesCategory } from './alert-category';
 
 /**
  * What HQ actually sees.
@@ -19,6 +20,8 @@ export interface AlertFilters {
   lga: string;
   ward: string;
   pu: string;
+  /** Reporting category, or 'ALL'. See alert-category.ts. */
+  category: string;
 }
 
 export const NO_FILTERS: AlertFilters = {
@@ -27,6 +30,7 @@ export const NO_FILTERS: AlertFilters = {
   lga: 'ALL',
   ward: 'ALL',
   pu: 'ALL',
+  category: 'ALL',
 };
 
 /**
@@ -192,6 +196,7 @@ export function filterAlerts(alerts: Alert[], filters: AlertFilters): Alert[] {
     if (filters.lga !== 'ALL' && !geoMatches(a.geo_lga, filters.lga)) return false;
     if (filters.ward !== 'ALL' && !geoMatches(a.geo_ward, filters.ward)) return false;
     if (filters.pu !== 'ALL' && !geoMatches(a.geo_pu, filters.pu)) return false;
+    if (!matchesCategory(a, filters.category)) return false;
 
     return true;
   });

@@ -32,6 +32,7 @@ import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
 import { consoleAccess } from '@/lib/console-access';
 import { describeTrack, summariseTrack, thinTrack, type TrackPoint } from '@/lib/incident-track';
 import { resolveReporterDetails } from '@/lib/incident-dossier';
+import { categoriesPresent, categoryCounts, categoryLabel } from '@/lib/alert-category';
 import * as alertActions from '@/lib/alert-actions';
 import type { AlertIds } from '@/lib/alert-actions';
 
@@ -40,6 +41,19 @@ export type { Alert };
 
 // Leaflet must be client-only (no SSR)
 const LiveMap = dynamic(() => import('@/components/LiveMap'), { ssr: false });
+
+/**
+ * How many alerts the console holds in memory at once.
+ *
+ * This was 500 with no indication anywhere that it was a cap, so past 500
+ * incidents the oldest simply stopped existing as far as the operator was
+ * concerned — and the board would have looked completely normal. The window is
+ * still bounded, because an unbounded fetch into a browser is its own failure
+ * during exactly the event that produces this many incidents; what changed is
+ * that the console now asks for the true count alongside it and SAYS when it
+ * is showing a window rather than the whole board.
+ */
+const ALERT_WINDOW = 2000;
 
 // Canonical Mission Alert Interface (Supabase Aligned)
 
@@ -393,6 +407,9 @@ export default function DashboardPage() {
 
   const [filterTier, setFilterTier] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
+  const [filterCategory, setFilterCategory] = useState('ALL');
+  /** How many alerts exist, against the ALERT_WINDOW actually loaded. */
+  const [alertsTotal, setAlertsTotal] = useState<number | null>(null);
   const [theme, setTheme] = usePersistedTheme();
   const [timeString, setTimeString] = useState('');
   const [selectedReport, setSelectedReport] = useState<Alert | null>(null);
@@ -558,12 +575,34 @@ export default function DashboardPage() {
     let alertDebounceTimer: NodeJS.Timeout | null = null;
     let telemetryDebounceTimer: NodeJS.Timeout | null = null;
 
+    // Which refetch is the newest one asked for.
+    //
+    // Every realtime event triggers a full refetch, so during a burst several
+    // are in flight at once. Responses are not guaranteed to come back in the
+    // order they were sent, and each one ends in an unconditional setAlerts —
+    // so a slower earlier request could land last and put an older board on
+    // the screen. Nothing is lost from the database and the next event
+    // corrects it, but "the screen briefly showed fewer incidents than exist"
+    // is not a thing to leave in a dispatch console.
+    //
+    // Each request takes a number and only the newest one is allowed to write.
+    let latestAlertsRequest = 0;
+    let latestTelemetryRequest = 0;
+
     const fetchAlertsData = async () => {
-      const { data } = await supabase
+      const mine = ++latestAlertsRequest;
+
+      // `count: 'exact'` so the cap below can be reported rather than hidden.
+      const { data, count } = await supabase
         .from('alerts')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
-        .limit(500);
+        .limit(ALERT_WINDOW);
+
+      // A newer refetch has already answered; this one is stale.
+      if (mine !== latestAlertsRequest) return;
+
+      setAlertsTotal(count ?? null);
 
       if (data) {
         const mapped = data.map((d: any) => ({
@@ -635,7 +674,10 @@ export default function DashboardPage() {
     };
 
     const fetchTelemetryData = async () => {
-      const { data: telemetryData } = await supabase.from('telemetry').select('*').limit(500);
+      const mine = ++latestTelemetryRequest;
+      const { data: telemetryData } = await supabase
+        .from('telemetry').select('*').limit(ALERT_WINDOW);
+      if (mine !== latestTelemetryRequest) return;
       if (!telemetryData || telemetryData.length === 0) return;
 
       // Enrich with profile names in one batch query
@@ -644,6 +686,8 @@ export default function DashboardPage() {
         .from('profiles')
         .select('id, full_name, role')
         .in('id', userIds);
+
+      if (mine !== latestTelemetryRequest) return;
 
       const profileMap: Record<string, { full_name?: string; role?: string }> = {};
       (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
@@ -847,9 +891,16 @@ export default function DashboardPage() {
   // buried in this component with no coverage at all.
   const displayAlerts = clusterAlerts(alerts, enableClustering);
 
+  // Derived during render rather than held in state: these are a pure function
+  // of the alerts already loaded, and a second copy in state would be one more
+  // thing that can be stale.
+  const categoriesOnBoard = categoriesPresent(alerts);
+  const categoryTallies = categoryCounts(alerts);
+
   const filtered = filterAlerts(displayAlerts, {
     status: filterStatus,
     tier: filterTier,
+    category: filterCategory,
     lga: filterLga,
     ward: filterWard,
     pu: filterPu,
@@ -1491,6 +1542,17 @@ export default function DashboardPage() {
                 <div>
                   <h2 style={{ fontSize: 24, fontWeight: 900 }}>INCIDENT COMMAND</h2>
                   <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Active triage and escalation management</p>
+                  {/*
+                    The console reads a bounded window. When there are more
+                    incidents than that, say so: a board that silently stops at
+                    a cap looks exactly like a board with nothing older on it,
+                    and the operator has no way to tell.
+                  */}
+                  {alertsTotal !== null && alertsTotal > alerts.length && (
+                    <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--warning)' }}>
+                      SHOWING NEWEST {alerts.length} OF {alertsTotal} INCIDENTS — FILTER TO NARROW
+                    </p>
+                  )}
                 </div>
                 {isHqUser ? (
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
@@ -1500,6 +1562,26 @@ export default function DashboardPage() {
                       <option value="ACTIVE">ACTIVE</option>
                       <option value="DURESS">DURESS</option>
                       <option value="SMS_FALLBACK">📡 SMS FALLBACK REPORTS</option>
+                    </select>
+                    {/*
+                      Sorting by what kind of emergency it is. The categories
+                      offered are the ones actually on the board, with a count,
+                      rather than a fixed list of ten — a dispatcher should not
+                      be able to select KIDNAP and be shown an empty screen
+                      without knowing whether that means "none" or "not loaded".
+                    */}
+                    <select
+                      value={filterCategory}
+                      onChange={e => setFilterCategory(e.target.value)}
+                      style={fSel}
+                      aria-label="Filter by incident category"
+                    >
+                      <option value="ALL">ALL CATEGORIES</option>
+                      {categoriesOnBoard.map(c => (
+                        <option key={c} value={c}>
+                          {categoryLabel(c)} ({categoryTallies[c] ?? 0})
+                        </option>
+                      ))}
                     </select>
                      <select value={filterLga} onChange={e => { setFilterLga(e.target.value); setFilterWard('ALL'); setFilterPu('ALL'); }} style={fSel}>
                       <option value="ALL">ALL LGAS (STATEWIDE)</option>
