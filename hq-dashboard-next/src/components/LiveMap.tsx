@@ -90,6 +90,15 @@ interface Props {
   usersMap?: Record<string, any>;
   /** Opens the full incident dossier for one alert. */
   onOpenDossier?: (id: string) => void;
+  /**
+   * The stored route of the incident currently being looked at.
+   *
+   * Separate from `agents[].path`, which is accumulated in the browser from
+   * live telemetry and therefore only exists for as long as the tab does. This
+   * one comes from `incident_tracks` and survives a refresh — it is the answer
+   * to "which way did they go" for an incident that has already happened.
+   */
+  incidentTrack?: { lat: number; lng: number }[];
   theme?: 'light' | 'dark';
 }
 
@@ -100,6 +109,7 @@ export default function LiveMap({
   onEscalate,
   usersMap = {},
   onOpenDossier,
+  incidentTrack,
   theme = 'light',
 }: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -562,6 +572,60 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
     // colours from CSS variables, so a theme toggle restyles the popup that is
     // already open without rebuilding anything.
   }, [alerts, mapReady, usersMap]);
+
+  // The stored route of the incident under inspection.
+  //
+  // Drawn in its own pane-level layer rather than among the agent trails: an
+  // agent trail is where somebody IS GOING, redrawn as they move, and this is
+  // where somebody WENT. Giving them the same treatment would let an operator
+  // read a finished route as a live one.
+  const incidentTrackRef = useRef<any>(null);
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current) return;
+    const { map, L } = mapInstanceRef.current;
+
+    if (incidentTrackRef.current) {
+      incidentTrackRef.current.remove();
+      incidentTrackRef.current = null;
+    }
+    // Two points is the minimum for a line. One position is not a route, and
+    // drawing it as a dot on top of the incident marker says nothing.
+    if (!incidentTrack || incidentTrack.length < 2) return;
+
+    const latlngs = incidentTrack.map((p) => [p.lat, p.lng]);
+    const line = L.polyline(latlngs, {
+      color: '#4527A0',
+      weight: 4,
+      opacity: 0.9,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(map);
+
+    // Where it started and where it ended. Without these an operator has a
+    // line and no idea which end is which.
+    const start = L.circleMarker(latlngs[0], {
+      radius: 6,
+      color: '#ffffff',
+      weight: 2,
+      fillColor: '#4527A0',
+      fillOpacity: 1,
+    }).bindTooltip('Route start', { direction: 'top' });
+    const end = L.circleMarker(latlngs[latlngs.length - 1], {
+      radius: 7,
+      color: '#ffffff',
+      weight: 2,
+      fillColor: '#E31E24',
+      fillOpacity: 1,
+    }).bindTooltip('Last known position', { direction: 'top' });
+
+    const group = L.layerGroup([line, start, end]).addTo(map);
+    incidentTrackRef.current = group;
+
+    return () => {
+      group.remove();
+      if (incidentTrackRef.current === group) incidentTrackRef.current = null;
+    };
+  }, [incidentTrack, mapReady]);
 
   useEffect(() => {
     if (!mapInstanceRef.current) return;

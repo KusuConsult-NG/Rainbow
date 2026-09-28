@@ -321,6 +321,43 @@ Future<void> onStart(ServiceInstance service) async {
                 .from('telemetry')
                 .upsert(telemetryPayload);
 
+            // AND KEEP THE POINT.
+            //
+            // The upsert above overwrites: `telemetry` has `user_id` as its
+            // primary key, so the database holds the CURRENT position and
+            // nothing else. The trail the console draws lived only in that
+            // browser tab's memory, so a refresh lost it, a second operator
+            // joining mid-incident saw a dot rather than a path, and anybody
+            // reviewing afterwards saw no movement at all. For a kidnapping,
+            // "which way did they go" is the question, and it was being
+            // discarded several times a minute.
+            //
+            // Only ever against an incident. No alert_id, no row — an officer
+            // on ordinary patrol writes nothing here, which is what keeps this
+            // from becoming the standing location feed that
+            // 20260929000000 was written to remove. The 5m filter above
+            // applies to this too, so a stationary handset does not fill the
+            // table with the same point.
+            //
+            // Its own try/catch: a failure to keep the history must never stop
+            // the live position being reported, and the live position is what
+            // a dispatcher is looking at right now.
+            if (currentAlertId != null) {
+              try {
+                await SupabaseConfig.client.from('incident_tracks').insert({
+                  'alert_id': currentAlertId,
+                  'user_id': userId,
+                  'latitude': pos.latitude,
+                  'longitude': pos.longitude,
+                  'accuracy': pos.accuracy,
+                  'speed': pos.speed,
+                  'recorded_at': DateTime.now().toUtc().toIso8601String(),
+                });
+              } catch (e) {
+                debugPrint('[TRACK_FAIL] could not keep the point: $e');
+              }
+            }
+
             if (service is AndroidServiceInstance) {
               unawaited(
                 service.setForegroundNotificationInfo(

@@ -207,6 +207,13 @@ psql_run "-f $PGROOT/20261003000000_liaisons_are_not_staff.sql" >/dev/null
 echo "▶ Re-applying it (must be idempotent)"
 psql_run "-f $PGROOT/20261003000000_liaisons_are_not_staff.sql" >/dev/null
 
+# An SOS starts a track and the database kept only the latest point, so the
+# trail existed in one browser tab's memory and nowhere else.
+echo "▶ Applying 20261004000000_incident_tracks.sql"
+psql_run "-f $PGROOT/20261004000000_incident_tracks.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261004000000_incident_tracks.sql" >/dev/null
+
 echo "▶ Asserting the mesh recognises a duplicate, and forgets in time"
 MESH_OUT=$(psql_run "-f $PGROOT/mesh_ingest_behaviour_test.sql" 2>&1) && MESH_RC=0 || MESH_RC=$?
 echo "$MESH_OUT" | grep -E "PASS|FAIL|ERROR" || true

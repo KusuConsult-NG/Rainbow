@@ -222,5 +222,3 @@ COMMENT ON POLICY "alerts_update_own_or_ours" ON public.alerts IS
   'Replaces alerts_update_own_or_staff, under which an officer of another '
   'organisation could resolve or reassign any incident in Plateau.';
 
-
-

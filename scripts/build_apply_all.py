@@ -309,7 +309,26 @@ WITH checks(ord, name, ok) AS (
             AND EXISTS (SELECT 1 FROM pg_policies
                          WHERE schemaname = 'public'
                            AND tablename = 'alerts'
-                           AND policyname = 'alerts_select_own_or_ours')))
+                           AND policyname = 'alerts_select_own_or_ours'))),
+    -- An SOS started a track and the database kept only the latest point, so
+    -- the trail lived in one browser tab's memory: a refresh lost it, and
+    -- anybody reviewing the incident afterwards saw no movement at all.
+    (31, 'the route taken during an incident is kept',
+        (SELECT to_regclass('public.incident_tracks') IS NOT NULL)),
+    -- And it expires, which is the whole reason keeping it does not undo the
+    -- work that made location borrowed rather than kept.
+    (32, 'routes expire, and only the service role can expire them',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.purge_stale_incident_tracks()', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'purge_stale_incident_tracks')),
+    -- A route is a record. One that can be rewritten is worth less than none,
+    -- because it can be made to say something else.
+    (33, 'a route cannot be rewritten or deleted through the API',
+        (SELECT NOT EXISTS (SELECT 1 FROM pg_policies
+                             WHERE schemaname = 'public'
+                               AND tablename = 'incident_tracks'
+                               AND cmd IN ('UPDATE', 'DELETE'))))
 )
 SELECT
   CASE WHEN ok THEN 'PASS' ELSE '*** FAIL ***' END AS result,

@@ -30,6 +30,7 @@ import {
 import type { Alert } from './types';
 import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
 import { consoleAccess } from '@/lib/console-access';
+import { describeTrack, summariseTrack, thinTrack, type TrackPoint } from '@/lib/incident-track';
 import { resolveReporterDetails } from '@/lib/incident-dossier';
 import * as alertActions from '@/lib/alert-actions';
 import type { AlertIds } from '@/lib/alert-actions';
@@ -395,6 +396,46 @@ export default function DashboardPage() {
   const [theme, setTheme] = usePersistedTheme();
   const [timeString, setTimeString] = useState('');
   const [selectedReport, setSelectedReport] = useState<Alert | null>(null);
+  /**
+   * The route taken during the incident currently open in the dossier.
+   *
+   * `null` means "not asked yet or could not ask" and an empty array means
+   * "asked, and this incident has no positions". The dossier says those
+   * differently, because a dispatcher deciding whether somebody is still where
+   * they said they were needs to know which one it is.
+   */
+  /// Held WITH the incident it belongs to, and matched during render rather
+  /// than cleared in an effect. Storing the points alone meant the previous
+  /// incident's route was on screen for one frame after opening the next
+  /// dossier — a route attributed to the wrong person, which is the worst
+  /// possible frame to render even briefly.
+  const [trackFor, setTrackFor] =
+    useState<{ alertId: string; points: TrackPoint[] } | null>(null);
+  const selectedTrack =
+    trackFor && trackFor.alertId === selectedReport?.id ? trackFor.points : null;
+
+  useEffect(() => {
+    const alertId = selectedReport?.id;
+    if (!alertId) return;
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from('incident_tracks')
+        .select('latitude, longitude, accuracy, speed, recorded_at')
+        .eq('alert_id', alertId)
+        .order('recorded_at', { ascending: true })
+        .limit(5000);
+      if (cancelled) return;
+      // A failed read stays null rather than becoming an empty route, which
+      // would read as "this person did not move".
+      if (error) {
+        console.error('[TRACK] could not load the route:', error);
+        return;
+      }
+      setTrackFor({ alertId, points: (data || []) as TrackPoint[] });
+    })();
+    return () => { cancelled = true; };
+  }, [selectedReport?.id]);
   // The AI summary belongs to ONE report, so it is stored WITH that report's
   // id and read back only when it still matches. The old code kept two loose
   // pieces of state and wiped them from an effect on `selectedReport` — a
@@ -1359,6 +1400,18 @@ export default function DashboardPage() {
                 // about the person who raised it.
                 usersMap={usersMap}
                 onOpenDossier={openDossierById}
+                // The route of whichever incident is open in the dossier,
+                // thinned for drawing: a two-hour SOS at one fix every five
+                // seconds is well over a thousand points, and a polyline of
+                // that redraws on every pan.
+                incidentTrack={
+                  selectedTrack
+                    ? thinTrack(selectedTrack).map((p) => ({
+                        lat: p.latitude,
+                        lng: p.longitude,
+                      }))
+                    : undefined
+                }
                 theme={theme}
               />
               <div className="glass fade-in" style={{ position: 'absolute', top: 24, right: 24, width: 320, maxHeight: 'calc(100% - 48px)', display: isNarrow ? 'none' : 'flex', borderRadius: 20, flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }}>
@@ -1715,6 +1768,24 @@ export default function DashboardPage() {
                           borderRadius: 20,
                           boxShadow: prioGlow
                         }}>{selectedReport.priority}</span>
+                      </div>
+                      {/* MOVEMENT DURING THE INCIDENT.
+                          This was drawn live on the map and then discarded:
+                          `telemetry` keeps one row per person, overwritten, so
+                          the trail existed only in a browser tab's memory and
+                          a refresh lost it. Anybody opening the dossier after
+                          the fact saw no movement at all — and for a
+                          kidnapping, which way they went is the question. */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>Movement:</span>
+                        <span
+                          data-testid="dossier-movement"
+                          style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', textAlign: 'right' }}
+                        >
+                          {selectedTrack === null
+                            ? 'Route not loaded'
+                            : describeTrack(summariseTrack(selectedTrack))}
+                        </span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Incident ID:</span>
