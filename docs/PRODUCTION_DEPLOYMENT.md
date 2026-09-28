@@ -155,6 +155,21 @@ and OR together with these. Drop them, or the append-only guarantee is not one.
 
 ## 2. HQ console
 
+### Railway  ← current target
+
+`docs/RAILWAY.md` is the runbook and `hq-dashboard-next/railway.json` carries the
+build and deploy config. Four settings in the Railway UI and three variables; the
+only one that is easy to get wrong is **Root Directory = `hq-dashboard-next`**,
+because this repository holds the Flutter app at its root.
+
+One thing worth knowing before choosing Railway over App Hosting: App Hosting can
+mark the service role key **RUNTIME only**, so it is not present during
+`next build` at all. Railway exposes every service variable to the build, so that
+structural protection is gone and only the code-level ones remain — `server-only`
+on `supabase-server.ts`, and the CI job that greps `.next/static` for key
+material. That CI job is now the thing standing between this deployment and
+finding C-1 recurring. Keep it green.
+
 ### Firebase App Hosting
 
 `firebase.json` and `hq-dashboard-next/apphosting.yaml` are in the repository,
