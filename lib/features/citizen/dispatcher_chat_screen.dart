@@ -238,6 +238,7 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
             child: Row(
               children: [
                 IconButton(
+                  tooltip: 'Dictate a message',
                   icon: Icon(
                     _isListening ? Icons.mic : Icons.mic_none,
                     color: _isListening ? AppColors.danger : AppColors.primary,
@@ -256,6 +257,7 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
                   ),
                 ),
                 IconButton(
+                  tooltip: 'Send',
                   icon: const Icon(Icons.send_rounded, color: AppColors.primary),
                   onPressed: _sendMessage,
                 ),

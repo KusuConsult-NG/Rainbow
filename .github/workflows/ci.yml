@@ -702,6 +702,12 @@ jobs:
       - name: Assert neither app names a column or function the schema lacks
         run: python3 scripts/check_schema_drift.py
 
+      # An icon with no tooltip has no accessible name — for a responder using
+      # a screen reader, and for any test. Four of the five buttons in the agent
+      # dashboard's app bar had none, and one of them signs the officer out.
+      - name: Assert every icon-only control has an accessible name
+        run: python3 scripts/check_control_labels.py
+
       - name: Assert every realtime subscription is on a published table
         run: |
           set -euo pipefail
@@ -869,6 +875,24 @@ jobs:
       # `acknowledged_at`, so it was escalated off the responder who had it; and
       # HQ, the rung that exists to override, had no dispatch control at all.
       # None of those is visible in a screenshot of a working screen.
+      # Every control on the responder dashboard, pressed as every tier.
+      #
+      # The tier-specific controls are the tier boundaries themselves —
+      # DISPATCH UNIT is WARD/LGA/HQ, the escalate arrow is everyone but HQ,
+      # the broadcast button is HQ/LGA — and none of them had been pressed by a
+      # test. The general sweep ran as a plain `responder`, which is the one
+      # account whose tier-specific controls do not exist, and reported a single
+      # control named `(icon)` for the whole screen because four of the five
+      # app-bar buttons had no accessible name.
+      - name: Press every control, as every tier
+        run: |
+          node scripts/local_e2e/fake_supabase.js &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
+            sleep 0.5
+          done
+          node scripts/local_e2e/tier_controls.js
+
       - name: Drive one incident up the whole command chain
         run: |
           node scripts/local_e2e/fake_supabase.js &

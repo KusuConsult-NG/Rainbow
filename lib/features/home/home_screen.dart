@@ -211,6 +211,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         appBar: AppBar(
           leading: Builder(
             builder: (context) => IconButton(
+                                    tooltip: 'Open the menu',
               icon:
                   const Icon(Icons.menu_rounded, color: AppColors.onBackground),
               onPressed: () {
@@ -310,6 +311,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
             IconButton(
+              tooltip: 'Notifications',
               icon: const Icon(
                 Icons.notifications_none_rounded,
                 color: AppColors.textSecondary,

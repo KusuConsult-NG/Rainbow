@@ -197,6 +197,7 @@ class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
                   ),
                 ),
                 IconButton(
+                  tooltip: 'Send',
                   icon: const Icon(Icons.send_rounded, color: AppColors.primary),
                   onPressed: _sendMessage,
                 ),

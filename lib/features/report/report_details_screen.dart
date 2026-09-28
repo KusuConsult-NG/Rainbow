@@ -348,6 +348,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     ),
                     if (_recordedAudioPath != null)
                       IconButton(
+                        tooltip: 'Delete the recording',
                         icon: const Icon(Icons.delete_forever_rounded, color: AppColors.emergency, size: 18),
                         onPressed: _deleteRecording,
                       ),

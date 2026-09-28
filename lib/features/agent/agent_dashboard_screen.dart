@@ -245,6 +245,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
         appBar: AppBar(
           leading: Builder(
             builder: (context) => IconButton(
+                                    tooltip: 'Open the command menu',
               icon: const Icon(Icons.menu_rounded, color: Colors.white),
               onPressed: () {
                 var state = Scaffold.maybeOf(context);
@@ -354,6 +355,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
               },
             ),
             IconButton(
+              tooltip: 'Switch between the map and the incident list',
               icon: Icon(
                 _showMap ? Icons.view_headline_rounded : Icons.radar_rounded,
                 color: Colors.white,
@@ -365,10 +367,12 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
             ),
             if (profile['role'] == 'HQ_COMMAND' || profile['role'] == 'LGA_COMMAND')
               IconButton(
+                tooltip: 'Send a command broadcast',
                 icon: const Icon(Icons.campaign_rounded, color: Colors.white),
                 onPressed: () => context.push(AppRoutes.adminBroadcast),
               ),
             IconButton(
+              tooltip: 'Sign out',
               icon: const Icon(
                 Icons.power_settings_new_rounded,
                 color: Colors.white70,

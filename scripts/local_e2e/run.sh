@@ -108,6 +108,12 @@ if command -v flutter >/dev/null 2>&1; then
   echo "==> using the mobile app: SOS, AI report, every category, every button"
   E2E_OUT="$OUT" node scripts/local_e2e/mobile_interact.js
 
+  echo "==> every control on the responder dashboard, as every tier"
+  # The tier-specific controls are the ones that matter and the ones the
+  # general sweep could not reach: it ran as a plain `responder`, which is the
+  # single account whose tier-specific controls do not exist.
+  E2E_OUT="$OUT" node scripts/local_e2e/tier_controls.js
+
   echo "==> the whole command chain: citizen -> PU -> WARD -> LGA -> HQ -> responder"
   # Separate again, and for the same reason the interaction pass is separate
   # from the screens pass. The two above prove each screen renders and each
