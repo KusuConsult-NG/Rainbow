@@ -573,6 +573,84 @@ async function writeMark() {
   await shot(page, '67-hq-acknowledge-report');
 
   // -----------------------------------------------------------------------
+  // The dispatcher's reply.
+  //
+  // The console read `chat_messages` in two places and wrote nowhere, so the
+  // citizen's screen — which is titled DISPATCHER CHAT — had no dispatcher on
+  // the other end. The only person who could answer was a responder with that
+  // exact incident open on a handset. A composer was added to the incident
+  // dossier's timeline; this is the first time it has been opened in a browser.
+  // -----------------------------------------------------------------------
+  state.screen = 'hq:dossier-reply';
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle2' });
+  await sleep(3500);
+  // The console opens on the Intelligence Map. The incident cards — and the
+  // DOSSIER button on each — are in the Incident Feed.
+  await clickText(page, 'Incident Feed');
+  await sleep(2500);
+  const dossierOpened = await clickText(page, '📄 DOSSIER|DOSSIER');
+  await sleep(2500);
+  check('an incident dossier opens', dossierOpened, dossierOpened ? '' : 'no dossier control');
+  await shot(page, '68-hq-incident-dossier');
+
+  const REPLY = 'HQ: ward team is staging at the junction, hold your position.';
+  const composerFound = await setField(
+    page, 'input[aria-label="Reply to this incident\'s channel"]', REPLY);
+  check('the dossier offers a reply composer', composerFound,
+    composerFound ? '' : 'no composer on the incident timeline');
+
+  const chatMark = await writeMark();
+  const sentReply = await clickText(page, 'SEND');
+  await sleep(2600);
+  const chatWrites = await writesSince(chatMark, 'chat_messages');
+  check(
+    'the dispatcher can reply, and it is written to the incident channel',
+    sentReply && chatWrites.length > 0,
+    chatWrites.length
+      ? JSON.stringify(chatWrites[0].rows[0]).slice(0, 150)
+      : (sentReply ? 'clicked, nothing written' : 'no send control'),
+  );
+  check(
+    'the reply carries the operator, not an anonymous sender',
+    chatWrites.length > 0 && !!chatWrites[0].rows[0].sender_id
+      && chatWrites[0].rows[0].message === REPLY,
+    chatWrites.length ? `${chatWrites[0].rows[0].sender_name} (${chatWrites[0].rows[0].sender_role})` : '',
+  );
+  await shot(page, '69-hq-dossier-reply-sent');
+
+  // -----------------------------------------------------------------------
+  // Mass broadcast.
+  //
+  // Every broadcast HQ ever sent failed: the screen wrote six columns no
+  // migration defines, PostgREST rejected the insert in full, and the operator
+  // saw a raw error where a statewide warning should have been. The columns
+  // exist now — this asserts the send actually reaches `system_alerts`, which
+  // no test has ever checked.
+  // -----------------------------------------------------------------------
+  state.screen = 'hq:mass-broadcast';
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle2' });
+  await sleep(3000);
+  await clickText(page, 'Communications & Broadcast|Communications');
+  await sleep(2500);
+  await shot(page, '70-hq-mass-broadcast');
+
+  const WARNING = 'Avoid the Bukuru expressway until further notice.';
+  await setField(page, 'textarea', WARNING);
+  await setField(page, 'input[type="text"]', 'ROAD CLOSURE');
+  const bcMark = await writeMark();
+  const bcSent = await clickText(page, 'transmit|send broadcast|broadcast now|send');
+  await sleep(3000);
+  const bcWrites = await writesSince(bcMark, 'system_alerts');
+  check(
+    'a mass broadcast reaches system_alerts',
+    bcSent && bcWrites.length > 0,
+    bcWrites.length
+      ? JSON.stringify(bcWrites[0].rows[0]).slice(0, 150)
+      : (bcSent ? 'clicked, nothing written' : 'no send control'),
+  );
+  await shot(page, '71-hq-mass-broadcast-sent');
+
+  // -----------------------------------------------------------------------
   // Sign out.
   // -----------------------------------------------------------------------
   state.screen = 'hq:signout';

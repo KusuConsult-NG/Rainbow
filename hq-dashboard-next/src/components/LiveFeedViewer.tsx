@@ -44,7 +44,8 @@ export default function LiveFeedViewer({ alertId }: Props) {
             type: 'broadcast',
             event: 'signalling',
             payload: {
-              type: 'candidate',
+              // `signal`, not `type`: see the note on the receiver below.
+              signal: 'candidate',
               candidate: event.candidate.toJSON(),
               sender: 'hq',
             },
@@ -69,12 +70,28 @@ export default function LiveFeedViewer({ alertId }: Props) {
           const sender = payload?.sender;
           if (sender === 'hq') return; // ignore self
 
-          const type = payload?.type;
+          // WHICH SIGNALLING MESSAGE IS THIS?
+          //
+          // It used to read `payload?.type`, and that could never be 'offer'.
+          // The Dart realtime client mutates the caller's map before sending
+          // it — `payload['type'] = type.toType()` — so every message the
+          // phone sent arrived here as `type: 'broadcast'`. This branch never
+          // matched, HQ never answered, and the negotiation never began: the
+          // phone had its camera and microphone on and was telling the person
+          // it was broadcasting to us.
+          //
+          // The mobile client also flattens where this one nests, so read the
+          // body from either shape.
+          const body = (payload && typeof payload.payload === 'object' && payload.payload)
+            ? payload.payload
+            : payload;
+          const type = body?.signal
+            ?? (body?.type !== 'broadcast' ? body?.type : undefined);
           console.log('[LIVE_FEED_HQ] Received Signalling:', type);
 
           if (type === 'offer') {
             try {
-              const offer = new RTCSessionDescription({ type: 'offer', sdp: payload.sdp });
+              const offer = new RTCSessionDescription({ type: 'offer', sdp: body.sdp });
               await pc.setRemoteDescription(offer);
               const answer = await pc.createAnswer();
               await pc.setLocalDescription(answer);
@@ -83,7 +100,7 @@ export default function LiveFeedViewer({ alertId }: Props) {
                 type: 'broadcast',
                 event: 'signalling',
                 payload: {
-                  type: 'answer',
+                  signal: 'answer',
                   sdp: answer.sdp,
                   sender: 'hq',
                 },
@@ -95,8 +112,8 @@ export default function LiveFeedViewer({ alertId }: Props) {
             }
           } else if (type === 'candidate') {
             try {
-              if (payload.candidate) {
-                await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+              if (body.candidate) {
+                await pc.addIceCandidate(new RTCIceCandidate(body.candidate));
               }
             } catch (err) {
               console.error('[LIVE_FEED_HQ] ICE Error:', err);

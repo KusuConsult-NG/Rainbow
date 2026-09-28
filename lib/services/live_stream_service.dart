@@ -5,6 +5,40 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// Which signalling message this is: `offer`, `answer`, `candidate` or `bye`.
+///
+/// IT CANNOT BE CALLED `type`, AND IT WAS.
+///
+/// `RealtimeChannel.send` does this, in realtime_client 2.11.0 line 778:
+///
+///     payload['type'] = type.toType();
+///
+/// It MUTATES the caller's map and overwrites any `type` key with the literal
+/// 'broadcast'. This service used `type` as its own discriminator, so every
+/// signalling message it sent — the offer, every ICE candidate, the bye —
+/// arrived at HQ as `type: 'broadcast'`. The console matches on
+/// `payload?.type === 'offer'`, which could never be true.
+///
+/// So the negotiation could never begin. The phone took the camera and the
+/// microphone, created a real peer connection, generated a real offer with real
+/// ICE candidates, and told the person "LIVE STREAM BROADCASTING TO HQ" — and
+/// HQ received messages it could not read and never answered. Somebody in an
+/// emergency believed they were showing HQ what was happening to them, with the
+/// camera light on to confirm it, and nobody was receiving anything.
+///
+/// Nothing could have caught this by reading one side: the mobile code is
+/// correct in isolation, the console code is correct in isolation, and the
+/// collision lives in a line of the SDK between them.
+///
+/// `signal` is not a reserved key. The fallback tolerates a peer still sending
+/// the old shape, but never accepts the literal 'broadcast' as a kind.
+String? signalKind(Map<String, dynamic> body) {
+  final signal = body['signal'] as String?;
+  if (signal != null && signal.isNotEmpty) return signal;
+  final legacy = body['type'] as String?;
+  return legacy == 'broadcast' ? null : legacy;
+}
+
 /// Documentation for this public member.
 class LiveStreamService {
   /// Documentation for this public member.
@@ -70,7 +104,7 @@ class LiveStreamService {
             _channel!.sendBroadcastMessage(
               event: 'signalling',
               payload: <String, dynamic>{
-                'type': 'candidate',
+                'signal': 'candidate',
                 'candidate': candidate.toMap(),
                 'sender': 'mobile',
               },
@@ -83,20 +117,25 @@ class LiveStreamService {
       _channel!.onBroadcast(
         event: 'signalling',
         callback: (payload) async {
-          final sender = payload['sender'] as String?;
+          // The console nests its body under `payload`; this client flattens.
+          // Read both rather than assume one.
+          final body = payload['payload'] is Map
+              ? Map<String, dynamic>.from(payload['payload'] as Map)
+              : payload;
+          final sender = body['sender'] as String?;
           if (sender == 'mobile') return; // ignore own messages
 
-          final type = payload['type'] as String?;
+          final type = signalKind(body);
           if (type == 'answer') {
             debugPrint('[LIVE_STREAM] Received Answer from HQ');
-            final sdp = payload['sdp'] as String?;
+            final sdp = body['sdp'] as String?;
             if (sdp != null && _peerConnection != null) {
               final answer = RTCSessionDescription(sdp, 'answer');
               await _peerConnection!.setRemoteDescription(answer);
             }
           } else if (type == 'candidate') {
             debugPrint('[LIVE_STREAM] Received ICE Candidate from HQ');
-            final candidateMap = payload['candidate'] as Map<String, dynamic>?;
+            final candidateMap = body['candidate'] as Map<String, dynamic>?;
             if (candidateMap != null && _peerConnection != null) {
               final candidate = RTCIceCandidate(
                 candidateMap['candidate'] as String?,
@@ -120,7 +159,7 @@ class LiveStreamService {
       await _channel!.sendBroadcastMessage(
         event: 'signalling',
         payload: <String, dynamic>{
-          'type': 'offer',
+          'signal': 'offer',
           'sdp': offer.sdp,
           'sender': 'mobile',
         },
@@ -169,7 +208,7 @@ class LiveStreamService {
         unawaited(
           _channel!.sendBroadcastMessage(
             event: 'signalling',
-            payload: <String, dynamic>{'type': 'bye', 'sender': 'mobile'},
+            payload: <String, dynamic>{'signal': 'bye', 'sender': 'mobile'},
           ),
         );
         unawaited(SupabaseConfig.client.removeChannel(_channel!));

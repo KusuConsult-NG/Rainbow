@@ -914,6 +914,34 @@ jobs:
       # account whose tier-specific controls do not exist, and reported a single
       # control named `(icon)` for the whole screen because four of the five
       # app-bar buttons had no accessible name.
+      # The live camera and microphone, and the citizen's own settings.
+      #
+      # The stream is the control with the largest gap in this repository
+      # between what it does and what had been verified about it: it takes the
+      # camera and the mic and offers them to HQ, and no test had ever pressed
+      # it, because a headless browser has no capture device. Chromium can
+      # synthesise one. Pressing it found that the negotiation could never
+      # begin — the Dart realtime client overwrites the `type` key the service
+      # used as its own discriminator, so HQ saw `type: 'broadcast'` and never
+      # answered, while the phone told the person it was broadcasting.
+      - name: The live stream, and the citizen settings including the duress PIN
+        run: |
+          node scripts/local_e2e/fake_supabase.js &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
+            sleep 0.5
+          done
+          node scripts/local_e2e/user_features.js
+
+      - name: A message sent by one person, read by another
+        run: |
+          node scripts/local_e2e/fake_supabase.js &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
+            sleep 0.5
+          done
+          node scripts/local_e2e/chat_thread.js
+
       - name: Press every control, as every tier
         run: |
           node scripts/local_e2e/fake_supabase.js &

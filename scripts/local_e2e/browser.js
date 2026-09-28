@@ -114,6 +114,19 @@ const DARK_TILE = tilePng(true);
 async function launch({
   viewport,
   canvaskitDir = null,
+  /**
+   * Give the browser a synthetic camera and microphone, and auto-grant them.
+   *
+   * The live stream — the control that turns on a phone's camera and mic and
+   * offers them to HQ over WebRTC — had never been pressed by any test, because
+   * a headless browser has no capture device and `getUserMedia` rejects. That is
+   * the single feature in this app with the largest gap between what it does
+   * and what had been verified about it, so it is worth the two flags.
+   *
+   * Off by default: every other pass should keep failing a permission prompt
+   * the way a real device would if the user declined.
+   */
+  fakeMedia = false,
   /** Every tile the app requested: { z, x, y, dark }. */
   tiles = [],
   /** Anything the browser complained about, tagged with the screen. */
@@ -122,7 +135,12 @@ async function launch({
 } = {}) {
   const browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
+    args: [
+      '--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none',
+      ...(fakeMedia
+        ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']
+        : []),
+    ],
     defaultViewport: viewport,
   });
 

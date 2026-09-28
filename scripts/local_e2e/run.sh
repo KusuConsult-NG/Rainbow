@@ -108,6 +108,14 @@ if command -v flutter >/dev/null 2>&1; then
   echo "==> using the mobile app: SOS, AI report, every category, every button"
   E2E_OUT="$OUT" node scripts/local_e2e/mobile_interact.js
 
+  echo "==> the live camera/microphone stream, and the citizen settings"
+  # Separate because it needs a synthetic capture device. Every other pass must
+  # keep behaving as a device whose camera is unavailable.
+  E2E_OUT="$OUT" node scripts/local_e2e/user_features.js
+
+  echo "==> the messaging round trip"
+  E2E_OUT="$OUT" node scripts/local_e2e/chat_thread.js
+
   echo "==> every control on the responder dashboard, as every tier"
   # The tier-specific controls are the ones that matter and the ones the
   # general sweep could not reach: it ran as a plain `responder`, which is the

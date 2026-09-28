@@ -608,6 +608,19 @@ try {
  */
 const wsClients = new Set();
 
+/**
+ * Broadcast messages pushed over a realtime channel, kept so a run can assert
+ * them.
+ *
+ * The live stream is the reason. `LiveStreamService` negotiates WebRTC over a
+ * Supabase broadcast channel — it sends an `offer` with an SDP and waits for an
+ * answer — and none of that touches the database, so nothing in a REST write
+ * log could ever show whether the camera actually went live. Recording the
+ * channel traffic is the only way to tell "the button lit up" from "the offer
+ * left the device".
+ */
+const broadcasts = [];
+
 /** `alert_id=eq.X` → does this row match? Only `eq` is used by this app. */
 function filterMatches(filter, row) {
   if (!filter) return true;
@@ -685,6 +698,12 @@ if (WebSocketServer) {
       if (event === 'phx_join') {
         const requested = payload?.config?.postgres_changes || [];
         const withIds = requested.map((c, i) => ({ ...c, id: i + 1 }));
+        // A broadcast-only channel asks for no postgres_changes at all — the
+        // live stream's signalling channel is one — so record the topic even
+        // when the list is empty, or a relay has nowhere to go.
+        if (!withIds.length) {
+          client.subs.set(`${topic}:broadcast`, { topic, table: null, filter: null, ids: [] });
+        }
         // Remember what this topic wants, so a write can find it again.
         for (const c of withIds) {
           client.subs.set(`${topic}:${c.id}`, {
@@ -707,6 +726,32 @@ if (WebSocketServer) {
       }
       if (event === 'access_token') {
         reply({ status: 'ok', response: {} });
+        return;
+      }
+      if (event === 'broadcast') {
+        // Keep the envelope AND its contents. The first version stored only
+        // `payload.payload` and recorded six signalling messages with a null
+        // body each, which reads as "the stream sent nothing" when the stream
+        // was in fact working — the nesting simply differs from what was
+        // assumed.
+        broadcasts.push({
+          topic,
+          event: payload?.event,
+          payload: payload?.payload ?? payload,
+          raw: payload,
+          at: new Date().toISOString(),
+        });
+        // Relay to the other subscribers of this topic, which is what a real
+        // broadcast channel does and what the HQ end would be listening for.
+        for (const other of wsClients) {
+          if (other.ws === ws) continue;
+          const listening = [...other.subs.values()].some((s) => s.topic === topic);
+          if (!listening) continue;
+          try {
+            other.ws.send(JSON.stringify([null, null, topic, 'broadcast', payload]));
+          } catch { /* client gone */ }
+        }
+        reply({ status: 'ok', response: {} });
       }
     });
   });
@@ -727,6 +772,7 @@ const control = http.createServer((req, res) => {
     log.length = 0;
     unknownColumns.length = 0;
     writes.length = 0;
+    broadcasts.length = 0;
     if (req.url === '/reset-data') {
       const fresh = JSON.parse(JSON.stringify(PRISTINE));
       for (const name of Object.keys(tables)) {
@@ -738,6 +784,6 @@ const control = http.createServer((req, res) => {
     return res.end('{"reset":true}');
   }
   res.writeHead(200, { 'content-type': 'application/json' });
-  res.end(JSON.stringify({ log, unknownColumns, writes }, null, 1));
+  res.end(JSON.stringify({ log, unknownColumns, writes, broadcasts }, null, 1));
 });
 control.listen(PORT + 1, '127.0.0.1');
