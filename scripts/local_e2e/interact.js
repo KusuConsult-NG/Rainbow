@@ -525,7 +525,11 @@ async function writeMark() {
   await shot(page, '62b-agency-incident-expanded');
   if (!expanded) check('the escalated incident card can be expanded', false, 'card not found');
   const depMark = await writeMark();
-  if (await clickText(page, 'deploy')) {
+  // "deploy" alone matches the sidebar's "Our Deployments" nav item, which
+  // comes first in the DOM — so this pressed the nav, the modal never opened,
+  // and the check reported the app inserting nothing when the app had never
+  // been asked to. The button on the incident card is "DEPLOY PERSONNEL".
+  if (await clickText(page, 'deploy personnel')) {
     await sleep(1500);
     await page.evaluate(() => {
       const box = document.querySelector('input[type="checkbox"]');
