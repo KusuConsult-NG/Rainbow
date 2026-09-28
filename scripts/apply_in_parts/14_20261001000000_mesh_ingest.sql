@@ -18,9 +18,11 @@
 --            already exists
 --
 -- and rolls itself back. That message means THE POLICIES ARE ALREADY IN PLACE.
--- Nothing is half-applied, and part 15 will still report every row PASS. If you
--- are unsure whether a part landed, run part 15 — it writes nothing and tells
--- you the truth about the whole set.
+-- Nothing is half-applied, and part 15 will still report every row PASS.
+--
+-- Part 15 is the readout: it writes nothing and tells you the truth about the
+-- whole set. It needs parts 01-14 applied first, because it checks work they do;
+-- run it early and it says so plainly rather than failing on a missing function.
 --
 -- The LAST part writes nothing. It returns one row per thing that had to be
 -- true, and every one of them must read PASS.

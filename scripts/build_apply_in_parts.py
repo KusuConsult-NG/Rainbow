@@ -58,9 +58,11 @@ NOTE = """--
 --            already exists
 --
 -- and rolls itself back. That message means THE POLICIES ARE ALREADY IN PLACE.
--- Nothing is half-applied, and part 15 will still report every row PASS. If you
--- are unsure whether a part landed, run part 15 — it writes nothing and tells
--- you the truth about the whole set.
+-- Nothing is half-applied, and part 15 will still report every row PASS.
+--
+-- Part 15 is the readout: it writes nothing and tells you the truth about the
+-- whole set. It needs parts 01-14 applied first, because it checks work they do;
+-- run it early and it says so plainly rather than failing on a missing function.
 --
 -- The LAST part writes nothing. It returns one row per thing that had to be
 -- true, and every one of them must read PASS.
@@ -68,6 +70,52 @@ NOTE = """--
 -- If you can paste the whole of apply_all_migrations.sql in one go, do that
 -- instead: one paste cannot be run out of order or stopped halfway by accident.
 --
+
+"""
+
+
+# ── A readable precondition, instead of 42883 ───────────────────────────────
+#
+# The verification block is ONE query, and it calls functions the earlier parts
+# create. Run it before them and PostgreSQL cannot even plan it:
+#
+#   ERROR: 42883: function public.next_tier(unknown) does not exist
+#   LINE 124: (SELECT public.next_tier('HQ') IS NULL AND ...
+#
+# That is a parse-time failure, so no amount of AND-guarding inside the query
+# avoids it — the missing object has to be caught before the query is reached.
+# In the single-paste flow this never happens, because everything is applied
+# first. In the parts flow somebody will inevitably run the last one early, to
+# see where they stand, and be told something that sounds like database damage.
+VERIFY_GUARD = """
+-- ── Are the parts before this one actually applied? ─────────────────────────
+--
+-- This part is one query that calls functions the earlier parts create. Without
+-- them PostgreSQL cannot plan it at all and reports
+-- `42883: function public.next_tier(unknown) does not exist`, which sounds far
+-- worse than it is. So it checks first and tells you what is missing.
+DO $precheck$
+DECLARE
+  missing TEXT[] := ARRAY[]::TEXT[];
+BEGIN
+  IF to_regclass('public.emergency_pins') IS NULL THEN
+    missing := missing || ARRAY['part 03 (emergency_pins)']; END IF;
+  IF to_regprocedure('public.next_tier(text)') IS NULL THEN
+    missing := missing || ARRAY['part 11 (next_tier)']; END IF;
+  IF to_regprocedure('public.purge_stale_telemetry()') IS NULL THEN
+    missing := missing || ARRAY['part 12 (purge_stale_telemetry)']; END IF;
+  IF to_regclass('public.sms_device_keys') IS NULL THEN
+    missing := missing || ARRAY['part 13 (sms_device_keys)']; END IF;
+  IF to_regclass('public.mesh_envelopes_seen') IS NULL THEN
+    missing := missing || ARRAY['part 14 (mesh_envelopes_seen)']; END IF;
+
+  IF array_length(missing, 1) > 0 THEN
+    RAISE EXCEPTION
+      'NOT READY: run the earlier parts first. Missing: %. '
+      'Nothing is wrong with the database — this part only checks work the '
+      'other parts do.', array_to_string(missing, ', ');
+  END IF;
+END $precheck$;
 
 """
 
@@ -123,7 +171,13 @@ def main() -> int:
     for n, (start, name) in enumerate(found, start=1):
         end = found[n][0] if n < len(found) else len(lines)
         label = name.replace(".sql", "")
-        (OUT / f"{n:02d}_{label}.sql").write_text(NOTE + "".join(lines[start:end]))
+        body = "".join(lines[start:end])
+        # Only the verification part needs the precondition; the migrations carry
+        # their own guards and are meant to run against a database that does not
+        # have a given table yet.
+        if label == "VERIFY":
+            body = VERIFY_GUARD + body
+        (OUT / f"{n:02d}_{label}.sql").write_text(NOTE + body)
 
     print(f"wrote {len(found)} parts to {OUT.relative_to(ROOT)}/")
     return 0

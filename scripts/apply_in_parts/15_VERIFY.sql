@@ -18,9 +18,11 @@
 --            already exists
 --
 -- and rolls itself back. That message means THE POLICIES ARE ALREADY IN PLACE.
--- Nothing is half-applied, and part 15 will still report every row PASS. If you
--- are unsure whether a part landed, run part 15 — it writes nothing and tells
--- you the truth about the whole set.
+-- Nothing is half-applied, and part 15 will still report every row PASS.
+--
+-- Part 15 is the readout: it writes nothing and tells you the truth about the
+-- whole set. It needs parts 01-14 applied first, because it checks work they do;
+-- run it early and it says so plainly rather than failing on a missing function.
 --
 -- The LAST part writes nothing. It returns one row per thing that had to be
 -- true, and every one of them must read PASS.
@@ -28,6 +30,36 @@
 -- If you can paste the whole of apply_all_migrations.sql in one go, do that
 -- instead: one paste cannot be run out of order or stopped halfway by accident.
 --
+
+
+-- ── Are the parts before this one actually applied? ─────────────────────────
+--
+-- This part is one query that calls functions the earlier parts create. Without
+-- them PostgreSQL cannot plan it at all and reports
+-- `42883: function public.next_tier(unknown) does not exist`, which sounds far
+-- worse than it is. So it checks first and tells you what is missing.
+DO $precheck$
+DECLARE
+  missing TEXT[] := ARRAY[]::TEXT[];
+BEGIN
+  IF to_regclass('public.emergency_pins') IS NULL THEN
+    missing := missing || ARRAY['part 03 (emergency_pins)']; END IF;
+  IF to_regprocedure('public.next_tier(text)') IS NULL THEN
+    missing := missing || ARRAY['part 11 (next_tier)']; END IF;
+  IF to_regprocedure('public.purge_stale_telemetry()') IS NULL THEN
+    missing := missing || ARRAY['part 12 (purge_stale_telemetry)']; END IF;
+  IF to_regclass('public.sms_device_keys') IS NULL THEN
+    missing := missing || ARRAY['part 13 (sms_device_keys)']; END IF;
+  IF to_regclass('public.mesh_envelopes_seen') IS NULL THEN
+    missing := missing || ARRAY['part 14 (mesh_envelopes_seen)']; END IF;
+
+  IF array_length(missing, 1) > 0 THEN
+    RAISE EXCEPTION
+      'NOT READY: run the earlier parts first. Missing: %. '
+      'Nothing is wrong with the database — this part only checks work the '
+      'other parts do.', array_to_string(missing, ', ');
+  END IF;
+END $precheck$;
 
 -- ============================================================================
 -- DID IT WORK?
