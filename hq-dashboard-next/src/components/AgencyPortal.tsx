@@ -301,12 +301,29 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
           </div>
         </div>
 
-        {/* Agency switcher — HQ only */}
+        {/* Agency switcher — HQ only.
+            A single-select group, so it carries the same ARIA as the section
+            tabs below: `role="tablist"`, `role="tab"` and `aria-selected`.
+            Without them these were six identical buttons to a screen reader,
+            with nothing saying which agency the portal is currently showing —
+            on a screen whose entire purpose is that the answer to "whose
+            incidents am I looking at" is unambiguous.
+            The browser sweep found it: clicking the already-selected agency
+            correctly does nothing, and nothing on the page distinguished that
+            from a button wired to nothing. The fix belongs here rather than in
+            a suppression list in the harness, which is the same conclusion the
+            section tabs reached. */}
         {isHq && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 'auto' }}>
+          <div
+            role="tablist"
+            aria-label="Agency"
+            style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 'auto' }}
+          >
             {AGENCIES.map(a => (
               <button
                 key={a.code}
+                role="tab"
+                aria-selected={selectedAgency === a.code}
                 onClick={() => setSelectedAgency(a.code)}
                 style={{
                   padding: '5px 12px',
