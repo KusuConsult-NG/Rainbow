@@ -412,6 +412,54 @@ describe('dispatchAlert', () => {
     expect(db.updates).toHaveLength(0);
   });
 
+  it('stands down an officer taken off the incident', async () => {
+    // The gap this closes. assigned_responders is REPLACED, and only the new
+    // uids were ever notified — so reassigning removed officers in silence.
+    // The responder app lists work by this column, so the incident vanished
+    // from their screen; if they were already driving to it, nothing said stop.
+    db.setRows('alerts', [{ ...ALERT, assigned_responders: ['a', 'b', 'c'] }]);
+
+    const { dispatchAlert } = await actions();
+    const res = await dispatchAlert('alert-1', ['a']);
+
+    expect(res.ok).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/push/dispatch',
+      expect.objectContaining({
+        body: JSON.stringify({
+          alertId: 'alert-1',
+          alertIds: ['alert-1'],
+          responderUids: ['b', 'c'],
+          kind: 'STAND_DOWN',
+        }),
+      }),
+    );
+  });
+
+  it('does not stand anybody down on a first dispatch', async () => {
+    // A stand-down to nobody is a wasted call; a stand-down to the officers
+    // just dispatched would cancel the deployment outright.
+    db.setRows('alerts', [{ ...ALERT, assigned_responders: [] }]);
+
+    const { dispatchAlert } = await actions();
+    await dispatchAlert('alert-1', ['a', 'b']);
+
+    const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const standDowns = calls.filter(c => String((c[1] as RequestInit)?.body).includes('STAND_DOWN'));
+    expect(standDowns).toHaveLength(0);
+  });
+
+  it('does not stand down an officer who is still on the incident', async () => {
+    db.setRows('alerts', [{ ...ALERT, assigned_responders: ['a', 'b'] }]);
+
+    const { dispatchAlert } = await actions();
+    await dispatchAlert('alert-1', ['a', 'b', 'c']);
+
+    const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const standDowns = calls.filter(c => String((c[1] as RequestInit)?.body).includes('STAND_DOWN'));
+    expect(standDowns).toHaveLength(0);
+  });
+
   it('pushes a notification to the assigned responders', async () => {
     const { dispatchAlert } = await actions();
     await dispatchAlert('alert-1', ['a', 'b']);

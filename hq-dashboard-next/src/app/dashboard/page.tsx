@@ -33,6 +33,7 @@ import { consoleAccess } from '@/lib/console-access';
 import { describeTrack, summariseTrack, thinTrack, type TrackPoint } from '@/lib/incident-track';
 import { resolveReporterDetails } from '@/lib/incident-dossier';
 import { categoriesPresent, categoryCounts, categoryLabel } from '@/lib/alert-category';
+import { assignableResponders, emptyRosterReason, type Posting } from '@/lib/assignable-responders';
 import * as alertActions from '@/lib/alert-actions';
 import type { AlertIds } from '@/lib/alert-actions';
 
@@ -894,6 +895,17 @@ export default function DashboardPage() {
   // Derived during render rather than held in state: these are a pure function
   // of the alerts already loaded, and a second copy in state would be one more
   // thing that can be stale.
+  // The operator's own posting, which scopes the responder picker on every
+  // incident card. Derived rather than held in state: it is a view of the
+  // profile already loaded.
+  const dispatcherPosting = {
+    id: user?.id,
+    role: userRole,
+    geo_lga: userProfile?.geo_lga as string | undefined,
+    geo_ward: userProfile?.geo_ward as string | undefined,
+    geo_pu: userProfile?.geo_pu as string | undefined,
+  };
+
   const categoriesOnBoard = categoriesPresent(alerts);
   const categoryTallies = categoryCounts(alerts);
 
@@ -1632,7 +1644,7 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 24 }}>
-                  {filtered.map(a => <AlertCard key={a.id} alert={a} agents={agentLocations} usersMap={usersMap} onViewDossier={(alert) => setSelectedReport(alert)} onDispatch={dispatchAlert} onEscalate={escalateAlert} onResolve={resolveAlert} onHqOverride={hqOverride} />)}
+                  {filtered.map(a => <AlertCard key={a.id} alert={a} agents={agentLocations} usersMap={usersMap} dispatcher={dispatcherPosting} onViewDossier={(alert) => setSelectedReport(alert)} onDispatch={dispatchAlert} onEscalate={escalateAlert} onResolve={resolveAlert} onHqOverride={hqOverride} />)}
                 </div>
               )}
             </div>
@@ -2252,10 +2264,16 @@ function MetricCard({ label, value, color }: { label: string, value: string | nu
 }
 
 
-function AlertCard({ alert, agents, usersMap, onViewDossier, onDispatch, onEscalate, onResolve, onHqOverride }: { 
+function AlertCard({ alert, agents, usersMap, dispatcher, onViewDossier, onDispatch, onEscalate, onResolve, onHqOverride }: { 
   alert: Alert; 
   agents: any[];
   usersMap: Record<string, any>;
+  /**
+   * The signed-in operator's own posting. The responder picker is scoped to
+   * it — see assignable-responders.ts — so this card cannot offer an officer
+   * outside the dispatcher's command.
+   */
+  dispatcher: Posting & { id?: string };
   onViewDossier?: (alert: Alert) => void;
   onDispatch: (ids: AlertIds, responderUid: string) => Promise<void> | void;
   onEscalate: (ids: AlertIds, t: string, notes?: string, agency?: string) => Promise<void> | void; 
@@ -2862,8 +2880,19 @@ Respond ONLY with a JSON object with this exact shape:
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflow: 'auto', marginBottom: 10 }}>
             {(() => {
-              const profileResponders = Object.values(usersMap || {}).filter(
-                (u: any) => u && u.role !== 'CITIZEN'
+              // This kept every profile with a role that was not CITIZEN —
+              // statewide. A ward commander in Jos North was offered, and
+              // could dispatch, an officer posted in Mangu: the officer got a
+              // push for an incident their own commander knew nothing about,
+              // and that commander never learned they had been sent.
+              //
+              // Scoped to the dispatcher's command, mirroring
+              // alert_in_my_area() in the database one axis over — that
+              // decides which incidents a posting reaches, this decides which
+              // officers it reaches.
+              const profileResponders = assignableResponders(
+                Object.values(usersMap || {}) as any[],
+                dispatcher,
               );
 
               const responderList = profileResponders.length > 0
@@ -2893,9 +2922,13 @@ Respond ONLY with a JSON object with this exact shape:
                   }));
 
               if (responderList.length === 0) {
+                // "NO REGISTERED RESPONDERS FOUND" reads as "the system is
+                // broken" during an emergency, and the causes need different
+                // actions: nobody is posted to this command, or this account
+                // has no posting and so commands nobody.
                 return (
                   <p style={{ fontSize: 10, color: 'var(--text-dim)', textAlign: 'center', padding: 10 }}>
-                    NO REGISTERED RESPONDERS FOUND
+                    {emptyRosterReason(dispatcher).toUpperCase()}
                   </p>
                 );
               }
