@@ -12,6 +12,10 @@
 --   * HQ is terminal: the chain stops rather than looping
 --   * the chain of custody is appended, not replaced
 --   * a broken app_config value cannot mean "escalate everything now"
+--   * a MANUAL escalation from the app restarts the clock for the tier taking
+--     it, so a hand-escalated alert does not cascade straight to HQ
+--   * acknowledging a mission from the app actually sets `acknowledged_at`, so
+--     the guard above can fire at all
 --
 -- Run inside scripts/verify_rls_migration.sh, after the migrations.
 -- ============================================================================
@@ -26,6 +30,9 @@ DECLARE
   a_ack    UUID;
   a_done   UUID;
   a_hq     UUID;
+  a_manual  UUID;
+  a_manual2 UUID;
+  a_accept  UUID;
   got      TEXT;
   ts       TIMESTAMPTZ;
   n        INT;
@@ -197,6 +204,113 @@ BEGIN
     failures := failures + 1;
   ELSE
     RAISE NOTICE 'PASS  only the service role can run the escalation job';
+  END IF;
+
+  -- ── 10. A MANUAL escalation restarts the clock ───────────────────────────
+  --
+  -- The two sides have to agree. The job measures the window from
+  -- `tier_assigned_at`; the app's escalation dialog writes the UPDATE. It wrote
+  -- status, severity, assignee, tier, log and summary — and not
+  -- `tier_assigned_at`. So an alert handed up by hand carried the timestamp
+  -- from when it was inserted at the polling unit, and the WARD's window was
+  -- already spent before the WARD ever saw it.
+  --
+  -- The two statements below are the app's payload, replayed. The first is what
+  -- it used to send.
+  INSERT INTO public.alerts (type, status, description, reported_by, tier_assigned_at)
+  VALUES ('SOS', 'PENDING', 'escalated by hand, old payload', reporter,
+          NOW() - INTERVAL '45 minutes')
+  RETURNING id INTO a_manual;
+
+  UPDATE public.alerts
+     SET status = 'ESCALATED', severity = 'HIGH', assigned_tier = 'WARD',
+         updated_at = NOW()
+   WHERE id = a_manual;
+
+  PERFORM public.escalate_overdue_alerts();
+  SELECT assigned_tier INTO got FROM public.alerts WHERE id = a_manual;
+  IF got = 'WARD' THEN
+    RAISE WARNING 'FAIL  the old payload held at WARD — this assertion is '
+                  'meant to demonstrate the cascade and no longer does';
+    failures := failures + 1;
+  ELSE
+    RAISE NOTICE 'PASS  without the clock reset a hand escalation cascades '
+                 'straight past WARD to % — which is the bug', got;
+  END IF;
+
+  -- And this is what it sends now.
+  INSERT INTO public.alerts (type, status, description, reported_by, tier_assigned_at)
+  VALUES ('SOS', 'PENDING', 'escalated by hand, fixed payload', reporter,
+          NOW() - INTERVAL '45 minutes')
+  RETURNING id INTO a_manual2;
+
+  UPDATE public.alerts
+     SET status = 'ESCALATED', severity = 'HIGH', assigned_tier = 'WARD',
+         tier_assigned_at = NOW(),
+         acknowledged_at = NULL, acknowledged_by = NULL,
+         updated_at = NOW()
+   WHERE id = a_manual2;
+
+  PERFORM public.escalate_overdue_alerts();
+  SELECT assigned_tier INTO got FROM public.alerts WHERE id = a_manual2;
+  IF got = 'WARD' THEN
+    RAISE NOTICE 'PASS  a hand escalation gives the WARD its full window';
+  ELSE
+    RAISE WARNING 'FAIL  a hand escalation still cascaded to %', got;
+    failures := failures + 1;
+  END IF;
+
+  -- The clock reset must not become a way to keep an alert alive forever: the
+  -- WARD's own window still has to expire.
+  UPDATE public.alerts SET tier_assigned_at = NOW() - INTERVAL '20 minutes'
+   WHERE id = a_manual2;
+  PERFORM public.escalate_overdue_alerts();
+  SELECT assigned_tier INTO got FROM public.alerts WHERE id = a_manual2;
+  IF got = 'LGA' THEN
+    RAISE NOTICE 'PASS  and it still climbs when THAT window passes';
+  ELSE
+    RAISE WARNING 'FAIL  the WARD held it past its own window, at %', got;
+    failures := failures + 1;
+  END IF;
+
+  -- ── 11. Acknowledging from the app stops the clock ────────────────────────
+  --
+  -- Section 5 proves the job honours `acknowledged_at`. This proves the app
+  -- sets it. Nothing in either app wrote the column, so the guard in section 5
+  -- could not fire in production: an officer who accepted a mission and set out
+  -- had it escalated out from under them, and the tier above was told nobody
+  -- had responded.
+  INSERT INTO public.alerts (type, status, description, reported_by, tier_assigned_at)
+  VALUES ('SOS', 'PENDING', 'accepted from the feed', reporter,
+          NOW() - INTERVAL '45 minutes')
+  RETURNING id INTO a_accept;
+
+  -- The tactical action sheet's UPDATE, as it now sends it.
+  UPDATE public.alerts
+     SET status = 'ACKNOWLEDGED', assigned_to = reporter,
+         acknowledged_at = NOW(), acknowledged_by = reporter,
+         updated_at = NOW()
+   WHERE id = a_accept;
+
+  PERFORM public.escalate_overdue_alerts();
+  SELECT assigned_tier INTO got FROM public.alerts WHERE id = a_accept;
+  IF got = 'UNIT' THEN
+    RAISE NOTICE 'PASS  accepting a mission from the feed stops it climbing';
+  ELSE
+    RAISE WARNING 'FAIL  an accepted mission escalated to % anyway', got;
+    failures := failures + 1;
+  END IF;
+
+  -- Moving on through the mission must not restart it either.
+  UPDATE public.alerts SET status = 'ON_ROUTE', updated_at = NOW()
+   WHERE id = a_accept;
+  PERFORM public.escalate_overdue_alerts();
+  SELECT assigned_tier INTO got FROM public.alerts WHERE id = a_accept;
+  IF got = 'UNIT' THEN
+    RAISE NOTICE 'PASS  and an officer EN ROUTE keeps it';
+  ELSE
+    RAISE WARNING 'FAIL  an officer en route lost the mission to %', got;
+    failures := failures + 1;
   END IF;
 
   -- ── Clean up so the file can run twice ───────────────────────────────────

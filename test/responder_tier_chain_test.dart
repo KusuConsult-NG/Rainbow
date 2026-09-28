@@ -115,6 +115,42 @@ void main() {
     });
   });
 
+  // The override. "HQ can override where the chain is not accessible" is the
+  // stated requirement, and HQ was the single tier with no dispatch control:
+  // the gate was written inline as `== 'WARD' || == 'LGA'` in two places.
+  group('who can send a field unit', () {
+    test('HQ can — that is what the override means', () {
+      expect(
+        canDispatchFrom('HQ'),
+        isTrue,
+        reason: 'An incident that climbed the whole chain because nobody '
+            'answered arrived at the only desk that could not dispatch.',
+      );
+    });
+
+    test('the middle of the chain commands units', () {
+      expect(canDispatchFrom('WARD'), isTrue);
+      expect(canDispatchFrom('LGA'), isTrue);
+    });
+
+    test('a polling unit does not — it IS the field unit', () {
+      expect(canDispatchFrom('UNIT'), isFalse);
+    });
+
+    test('every tier can either dispatch or escalate, and HQ can dispatch', () {
+      // The action row used to be gated on `assignedTier != 'HQ'` as a whole,
+      // so this is the property that guards against losing a tier's only
+      // action the next time that row is edited.
+      for (final tier in ['UNIT', 'WARD', 'LGA', 'HQ']) {
+        expect(
+          canDispatchFrom(tier) || escalationTargetFor(tier) != null,
+          isTrue,
+          reason: '$tier has no action at all',
+        );
+      }
+    });
+  });
+
   // The role string on the profile is what decides all of this, so the mapping
   // from role to tier is part of the same claim.
   group('role strings map to the right rung', () {

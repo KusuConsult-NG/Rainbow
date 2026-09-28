@@ -107,6 +107,14 @@ if command -v flutter >/dev/null 2>&1; then
 
   echo "==> using the mobile app: SOS, AI report, every category, every button"
   E2E_OUT="$OUT" node scripts/local_e2e/mobile_interact.js
+
+  echo "==> the whole command chain: citizen -> PU -> WARD -> LGA -> HQ -> responder"
+  # Separate again, and for the same reason the interaction pass is separate
+  # from the screens pass. The two above prove each screen renders and each
+  # control does something; this proves ONE incident travels the whole chain —
+  # which is a claim about the system, not about a screen, and is the only pass
+  # that can catch a rung that works in isolation and drops the handover.
+  E2E_OUT="$OUT" node scripts/local_e2e/chain_lifecycle.js
 else
   echo "==> flutter not installed — skipping the mobile screens"
 fi

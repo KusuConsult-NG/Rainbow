@@ -57,6 +57,27 @@ String? escalationTargetFor(String assignedTier) {
   }
 }
 
+/// Can an officer at [assignedTier] send a field unit to an incident?
+///
+/// This used to be written inline as `assignedTier == 'WARD' || == 'LGA'`, in
+/// two places, which excluded the one tier that most needs it. HQ is the rung
+/// whose entire job is to override when the chain below it is not responding —
+/// and an incident that climbed all the way up because nobody answered arrived
+/// at the only desk with no way to send anyone to it.
+///
+/// A polling-unit officer is excluded deliberately, not by oversight: they ARE
+/// the field unit, and ENGAGE self-deploys them.
+bool canDispatchFrom(String assignedTier) {
+  switch (assignedTier.toUpperCase()) {
+    case 'WARD':
+    case 'LGA':
+    case 'HQ':
+      return true;
+    default:
+      return false;
+  }
+}
+
 /// Rank of a tier in the chain, bottom to top. UNIT=0 ... HQ=3.
 int tierRank(String tier) {
   switch (tier.toUpperCase()) {

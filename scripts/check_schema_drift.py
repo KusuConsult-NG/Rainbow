@@ -429,6 +429,64 @@ def called_functions() -> list[tuple[str, str, int]]:
     return found
 
 
+# `alert['assignedToUid']` — a camelCase key read off a map in a Dart file that
+# queries Supabase.
+#
+# PostgREST never returns a camelCase key. Every key on a row it hands back is
+# the column name, and every column in this schema is snake_case. So a camelCase
+# subscript in a file that reads rows is either a key from a local model that
+# does not belong on this map, or a straight mistake — and unlike a bad select
+# or a bad insert it fails SILENTLY: the read is `null`, the comparison against
+# it is `false`, and nothing is logged.
+#
+# That is how `alert['assignedToUid']` survived in three places. It is the field
+# name on `AlertModel`, a local Dart model that never touches these maps, so all
+# three reads were a constant null. The visibility filter's "if it is assigned
+# to me, show it" rule — the one that makes an HQ override to a lower-tier
+# officer visible to them — could never fire, and the tactical action sheet's
+# `isAssignedToMe` was permanently false, so EN ROUTE, ON SITE, RESOLVE MISSION,
+# MISSION INTEL and SECURE CHAT never appeared for the officer holding the
+# mission.
+#
+# Scoped to files that mention Supabase at all, which keeps the maps that are
+# legitimately camelCase out of it: a GoRouter `extra` map, an FCM payload, a
+# WebRTC ICE candidate, a `service.invoke` argument. Those files do not query.
+CAMEL_SUBSCRIPT = re.compile(
+    r"""([A-Za-z_]\w*)\s*\[\s*['"]([a-z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*)['"]\s*\]"""
+)
+
+# A map that is demonstrably not a database row, named where it is read. Each
+# entry is (file suffix, variable name) and needs a reason in the comment.
+NOT_A_ROW: set[tuple[str, str]] = {
+    # `service.invoke('updateMode', {...})` payloads, round-tripped through
+    # flutter_background_service — its own wire format, not a table.
+    ("services/background_tracking_service.dart", "event"),
+    # An ICE candidate as WebRTC defines it: sdpMid, sdpMLineIndex.
+    ("services/live_stream_service.dart", "candidateMap"),
+    # An FCM `data` payload, keyed by whatever the sender put in it.
+    ("services/push_notification_service.dart", "data"),
+}
+
+
+def camel_row_reads() -> list[tuple[str, str, str, int]]:
+    """(variable, key, file, line) for every camelCase subscript in lib/."""
+    found = []
+    for path in (ROOT / "lib").rglob("*.dart"):
+        if path.name.endswith((".g.dart", ".freezed.dart", "_test.dart")):
+            continue
+        text = path.read_text()
+        if "SupabaseConfig.client" not in text and ".from(" not in text:
+            continue
+        rel = str(path.relative_to(ROOT))
+        text = blank_comments(text)
+        for m in CAMEL_SUBSCRIPT.finditer(text):
+            var, key = m.group(1), m.group(2)
+            if any(rel.endswith(suffix) and var == name for suffix, name in NOT_A_ROW):
+                continue
+            found.append((var, key, rel, text.count("\n", 0, m.start()) + 1))
+    return found
+
+
 def main() -> int:
     schema = schema_columns()
     problems: list[str] = []
@@ -490,6 +548,20 @@ def main() -> int:
         print("fails at runtime and nowhere else.")
         print()
 
+    camel = [
+        f"  {path}:{line}  {var}['{key}']"
+        for var, key, path, line in sorted(set(camel_row_reads()))
+    ]
+    if camel:
+        print("camelCase keys read off maps in files that query Supabase:")
+        print("\n".join(camel))
+        print()
+        print("PostgREST returns column names, and every column here is")
+        print("snake_case — so each of these reads null and every comparison")
+        print("against it is false, silently. Use the column name, or add the")
+        print("map to NOT_A_ROW with a reason if it is not a database row.")
+        print()
+
     if problems:
         print("Columns read or written that no migration creates:")
         print("\n".join(sorted(set(problems))))
@@ -499,7 +571,7 @@ def main() -> int:
         print("and nowhere else. Add the column in a migration, or stop naming it.")
         return 1
 
-    if unknown_tables or missing_fns or bad_embeds:
+    if unknown_tables or missing_fns or bad_embeds or camel:
         return 1
 
     print(f"OK: every column read or written by either app exists in the "

@@ -99,20 +99,32 @@ const DARK_TILE = tilePng(true);
 
 /**
  * Launch a browser whose pages serve map tiles locally and record every tile
- * asked for. Returns { browser, newPage, tiles, problems }.
+ * asked for. Returns { browser, newPage, tiles, problems, state }.
+ *
+ * The three collectors can be passed IN, which is what lets a long run replace
+ * its browser part-way through without losing what it has recorded. A Flutter
+ * release build in CanvasKit mode holds a large GPU-side surface per page, and
+ * a run that signs in as eight accounts in turn exhausted this container before
+ * the eighth: the browser died and the run ended on a TargetCloseError, with the
+ * screens it had already captured intact but its report never written. Replacing
+ * the browser between roles costs a few seconds of startup and removes that
+ * whole failure mode — but only if the tile log and the error log survive it,
+ * since those are the run's evidence.
  */
-async function launch({ viewport, canvaskitDir = null }) {
+async function launch({
+  viewport,
+  canvaskitDir = null,
+  /** Every tile the app requested: { z, x, y, dark }. */
+  tiles = [],
+  /** Anything the browser complained about, tagged with the screen. */
+  problems = [],
+  state = { screen: 'startup' },
+} = {}) {
   const browser = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
     defaultViewport: viewport,
   });
-
-  /** Every tile the app requested: { z, x, y, dark }. */
-  const tiles = [];
-  /** Anything the browser complained about, tagged with the screen. */
-  const problems = [];
-  const state = { screen: 'startup' };
 
   async function newPage() {
     const page = await browser.newPage();

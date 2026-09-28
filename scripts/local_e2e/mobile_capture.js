@@ -112,8 +112,29 @@ async function semanticsText(page) {
   const origin = `http://127.0.0.1:${PORT}`;
   console.log(`[mobile] serving build/web on ${origin}`);
 
-  const { browser, newPage, problems, state, tiles } = await launch({ viewport: PHONE, canvaskitDir: path.join(WEB, 'canvaskit') });
+  // The collectors live out here so a browser restart does not lose them.
+  const tiles = [];
+  const problems = [];
+  const state = { screen: 'startup' };
+  const LAUNCH = { viewport: PHONE, canvaskitDir: path.join(WEB, 'canvaskit'), tiles, problems, state };
+
+  let { browser, newPage } = await launch(LAUNCH);
   let page = await newPage();
+
+  /**
+   * Replace the browser.
+   *
+   * Eight accounts, twenty-four routes each, in one CanvasKit browser exhausted
+   * this container on the eighth: the process died mid-screenshot and the run
+   * ended on `TargetCloseError` with no report written. The screens captured
+   * before that were fine, which is the dangerous part — a partial run that
+   * looks like a crash rather than like missing coverage.
+   */
+  async function freshBrowser() {
+    try { await browser.close(); } catch { /* already gone */ }
+    ({ browser, newPage } = await launch(LAUNCH));
+    page = await newPage();
+  }
 
   // A release build fetches CanvasKit from gstatic, which the egress policy
   // refuses. The same files are already in build/web/canvaskit, so serve those:
@@ -339,6 +360,7 @@ async function semanticsText(page) {
 
   for (const role of ROLES) {
     state.screen = `mobile:${role}:signin`;
+    await freshBrowser();
     const landed = await signIn(role);
     const signedIn = !/login/.test(landed);
     check(`${role}: signs in`, signedIn, `landed on ${landed || '#/'}`);

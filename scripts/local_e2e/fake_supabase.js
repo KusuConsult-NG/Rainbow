@@ -25,7 +25,7 @@ const http = require('http');
 const crypto = require('crypto');
 const path = require('path');
 const { tables, PEOPLE, PASSWORD, DOMAIN } = require('./fixtures');
-const { columns: schema, relationships } = require('./schema').build();
+const { columns: schema, relationships, defaults: columnDefaults } = require('./schema').build();
 
 const PORT = Number(process.env.FAKE_SUPABASE_PORT || 54321);
 
@@ -507,9 +507,24 @@ const server = http.createServer(async (req, res) => {
       const merging = prefer.includes('resolution=merge-duplicates');
       const conflictKey = url.searchParams.get('on_conflict') || 'id';
 
+      // Apply the schema's own DEFAULTs for columns the caller omitted.
+      //
+      // Without this the fake stored exactly what was POSTed, so
+      // `alerts.assigned_tier DEFAULT 'UNIT'` — the thing that puts an alert
+      // at the bottom of the command chain — came back NULL, and a run
+      // reported that citizen reports never reach the polling unit. They do:
+      // the default is proven against real PostgreSQL. It was the stand-in
+      // that did not model it.
+      const defs = columnDefaults[table] || {};
       const created = [];
       for (const r of rows) {
-        const row = { id: r.id || crypto.randomUUID(), created_at: new Date().toISOString(), ...r };
+        const withDefaults = {};
+        for (const [col, val] of Object.entries(defs)) {
+          if (r[col] === undefined) {
+            withDefaults[col] = val === '__NOW__' ? new Date().toISOString() : val;
+          }
+        }
+        const row = { id: r.id || crypto.randomUUID(), created_at: new Date().toISOString(), ...withDefaults, ...r };
         const existing = (tables[table] || []).find(
           (x) => row[conflictKey] !== undefined && x[conflictKey] === row[conflictKey],
         );

@@ -49,6 +49,38 @@ const NON_COLUMN = /^(constraint|primary|unique|foreign|check|exclude|like|inher
 
 function build() {
   const tables = new Map();
+  /** table -> { column: defaultValue } for defaults the fake can honour. */
+  const defaults = new Map();
+  /**
+   * @param raw  the SQL default as written
+   * @param type the column's declared type, when the clause carried one — it
+   *   decides what an empty literal means. `'{}'` on a `TEXT[]` is an empty
+   *   ARRAY; on `JSONB` it is an empty OBJECT. Getting that wrong hands the app
+   *   a string where it expects a list, and `Array.isArray` on it is false
+   *   everywhere — which is how `escalation_log` arrived as the two-character
+   *   string "[]" and every read of the chain of custody came back empty.
+   */
+  const setDefault = (table, column, raw, type = '') => {
+    if (!table || !column) return;
+    const cast = String(raw).match(/::([a-z_ ]+)$/i);
+    const v = String(raw).trim().replace(/::[a-z_ ]+$/i, '').trim();
+    const declared = `${type} ${cast ? cast[1] : ''}`.toLowerCase();
+    const isArray = /\[\s*\]/.test(type);
+    const isJson = /\bjsonb?\b/.test(declared);
+    let value;
+    if (/^'(.*)'$/s.test(v)) {
+      const inner = v.replace(/^'|'$/g, '').replace(/''/g, "'");
+      if (isArray && /^\{\s*\}$/.test(inner)) value = [];
+      else if (isJson) {
+        try { value = JSON.parse(inner); } catch { value = inner; }
+      } else value = inner;
+    } else if (/^(now\(\)|current_timestamp)$/i.test(v)) value = '__NOW__';
+    else if (/^(true|false)$/i.test(v)) value = v.toLowerCase() === 'true';
+    else if (/^-?\d+(\.\d+)?$/.test(v)) value = Number(v);
+    else return; // gen_random_uuid(), expressions: the fake makes its own
+    if (!defaults.has(table)) defaults.set(table, {});
+    defaults.get(table)[column] = value;
+  };
   /** table -> set of tables it declares a foreign key to. */
   const refs = new Map();
   const add = (table, column) => {
@@ -89,7 +121,16 @@ function build() {
         if (ref) addRef(table, ref[1]);
         if (!t || NON_COLUMN.test(t)) continue;
         const col = t.match(/^"?([a-z_][a-z0-9_]*)"?/i);
-        if (col) add(table, col[1]);
+        if (col) {
+          add(table, col[1]);
+          const def = t.match(/\bdefault\s+('(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_]*\(\)|[^\s,]+)/i);
+          // Everything between the column name and DEFAULT/NOT NULL is the
+          // declared type, including a `[]` suffix.
+          if (def) {
+            const decl = t.slice(col[0].length, def.index);
+            setDefault(table, col[1], def[1], decl);
+          }
+        }
       }
     }
 
@@ -104,9 +145,19 @@ function build() {
       /alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?\s+((?:[^;])*?);/gi;
     while ((m = alterRe.exec(sql)) !== null) {
       const table = m[1];
-      const addRe = /add\s+column\s+(?:if\s+not\s+exists\s+)?"?([a-z_][a-z0-9_]*)"?/gi;
+      const addRe = /add\s+column\s+(?:if\s+not\s+exists\s+)?"?([a-z_][a-z0-9_]*)"?([^,]*)/gi;
       let a;
-      while ((a = addRe.exec(m[2])) !== null) add(table, a[1]);
+      while ((a = addRe.exec(m[2])) !== null) {
+        add(table, a[1]);
+        const def = (a[2] || '').match(/\bdefault\s+('(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_]*\(\)|[^\s,]+)/i);
+        if (def) setDefault(table, a[1], def[1], (a[2] || '').slice(0, def.index));
+      }
+      // ALTER COLUMN x SET DEFAULT y — how a default is added to an existing
+      // column, which is exactly how alerts.assigned_tier gets its 'UNIT'.
+      const setDefRe =
+        /alter\s+column\s+"?([a-z_][a-z0-9_]*)"?\s+set\s+default\s+('(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_]*\(\)|[^\s,;]+)/gi;
+      let sd;
+      while ((sd = setDefRe.exec(m[2])) !== null) setDefault(table, sd[1], sd[2]);
     }
 
     // alter table ... rename column a to b
@@ -125,7 +176,7 @@ function build() {
   for (const [table, cols] of tables) columns[table] = [...cols].sort();
   const relationships = {};
   for (const [table, to] of refs) relationships[table] = [...to].sort();
-  return { columns, relationships };
+  return { columns, relationships, defaults: Object.fromEntries(defaults) };
 }
 
 module.exports = { build };
