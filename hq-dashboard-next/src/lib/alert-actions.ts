@@ -304,3 +304,46 @@ export async function dispatchAlert(
     return failed(e, 'Dispatch failed');
   }
 }
+
+/**
+ * Sends a message into an incident's tactical channel, as the signed-in
+ * operator.
+ *
+ * THE DISPATCHER COULD NOT REPLY.
+ *
+ * The mobile app has two chat screens — the citizen's, titled DISPATCHER CHAT,
+ * and the responder's SECURE CHAT — and both write and subscribe correctly.
+ * The console, where the dispatcher actually sits, read `chat_messages` in two
+ * places and wrote nowhere. So a citizen in an emergency could send messages to
+ * a dispatcher who had no way to answer, and the only person who could reply
+ * was a responder who happened to have that exact incident open on a handset.
+ *
+ * `actor.id` is required rather than optional: `sender_id` must equal
+ * `auth.uid()` for the insert policy to admit it, and an anonymous console
+ * message is not a thing we want to invent a fallback for — an unattributed
+ * instruction on an emergency channel is worse than no instruction.
+ */
+export async function sendChatMessage(
+  alertId: string,
+  message: string,
+  actor: Actor & { name?: string; role?: string },
+): Promise<ActionResult> {
+  const text = message.trim();
+  if (!text) return { ok: false, error: 'Nothing to send' };
+  if (!actor.id) return { ok: false, error: 'Not signed in' };
+
+  try {
+    const { error } = await supabase.from('chat_messages').insert({
+      alert_id: alertId,
+      sender_id: actor.id,
+      sender_name: actor.name || actor.email || 'HQ DISPATCH',
+      sender_role: actor.role || 'HQ_COMMAND',
+      message: text,
+    });
+    if (error) throw error;
+    return { ok: true };
+  } catch (e) {
+    console.error('[HQ_CHAT_ERR]', e);
+    return failed(e, 'Message not sent');
+  }
+}

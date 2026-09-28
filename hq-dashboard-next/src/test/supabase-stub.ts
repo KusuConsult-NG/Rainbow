@@ -35,6 +35,9 @@ export interface SupabaseStub {
   setError(table: string, error: { message: string }): void;
   /** Make writes to `table` fail — reads still succeed. */
   setUpdateError(table: string, error: { message: string }): void;
+  /** Same write-error seam as setUpdateError; named for readability at the
+   *  call site, since inserts and updates share one rejection path here. */
+  setInsertError(table: string, error: { message: string }): void;
   /** How many times the component read `table`. */
   selectCount(table: string): number;
   updates: RecordedUpdate[];
@@ -61,6 +64,7 @@ export function makeSupabaseStub(): SupabaseStub {
     },
     setError: (t, e) => errors.set(t, e),
     setUpdateError: (t, e) => writeErrors.set(t, e),
+    setInsertError: (t, e) => writeErrors.set(t, e),
     selectCount: (t) => selects.get(t) ?? 0,
     updates,
     inserts,

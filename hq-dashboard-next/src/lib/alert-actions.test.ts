@@ -446,3 +446,61 @@ describe('dispatchAlert', () => {
     });
   });
 });
+
+// The dispatcher could not reply. The console read `chat_messages` in two
+// places and wrote nowhere, so the citizen's DISPATCHER CHAT had no dispatcher
+// on the other end — only a responder with that incident open on a handset.
+describe('sendChatMessage', () => {
+  beforeEach(() => {
+    db = makeSupabaseStub();
+    db.setRows('alerts', [ALERT]);
+  });
+
+  const inserted = () => db.inserts.find(i => i.table === 'chat_messages')!
+    .values as Record<string, unknown>;
+
+  it('sends as the signed-in operator', async () => {
+    const { sendChatMessage } = await actions();
+    const res = await sendChatMessage('alert-1', 'Units are ten minutes out.', {
+      ...HQ, name: 'ACP Musa Ibrahim', role: 'HQ_COMMAND',
+    });
+
+    expect(res.ok).toBe(true);
+    expect(inserted()).toMatchObject({
+      alert_id: 'alert-1',
+      sender_id: HQ.id,
+      sender_name: 'ACP Musa Ibrahim',
+      sender_role: 'HQ_COMMAND',
+      message: 'Units are ten minutes out.',
+    });
+  });
+
+  it('trims the message', async () => {
+    const { sendChatMessage } = await actions();
+    await sendChatMessage('alert-1', '   hold position   ', { ...HQ });
+    expect(inserted().message).toBe('hold position');
+  });
+
+  it('refuses an empty message rather than writing a blank line', async () => {
+    const { sendChatMessage } = await actions();
+    expect(await sendChatMessage('alert-1', '   ', { ...HQ }))
+      .toEqual({ ok: false, error: 'Nothing to send' });
+    expect(db.inserts.find(i => i.table === 'chat_messages')).toBeUndefined();
+  });
+
+  // `sender_id` must equal auth.uid() for the insert policy to admit it, and
+  // an unattributed instruction on an emergency channel is worse than none.
+  it('refuses to send with nobody signed in', async () => {
+    const { sendChatMessage } = await actions();
+    expect(await sendChatMessage('alert-1', 'move in', { email: 'x@y.z' }))
+      .toEqual({ ok: false, error: 'Not signed in' });
+    expect(db.inserts.find(i => i.table === 'chat_messages')).toBeUndefined();
+  });
+
+  it('reports a rejected insert instead of swallowing it', async () => {
+    db.setInsertError('chat_messages', { message: 'row level security' });
+    const { sendChatMessage } = await actions();
+    expect(await sendChatMessage('alert-1', 'move in', { ...HQ }))
+      .toEqual({ ok: false, error: 'row level security' });
+  });
+});

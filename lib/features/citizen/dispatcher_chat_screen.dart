@@ -75,6 +75,10 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
     final fullName = profile['full_name'] as String? ?? profile['name'] as String? ?? (user.email?.split('@')[0] ?? 'User');
     final role = (profile['role'] as String? ?? 'CITIZEN').toUpperCase();
 
+    // Cleared here, and handed back below if the send fails. It used to be
+    // cleared before the insert with the failure swallowed in a debugPrint, so
+    // a message that never left the phone looked exactly like one that did —
+    // to a person who may be in an emergency and is waiting for an answer.
     _controller.clear();
 
     try {
@@ -87,6 +91,19 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
       });
     } catch (e) {
       debugPrint('[CHAT_ERR] Message insert failed: $e');
+      if (!mounted) return;
+      _controller.text = text;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.error,
+          content: const Text('MESSAGE NOT SENT — check your connection and retry'),
+          action: SnackBarAction(
+            label: 'RETRY',
+            textColor: Colors.white,
+            onPressed: () => unawaited(_sendMessage()),
+          ),
+        ),
+      );
     }
   }
 

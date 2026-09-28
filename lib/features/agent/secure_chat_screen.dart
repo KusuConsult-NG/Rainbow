@@ -1,4 +1,6 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -28,14 +30,20 @@ class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
 
-    _controller.clear();
-
     final auth = ref.read(authProvider);
     final user = auth.user;
     if (user == null) return;
 
     final alertId = widget.alertData['id'] as String;
 
+    // CLEAR ONLY ONCE IT IS SENT.
+    //
+    // This cleared the box first and then swallowed any failure in a
+    // `debugPrint`. On a tactical channel that means the operator types a
+    // message, watches it disappear, sees it never arrive in the thread, and
+    // has nothing to tell them whether it went. Row-level security, an expired
+    // session and a dead network all present identically: as silence.
+    _controller.clear();
     try {
       await SupabaseConfig.client.from('chat_messages').insert({
         'alert_id': alertId,
@@ -46,6 +54,20 @@ class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
       });
     } catch (e) {
       debugPrint('[CHAT_ERR] Secure chat insert failed: $e');
+      if (!mounted) return;
+      // Give the text back, so it can be retried rather than retyped.
+      _controller.text = text;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.error,
+          content: const Text('MESSAGE NOT SENT — check your connection and retry'),
+          action: SnackBarAction(
+            label: 'RETRY',
+            textColor: Colors.white,
+            onPressed: () => unawaited(_sendMessage()),
+          ),
+        ),
+      );
     }
   }
 

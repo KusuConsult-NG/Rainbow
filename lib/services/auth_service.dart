@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
+import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/services/secure_storage_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -204,8 +205,30 @@ class AuthService {
     }
   }
 
-  /// Sign out user session
+  /// Test seam: BackgroundTrackingService talks to platform channels, which do
+  /// not exist under `flutter test`.
+  @visibleForTesting
+  static Future<void> Function()? stopTrackingOverride;
+
+  /// Sign out user session.
+  ///
+  /// STOPPING LOCATION IS PART OF SIGNING OUT.
+  ///
+  /// This cleared the session and the secure storage and left the background
+  /// location service running. Its keys live in SharedPreferences, which
+  /// `deleteAll()` does not touch, and the isolate re-initialises Supabase by
+  /// itself — so the phone carried on transmitting its position every few
+  /// seconds under the signed-out user's uid, with the app showing a login
+  /// screen. Signing out is the clearest statement a person can make that they
+  /// are done being observed, and it was the one action that did not stop it.
+  ///
+  /// First, so that a failure below cannot leave tracking alive.
   Future<void> signOut() async {
+    try {
+      await (stopTrackingOverride ?? BackgroundTrackingService().stopTracking)();
+    } catch (e) {
+      debugPrint('[SIGNOUT_TRACKING_ERR] could not stop tracking: $e');
+    }
     await SupabaseConfig.client.auth.signOut();
     await _secureStorage.deleteAll();
     _pendingPhone = null;

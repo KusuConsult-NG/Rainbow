@@ -48,7 +48,8 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/emergency_pins_behaviour_test.sql \
    "$REPO"/scripts/production_readiness_behaviour_test.sql \
    "$REPO"/scripts/signup_role_escalation_test.sql \
-   "$REPO"/scripts/command_chain_behaviour_test.sql "$PGROOT/"
+   "$REPO"/scripts/command_chain_behaviour_test.sql \
+   "$REPO"/scripts/privacy_behaviour_test.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
 psql_run() {
@@ -165,6 +166,20 @@ psql_run "-f $PGROOT/20260928000000_command_chain_escalation.sql" >/dev/null
 # configured and dead before this; a test is the only thing that keeps them alive.
 echo "▶ Asserting the command chain climbs, and stops"
 CHAIN_OUT=$(psql_run "-f $PGROOT/command_chain_behaviour_test.sql" 2>&1) && CHAIN_RC=0 || CHAIN_RC=$?
+
+echo "▶ Applying 20260929000000_telemetry_is_not_a_standing_feed.sql"
+psql_run "-f $PGROOT/20260929000000_telemetry_is_not_a_standing_feed.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20260929000000_telemetry_is_not_a_standing_feed.sql" >/dev/null
+
+echo "▶ Asserting who can watch whom, and for how long"
+PRIV_OUT=$(psql_run "-f $PGROOT/privacy_behaviour_test.sql" 2>&1) && PRIV_RC=0 || PRIV_RC=$?
+echo "$PRIV_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$PRIV_RC" -ne 0 ]; then
+  echo "$PRIV_OUT"
+  echo "✗ privacy assertions failed"
+  exit 1
+fi
 printf '%s\n' "$CHAIN_OUT" | grep -E "PASS|FAIL|ALL COMMAND" || true
 if [ "$CHAIN_RC" -ne 0 ]; then
   # The ERROR line first: a statement dump is ~20 lines and pushes the actual
