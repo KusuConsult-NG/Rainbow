@@ -16,6 +16,7 @@ String? redirect({
   String? resolutionError,
   bool splashFinished = true,
   String location = AppRoutes.splash,
+  bool isLocked = false,
 }) {
   return computeRedirect(
     isLoading: isLoading,
@@ -26,10 +27,12 @@ String? redirect({
     resolutionError: resolutionError,
     splashFinished: splashFinished,
     location: location,
+    isLocked: isLocked,
   );
 }
 
 void main() {
+  _reentryLockTests();
   group('gating', () {
     test('never redirects while auth is still loading', () {
       expect(redirect(isLoading: true), isNull);
@@ -154,6 +157,113 @@ void main() {
       expect(
         redirect(isDeactivated: true, location: AppRoutes.uninstallRequest),
         isNull,
+      );
+    });
+  });
+}
+
+void _reentryLockTests() {
+  group('the re-entry lock', () {
+    test('sends every ordinary screen to the lock', () {
+      // Expressed in the router, not as a widget around some screens, because
+      // a gate that a route can be reached around is not a gate — and this app
+      // has thirty-odd routes, including deep links into a report in progress.
+      for (final screen in <String>[
+        AppRoutes.home,
+        AppRoutes.agentDashboard,
+        AppRoutes.settings,
+        AppRoutes.incidentHistory,
+        AppRoutes.reportDetails,
+        AppRoutes.safeZone,
+      ]) {
+        expect(
+          redirect(role: UserRole.citizen, location: screen, isLocked: true),
+          AppRoutes.lock,
+          reason: screen,
+        );
+      }
+    });
+
+    test('never stands in front of a running emergency', () {
+      // The rule the whole design exists to protect. Someone in the middle of
+      // an SOS must not be sent to read an SMS before they can see their own
+      // alarm.
+      expect(
+        redirect(
+          role: UserRole.citizen,
+          location: AppRoutes.emergencyActive,
+          isLocked: true,
+        ),
+        isNull,
+      );
+    });
+
+    test('lets a locked person sign out', () {
+      expect(
+        redirect(
+          role: UserRole.citizen,
+          location: AppRoutes.login,
+          isLocked: true,
+        ),
+        isNull,
+      );
+    });
+
+    test('stays put when already on the lock screen', () {
+      expect(
+        redirect(
+          role: UserRole.citizen,
+          location: AppRoutes.lock,
+          isLocked: true,
+        ),
+        isNull,
+      );
+    });
+
+    test('does not lock somebody who is not signed in', () {
+      // There is no number to send a code to. The login screen is the door.
+      expect(
+        redirect(
+          isAuthenticated: false,
+          location: AppRoutes.home,
+          isLocked: true,
+        ),
+        AppRoutes.login,
+      );
+    });
+
+    test('releases to the right home when the lock lifts', () {
+      // Leaving somebody stranded on a lock screen with nothing to unlock
+      // would be the same bug as the lock itself, with the sign reversed.
+      expect(
+        redirect(role: UserRole.citizen, location: AppRoutes.lock),
+        AppRoutes.home,
+      );
+      expect(
+        redirect(role: UserRole.responder, location: AppRoutes.lock),
+        AppRoutes.agentDashboard,
+      );
+      expect(
+        redirect(
+          isAuthenticated: false,
+          location: AppRoutes.lock,
+        ),
+        AppRoutes.login,
+      );
+    });
+
+    test('a deactivated account is still handled while locked', () {
+      // Order matters: the lock is checked first, so a deactivated user sees
+      // the lock rather than the uninstall-request screen. That is correct —
+      // we do not know yet that it is them.
+      expect(
+        redirect(
+          role: UserRole.citizen,
+          isDeactivated: true,
+          location: AppRoutes.home,
+          isLocked: true,
+        ),
+        AppRoutes.lock,
       );
     });
   });
