@@ -52,7 +52,8 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/privacy_behaviour_test.sql \
    "$REPO"/scripts/sms_device_keys_behaviour_test.sql \
    "$REPO"/scripts/mesh_ingest_behaviour_test.sql \
-   "$REPO"/scripts/alert_category_behaviour_test.sql "$PGROOT/"
+   "$REPO"/scripts/alert_category_behaviour_test.sql \
+   "$REPO"/scripts/alert_scoping_behaviour_test.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
 psql_run() {
@@ -229,6 +230,23 @@ echo "$CAT_OUT" | grep -E "PASS|FAIL|ERROR" || true
 if [ "$CAT_RC" -ne 0 ]; then
   echo "$CAT_OUT"
   echo "✗ alert category assertions failed"
+  exit 1
+fi
+
+# The command chain had structure for ROUTING and none for AUTHORITY: is_staff()
+# means "not a citizen", so every officer at every tier could read AND write
+# every incident in the state.
+echo "▶ Applying 20261006000000_alerts_scoped_to_posting.sql"
+psql_run "-f $PGROOT/20261006000000_alerts_scoped_to_posting.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261006000000_alerts_scoped_to_posting.sql" >/dev/null
+
+echo "▶ Asserting an officer's authority ends at their command"
+SCOPE_OUT=$(psql_run "-f $PGROOT/alert_scoping_behaviour_test.sql" 2>&1) && SCOPE_RC=0 || SCOPE_RC=$?
+echo "$SCOPE_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$SCOPE_RC" -ne 0 ]; then
+  echo "$SCOPE_OUT"
+  echo "✗ alert scoping assertions failed"
   exit 1
 fi
 
