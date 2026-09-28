@@ -285,7 +285,38 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
     return () => {
       readySignal.set(false);
       if (mapInstanceRef.current) {
-        mapInstanceRef.current.map.remove();
+        // Stop any animation FIRST.
+        //
+        // Opening a popup near an edge starts an autoPan, which runs on
+        // requestAnimationFrame. If the operator switches tab inside that
+        // window — click a pin, look at the feed — React unmounts this
+        // component while the pan is still stepping, and the next frame calls
+        // `_onPanTransitionEnd`, which reads `map._mapPane.classList` on a map
+        // that no longer has panes. An uncaught TypeError in the console HQ
+        // watches, twice, every time.
+        //
+        // `stop()` and `closePopup()` are Leaflet's public API for exactly
+        // this. The browser harness catches it; jsdom does not, because it
+        // runs no animation frames.
+        const dying = mapInstanceRef.current.map;
+        dying.closePopup();
+        // Detach the pan animation's listeners before the map goes.
+        //
+        // `_onPanTransitionEnd` does `removeClass(this._mapPane, …)` and
+        // `map.remove()` deletes `_mapPane`, so a pan that completes after the
+        // unmount throws `Cannot read properties of undefined (reading
+        // 'classList')` from a requestAnimationFrame callback — uncaught, in
+        // the console HQ watches, every time an operator clicks a pin near the
+        // edge (which starts an autoPan) and then switches tab.
+        //
+        // Neither `map.stop()` nor `setView(…, {animate: false})` fixes it and
+        // both make it worse: they end the animation by firing `moveend`,
+        // which the popup listens to, and its `_adjustPan` starts a FRESH pan
+        // on a map that is about to lose its panes. Dropping the listeners is
+        // the only thing that cannot restart anything. The animation object is
+        // discarded with the map a line later.
+        if (dying._panAnim) dying._panAnim.off();
+        dying.remove();
         mapInstanceRef.current = null;
       }
       markersRef.current = [];

@@ -306,6 +306,38 @@ describe('LiveMap', () => {
     }, { timeout: 5000 });
   });
 
+  it('unmounting with a popup open does not throw a frame later', async () => {
+    // Opening a popup near an edge starts Leaflet's autoPan, which runs on
+    // requestAnimationFrame. Switching tab inside that window unmounts the map
+    // mid-animation, and the next frame called `map._mapPane.classList` on a
+    // map with no panes: an uncaught TypeError in the console HQ watches,
+    // twice per visit. The browser harness caught it first; this suite
+    // reproduced it five times over once the popup tests existed.
+    const LiveMap = await load();
+    const thrown: unknown[] = [];
+    const onUncaught = (e: unknown) => thrown.push(e);
+    process.on('uncaughtException', onUncaught);
+    try {
+      const { container, unmount } = render(
+        <LiveMap
+          alerts={[alert('a-1', 9.9167, 8.8917)]}
+          agents={[]}
+          onResolve={noop}
+          onEscalate={noop}
+          theme="dark"
+        />,
+      );
+      await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+      await openPopup(container);
+      unmount();
+      // Let several animation frames run against the dead map.
+      await new Promise((r) => setTimeout(r, 400));
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
+    expect(thrown.map(String)).toEqual([]);
+  });
+
   it('unmounts without throwing', async () => {
     const LiveMap = await load();
     const { container, unmount } = render(

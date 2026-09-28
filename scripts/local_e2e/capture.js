@@ -571,6 +571,36 @@ async function chooseTactical(page, triggerText, optionText) {
     ctl.unknownColumns.join('; ') || 'none',
   );
 
+  // A basemap refused by our OWN policy is invisible from the map code and
+  // from the header: the map simply renders grey with the markers floating on
+  // it, and the only evidence is a console message nobody reads during an
+  // incident. `img-src` listed `*.tile.openstreetmap.org` while the map
+  // requested `tile.openstreetmap.org` — a wildcard matches a subdomain of a
+  // host, never the host — so every tile in the command console was blocked.
+  const blockedImages = browserProblems.filter((p) =>
+    /violates the following Content Security Policy directive: "img-src/i.test(p.text),
+  );
+  check(
+    'the basemap is not blocked by our own content security policy',
+    blockedImages.length === 0,
+    blockedImages.length
+      ? `${blockedImages.length} image(s) refused, first: ${blockedImages[0].text.slice(0, 120)}`
+      : 'no img-src violations',
+  );
+
+  const otherCspRefusals = browserProblems.filter(
+    (p) =>
+      /violates the following Content Security Policy/i.test(p.text) &&
+      !/"img-src/i.test(p.text),
+  );
+  check(
+    'nothing else the console needs is refused by the policy either',
+    otherCspRefusals.length === 0,
+    otherCspRefusals.length
+      ? `${otherCspRefusals.length}: ${otherCspRefusals[0].text.slice(0, 140)}`
+      : 'clean',
+  );
+
   const fatal = browserProblems.filter(
     (p) =>
       p.kind === 'pageerror' ||

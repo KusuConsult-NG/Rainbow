@@ -3269,3 +3269,68 @@ One honest limitation: the jsdom test asserts the DOSSIER button's `onclick`
 attribute and calls the handler directly rather than clicking it, because jsdom
 evaluates an inline `onclick` in a global scope that is not the one vitest hands
 the test. The real click is covered in Chromium by the harness.
+
+## The map had no basemap at all, and our own policy was why
+
+Moving the tiles off CARTO replaced a watermarked map with a blank one, and
+nothing in the map code could have shown it. `src/lib/csp.ts` allowed:
+
+```
+img-src ... https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org
+```
+
+and the map now requests `https://tile.openstreetmap.org/{z}/{x}/{y}.png`. A
+CSP wildcard matches a **subdomain of** a host, never the host itself, so every
+tile in the command console was refused:
+
+```
+Loading the image 'https://tile.openstreetmap.org/9/269/241.png' violates the
+following Content Security Policy directive: "img-src ..."
+```
+
+Grey map, markers floating on nothing, one console message per tile and no
+other symptom. This is the third time in this audit that a correct-looking
+change has been undone by a second file that had to agree with it — the tile
+URL that diverged between the initial layer and the theme effect, the profile
+query that named columns the schema does not have, and now the policy that
+decides whether the provider may be reached at all.
+
+Both spellings are allowed now, and the configured provider's origin is derived
+from `NEXT_PUBLIC_MAP_TILE_URL`, so moving to a keyed or self-hosted tile server
+does not silently reproduce the blank map. Leaflet's `{s}` subdomain
+placeholder becomes a wildcard; a non-https URL widens nothing. CARTO is gone
+from the policy, because nothing requests it.
+
+Seven tests in `src/lib/csp.test.ts` — there were none — and the browser
+harness now fails the run on any `img-src` refusal, because that is the only
+place this was ever visible.
+
+## Clicking a pin and changing tab threw, twice, every time
+
+The harness reported two uncaught `TypeError: Cannot read properties of
+undefined (reading 'classList')` on the screen after the map. The stack is
+Leaflet's:
+
+```
+_onPanTransitionEnd -> DomUtil.removeClass(this._mapPane, 'leaflet-pan-anim')
+```
+
+Opening a popup near an edge starts an autoPan, which runs on
+`requestAnimationFrame`. `map.remove()` deletes `_mapPane`. So an operator who
+clicks a pin and switches tab within a quarter of a second unmounts the map
+mid-animation, and the next frame reads `classList` off nothing. Reachable
+before this work and much more reachable after it, because a dossier-sized card
+autopans almost every time.
+
+Two obvious fixes both make it worse, and the tests say so: `map.stop()` runs
+`setZoom` first, which can begin a fresh animation, and ending the pan by any
+route fires `moveend` — which the popup itself listens to, and whose handler
+`_adjustPan` starts another pan on a map that is about to lose its panes.
+Detaching the animation's listeners before `remove()` is the only step that
+cannot restart anything.
+
+Worth recording as a testing lesson: vitest reported these as "unhandled
+errors" beside a green suite, and a green suite is what a reader takes away.
+`LiveMap.test.tsx` now registers an `uncaughtException` listener, unmounts with
+a popup open, waits for the frames to run against the dead map, and fails on
+anything that arrives.
