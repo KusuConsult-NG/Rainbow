@@ -496,7 +496,21 @@ async function writeMark() {
 
   // Deploy against the escalated incident.
   state.screen = 'army:deploy';
-  await clickText(page, 'situation feed|incidents');
+  // The portal's own section tab, found BY ROLE rather than by text.
+  //
+  // This was `clickText(page, 'situation feed|incidents')`, and the `incidents`
+  // alternation started matching the liaison's NAV entry — "Incidents For Us" —
+  // which navigated out of the portal altogether. Every following step then ran
+  // against the dashboard's incident feed: the card was found, the dossier
+  // opened, and "deploy" matched nothing, so the deployment check failed while
+  // the screenshot showed an incident dossier. A matcher loose enough to leave
+  // the screen is a matcher that can report the wrong thing.
+  await page.evaluate(() => {
+    const tab = [...document.querySelectorAll('[role="tab"]')].find(
+      (t) => /situation feed/i.test(t.textContent || ''),
+    );
+    tab?.click();
+  });
   await sleep(1500);
   // DEPLOY and REPORT only appear once the incident card is expanded.
   const expanded = await page.evaluate(() => {
