@@ -89,9 +89,34 @@ class _OnboardingContactsScreenState
                     if (name.isNotEmpty && phone.isNotEmpty) {
                       final user = ref.read(authProvider).user;
                       if (user != null) {
-                        await SupabaseConfig.client.from('profiles').update({
-                          'emergency_contacts': [{'name': name, 'phone': phone}],
-                        }).eq('id', user.id);
+                        try {
+                          await SupabaseConfig.client
+                              .from('profiles')
+                              .update({
+                                'emergency_contacts': [
+                                  {'name': name, 'phone': phone},
+                                ],
+                              })
+                              .eq('id', user.id);
+                        } catch (e) {
+                          // This was unguarded, so a failed write looked
+                          // exactly like a successful one: the screen moved on
+                          // and the person believed someone would be called
+                          // for them. Say so, and stay.
+                          debugPrint('[ONBOARD_CONTACTS_ERR] $e');
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'YOUR CONTACT DID NOT SAVE. CHECK YOUR '
+                                  'CONNECTION AND TRY AGAIN.',
+                                ),
+                                backgroundColor: AppColors.danger,
+                              ),
+                            );
+                          }
+                          return;
+                        }
                       }
                     }
                     // context.mounted, not the State's mounted: this is a
@@ -113,7 +138,8 @@ class _OnboardingContactsScreenState
                     ),
                   ),
                   child: Text(
-                    'SAVE & PROCEED TO MAP',
+                    // It proceeds to the emergency PIN step, not the map.
+                    'SAVE & CONTINUE',
                     style: GoogleFonts.outfit(
                       fontWeight: FontWeight.bold,
                       color: Colors.white,

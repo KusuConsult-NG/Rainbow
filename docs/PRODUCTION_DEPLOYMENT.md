@@ -235,6 +235,57 @@ deploy, the same scan CI runs. Keep that step in whatever replaces it.
 
 ---
 
+## 2b. Citizen sign-in needs an SMS provider — nothing works until it does
+
+**This is a blocker, not a checklist item.** A citizen signs in with their phone
+number and a code sent to it. There is no email path and no password. The app
+calls `supabase.auth.signInWithOtp(phone: …)`, and Supabase refuses that call
+outright unless the project has an SMS provider configured — so until this is
+done, **every citizen sign-in fails**, and the app is an emergency service that
+nobody can get into.
+
+Termii, which this deployment already uses for outbound alerts, is **not** one
+of Supabase's built-in providers (Twilio, MessageBird, Vonage, TextLocal). So it
+has to be attached the other way:
+
+1. **Authentication → Providers → Phone**: enable it.
+2. Either pick a built-in provider and enter its credentials, **or** attach
+   Termii through **Authentication → Hooks → Send SMS**: a Postgres function or
+   an Edge Function that receives the message and delivers it through Termii's
+   API. The hook is the option that keeps one SMS account and one bill.
+3. Set the OTP length and expiry. The app's code field takes **6 digits**
+   (`maxLength: 6`), so a shorter code cannot be typed in full.
+4. **Send yourself one.** A provider that is configured but not working looks
+   identical to one that is not configured, from every screen in the app.
+
+The app tells the person the truth when this is missing rather than "try again":
+`AuthService._describeOtpSendFailure` recognises the provider-disabled refusals
+and says *"SMS sign-in is not switched on for this service yet. Report this to
+HQ — it is not your phone."* That is a deployment fault, and the person holding
+the handset cannot fix it by retrying.
+
+### Costs, and who pays
+
+Every sign-in is a paid SMS. So is every re-entry code. Two decisions belong to
+whoever owns the Termii account before launch, not after the first bill:
+
+* the per-message cost and the expected volume (one per citizen sign-in, plus
+  re-entry codes);
+* a rate limit, in Supabase, so a script cannot drain the account by asking for
+  codes for a list of numbers.
+
+### The demo account must not ship
+
+`DEMO_CITIZEN_EMAIL` and `DEMO_CITIZEN_PASS` in `.env` are a **real account with
+a real password**, and `.env` ships inside the APK and extracts with `unzip`.
+The code path that used them is compiled out of release builds now
+(`AuthService.isDemoNumber` returns false under `kReleaseMode`), but the
+credentials are still readable in the artifact if they are present in the file.
+Leave both blank in the `.env` used for a release build, and make sure the
+account itself is disabled in Supabase.
+
+---
+
 ## 3. Mobile app
 
 ```bash
