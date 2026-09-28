@@ -607,6 +607,9 @@ async function logMark() {
   /** Per screen: how much of the accessibility tree the sweep can reach. */
   const coverage = [];
 
+  /** Controls that were found but had gone from the DOM by the time we pressed. */
+  let unreachable = 0;
+
   for (const route of SCREENS) {
     state.screen = `sweep:${route}`;
     await go(route, 2600);
@@ -614,7 +617,7 @@ async function logMark() {
     const landed = await page.evaluate(() => window.location.hash);
     if (!landed.includes(route)) sweptElsewhere += 1;
 
-    const buttons = await page.evaluate(() => {
+    const captureControls = () => page.evaluate(() => {
       // `flt-semantics[role="button"]` alone found under two controls per
       // screen — 34 across nineteen screens, against the console sweep's 140.
       // Flutter only gives role="button" to widgets it considers semantic
@@ -646,12 +649,14 @@ async function logMark() {
       return window.__mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
     });
 
+    let labels = await captureControls();
+
     const cov = await page.evaluate(() => window.__coverage);
     coverage.push({ route, ...cov });
     console.log(`      semantics ${route}: ${cov.nodes} nodes, ${cov.matched} tappable, ${cov.innermost} pressable`);
 
-    for (let i = 0; i < buttons.length; i++) {
-      const label = buttons[i];
+    for (let i = 0; i < labels.length; i++) {
+      const label = labels[i];
       // Signing out would end the sweep; SOS is asserted separately and files a
       // real alert every time it is pressed.
       //
@@ -682,7 +687,10 @@ async function logMark() {
         b.click();
         return true;
       }, i);
-      if (!clicked) continue;
+      if (!clicked) {
+        unreachable += 1;
+        continue;
+      }
       await sleep(700);
 
       const after = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
@@ -696,7 +704,22 @@ async function logMark() {
       sweepLog.push({ route, label, effect: effect.join(', ') || 'nothing' });
       if (!effect.length) deadControls.push({ route, label });
 
-      if (after.url !== before.url) await go(route, 2000);
+      // BACK TO THE SCREEN, AND RE-READ IT.
+      //
+      // The list was captured once and then indexed for the rest of the loop.
+      // Flutter rebuilds its semantics tree on any change, so the FIRST control
+      // that navigated — or opened a sheet, or expanded a card — detached every
+      // node after it: `isConnected` went false, `clicked` came back false, and
+      // the rest of that screen's controls were skipped in silence.
+      //
+      // That is why the sweep pressed 26 of the 75 controls it could see. It
+      // was not the selector; it was this. Returning to the route and
+      // re-reading the tree costs a navigation per press and reaches the whole
+      // screen.
+      if (effect.length) {
+        await go(route, 1800);
+        labels = await captureControls();
+      }
     }
     await shot(`94-mobile-sweep${route.replace(/\//g, '-')}`);
   }
@@ -788,6 +811,16 @@ async function logMark() {
 
   const totalNodes = coverage.reduce((n, c) => n + c.nodes, 0);
   const totalPressable = coverage.reduce((n, c) => n + c.innermost, 0);
+  // A sweep that presses a fraction of what it found is not a sweep, and the
+  // shortfall must be visible rather than implied by a small tally.
+  check(
+    'the sweep pressed the controls it found',
+    unreachable === 0,
+    unreachable
+      ? `${unreachable} control(s) had gone from the DOM before they could be pressed`
+      : `${sweepLog.length} pressed, ${skipped} skipped, of ${totalPressable} found`,
+  );
+
   check(
     'the app exposes its controls to the accessibility tree',
     totalPressable > 0,
