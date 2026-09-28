@@ -33,14 +33,29 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
   String? _lastMessageId;
 
+  /// ONE CHANNEL, NOT TWO PLUS ONE PER FRAME.
+  ///
+  /// This screen opened a realtime subscription in `initState` to speak new
+  /// messages aloud, AND built a second one inline in `build()` for the
+  /// StreamBuilder — two channels on the same topic — and the second was
+  /// recreated on every rebuild, including the rebuild that sending a message
+  /// causes. The agent's Secure Chat had the same inline-stream problem and it
+  /// showed: the sender's own screen fell into "Error loading channel
+  /// messages" the moment they sent something.
+  ///
+  /// One broadcast stream now, created once, with both the speaker and the
+  /// list listening to it.
+  late final Stream<List<Map<String, dynamic>>> _messages;
+
   @override
   void initState() {
     super.initState();
-    _subscription = SupabaseConfig.client
+    _messages = SupabaseConfig.client
         .from('chat_messages')
         .stream(primaryKey: ['id'])
         .eq('alert_id', widget.alertId)
-        .listen((messages) {
+        .asBroadcastStream();
+    _subscription = _messages.listen((messages) {
       if (messages.isNotEmpty) {
         final newest = messages.last;
         final msgId = newest['id'] as String;
@@ -137,10 +152,7 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
         children: [
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: SupabaseConfig.client
-                  .from('chat_messages')
-                  .stream(primaryKey: ['id'])
-                  .eq('alert_id', widget.alertId),
+              stream: _messages,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return Center(

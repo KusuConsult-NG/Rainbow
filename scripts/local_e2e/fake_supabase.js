@@ -487,9 +487,15 @@ const server = http.createServer(async (req, res) => {
         const r = query(table, url.searchParams, noteUnknown);
         if (r.error) return send(400, r.error);
         const ids = new Set(r.rows.map((x) => x.id));
+        const changed = [];
         for (const row of tables[table] || []) {
-          if (ids.has(row.id)) Object.assign(row, rows[0]);
+          if (ids.has(row.id)) {
+            const before = { ...row };
+            Object.assign(row, rows[0]);
+            changed.push([row, before]);
+          }
         }
+        for (const [after, before] of changed) emitChange(table, 'UPDATE', after, before);
         return send(200, [...ids].map((id) => (tables[table] || []).find((x) => x.id === id)));
       }
 
@@ -530,8 +536,10 @@ const server = http.createServer(async (req, res) => {
         );
         if (existing) {
           if (merging) {
+            const before = { ...existing };
             Object.assign(existing, row);
             created.push(existing);
+            emitChange(table, 'UPDATE', existing, before);
             continue;
           }
           return send(409, {
@@ -541,6 +549,7 @@ const server = http.createServer(async (req, res) => {
         }
         if (tables[table]) tables[table].push(row);
         created.push(row);
+        emitChange(table, 'INSERT', row);
       }
       return send(201, single ? created[0] : created);
     }
@@ -576,28 +585,128 @@ try {
   console.error('[fake] ws not resolvable — realtime will not be served');
 }
 
+/**
+ * Realtime, actually served.
+ *
+ * This block used to destructure `{ topic, event, ref, payload }` out of the
+ * parsed frame. The Supabase Dart client does not send objects: it uses
+ * Phoenix's ARRAY serializer, `[join_ref, ref, topic, event, payload]`. So
+ * `event` was `undefined` on every frame, neither branch ever ran, and the fake
+ * answered nothing at all — 37 frames received, 0 sent, in a representative
+ * run.
+ *
+ * Nothing failed loudly, which is why it lasted. The client waits for a reply
+ * to `phx_join` before reporting SUBSCRIBED, gives up after about ten seconds,
+ * and each screen then shows its own degraded state: the dashboard's honest
+ * "MISSION FEED NOT LIVE", and the chat screen's "Error loading channel
+ * messages". Both look exactly like an app that cannot reach its backend.
+ *
+ * So every local run so far tested the app's OFFLINE behaviour and none tested
+ * its live behaviour, and every "NOT LIVE" banner in the captured screenshots
+ * is this fake rather than the app. Worth stating plainly, because a fake that
+ * silently degrades the thing under test is the most expensive kind of wrong.
+ */
+const wsClients = new Set();
+
+/** `alert_id=eq.X` → does this row match? Only `eq` is used by this app. */
+function filterMatches(filter, row) {
+  if (!filter) return true;
+  const m = String(filter).match(/^([a-z_][a-z0-9_]*)=eq\.(.*)$/i);
+  if (!m) return true;
+  const [, col, want] = m;
+  const got = row?.[col];
+  if (got === undefined || got === null) return false;
+  if (want === 'true' || want === 'false') return String(got) === want;
+  return String(got) === want;
+}
+
+/** Tell every subscriber that a row changed, the way Realtime does. */
+function emitChange(table, type, record, oldRecord = {}) {
+  if (!wsClients.size) return;
+  const commit = new Date().toISOString();
+  for (const client of wsClients) {
+    for (const sub of client.subs.values()) {
+      if (sub.table !== table) continue;
+      const row = type === 'DELETE' ? oldRecord : record;
+      if (!filterMatches(sub.filter, row)) continue;
+      const frame = [
+        null, null, sub.topic, 'postgres_changes',
+        {
+          ids: sub.ids,
+          data: {
+            schema: 'public',
+            table,
+            commit_timestamp: commit,
+            eventType: type,
+            type,
+            new: type === 'DELETE' ? {} : record,
+            old: type === 'INSERT' ? {} : oldRecord,
+            record: type === 'DELETE' ? {} : record,
+            old_record: type === 'INSERT' ? {} : oldRecord,
+            columns: Object.keys(record || oldRecord || {}).map((name) => ({ name, type: 'text' })),
+            errors: null,
+          },
+        },
+      ];
+      try { client.ws.send(JSON.stringify(frame)); } catch { /* client gone */ }
+    }
+  }
+}
+
 if (WebSocketServer) {
   const wss = new WebSocketServer({ server, path: '/realtime/v1/websocket' });
   wss.on('connection', (ws) => {
+    const client = { ws, subs: new Map() };
+    wsClients.add(client);
+    ws.on('close', () => wsClients.delete(client));
+
     ws.on('message', (raw) => {
       let msg;
       try { msg = JSON.parse(raw.toString()); } catch { return; }
-      const { topic, event, ref, payload } = msg;
+      if (process.env.FAKE_WS_DEBUG) console.log('[ws recv]', JSON.stringify(msg).slice(0, 300));
+
+      // Both serializers, because reading only one is how this was broken.
+      let joinRef, ref, topic, event, payload;
+      if (Array.isArray(msg)) {
+        [joinRef, ref, topic, event, payload] = msg;
+      } else {
+        ({ topic, event, ref, payload } = msg);
+        joinRef = ref;
+      }
+
+      const reply = (body) => {
+        const frame = Array.isArray(msg)
+          ? [joinRef, ref, topic, 'phx_reply', body]
+          : { topic, ref, event: 'phx_reply', payload: body };
+        if (process.env.FAKE_WS_DEBUG) console.log('[ws send]', JSON.stringify(frame).slice(0, 300));
+        ws.send(JSON.stringify(frame));
+      };
+
       if (event === 'phx_join') {
-        // Echo the requested postgres_changes back as accepted, with ids, which
-        // is what the client waits for before reporting SUBSCRIBED.
         const requested = payload?.config?.postgres_changes || [];
-        ws.send(JSON.stringify({
-          topic, ref, event: 'phx_reply',
-          payload: {
-            status: 'ok',
-            response: { postgres_changes: requested.map((c, i) => ({ ...c, id: i + 1 })) },
-          },
-        }));
+        const withIds = requested.map((c, i) => ({ ...c, id: i + 1 }));
+        // Remember what this topic wants, so a write can find it again.
+        for (const c of withIds) {
+          client.subs.set(`${topic}:${c.id}`, {
+            topic, table: c.table, filter: c.filter, ids: withIds.map((x) => x.id),
+          });
+        }
+        reply({ status: 'ok', response: { postgres_changes: withIds } });
+        return;
+      }
+      if (event === 'phx_leave') {
+        for (const key of [...client.subs.keys()]) {
+          if (key.startsWith(`${topic}:`)) client.subs.delete(key);
+        }
+        reply({ status: 'ok', response: {} });
         return;
       }
       if (event === 'heartbeat') {
-        ws.send(JSON.stringify({ topic: 'phoenix', ref, event: 'phx_reply', payload: { status: 'ok', response: {} } }));
+        reply({ status: 'ok', response: {} });
+        return;
+      }
+      if (event === 'access_token') {
+        reply({ status: 'ok', response: {} });
       }
     });
   });

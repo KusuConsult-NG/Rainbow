@@ -26,6 +26,35 @@ class SecureChatScreen extends ConsumerStatefulWidget {
 class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
   final _controller = TextEditingController();
 
+  /// THE SUBSCRIPTION IS CREATED ONCE, NOT ON EVERY FRAME.
+  ///
+  /// This used to be built inline in `build()`:
+  ///
+  ///     stream: SupabaseConfig.client.from('chat_messages')
+  ///         .stream(primaryKey: ['id']).eq('alert_id', alertId),
+  ///
+  /// `.stream()` opens a realtime channel, so writing it there opens a NEW one
+  /// on every rebuild and discards the one before it. Sending a message clears
+  /// the text field, which rebuilds, which churned the channel — and the
+  /// replacement came up in an error state. So the sender's own screen replaced
+  /// the conversation with "Error loading channel messages" at the exact moment
+  /// they sent something, while the message itself was written perfectly well.
+  /// Every message after that was invisible to them until they left the screen
+  /// and came back.
+  ///
+  /// A `late final` initialised in `initState` gives the widget one channel for
+  /// its lifetime, which is what a subscription is meant to be.
+  late final Stream<List<Map<String, dynamic>>> _messages;
+
+  @override
+  void initState() {
+    super.initState();
+    _messages = SupabaseConfig.client
+        .from('chat_messages')
+        .stream(primaryKey: ['id'])
+        .eq('alert_id', widget.alertData['id'] as String);
+  }
+
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
@@ -49,7 +78,23 @@ class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
         'alert_id': alertId,
         'sender_id': user.id,
         'sender_name': auth.profile?['full_name'] ?? 'Tactical Unit',
-        'sender_role': auth.role.name.toUpperCase(),
+        // WHO IS SPEAKING, NOT MERELY THAT THEY ARE STAFF.
+        //
+        // This wrote `auth.role.name.toUpperCase()`, and `UserRole` has three
+        // values: citizen, responder, unknown. So EVERY staff message on a
+        // tactical channel was signed 'RESPONDER' — an HQ commander's
+        // instruction labelled identically to a neighbouring unit's remark.
+        // On a channel people act on, the rank attached to "hold position" is
+        // most of its meaning.
+        //
+        // It also put a third vocabulary in one column: the citizen's screen
+        // and the console both write the real `profiles.role`, so the same
+        // thread carried HQ_COMMAND from one writer and RESPONDER from another
+        // for the same person. The profile role is the answer everywhere now,
+        // with the coarse enum only as a fallback for a session whose profile
+        // has not loaded.
+        'sender_role': (auth.profile?['role'] as String?)?.toUpperCase()
+            ?? auth.role.name.toUpperCase(),
         'message': text,
       });
     } catch (e) {
@@ -85,10 +130,7 @@ class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
         children: [
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: SupabaseConfig.client
-                  .from('chat_messages')
-                  .stream(primaryKey: ['id'])
-                  .eq('alert_id', alertId),
+              stream: _messages,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return Center(
