@@ -740,7 +740,12 @@ async function logMark() {
       // emergency-alerts toggle are ordinary controls, and skipping them
       // dropped the sweep to 22 controls over nineteen screens — a pass earned
       // by pressing almost nothing. Match the panic button's own wording.
-      if (/sign ?out|log ?out|terminate|send sos|silent sos|\bsos\b|panic/i.test(label)) {
+      // "Lock This Phone" belongs with SIGN OUT: it ends the sweep. Pressing
+      // it locks the app, and every screen after that is the lock screen —
+      // which is exactly what happened once the sweep started reaching enough
+      // controls to find it. The lock is asserted in full in its own section
+      // above, including that a locked phone cannot be walked into any screen.
+      if (/sign ?out|log ?out|terminate|send sos|silent sos|\bsos\b|panic|lock this phone/i.test(label)) {
         skipped += 1;
         continue;
       }
