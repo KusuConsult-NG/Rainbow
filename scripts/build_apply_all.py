@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate scripts/apply_all_migrations.sql — the nine unapplied migrations,
+"""Generate scripts/apply_all_migrations.sql — every unapplied migration,
 in order, as one paste, with a pass/fail readout at the end.
 
 WHY THIS IS GENERATED RATHER THAN HAND-WRITTEN
@@ -67,12 +67,12 @@ def outstanding_migrations() -> list[str]:
 
 MIGRATIONS = outstanding_migrations()
 
-HEADER = """-- ============================================================================
+HEADER = f"""-- ============================================================================
 -- APPLY ALL OUTSTANDING MIGRATIONS — generated file, do not edit by hand.
 --   Regenerate with: python3 scripts/build_apply_all.py
 --
 -- Paste the WHOLE of this file into the Supabase dashboard -> SQL Editor and
--- run it. It applies the nine outstanding migrations in order and finishes by
+-- run it. It applies the {len(MIGRATIONS)} outstanding migrations in order and finishes by
 -- SELECTing a pass/fail table, so one paste in gives you one answer out.
 --
 -- ---------------------------------------------------------------------------
@@ -105,13 +105,13 @@ HEADER = """-- =================================================================
 
 """
 
-VERIFY = """
+VERIFY = f"""
 
 -- ============================================================================
 -- DID IT WORK?
 --
 -- One row per thing that had to be true. `result` is PASS or FAIL; nothing here
--- writes. If every row says PASS, the nine migrations are applied.
+-- writes. If every row says PASS, the {len(MIGRATIONS)} migrations are applied.
 --
 -- These check BEHAVIOUR-ADJACENT FACTS, not just that statements ran: that anon
 -- holds no policy at all, that the escalation columns exist (their absence made
@@ -230,7 +230,23 @@ WITH checks(ord, name, ok) AS (
         (SELECT NOT has_function_privilege('authenticated',
                   'public.sms_key_for_ingest(bytea)', 'EXECUTE')
            FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-          WHERE n.nspname = 'public' AND p.proname = 'sms_key_for_ingest'))
+          WHERE n.nspname = 'public' AND p.proname = 'sms_key_for_ingest')),
+    -- Without this, one mesh alert flooded by several relays becomes several
+    -- incidents and several units sent to one place.
+    (24, 'the mesh can recognise the same envelope arriving twice',
+        (SELECT to_regclass('public.mesh_envelopes_seen') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM pg_proc p
+                          JOIN pg_namespace n ON n.oid = p.pronamespace
+                         WHERE n.nspname = 'public'
+                           AND p.proname = 'mesh_note_envelope'))),
+    -- And it must not become a record of which handset carried whose emergency.
+    (25, 'mesh traffic is not readable through the API',
+        (SELECT relrowsecurity
+            AND NOT EXISTS (SELECT 1 FROM pg_policies
+                             WHERE schemaname = 'public'
+                               AND tablename = 'mesh_envelopes_seen')
+           FROM pg_class
+          WHERE oid = 'public.mesh_envelopes_seen'::regclass))
 )
 SELECT
   CASE WHEN ok THEN 'PASS' ELSE '*** FAIL ***' END AS result,

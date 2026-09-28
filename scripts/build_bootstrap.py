@@ -8,7 +8,7 @@ already has them and re-running the initial schema would re-create the
 permissive `USING (true)` policies that 20260813 exists to remove.
 
 A fresh Supabase project has none of it. So this file is all THIRTEEN migrations
-in order — the four that built the original schema, then the nine outstanding
+in order — the ones that built the original schema, then every outstanding
 ones — which is the only way to get a staging project that matches production's
 shape rather than a subset of it.
 
