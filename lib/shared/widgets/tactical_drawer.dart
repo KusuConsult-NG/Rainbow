@@ -12,6 +12,30 @@ class TacticalDrawer extends ConsumerWidget {
   /// Documentation for this public member.
   const TacticalDrawer({super.key});
 
+  /// Close the drawer, THEN go.
+  ///
+  /// Every item here navigated without closing it. Two of the four destinations
+  /// — SECURITY HUB and MISSION ARCHIVE — live inside the app's navigation
+  /// shell, so pushing them keeps the shell's Scaffold mounted and its open
+  /// drawer sits on top of the screen that just loaded. The screen IS there,
+  /// greyed out behind the drawer; to the officer, the tap simply did nothing,
+  /// and they would have to swipe the drawer away to discover otherwise.
+  ///
+  /// The other two hid it by accident: EXTRACTION LIST's route is outside the
+  /// shell, so it replaces the whole tree including the drawer, and TERMINATE
+  /// SESSION uses `context.go`, which does the same. So the two that looked
+  /// broken and the two that looked fine differed only in where their
+  /// destination happened to sit in the route table.
+  static void _leave(BuildContext context, VoidCallback go) {
+    // Close first. `maybePop` rather than `pop` so this cannot take a route
+    // with it if the drawer is somehow already closed.
+    final scaffold = Scaffold.maybeOf(context);
+    if (scaffold?.isDrawerOpen ?? false) {
+      Navigator.of(context).pop();
+    }
+    go();
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Drawer(
@@ -28,17 +52,17 @@ class TacticalDrawer extends ConsumerWidget {
                 DrawerTile(
                   icon: Icons.shield_rounded,
                   label: 'SECURITY HUB',
-                  onTap: () => context.push(AppRoutes.settings),
+                  onTap: () => _leave(context, () => context.push(AppRoutes.settings)),
                 ),
                 DrawerTile(
                   icon: Icons.history_edu_rounded,
                   label: 'MISSION ARCHIVE',
-                  onTap: () => context.push(AppRoutes.incidentHistory),
+                  onTap: () => _leave(context, () => context.push(AppRoutes.incidentHistory)),
                 ),
                 DrawerTile(
                   icon: Icons.contact_emergency_rounded,
                   label: 'EXTRACTION LIST',
-                  onTap: () => context.push(AppRoutes.onboardingContacts),
+                  onTap: () => _leave(context, () => context.push(AppRoutes.onboardingContacts)),
                 ),
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 20),
@@ -49,6 +73,11 @@ class TacticalDrawer extends ConsumerWidget {
                   label: 'TERMINATE SESSION',
                   color: AppColors.emergency,
                   onTap: () async {
+                    // Closed first here too, so a slow sign-out does not leave
+                    // the drawer sitting over a half-torn-down session.
+                    final nav = Navigator.of(context);
+                    final scaffold = Scaffold.maybeOf(context);
+                    if (scaffold?.isDrawerOpen ?? false) nav.pop();
                     await ref.read(authProvider.notifier).signOut();
                     if (context.mounted) context.go(AppRoutes.login);
                   },

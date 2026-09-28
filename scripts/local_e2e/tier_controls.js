@@ -112,6 +112,22 @@ const APP_BAR = [
 
 const NAV = ['DASHBOARD', 'MOVEMENT', 'NEW REPORT'];
 
+// The drawer behind the menu button. Every previous sweep opened it and stopped
+// there, and TERMINATE SESSION was explicitly skipped by name — the sweeps
+// filtered out anything matching /sign ?out|log ?out|terminate|power/ so a run
+// could continue. Which is reasonable for a sweep and means the app's only
+// destructive control had never been pressed by anything.
+// Each item is checked by what its destination SAYS, not by the address bar.
+// These all use `context.push`, which on go_router's web target does not
+// update the hash — the same thing that made the working broadcast button look
+// broken earlier in this file. A phone has no address bar; the screen is the
+// evidence.
+const DRAWER = [
+  { label: 'SECURITY HUB', lands: 'the settings screen', says: /PREFERENCES & SECURITY|TACTICAL SYSTEM SETTINGS/i },
+  { label: 'MISSION ARCHIVE', lands: 'the incident archive', says: /HISTORICAL ARCHIVE|TACTICAL INCIDENT LOGS/i },
+  { label: 'EXTRACTION LIST', lands: 'the emergency contacts', says: /EMERGENCY CONTACTS|trusted contacts/i },
+];
+
 (async () => {
   if (!await fetch('http://127.0.0.1:54321/auth/v1/health').then((r) => r.ok).catch(() => false)) {
     console.error('start the stand-in first: node scripts/local_e2e/fake_supabase.js');
@@ -317,16 +333,58 @@ const NAV = ['DASHBOARD', 'MOVEMENT', 'NEW REPORT'];
 
     // ── The app bar controls DO something ─────────────────────────────────
     const drawer = await press('Open the command menu', { settle: 2000 });
-    const drawerOpen = await page.evaluate(() => {
+    const drawerText = await page.evaluate(() => {
       const h = document.querySelector('flt-semantics-host') || document.body;
-      return /SETTINGS|LOGOUT|SIGN OUT|TACTICAL|PROFILE|MENU/i.test(h.textContent || '');
+      return h.textContent || '';
     });
     check(`${tier.banner}: the menu opens the drawer`,
-      drawer.found && (drawer.changed || drawerOpen),
+      drawer.found && /SECURITY HUB|MISSION ARCHIVE|TERMINATE SESSION/i.test(drawerText),
       drawer.found ? '' : 'control not found');
     if (drawer.found) await shot(`${tier.role}-drawer`);
-    await page.keyboard.press('Escape');
-    await sleep(1200);
+
+    // Each item, pressed. Not just "the drawer opened".
+    // Identical setup for every item, deliberately.
+    //
+    // The first version relied on the drawer already being open for the first
+    // item and re-opened it for the rest, and the two shapes did not behave the
+    // same: the items that ran against the already-open drawer reported the
+    // drawer still showing after the press. Whatever the cause — an animation
+    // still settling, most likely — the fix is to stop having two paths. Every
+    // item now starts from a reloaded page with the drawer freshly opened.
+    for (const item of DRAWER) {
+      await page.evaluate(() => { window.location.hash = '#/agent-dashboard'; });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(
+        () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 60000 });
+      await sleep(5000);
+      await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
+      await sleep(1500);
+      await press('Open the command menu', { settle: 2600 });
+      const r = await press(item.label, { settle: 3600 });
+      const landed = await page.evaluate(() => {
+        const h = document.querySelector('flt-semantics-host') || document.body;
+        return h.textContent || '';
+      });
+      const ok = r.found && item.says.test(landed);
+      check(
+        `${tier.banner}: ${item.label} opens ${item.lands}`,
+        ok,
+        r.found ? (ok ? '' : `landed on "${landed.replace(/\s+/g, ' ').slice(0, 50)}"`)
+          : 'not in the drawer',
+      );
+      if (ok) await shot(`${tier.role}-drawer-${item.label.toLowerCase().replace(/\W+/g, '-')}`);
+    }
+    // Leave the screen clean for the app-bar assertions below: a Flutter Drawer
+    // stays open across a hash change, and an open drawer covers the app bar —
+    // which made every control after this loop report as missing.
+    await page.evaluate(() => { window.location.hash = '#/agent-dashboard'; });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(
+      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 60000 });
+    await sleep(5000);
+    await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
+    await sleep(1500);
+    await waitForFeed();
 
     const mapToggle = await press('Switch between the map and the incident list', { settle: 2400 });
     check(`${tier.banner}: the map/list toggle switches the view`,
@@ -371,6 +429,44 @@ const NAV = ['DASHBOARD', 'MOVEMENT', 'NEW REPORT'];
       await page.evaluate(() => { window.location.hash = '#/agent-dashboard'; });
       await sleep(2600);
     }
+  }
+
+  // ── TERMINATE SESSION, last, because it ends the session ────────────────
+  //
+  // The drawer's only destructive control, and the one every sweep filtered out
+  // by name so the run could carry on. It is also the control whose behaviour
+  // changed most recently: signing out now stops background location tracking
+  // first, because it used to clear the session and leave the phone
+  // transmitting. Worth pressing at least once.
+  state.screen = 'tier:signout';
+  const soLanded = await signIn('hq');
+  if (/agent-dashboard/.test(soLanded)) {
+    await waitForFeed();
+    await press('Open the command menu', { settle: 2200 });
+    await shot('signout-drawer');
+    const so = await press('TERMINATE SESSION', { settle: 4500 });
+    const after = await page.evaluate(() => location.hash);
+    check(
+      'TERMINATE SESSION signs the officer out and returns to login',
+      so.found && /login/.test(after),
+      so.found ? `-> ${after}` : 'not in the drawer',
+    );
+    await shot('signout-back-at-login');
+
+    // And it must really be signed out, not merely routed away from.
+    const backIn = await page.evaluate(() => {
+      window.location.hash = '#/agent-dashboard';
+      return null;
+    });
+    void backIn;
+    await sleep(3000);
+    const guarded = await page.evaluate(() => location.hash);
+    check(
+      'and the dashboard cannot be re-entered by URL afterwards',
+      /login|splash/.test(guarded),
+      `-> ${guarded}`,
+    );
+    await shot('signout-dashboard-refused');
   }
 
   // ── The untiered responder, whose controls are the lowest common set ────
