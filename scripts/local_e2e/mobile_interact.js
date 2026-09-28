@@ -612,10 +612,24 @@ async function logMark() {
     if (!landed.includes(route)) sweptElsewhere += 1;
 
     const buttons = await page.evaluate(() => {
-      window.__mb = [...document.querySelectorAll('flt-semantics[role="button"]')].filter((b) => {
+      // `flt-semantics[role="button"]` alone found under two controls per
+      // screen — 34 across nineteen screens, against the console sweep's 140.
+      // Flutter only gives role="button" to widgets it considers semantic
+      // buttons; an InkWell, a ListTile, a GestureDetector and a tappable card
+      // are marked `flt-tappable` with no role, and those are most of this
+      // app's controls. A sweep that cannot see them is not a sweep.
+      const all = [...document.querySelectorAll(
+        'flt-semantics[role="button"], flt-semantics[flt-tappable],'
+        + ' flt-semantics[role="link"], flt-semantics[role="checkbox"]',
+      )].filter((b) => {
         const r = b.getBoundingClientRect();
         return r.width > 4 && r.height > 4;
       });
+      // Keep the innermost only. Flutter nests semantics, so a tappable card
+      // containing a tappable button would otherwise be counted and pressed
+      // twice — and pressing the wrapper does not necessarily do what pressing
+      // the button does.
+      window.__mb = all.filter((n) => !all.some((o) => o !== n && n.contains(o)));
       return window.__mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
     });
 
@@ -707,10 +721,16 @@ async function logMark() {
       await go(route, 2800);
 
       const buttons = await page.evaluate(() => {
-        window.__mb = [...document.querySelectorAll('flt-semantics[role="button"]')].filter((b) => {
+        // Same widening as the citizen sweep above: role="button" alone misses
+        // every InkWell, ListTile and tappable card, which is most of them.
+        const all = [...document.querySelectorAll(
+          'flt-semantics[role="button"], flt-semantics[flt-tappable],'
+          + ' flt-semantics[role="link"], flt-semantics[role="checkbox"]',
+        )].filter((b) => {
           const r = b.getBoundingClientRect();
           return r.width > 4 && r.height > 4;
         });
+        window.__mb = all.filter((n) => !all.some((o) => o !== n && n.contains(o)));
         return window.__mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
       });
 
