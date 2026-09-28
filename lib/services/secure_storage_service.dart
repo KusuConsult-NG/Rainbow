@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -55,10 +57,39 @@ class SecureStorageService {
     await _storage.delete(key: _pinKey);
   }
 
+  /// Reads a JSON object previously written by [writeJson].
+  ///
+  /// Anything that is not readable as an object comes back null rather than
+  /// throwing. Callers use this for state they compare against — a stored
+  /// value from an older build must degrade to "unknown", never to a false
+  /// claim about what changed.
+  Future<Map<String, dynamic>?> readJson(String key) async {
+    final raw = await _storage.read(key: key);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// Writes a JSON object.
+  Future<void> writeJson(String key, Map<String, dynamic> value) async {
+    await _storage.write(key: key, value: jsonEncode(value));
+  }
+
+  /// Removes one key.
+  Future<void> delete(String key) async {
+    await _storage.delete(key: key);
+  }
+
+  /// Documentation for this public member.
   Future<void> deleteAll() async {
     await _storage.deleteAll();
   }
 
+  /// Documentation for this public member.
   Future<void> clearAll() async {
     await _storage.deleteAll();
   }

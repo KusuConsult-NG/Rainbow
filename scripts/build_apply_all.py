@@ -259,7 +259,31 @@ WITH checks(ord, name, ok) AS (
                              WHERE schemaname = 'public'
                                AND tablename = 'mesh_envelopes_seen')
            FROM pg_class
-          WHERE oid = 'public.mesh_envelopes_seen'::regclass))
+          WHERE oid = 'public.mesh_envelopes_seen'::regclass)),
+    -- A handset whose SIM has gone can no longer be reached by SMS, and the
+    -- alert queue keeps queueing with nowhere to go. HQ is told.
+    (26, 'a handset can report that its SMS channel changed',
+        (SELECT to_regclass('public.sim_channel_events') IS NOT NULL)),
+    -- And that report must not be readable by every staff account. A
+    -- polling-unit officer, and every agency liaison, are staff; neither has a
+    -- reason to see which citizens changed SIM. This is the same mistake the
+    -- telemetry work was written to undo.
+    (27, 'SIM reports are limited to command, not all staff',
+        (SELECT relrowsecurity
+            AND EXISTS (SELECT 1 FROM pg_policies
+                         WHERE schemaname = 'public'
+                           AND tablename = 'sim_channel_events'
+                           AND policyname = 'sim_events_select_self_or_command')
+           FROM pg_class
+          WHERE oid = 'public.sim_channel_events'::regclass)),
+    -- There is no column for a position on that table, and there must not be:
+    -- with one it stops being a channel board and becomes a movement log on
+    -- private citizens.
+    (28, 'SIM reports carry no position',
+        (SELECT count(*) = 0 FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'sim_channel_events'
+            AND column_name IN ('latitude','longitude','lat','lng','location')))
 )
 SELECT
   CASE WHEN ok THEN 'PASS' ELSE '*** FAIL ***' END AS result,

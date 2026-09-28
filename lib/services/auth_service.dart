@@ -9,6 +9,7 @@ import 'package:rainbow_app/core/offline/sms_device_key.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/services/secure_storage_service.dart';
+import 'package:rainbow_app/services/sim_watch_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Provider for AuthService
@@ -319,8 +320,20 @@ class AuthService {
     } catch (e) {
       debugPrint('[SIGNIN_SMSKEY_ERR] could not obtain a device key: $e');
     }
+    // Record which SIM this handset has, so a later removal is visible. The
+    // first check never reports anything — it is the baseline — and a failure
+    // here is not a reason to fail a sign-in.
+    try {
+      await (simBaselineOverride ?? () async => SimWatchService().check())();
+    } catch (e) {
+      debugPrint('[SIGNIN_SIM_ERR] could not record the SIM baseline: $e');
+    }
     return true;
   }
+
+  /// Test seam: the SIM check reaches a platform channel and Supabase.
+  @visibleForTesting
+  static Future<void> Function()? simBaselineOverride;
 
   /// Test seam: BackgroundTrackingService talks to platform channels, which do
   /// not exist under `flutter test`.
@@ -330,6 +343,10 @@ class AuthService {
   /// Test seam: the SMS key service reaches secure storage and Supabase.
   @visibleForTesting
   static Future<void> Function()? forgetSmsKeyOverride;
+
+  /// Test seam: the SIM baseline reaches secure storage.
+  @visibleForTesting
+  static Future<void> Function()? forgetSimBaselineOverride;
 
   /// Sign out user session.
   ///
@@ -357,6 +374,16 @@ class AuthService {
       await (forgetSmsKeyOverride ?? SmsDeviceKeyService().forget)();
     } catch (e) {
       debugPrint('[SIGNOUT_SMSKEY_ERR] could not retire the SMS key: $e');
+    }
+    // And forget which SIM was in this handset. Without this the next person
+    // to sign in on the same phone is compared against the previous owner's
+    // SIM, and gets a "SIM REPLACED" alert for what is really a change of
+    // owner. `deleteAll()` below would cover it, but saying it explicitly
+    // keeps the reason attached to the line.
+    try {
+      await (forgetSimBaselineOverride ?? SimWatchService().forget)();
+    } catch (e) {
+      debugPrint('[SIGNOUT_SIM_ERR] could not clear the SIM baseline: $e');
     }
     await SupabaseConfig.client.auth.signOut();
     await _secureStorage.deleteAll();

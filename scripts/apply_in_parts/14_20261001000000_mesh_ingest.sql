@@ -202,5 +202,3 @@ COMMENT ON COLUMN public.alerts.arrived_via IS
   'encrypted SMS fallback. ''MESH'' when it was relayed through nearby phones '
   'to one that had a network. Either way the reporter had no data connection.';
 
-
-

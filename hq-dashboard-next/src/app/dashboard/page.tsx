@@ -11,6 +11,7 @@ import SystemAlertListener from '@/components/SystemAlertListener';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import Analytics from '@/components/Analytics';
 import UninstallRequests from '@/components/UninstallRequests';
+import SimChannelEvents from '@/components/SimChannelEvents';
 import AgencyPortal from '@/components/AgencyPortal';
 import IncidentReplayPanel from '@/components/IncidentReplayPanel';
 import LiveFeedViewer from '@/components/LiveFeedViewer';
@@ -24,7 +25,7 @@ import {
   ShieldAlert, Shield, Map as MapIcon, Users, Radio, Settings,
   LogOut, AlertTriangle, CheckCircle, ChevronUp, Phone,
   Loader2, Filter, Bell, Activity, Clock, Target, Edit3, Send,
-  Sun, Moon, X, Sparkles, MapPin, Menu,
+  Sun, Moon, X, Sparkles, MapPin, Menu, SignalZero,
 } from 'lucide-react';
 import type { Alert } from './types';
 import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
@@ -58,7 +59,7 @@ const fSel: React.CSSProperties = {
   fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-inter),sans-serif',
 };
 
-type Tab = 'map' | 'alerts' | 'history' | 'analytics' | 'broadcast' | 'admin' | 'settings' | 'audit' | 'uninstall' | 'agency';
+type Tab = 'map' | 'alerts' | 'history' | 'analytics' | 'broadcast' | 'admin' | 'settings' | 'audit' | 'uninstall' | 'agency' | 'sim';
 
 const formatAlertTimestamp = (alert: Alert | null | undefined, type: 'reported' | 'resolved' = 'reported'): string => {
   if (!alert) return '—';
@@ -336,6 +337,33 @@ export default function DashboardPage() {
   const [agentLocations, setAgentLocations] = useState<any[]>([]);
   const agentPathsRef = useRef<Map<string, {lat: number; lng: number; timestamp: string}[]>>(new Map());
   const [unreadAgencyReports, setUnreadAgencyReports] = useState(0);
+  const [openSimEvents, setOpenSimEvents] = useState(0);
+
+  // Handsets whose SMS channel has gone. Badged because the consequence is
+  // invisible otherwise: the alert queue keeps queueing, the sign-in code has
+  // nowhere to arrive, and an operator finds out when they try to reach
+  // somebody. RLS restricts the table to command, so a liaison or a
+  // polling-unit officer simply gets nothing here rather than an error.
+  useEffect(() => {
+    const commandRoles = ['HQ_OFFICER', 'HQ_COMMAND', 'ADMIN', 'LGA_COMMAND'];
+    if (!commandRoles.includes(userRole)) return;
+    const loadOpen = async () => {
+      const { count, error } = await supabase
+        .from('sim_channel_events')
+        .select('id', { count: 'exact', head: true })
+        .is('acknowledged_at', null);
+      // A failed count must not read as zero: a badge that says "nothing" when
+      // it could not ask is the same lie as an empty board.
+      if (error) return;
+      setOpenSimEvents(count || 0);
+    };
+    loadOpen();
+    const channel = supabase
+      .channel('sim-events-badge')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sim_channel_events' }, loadOpen)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [userRole]);
 
   // Load unread agency report count for HQ notification badge
   // Note: uses userRole directly since isHqUser is declared later in the component
@@ -1013,6 +1041,13 @@ export default function DashboardPage() {
                 <NavItem icon={<Activity size={18} />} label="Forensic Audit" active={activeTab === 'audit'} onClick={() => setActiveTab('audit')} />
                 <NavItem icon={<Settings size={18} />} label="System Logic" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
                 <NavItem icon={<ShieldAlert size={18} />} label="Uninstall Requests" active={activeTab === 'uninstall'} onClick={() => setActiveTab('uninstall')} />
+                <NavItem
+                  icon={<SignalZero size={18} />}
+                  label="Handset SMS Channel"
+                  active={activeTab === 'sim'}
+                  onClick={() => setActiveTab('sim')}
+                  badge={openSimEvents > 0 ? openSimEvents : undefined}
+                />
               </>
             )}
           </nav>
@@ -1073,6 +1108,7 @@ export default function DashboardPage() {
                 {activeTab === 'audit' && 'Accountability'}
                 {activeTab === 'settings' && 'Platform Core'}
                 {activeTab === 'agency' && 'Inter-Agency Command'}
+                {activeTab === 'sim' && 'Handset SMS Channel'}
               </h2>
             </div>
             {!isNarrow && <div style={{ height: 20, width: 1, background: 'var(--border)', flexShrink: 0 }}></div>}
@@ -1490,6 +1526,7 @@ export default function DashboardPage() {
           {activeTab === 'settings' && <SystemConfig />}
           {activeTab === 'audit' && <AuditLogs />}
           {activeTab === 'uninstall' && <UninstallRequests />}
+          {activeTab === 'sim' && <SimChannelEvents />}
           {activeTab === 'agency' && (
             <AgencyPortal
               userRole={userRole}

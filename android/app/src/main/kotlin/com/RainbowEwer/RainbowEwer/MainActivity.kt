@@ -6,6 +6,7 @@ import android.app.PictureInPictureParams
 import android.content.Context
 import android.media.AudioManager
 import android.telephony.SmsManager
+import android.telephony.TelephonyManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
@@ -18,6 +19,7 @@ class MainActivity : FlutterFragmentActivity() {
     private val AUDIO_CHANNEL = "com.operationrainbow.app/audio_routing"
     private val PIP_CHANNEL = "com.operationrainbow.app/pip"
     private val SMS_CHANNEL = "com.operationrainbow.app/sms"
+    private val SIM_CHANNEL = "com.operationrainbow.app/sim"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -101,6 +103,75 @@ class MainActivity : FlutterFragmentActivity() {
                         result.error("SMS_DENIED", e.message, null)
                     } catch (e: Exception) {
                         result.error("SMS_FAILED", e.message, null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // IS THERE STILL A SIM IN THIS HANDSET, AND WHOSE NETWORK IS IT ON?
+        //
+        // The phone number is the identity in this app, and it is what the
+        // encrypted SMS fallback rides on. When the SIM leaves, that channel
+        // dies and nothing else notices — so HQ is told the channel is down.
+        // The record is about the CHANNEL, not the person: no location is
+        // attached, and the holder is told on the handset that it was sent.
+        //
+        // NO PERMISSION IS REQUESTED, AND NONE IS NEEDED. getSimState,
+        // getSimOperator and getSimOperatorName are all open to any app. The
+        // values that would identify a particular CARD rather than a network —
+        // the ICCID and the IMSI — have required READ_PRIVILEGED_PHONE_STATE
+        // since Android 10, which is signature-level and unavailable to us. So
+        // one MTN SIM swapped for another MTN SIM cannot be seen from here.
+        // That limit is stated in sim_fingerprint.dart and asserted in its
+        // tests, because an operator who assumed otherwise would be wrong
+        // about the commonest swap there is.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SIM_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "readSim" -> {
+                    try {
+                        val telephony =
+                            getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+                        if (telephony == null) {
+                            // A tablet with no telephony hardware. Not "the SIM
+                            // was removed" — there was never a tray.
+                            result.success(mapOf("presence" to "unavailable"))
+                            return@setMethodCallHandler
+                        }
+
+                        val presence = when (telephony.simState) {
+                            TelephonyManager.SIM_STATE_ABSENT -> "absent"
+                            TelephonyManager.SIM_STATE_READY -> "present"
+                            // PIN_REQUIRED, PUK_REQUIRED, NETWORK_LOCKED and
+                            // CARD_IO_ERROR all mean a card IS in the tray, so
+                            // reporting them as absent would raise a removal
+                            // alert for a phone that has merely been rebooted
+                            // and not yet unlocked.
+                            TelephonyManager.SIM_STATE_PIN_REQUIRED,
+                            TelephonyManager.SIM_STATE_PUK_REQUIRED,
+                            TelephonyManager.SIM_STATE_NETWORK_LOCKED -> "present"
+                            else -> "unavailable"
+                        }
+
+                        // Empty strings are what this returns with no service,
+                        // and an empty operator must not read as a change of
+                        // network. Normalised to null here so the Dart side
+                        // sees one shape.
+                        val code = telephony.simOperator?.takeIf { it.isNotBlank() }
+                        val name = telephony.simOperatorName?.takeIf { it.isNotBlank() }
+
+                        result.success(
+                            mapOf(
+                                "presence" to presence,
+                                "operator_code" to code,
+                                "operator_name" to name
+                            )
+                        )
+                    } catch (e: SecurityException) {
+                        result.success(mapOf("presence" to "unavailable"))
+                    } catch (e: Exception) {
+                        // Any failure is "cannot see", never "it has gone".
+                        result.success(mapOf("presence" to "unavailable"))
                     }
                 }
                 else -> result.notImplemented()
