@@ -38,19 +38,15 @@ HISTORICAL = [
     "phase2_assigned_responders.sql",
     "phase3_profile_columns_and_config.sql",
 ]
-OUTSTANDING = [
-    "20260812000000_agency_tables.sql",
-    "20260813000000_rls_least_privilege.sql",
-    "20260902000000_per_user_emergency_pins.sql",
-    "20260903000000_realtime_publication.sql",
-    "20260903000001_incident_media_storage.sql",
-    "20260903000002_system_alerts_broadcast.sql",
-    "20260903000003_alert_escalation_columns.sql",
-    "20260903000004_profiles_badge_number.sql",
-    "20260903000005_alerts_assigned_tier.sql",
-    "20260927000000_signup_cannot_choose_role.sql",
-    "20260928000000_command_chain_escalation.sql",
-]
+# Derived, for the reason given in build_apply_all.py: a hand-maintained list
+# silently omits any migration nobody remembers to add, and the in-sync check
+# cannot see the omission because the missing file was never in the output to
+# diff.
+OUTSTANDING = sorted(
+    p.name
+    for p in (ROOT / "supabase/migrations").glob("*.sql")
+    if p.name not in set(HISTORICAL)
+)
 
 HEADER = """-- ============================================================================
 -- BOOTSTRAP A STAGING PROJECT — generated file, do not edit by hand.

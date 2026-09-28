@@ -78,9 +78,15 @@ fi
 
 FAILED=$(printf '%s\n' "$OUT" | grep -c '\*\*\* FAIL \*\*\*' || true)
 PASSED=$(printf '%s\n' "$OUT" | grep -c '^ PASS' || true)
+# How many checks the generated script actually contains, rather than a number
+# written here. The floor used to be the literal 18, so adding checks to the
+# generator left this reporting "21/18" and — worse — would have kept passing
+# if three of them had silently stopped being emitted.
+EXPECTED=$(grep -cE "^    \([0-9]+, '" "$REPO/scripts/apply_all_migrations.sql" || true)
+[ "${EXPECTED:-0}" -gt 0 ] || EXPECTED=18
 printf '%s\n' "$OUT" | grep -E '^\s*(PASS|\*\*\* FAIL)' || true
-echo "  checks passed: $PASSED   failed: $FAILED"
-if [ "$FAILED" -ne 0 ] || [ "$PASSED" -lt 18 ]; then
+echo "  checks passed: $PASSED / $EXPECTED   failed: $FAILED"
+if [ "$FAILED" -ne 0 ] || [ "$PASSED" -lt "$EXPECTED" ]; then
   echo "::error::the apply script's own verification reported a failure"; exit 1
 fi
 
@@ -96,4 +102,4 @@ FAILED2=$(printf '%s\n' "$OUT2" | grep -c '\*\*\* FAIL \*\*\*' || true)
 
 echo
 echo "✓ apply_all_migrations.sql applies cleanly in one paste, twice over,"
-echo "  and its own verification reports $PASSED/18 PASS."
+echo "  and its own verification reports $PASSED/$EXPECTED PASS."

@@ -144,12 +144,18 @@ for f in 20260720000000_initial_schema phase1_foundation \
          phase2_assigned_responders phase3_profile_columns_and_config; do
   psql_f replayed "$f.sql" >/dev/null 2>&1 || true
 done
-for f in 20260812000000_agency_tables 20260813000000_rls_least_privilege \
-         20260902000000_per_user_emergency_pins 20260903000000_realtime_publication \
-         20260903000001_incident_media_storage 20260903000002_system_alerts_broadcast \
-         20260903000003_alert_escalation_columns 20260903000004_profiles_badge_number \
-         20260903000005_alerts_assigned_tier; do
-  psql_f replayed "$f.sql" >/dev/null
+# EVERY outstanding migration, read from the directory rather than listed here.
+#
+# This was a hand-written list, and it had silently fallen three migrations
+# behind. The comparison below is an EQUIVALENCE check — "the one-paste
+# bootstrap produces the same schema as replaying the migrations" — so a short
+# replay list does not fail loudly, it just weakens the claim to nothing for
+# the migrations it omits. It kept passing only because the two it was missing
+# happened to add no policies; the first one that did exposed it.
+for f in $(cd "$REPO/supabase/migrations" && ls *.sql \
+            | grep -vE '^(20260720000000_initial_schema|phase[123]_)' \
+            | sort); do
+  psql_f replayed "$f" >/dev/null
 done
 
 SNAP="select tablename||'|'||policyname||'|'||cmd from pg_policies where schemaname='public' order by 1"

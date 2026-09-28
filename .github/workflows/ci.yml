@@ -594,6 +594,35 @@ jobs:
           fi
           echo "OK: all four generated scripts match the migrations."
 
+      # A stale script and an INCOMPLETE one fail differently, and only the
+      # first was checked. The two apply-scripts used to carry a hand-written
+      # list of migrations, so adding one and re-running the generators
+      # produced no diff, no warning and a clean exit — while the file an
+      # operator pastes into production silently lacked it. The diff above
+      # cannot see that: a migration that was never in the list was never in
+      # the output to differ. The lists are derived from the directory now;
+      # this asserts the derivation actually reached every file.
+      - name: Assert every migration reaches the apply scripts
+        run: |
+          set -euo pipefail
+          MISSING=0
+          for f in supabase/migrations/*.sql; do
+            name=$(basename "$f")
+            case "$name" in
+              20260720000000_initial_schema.sql|phase1_foundation.sql| \
+              phase2_assigned_responders.sql|phase3_profile_columns_and_config.sql)
+                # The original schema, already applied on production. Re-running
+                # it would re-create the permissive policies 20260813 removes.
+                continue ;;
+            esac
+            grep -q -- "$name" scripts/apply_all_migrations.sql || {
+              echo "::error::$name is missing from scripts/apply_all_migrations.sql"; MISSING=1; }
+            grep -q -- "$name" scripts/bootstrap_staging.sql || {
+              echo "::error::$name is missing from scripts/bootstrap_staging.sql"; MISSING=1; }
+          done
+          [ "$MISSING" -eq 0 ] || exit 1
+          echo "OK: every migration is present in both apply scripts."
+
       # The inventory's "is this policy ours?" list is extracted from the
       # migration files. A hand-written version was tried first and was
       # substantially wrong — it invented names and missed real ones, which would
@@ -603,7 +632,8 @@ jobs:
         run: |
           set -euo pipefail
           for NAME in alerts_select_own_or_staff profiles_select_self_or_staff \
-                      telemetry_select_self_or_staff safe_zones_read uninstall_read_own_or_staff; do
+                      telemetry_select_self_or_responding_staff chat_insert_participant \
+                      safe_zones_read uninstall_read_own_or_staff; do
             grep -q "'$NAME'" scripts/rls_inventory.sql || {
               echo "::error::$NAME is created by a migration but missing from the inventory's known list."
               exit 1

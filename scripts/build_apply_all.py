@@ -28,22 +28,44 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "scripts/apply_all_migrations.sql"
 
-# In order. The four historical files (initial schema, phase1-3) are NOT here:
-# they are already applied on production, and re-running them would re-create
-# the permissive policies that 20260813 exists to remove.
-MIGRATIONS = [
-    "20260812000000_agency_tables.sql",
-    "20260813000000_rls_least_privilege.sql",
-    "20260902000000_per_user_emergency_pins.sql",
-    "20260903000000_realtime_publication.sql",
-    "20260903000001_incident_media_storage.sql",
-    "20260903000002_system_alerts_broadcast.sql",
-    "20260903000003_alert_escalation_columns.sql",
-    "20260903000004_profiles_badge_number.sql",
-    "20260903000005_alerts_assigned_tier.sql",
-    "20260927000000_signup_cannot_choose_role.sql",
-    "20260928000000_command_chain_escalation.sql",
-]
+# ── The outstanding migrations, DERIVED from the directory ──────────────────
+#
+# This used to be a hand-maintained list, and that is a trap rather than a
+# chore. Adding a migration and running this generator produced no diff, no
+# warning and a successful exit — while the script an operator pastes into
+# production silently lacked the new file. The CI check only diffs this
+# script's OUTPUT against the committed copy, so a migration that was never in
+# the list was never in the diff either, and nothing anywhere said so.
+#
+# It is derived now. HISTORICAL_FILES is the exclusion list, and it is short,
+# closed and explained: those four built the original schema, they are already
+# applied on production, and re-running them would re-create the permissive
+# `USING (true)` policies that 20260813 exists to remove.
+HISTORICAL_FILES = {
+    "20260720000000_initial_schema.sql",
+    "phase1_foundation.sql",
+    "phase2_assigned_responders.sql",
+    "phase3_profile_columns_and_config.sql",
+}
+
+
+def outstanding_migrations() -> list[str]:
+    """Every migration that is not part of the already-applied original schema.
+
+    Sorted by filename, which is the timestamp prefix, which is the order they
+    must apply in.
+    """
+    names = sorted(
+        p.name
+        for p in (ROOT / "supabase/migrations").glob("*.sql")
+        if p.name not in HISTORICAL_FILES
+    )
+    if not names:
+        raise SystemExit("no migrations found — is supabase/migrations present?")
+    return names
+
+
+MIGRATIONS = outstanding_migrations()
 
 HEADER = """-- ============================================================================
 -- APPLY ALL OUTSTANDING MIGRATIONS — generated file, do not edit by hand.
@@ -177,7 +199,24 @@ WITH checks(ord, name, ok) AS (
            FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'escalate_overdue_alerts')),
     (18, 'the chain terminates at HQ',
-        (SELECT public.next_tier('HQ') IS NULL AND public.next_tier('UNIT') = 'WARD'))
+        (SELECT public.next_tier('HQ') IS NULL AND public.next_tier('UNIT') = 'WARD')),
+    -- Location is borrowed, not kept. A citizen's position must stop being
+    -- readable by staff once their emergency closes, nothing may be kept
+    -- forever, and a message must not be injectable into somebody else's
+    -- channel.
+    (19, 'a citizen''s position is not a standing staff feed',
+        EXISTS (SELECT 1 FROM pg_policies
+                 WHERE schemaname = 'public' AND tablename = 'telemetry'
+                   AND policyname = 'telemetry_select_self_or_responding_staff')),
+    (20, 'stale positions are purged, and only by the service role',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.purge_stale_telemetry()', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'purge_stale_telemetry')),
+    (21, 'a message can only be written into your own channel',
+        EXISTS (SELECT 1 FROM pg_policies
+                 WHERE schemaname = 'public' AND tablename = 'chat_messages'
+                   AND policyname = 'chat_insert_participant'))
 )
 SELECT
   CASE WHEN ok THEN 'PASS' ELSE '*** FAIL ***' END AS result,
