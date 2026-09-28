@@ -2326,7 +2326,7 @@ WITH checks(ord, name, ok) AS (
                   'public.purge_stale_telemetry()', 'EXECUTE')
            FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'purge_stale_telemetry')),
-    (21, 'a message can only be written into your own channel',
+    (21, 'a message cannot be forged into somebody elses channel',
         EXISTS (SELECT 1 FROM pg_policies
                  WHERE schemaname = 'public' AND tablename = 'chat_messages'
                    AND policyname = 'chat_insert_participant')),
