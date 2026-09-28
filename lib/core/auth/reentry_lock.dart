@@ -145,10 +145,12 @@ String lockScreenExplanation(UnlockPath path) {
 ///     twice, and the browser harness walked into exactly that: signed out,
 ///     completed the OTP, and every screen of the sweep was the lock screen.
 ///
-///   * **It showed the previous person's number to the next one.** The lock
-///     screen names the number a code went to. Hand the phone to a colleague,
-///     let them sign in as themselves, and a stale lock put the last user's
-///     mobile number on their screen.
+///   * **It locked a colleague out of a session they had just opened.** Hand
+///     the phone over, let them sign in as themselves, and a stale lock met
+///     them instead of the app. They could get past it — the lock screen reads
+///     the live session, so the code goes to THEIR number, not the previous
+///     user's — but being asked to re-verify a sign-in completed seconds ago is
+///     the same defect as above, arriving at a worse moment.
 ///
 /// So: same session, the lock stands. Different session — including no session
 /// at all — the lock is not theirs and does not apply. Ending the session is a

@@ -207,10 +207,11 @@ void main() {
     expect(container.read(reentryLockProvider), isFalse);
   });
 
-  test("one person's lock is not shown to the next person", () {
-    // The lock screen names the number a code went to. A lock that survived a
-    // change of account put the previous user's mobile number in front of
-    // whoever signed in after them.
+  test('a colleague is not locked out of the session they just opened', () {
+    // A stale lock met the next person instead of the app. They could get past
+    // it — the lock screen reads the live session, so the code goes to their
+    // own number — but re-verifying a sign-in completed seconds ago is the same
+    // defect as above, arriving at a worse moment.
     final container = containerWith(signedIn: true, emergency: false);
     addTearDown(container.dispose);
 
