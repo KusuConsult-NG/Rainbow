@@ -195,6 +195,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12),
             ),
             trailing: IconButton(
+                        tooltip: 'Edit your name',
               icon: const Icon(Icons.edit, color: AppColors.textDim),
               onPressed: () => _showEditNameDialog(fullName),
             ),
@@ -228,6 +229,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   children: [
                     Text('Emergency Contacts', style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold)),
                     IconButton(
+                      tooltip: 'Add an emergency contact',
                       icon: const Icon(Icons.add, color: AppColors.primary),
                       onPressed: _showAddContactDialog,
                     ),
@@ -240,6 +242,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     contentPadding: EdgeInsets.zero,
                     title: Text(c, style: GoogleFonts.inter(color: AppColors.onBackground)),
                     trailing: IconButton(
+                                tooltip: 'Remove this emergency contact',
                       icon: const Icon(Icons.remove_circle_outline, color: AppColors.danger),
                       onPressed: () => _removeEmergencyContact(c),
                     ),

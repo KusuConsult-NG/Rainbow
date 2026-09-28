@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
@@ -48,6 +50,38 @@ class AppConfig {
     final raw = _read('HQ_API_BASE_URL');
     if (raw == null) return null;
     return raw.endsWith('/') ? raw.substring(0, raw.length - 1) : raw;
+  }
+
+  /// Where an SMS-borne alert is sent — the emergency shortcode or long number
+  /// the HQ gateway receives on.
+  ///
+  /// A destination number, not a credential, so it is safe in a bundled asset.
+  /// `null` disables the SMS fallback entirely: a message with nowhere to go
+  /// would cost money and reach nobody.
+  static String? get smsShortcode => _read('SMS_EMERGENCY_SHORTCODE');
+
+  /// HQ's mesh PUBLIC key: a compressed P-256 point, 33 bytes as 66 hex
+  /// characters.
+  ///
+  /// Public by definition — every handset has it and it can only seal, never
+  /// open. The private half lives on the HQ server and nowhere else; see
+  /// `docs/OFFLINE_CHANNELS_DESIGN.md`.
+  ///
+  /// Returns null unless the value is exactly a 33-byte point whose first byte
+  /// is a valid compression prefix. A half-configured key is worse than none: it
+  /// would seal alerts nobody can open, and the phone would believe it had a
+  /// working channel.
+  static Uint8List? get meshHqPublicKey {
+    final raw = _read('MESH_HQ_PUBLIC_KEY')?.trim();
+    if (raw == null || !RegExp(r'^[0-9a-fA-F]{66}$').hasMatch(raw)) return null;
+    final bytes = Uint8List(33);
+    for (var i = 0; i < 33; i++) {
+      bytes[i] = int.parse(raw.substring(i * 2, i * 2 + 2), radix: 16);
+    }
+    // 0x02 and 0x03 are the compressed-point prefixes; anything else is not a
+    // point, whatever else it might be.
+    if (bytes[0] != 0x02 && bytes[0] != 0x03) return null;
+    return bytes;
   }
 
   static String? get cloudinaryCloudName => _read('CLOUDINARY_CLOUD_NAME');

@@ -19,6 +19,33 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      THE ENCRYPTED SMS FALLBACK.
+
+      Sends one 75-character message to the HQ shortcode when the handset has
+      cell signal but no usable data — the commonest way this app loses its
+      connection, and the one the offline queue alone cannot answer, because a
+      queued report waits for a network that may not come back for hours.
+
+      Google Play restricts SEND_SMS to apps whose core function is messaging.
+      Everything else needs a Permissions Declaration, and shipping this
+      WITHOUT filing one will get the release rejected. The declaration should
+      say: emergency alerting for a government disaster-response service,
+      single message per incident, sent only when data is unavailable, content
+      encrypted and never read or stored by the app.
+
+      If the declaration is refused, the fallback in
+      `lib/core/offline/sms_sender.dart` opens the messaging app with the
+      message pre-filled instead. That is Play-safe and requires a tap — which
+      means it cannot serve a SILENT or DURESS SOS, and the app degrades
+      accordingly rather than pretending otherwise.
+
+      READ_PHONE_STATE is NOT requested: knowing whether a SIM is present would
+      be convenient and is not worth another sensitive permission. A failed
+      send is handled as a failed send.
+    -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Phone calls for emergency escalation -->

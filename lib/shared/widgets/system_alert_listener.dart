@@ -135,6 +135,7 @@ class _SystemAlertListenerState extends ConsumerState<SystemAlertListener> {
                         ),
                       ),
                       IconButton(
+                        tooltip: 'Dismiss this alert',
                         onPressed: () {
                           if (mounted) {
                             setState(() {

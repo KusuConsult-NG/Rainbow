@@ -1,7 +1,8 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Clock, ShieldAlert, Radio, CheckCircle2, MessageSquare, AlertTriangle } from 'lucide-react';
+import { sendChatMessage } from '../lib/alert-actions';
+import { Clock, ShieldAlert, Radio, CheckCircle2, MessageSquare, AlertTriangle, Send } from 'lucide-react';
 
 interface TimelineEvent {
   id?: string;
@@ -15,6 +16,10 @@ interface TimelineEvent {
 export default function IncidentReplayPanel({ alertId }: { alertId: string }) {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!alertId) return;
@@ -36,7 +41,7 @@ export default function IncidentReplayPanel({ alertId }: { alertId: string }) {
           combined.push({
             id: `create-${alert.id}`,
             type: 'INITIAL_REPORT',
-            actor: alert.reported_by || alert.reportedBy || 'Citizen',
+            actor: alert.reported_by || 'Citizen',  // `reportedBy` is not a column; the fallback was dead
             role: 'CITIZEN',
             timestamp: alert.created_at || new Date().toISOString(),
             notes: `Alert initiated: ${alert.type || 'EMERGENCY'}. Details: ${alert.description || 'No description'}`,
@@ -112,7 +117,50 @@ export default function IncidentReplayPanel({ alertId }: { alertId: string }) {
     };
 
     fetchUnifiedTimeline();
-  }, [alertId]);
+  }, [alertId, reload]);
+
+  // THE DISPATCHER'S REPLY.
+  //
+  // This panel already read `chat_messages` and rendered each one as a
+  // COMMUNICATION event, so the console could WATCH a conversation it had no
+  // way to join. The citizen's screen in the mobile app is literally titled
+  // DISPATCHER CHAT; until now the dispatcher was the one participant who
+  // could not speak.
+  const send = useCallback(async () => {
+    const text = draft.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setSendError(null);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    let name = user?.email ?? 'HQ DISPATCH';
+    let role = 'HQ_COMMAND';
+    if (user?.id) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name, role')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (profile?.full_name) name = profile.full_name as string;
+      if (profile?.role) role = profile.role as string;
+    }
+
+    const res = await sendChatMessage(alertId, text, {
+      id: user?.id,
+      email: user?.email,
+      name,
+      role,
+    });
+    setSending(false);
+    if (res.ok) {
+      setDraft('');
+      setReload(n => n + 1);
+    } else {
+      // Never clear the draft on failure. The mobile screens used to do
+      // exactly that and the message simply vanished.
+      setSendError(res.error);
+    }
+  }, [alertId, draft, sending]);
 
   const getEventIcon = (type: string) => {
     switch (type) {
@@ -165,6 +213,55 @@ export default function IncidentReplayPanel({ alertId }: { alertId: string }) {
           ))}
         </div>
       )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
+            placeholder="Reply to this incident's channel…"
+            aria-label="Reply to this incident's channel"
+            disabled={sending}
+            style={{
+              flex: 1,
+              padding: '10px 12px',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--border)',
+              borderRadius: 10,
+              color: 'var(--text-primary)',
+              fontSize: 12,
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void send()}
+            disabled={sending || !draft.trim()}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '10px 16px',
+              background: draft.trim() ? 'var(--primary)' : 'var(--input-bg)',
+              color: draft.trim() ? '#fff' : 'var(--text-muted)',
+              border: '1px solid var(--border)',
+              borderRadius: 10,
+              fontSize: 11,
+              fontWeight: 900,
+              letterSpacing: 1,
+              cursor: draft.trim() && !sending ? 'pointer' : 'default',
+            }}
+          >
+            <Send size={13} />
+            {sending ? 'SENDING…' : 'SEND'}
+          </button>
+        </div>
+        {sendError && (
+          <span role="alert" style={{ fontSize: 11, fontWeight: 700, color: 'var(--danger)' }}>
+            NOT SENT — {sendError}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

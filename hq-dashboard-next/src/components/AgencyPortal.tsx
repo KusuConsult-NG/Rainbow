@@ -569,7 +569,11 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
               {incident.escalation_log.map((entry: any, i: number) => (
                 <div key={i} style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
                   <span style={{ color: agencyColor, fontWeight: 700 }}>{entry.from_tier} → {entry.to_tier}</span>
-                  {' '}{entry.reason} · {entry.by_email} · {new Date(entry.at).toLocaleString()}
+                  {/* The LGA an HQ handover was aimed at. It used to be written
+                      into `to_tier` itself, which put a place where every other
+                      writer puts a rung; naming it separately keeps both. */}
+                  {entry.to_lga && entry.to_lga !== 'ALL' ? ` (${entry.to_lga})` : ''}
+                  {' '}{entry.reason} · {entry.by_email ?? entry.by ?? 'SYSTEM'} · {new Date(entry.at).toLocaleString()}
                 </div>
               ))}
             </div>

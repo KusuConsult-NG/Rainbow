@@ -25,10 +25,30 @@ compromised, rotate all keys, and do not deploy until C-1 through C-4 are fixed.
 **Current position:** C-1, C-2, C-4 and C-5 are fixed and verified. **Two need a
 human, for different reasons.**
 
-**C-3** is addressed in code and no longer unverified: the migration has been proven
-correct against a real PostgreSQL 16 (`./scripts/verify_rls_migration.sh`, also a CI
-job). It just has not been *run* on your database, which needs credentials this audit
-does not have.
+**C-3 is CLOSED, on the live database, 2026-09-28.** All fourteen outstanding
+migrations were applied to the production Supabase project and its own verification
+reported **25/25 PASS**. The permissive policy set is gone: 44 policies became 29,
+and `no policy grants anon or public anything` passes.
+
+What that run closed, measured on the real database rather than argued from the
+migration text:
+
+| was true before | now |
+|---|---|
+| any citizen could `update profiles set role='ADMIN' where id=auth.uid()` and become HQ | `profiles_no_privilege_escalation` blocks it |
+| any authenticated account could update **any** alert — resolve somebody else's emergency | responders only |
+| every signed-in account could read every citizen's live GPS, kept forever | only while that citizen has an open emergency, purged after 24h |
+| every alert, profile and incident chat readable by every account | scoped |
+| any account could write the four agency tables | scoped |
+| `app_config` readable by `anon` | scoped |
+
+The database was empty when this ran — zero users, zero alerts — so none of the
+above was ever exploited. It was applied before the first citizen existed, which is
+the only comfortable time to do it.
+
+Also now live: the command chain's timeouts, which had been *configured and dead*
+since the beginning (`rainbow-escalate-overdue`, every minute), the telemetry purge,
+and the mesh envelope purge. All three confirmed active in `cron.job`.
 
 **C-6** cannot be addressed in code at all. Deleting `functions/` does not undeploy
 anything, so the only action that closes it is `firebase functions:list` against
@@ -2090,13 +2110,20 @@ clean.
 
 ## Applying the migrations, in two pastes
 
-Nine migrations meant nine trips to the SQL editor, each with its own
-verification snippet to run and read — nine chances to skip one, apply them out
+Fourteen migrations would mean fourteen trips to the SQL editor, each with its own
+verification snippet to run and read — fourteen chances to skip one, apply them out
 of order, or believe a step worked because no error appeared.
 
 `scripts/apply_all_migrations.sql` is generated from the migration files and
-contains all nine in order, ending in a fourteen-row PASS/FAIL table. One paste
-in, one answer out.
+contains all of them in order, ending in a 25-row PASS/FAIL table. One paste in,
+one answer out. `scripts/apply_in_parts/` is the same SQL split for an editor that
+will not take 2,300 lines at once, and CI proves the parts land the same database
+as the whole.
+
+**Counts in this file are derived now, not written.** An earlier version of the
+generated header said "the nine outstanding migrations" while the file applied
+fourteen — on a file an operator pastes into production, a header that miscounts by
+five costs its reader's trust in everything under it.
 
 It does **not** replace the dry run, and says so in its own header. The RLS
 migration drops prior policies by exact name, a hand-made dashboard policy
@@ -2210,3 +2237,857 @@ deleting it: a new permissive policy fails here even when granted only to
 Stated plainly, because the point of staging is to stop guessing: it does not
 test the deployment (the App Hosting config has still never been executed), the
 mobile release builds (no Android or iOS SDK here), or behaviour under load.
+
+## Every screen, rendered
+
+Until this pass, **no console screen in this repository had ever been
+rendered.** Every console finding above came from reading code, or from unit
+tests of logic deliberately lifted out of the components so it could be tested
+at all. That was an honest limit — a widget test cannot build a screen that
+touches the database — but it left the wiring between logic and screen
+completely unexercised, and that is where this system's worst defects have
+lived.
+
+`scripts/local_e2e/run.sh` closes it. A stand-in Supabase, a production build of
+the console, a real Chromium, 51 screenshots and 32 assertions, in about two
+minutes, needing no credentials and no network.
+
+The stand-in is the part that matters. Its tables are built from
+`supabase/migrations/`, so a query naming a column no migration defines is
+rejected exactly as PostgREST rejects it — in full, taking the select, the
+filters and the order with it. A tolerant fake would have turned this system's
+most expensive defect class into a pass.
+
+**What it proves, and what it does not.** It proves the screens. It does not
+prove row-level security and cannot: the fake answers every query as the
+service role would. Policies are still only provable against a real PostgREST,
+which is `scripts/verify_rls.js` against a staging project.
+
+### What the first run found
+
+**The Uninstall Requests panel had never worked.** `UninstallRequests.tsx` asked
+for:
+
+```ts
+.select('*, profiles(full_name, role, geo_lga)')
+.order('created_at', { ascending: false })
+```
+
+Both halves are refused by PostgREST, each on its own sufficient to kill the
+query:
+
+* `uninstall_requests` has no `created_at`. Its timestamp is `submitted_at`,
+  and has been since the table was created in `phase1_foundation.sql`.
+* Embedding needs a declared foreign key. `user_id` references `auth.users`,
+  not `public.profiles`, so there is no relationship to travel: PGRST200.
+
+`loadRequests()` therefore returned `null` on every call, and the panel showed
+its could-not-load state to every operator, permanently. Nobody could authorise
+an uninstall request through this console.
+
+The fail-closed design is the only reason this was survivable rather than a
+lie — the panel distinguishes "the query failed" from "there is nothing here",
+so it never claimed an empty queue. That distinction is the README's first
+principle, and it held.
+
+Fixed by ordering on `submitted_at` and fetching the reporter's name in a second
+query. A foreign key to `profiles` would have saved the round trip, but
+`user_id` is nullable `ON DELETE SET NULL` and rows may reference users with no
+profile row — a migration that can fail on real data is a bad trade for one
+request.
+
+### Why three gates had all passed it
+
+* **`check_schema_drift.py` exempted `id`, `created_at` and `updated_at`** on
+  every table, on the reasoning that a migration might not spell them out. It
+  does spell them out. The exemption was shaped exactly like the most common
+  column names in the codebase, and `created_at` walked straight through it.
+  The exemption set is now empty.
+* **The same script skipped any select containing `(`, `*` or `:`** as not a
+  plain column list. `'*, profiles(full_name, role, geo_lga)'` contains all
+  three. Skipping the awkward shape meant skipping the query most likely to be
+  wrong. Embedded resources are now parsed, their columns checked against the
+  embedded table, and the relationship checked against the foreign keys.
+* **`.order()` was never examined at all.** It is the easiest place for a bad
+  column name to hide, because the select list beside it can be perfectly
+  correct and the query still dies. Now gated.
+
+Both new gates were verified by restoring the original query and watching the
+checker fail on each half, then restoring the fix.
+
+### Three failures in the first run that were the harness, not the app
+
+Recorded because the difference is the whole value of the exercise, and because
+each one nearly became a false finding in this report.
+
+* **The ARMY portal looked empty.** The migration parser read only the first
+  clause of `ALTER TABLE … ADD COLUMN a, ADD COLUMN b`, so it never saw
+  `alerts.escalation_log`, so the fake rejected the portal's query, so the
+  portal correctly showed its empty state. The portal was fine. Worse, the
+  matching assertion on the POLICE portal *passed* for the same broken reason —
+  a green check produced by a broken harness.
+* **C-5 appeared to have regressed.** It had not: the unlocated callout is on
+  the map, which is where a fabricated pin would have been, and the assertion
+  was looking at the incident feed. The map states it twice — a `1 UNLOCATED`
+  counter and an amber `NO GPS FIX — NOT ON MAP` badge on the card.
+* **Every screen failed at once**, showing the console's error boundary. The
+  previous `next start` was still holding port 3000, so the browser loaded the
+  old build's HTML against the new build's chunk names. An environment mistake.
+  It did demonstrate the error boundary working on a real `ChunkLoadError`,
+  which no test had shown before.
+
+### What the run confirms still works
+
+Recorded because several of these were repairs made earlier in this audit on
+reasoning alone, and this is the first time any of them has been observed:
+
+| | |
+|---|---|
+| the proxy guard | an anonymous `/dashboard` lands on `/login` |
+| C-5 | the SOS with null coordinates is counted as `1 UNLOCATED` and badged `NO GPS FIX — NOT ON MAP`, not pinned in central Jos |
+| ungraded severity | reads `UNKNOWN` in the dossier, and the CRITICAL filter drops it — severity is not assumed |
+| the CRITICAL filter | keeps both CRITICAL incidents, drops the two HIGH ones and the ungraded one |
+| mass broadcast | inserts into `system_alerts` with all eleven columns accepted, and a derived non-null `title` — the `NOT NULL` that used to fail |
+| the agency portal | the ARMY-escalated incident appears in the ARMY portal and in no other |
+| login failure | a wrong password reads as a credential error, never as `Failed to fetch` |
+| the error boundary | catches a real chunk failure and says the board is offline rather than showing a blank page |
+
+32 of 32 assertions pass. The screenshots are kept by CI as a build artifact on
+every run, pass or fail — a failure is exactly when somebody wants to see the
+screen.
+
+### Still not covered by any of this
+
+* **Row-level security as deployed.** Only staging can show it.
+* **The mobile app on a device.** Its test suite runs in CI; no screen has been
+  rendered on a handset or an emulator, and no release build has been produced.
+* **The deploy.** The App Hosting config has still never been executed.
+
+## Pressing the buttons
+
+Rendering a screen and using one are different claims. The pass above proved
+the first. This one presses every control a commander or an agency liaison can
+reach and checks each action against the database write it is supposed to
+cause — because a button that looks right, logs nothing and writes nothing is
+invisible to a screenshot.
+
+`scripts/local_e2e/interact.js`: sixteen named flows asserted against their
+writes, then a sweep that clicks the remaining sixty-odd controls and records
+what each one did — a request, a DOM change, a navigation, or nothing at all.
+The last is what it is hunting.
+
+### The map was never actually tested
+
+The first pass reported "the map renders". It did not. OpenStreetMap — and
+CARTO's dark basemap, which the console switches to in dark mode — are both
+refused by the egress policy here and on any CI runner, so every map screenshot
+was markers floating on an empty grey page. "The map renders" meant nothing.
+
+Tiles are now served locally from a generated PNG and every request recorded,
+which is better evidence than the real endpoint rather than worse:
+
+* the base layer is visibly present, so a screenshot shows a map;
+* the run asserts the tiles the app asks for are **over Plateau State** — 24
+  of 24 inside the state's bounding box, first corner 10.49°N 9.14°E, all at
+  zoom 9 — rather than trusting the centre it was configured with;
+* switching theme is asserted to repoint the base layer at the dark basemap,
+  not merely recolour the chrome around it;
+* it does not depend on a third party's uptime.
+
+It does **not** prove OpenStreetMap's own tiles render. That needs the real
+endpoint and a network that allows it.
+
+### What pressing the buttons found: anyone could become a commander
+
+The Agent Directory provisions staff accounts. It did it like this:
+
+```ts
+supabase.auth.signUp({ email, password,
+  options: { data: { role: 'HQ_COMMAND', agency, geo_lga, ... } } })
+```
+
+and `handle_new_user()`, unchanged since the initial schema, did this:
+
+```sql
+role := COALESCE(NEW.raw_user_meta_data->>'role', 'CITIZEN')
+```
+
+`raw_user_meta_data` **is** `options.data`. It is written by whoever is signing
+up, with the anon key — which ships inside the APK and inside the browser
+bundle, by design, because row-level security is meant to be the whole access
+model. So this was enough, from anywhere:
+
+```ts
+supabase.auth.signUp({ email, password,
+  options: { data: { role: 'HQ_COMMAND' } } })
+```
+
+`is_staff()` and `is_command()` read `profiles.role`, so that account then
+passes every policy in the RLS migration: the full incident board, live
+telemetry for every citizen who has pressed SOS, dispatch, escalation, and mass
+broadcast to the whole state.
+
+**Why the existing guard did not cover it.** `profiles_no_privilege_escalation`
+is `BEFORE UPDATE`. The escalation is not an update — the role is chosen at
+INSERT, by the signup itself. README.md said "nothing reads `user_metadata`",
+which was true of the policies and not true of the trigger that creates the row
+the policies read. The security model was correct about itself one layer up
+from where the hole was.
+
+**Proven, not argued.** `scripts/signup_role_escalation_test.sql` runs in the
+existing throwaway-PostgreSQL harness. Before the fix:
+
+```
+WARNING:  FAIL  a signup that asked for HQ_COMMAND got HQ_COMMAND
+```
+
+**The fix.** `20260927000000_signup_cannot_choose_role.sql` makes every signup a
+CITIZEN whatever it asks for; `full_name` and `phone` are still honoured,
+because they are not privileges. The function also gains `SET search_path`,
+which a SECURITY DEFINER function should always pin.
+
+That closes the hole and breaks the console's provisioning, which depended on
+it — so provisioning moved to `/api/admin/provision`: it authenticates the
+caller, refuses anyone who is not command, refuses an unknown role by name,
+refuses a non-HQ commander minting an `HQ_COMMAND` or `ADMIN` peer, creates the
+account with the service key, sets the role on the profile, and deletes the
+account if the role write fails — an account that exists with no role is a
+citizen holding staff credentials, which is worse than no account.
+
+The run asserts the whole of it end to end: the form posts to the route, the
+route answers 201, the profile comes back `UNIT_COMMAND` rather than `CITIZEN`,
+and **every write that touches `profiles.role` arrived with the service key,
+never from the browser.** The stand-in records which key each write came with,
+so that last claim is checkable rather than assumed.
+
+**Still outstanding, and it needs a human.** The migration cannot tell an
+account legitimately provisioned as `HQ_COMMAND` from one that asked to be.
+`docs/PRODUCTION_DEPLOYMENT.md` carries the audit query for the existing roster.
+On the project this was applied to on 2026-09-28 the answer was easy — there were
+zero accounts of any kind — but that will not be true of a project that has been
+running.
+
+**And one thing this fix created, found while using it.** `/api/admin/provision`
+opens with `requireRole(COMMAND_ROLES)`, and the migration makes every signup a
+CITIZEN. So on a database with no staff, **there is no way in**: the only route
+that can set a role refuses everyone, because nobody holds a role yet. It is a
+genuine bootstrap deadlock, not a misconfiguration, and it appeared the first time
+anybody stood the system up from nothing.
+
+The first account therefore has to be made out of band, once, per deployment:
+
+```sql
+-- after creating the auth user in the Supabase dashboard
+update public.profiles
+   set role = 'HQ_COMMAND', full_name = '...', badge_number = 'HQ-001'
+ where email = '...';
+```
+
+That works because `profiles_no_privilege_escalation` exempts a caller with no
+`auth.uid()`, which is what the SQL editor is. Every account after the first goes
+through the route. Written down here because the deadlock is invisible until the
+moment it blocks you, and at that moment it looks like the console is broken.
+
+### Six more harness faults, again not app faults
+
+Every one of these first presented as a defect in the console:
+
+* **`DISPATCH` "wrote nothing".** It opens a responder picker, and the confirm
+  button stays disabled until somebody is selected. Dispatching to nobody is
+  correctly refused; the harness had not selected anyone.
+* **"Filing an action report wrote nothing".** The pattern `report` matched the
+  **Action Reports tab** rather than `FILE REPORT TO HQ` on the card, so the
+  run navigated to the list and then complained the list did not write.
+* **`DEPLOY` "was missing".** It is on the expanded incident card, and the card
+  collapses when the deployment modal closes.
+* **"The browser writes `profiles.role`".** It does not — that write is the
+  server route's, through the same stand-in. The fake now records which key
+  each write arrived with, which is what makes the claim meaningful.
+* **"`🚔 POLICE` is a dead control".** The sweep compared `innerHTML.length`,
+  and selecting a different agency swapped text of the same length. It hashes
+  the content now.
+* **"`Provision Security Personnel Account` is a dead control".** Three of its
+  fields are `required`, so clicking submit on an empty form is refused by the
+  browser with no DOM change. The sweep now treats failed field validation as
+  the control working, which it is.
+
+### What now passes
+
+21 of 21 interaction assertions, 62 controls exercised, no dead control, nothing
+thrown, and no query naming a column the migrations do not define:
+
+| | |
+|---|---|
+| map | 24/24 tiles over Plateau at zoom 9; markers drawn; theme switch repoints the basemap |
+| dispatch | picks a responder, writes `DISPATCHED` with `assigned_to` and `assigned_responders` |
+| escalate | writes status, agency and an appended `escalation_log` entry |
+| resolve | writes `RESOLVED` with `resolved_by` and `resolved_at` |
+| broadcast | inserts into `system_alerts` with a derived non-null title |
+| provisioning | 201 from the server route; role set with the service key, never from the browser |
+| uninstall queue | `APPROVE` writes status and `reviewed_at` |
+| agency portal | add officer, change status, deploy personnel, file a report — all four insert |
+| HQ ↔ agency | HQ acknowledging a report writes `read_by_hq` and who acknowledged it |
+| sign out | returns to the login screen |
+
+## The mobile app, rendered and used
+
+No screen of the mobile app had ever been rendered either: there is no emulator
+here, and for most of this audit there was no Flutter SDK, so "it builds and its
+tests pass" was the whole of the evidence.
+
+Flutter's web target builds the same widget tree from the same Dart, so the
+screens can be rendered and the buttons pressed. `scripts/local_e2e/`:
+
+* `mobile_capture.js` — every route at phone size (390×844), screenshotted
+* `mobile_interact.js` — SOS both ways, the AI report, all ten reporting
+  categories end to end, emergency PINs, the uninstall request, and a sweep of
+  every remaining button
+
+**What that is and is not.** It is the real screens, the real router, the real
+state, against the stand-in backend. It is **not** an Android or iOS build:
+platform plugins behave differently or not at all on web. It does not prove
+row-level security.
+
+### Every SOS this app has ever sent was refused by the database
+
+`AlertService.submitAlert` built its insert payload with both of these:
+
+```dart
+'reported_by': reportedBy,
+'reportedBy': reportedBy,      // not a column
+```
+
+PostgREST rejects an insert naming an unknown column **in full**. So every alert
+the mobile app submitted — every SOS, every incident report, from every
+citizen — was refused.
+
+It was invisible because the failure path is a *fallback*, not an error: the
+catch enqueues the alert into offline SQLite and the UI reports the alert sent.
+It looked like an app with good offline support. It was an app that was always
+offline.
+
+**Why the drift gate missed it.** `check_schema_drift.py` matched Dart payload
+keys with `[a-z_][a-z0-9_]*` and no `IGNORECASE`, so `'reportedBy'` did not
+match the pattern at all and was skipped in silence — and a camelCase key is
+precisely what a wrong column name looks like when the surrounding code is
+Dart. The pattern now accepts any identifier, and the gate reports
+`alerts.reportedby` on the original code.
+
+### Every panic SOS was filed as MEDIUM
+
+`submitAlert` took an `isCritical` flag and never read it. The body graded
+alerts from `priority`, which defaults to `AlertPriority.medium`. So
+`EmergencyNotifier.startEmergency()` — which passes `isCritical: true` and no
+`priority` — filed every PANIC SOS at MEDIUM.
+
+On the HQ board that put the most urgent thing a citizen can do below a report
+of a blocked drain, and outside the CRITICAL filter entirely. The console-side
+work earlier in this audit *verified* that the CRITICAL filter correctly drops
+anything not graded CRITICAL; this is what was arriving mis-graded.
+
+Nothing caught it. `sos_orchestration_test.dart` verifies the provider *passes*
+`isCritical: true`, which it did — the parameter is right there in the call and
+looks like it works. It was found by pressing the button in a browser and
+reading the row that came out: `severity: MEDIUM`.
+
+Fixed by honouring the flag, and pinned by three tests in
+`offline_queue_test.dart` that go through the real `submitAlert` (its offline
+fallback writes the same severity the insert would). Restoring the bug makes
+them fail with `Expected: 'CRITICAL'  Actual: 'MEDIUM'`. The browser run now
+reports `type=PANIC SOS severity=CRITICAL`.
+
+### What the mobile run now proves
+
+16 of 16 assertions:
+
+| | |
+|---|---|
+| silent SOS (tap) | inserts `EMERGENCY - Silent SOS` with reporter and real coordinates |
+| panic SOS (long press) | inserts `PANIC SOS` at **CRITICAL**, and opens the emergency screen |
+| AI report | opens, listens, and produces a transcript |
+| all ten categories | Kidnap … Community attack, each through category → subtype → dossier → transmit, **10/10 inserted**, each carrying its own type and severity (e.g. `Kidnap - Immediate Abduction` / `CRITICAL`) |
+| emergency PIN | the four-step wizard reaches `rpc/set_emergency_pins` — the device never stores PIN material |
+| uninstall request | inserts into `uninstall_requests` |
+| incident history, safe zones | read the tables they display |
+| every other button | 13 exercised, none dead |
+
+### One error that is NOT the app's
+
+An uncaught `TypeError: Cannot read properties of null (reading 'toString')`
+fires 22 times, whenever the harness synthesises a keystroke. Resolved through
+`main.dart.js.map`, its stack is entirely inside
+`org-dartlang-sdk:///lib/_engine/engine/keyboard_binding.dart` — Flutter's own
+web keyboard binding — with no frame in `lib/`, and that binding does not exist
+on Android or iOS. It is excluded by stack rather than by message, so an app
+error with the same wording would still be reported.
+
+### Two more harness faults worth recording
+
+* **"Login is broken."** It was not. The fake appended on `upsert` instead of
+  merging, so `profiles` held two rows for one id; the app's own profile lookup
+  uses `.single()`, got "Results contain 2 rows", left the role unknown and
+  parked the user on the login screen. An hour of it looking like an auth bug.
+* **"Nine of ten categories are broken."** The report flow is three screens —
+  category, subtype, dossier — and the harness had collapsed the middle one,
+  typing a narrative into a screen with no narrative field and then looking for
+  a button that lives on the screen after it.
+
+### Still not covered
+
+* **A real device.** Web is the same Dart, not the same platform.
+* **Row-level security**, which only a staging project can show.
+* **The release build and the store artefacts**, which are gated statically only.
+
+## The command chain
+
+The intended model, stated by the system's owner: **an alert reaches the
+polling unit; the PU escalates to the ward, the ward to the LGA, the LGA to
+HQ; and HQ overrides where the chain below it is not accessible.**
+
+Three things had to be true for that, and none of them were.
+
+### The timeouts were configured, visible, and dead
+
+`app_config` has seeded escalation timeouts — PU 2 minutes, WARD 5, LGA 10 —
+and the console's System Logic screen lets an operator edit and save them. The
+only code that touched those keys was the screen that displays and saves them.
+**Nothing ever escalated on a timeout.**
+
+That is the worst kind of dead setting. It is not missing, it is reassuring: an
+operator who sets "PU timeout: 2 minutes" comes away believing unanswered
+alerts climb the chain, and nothing tells them otherwise. It is also exactly
+the mechanism the owner's model needs, since a tier that is "not accessible" is
+detected by a clock.
+
+`escalate_overdue_alerts()` now enforces them, in the database, on a pg_cron
+schedule. Server-side because a tier that is not responding is very often a
+tier that is offline — an escalation that only runs while somebody has the
+console open cannot fire in the case it exists for.
+
+### Nothing put an alert at the bottom of the chain
+
+`assigned_tier` was nullable with no default, so an alert arrived owned by
+nobody. The ladder existed with no bottom rung. The default is now `'UNIT'`,
+set in the DATABASE rather than in a client, because an alert inserted by the
+mobile app, the console, the offline queue replaying, or any future integration
+must all land in the same place. A client-side default is one forgotten call
+site away from an unowned emergency.
+
+### There was no clock on ownership
+
+Nothing recorded *when* a tier took an alert, so "has this tier had it too
+long?" could not be asked. `tier_assigned_at` starts on insert and restarts on
+every escalation, so an alert escalated to the ward gets the ward's full window
+rather than whatever was left of the PU's.
+
+### What the chain now does, proven on real PostgreSQL
+
+14 assertions in `scripts/command_chain_behaviour_test.sql`:
+
+| | |
+|---|---|
+| a new alert lands at the polling unit, with the clock started |
+| an alert inside its window is left alone |
+| an overdue UNIT alert climbs to WARD |
+| it climbs **one rung per timeout**, never straight to the top |
+| the move is appended to `escalation_log` with `reason: TIMEOUT` |
+| an **acknowledged** alert never moves — somebody has it |
+| a resolved alert never moves |
+| **HQ is terminal**: `next_tier('HQ')` is NULL, so the chain stops rather than looping |
+| a malformed timeout falls back to the seeded value, not to zero |
+| a zero timeout is refused rather than escalating everything instantly |
+| the job is service-role only — no signed-in client can reassign every emergency |
+
+The two dangerous defaults are deliberate. A missing or malformed
+`app_config` value must not mean "escalate immediately" (timeout 0) or "never
+escalate" (NULL read as infinite); both are silent, and both are wrong in an
+emergency queue.
+
+### Still missing: alerts do not reach the RIGHT polling unit
+
+They now reach *a* tier. They do not reach the *correct* PU, because nothing
+populates the geography an alert would be routed by:
+
+* a citizen incident report attaches **no** `geo_lga`, `geo_ward` or `geo_pu`
+  at all unless the reporter ticks "manual override";
+* the panic SOS attaches `geo_lga` and `geo_ward` from the reporter's profile
+  and **never `geo_pu`**, though the profile has one;
+* the unit filter's PU comparison is therefore never reached, and the
+  `geo_pu IS NULL` fail-open shows every alert to every unit in the state.
+
+The decision taken was to resolve the incident's **GPS coordinates** to a
+PU/ward/LGA, which is the right answer — it reflects where the incident is
+rather than where the reporter is registered. **The data to do it does not
+exist in this repository:**
+
+* all 17 "LGA boundaries" in `plateau_boundaries.json` are axis-aligned
+  rectangles — placeholders, not real shapes;
+* `TacticalWard` carries `id`, `name` and `pollingUnits: List<String>`. There
+  are **no coordinates for any ward or polling unit anywhere**.
+
+Resolving against the rectangles would confidently route an SOS to the wrong
+LGA, which is worse than not routing it. Real INEC ward and polling-unit
+geometry is a prerequisite, and it is an input this repository has to be given.
+
+Also noted: the dashboard prefers plural `geo_lgas` / `geo_wards` / `geo_pus`
+columns for an officer covering several patches, falling back to the singular.
+None of those three columns exist in any migration, so the fallback is the only
+path that ever runs and a multi-ward officer cannot be expressed.
+
+## Two of Plateau's seventeen LGAs could not be matched
+
+The two apps each carry their own copy of the state's jurisdiction map, and
+they disagreed.
+
+| | console | mobile app |
+|---|---|---|
+| | `Barkin Ladi` | `BARIKIN LADI` |
+| | `Qua'an Pan` | `BWALL` |
+
+`BARIKIN LADI` is a transposition of Barkin Ladi. `BWALL` is not a local
+government area at all — Bwall is a district *inside* Qua'an Pan, and Qua'an
+Pan was missing from the mobile app entirely.
+
+**Why it matters.** The console matches an alert to an LGA with `geoMatches`,
+which lowercases both sides and accepts a substring in either direction. That
+generosity absorbs `JOS NORTH` vs `Jos North` — it cannot rescue a name that is
+simply different. `barikin ladi` is not a substring of `barkin ladi`, and
+`bwall` shares nothing with `qua'an pan`. So an incident tagged by the mobile
+app in either of those two LGAs could not be matched to them: not by the
+console's LGA filter, and not by the dashboard scope of the commander
+responsible for that ground. A citizen in Qua'an Pan also could not select
+their own LGA, because the app did not list it.
+
+Two of seventeen LGAs, and the reason both apps looked correct in isolation is
+that each was self-consistent. Only comparing them shows it.
+
+Fixed in the mobile map, and pinned by `test/jurisdiction_names_test.dart`,
+which asserts the app knows exactly the seventeen real LGAs — no extras, none
+missing — and that every name survives the console's own matching function.
+
+## The map boundaries were rectangles
+
+`plateau_boundaries.json` held 17 features. All 17 were **axis-aligned
+rectangles**: four corners, two distinct longitudes, two distinct latitudes.
+They are the dashed grid visible behind the markers in every map screenshot,
+and they are not the shape of anything.
+
+That is why resolving an incident's GPS to an LGA was refused earlier in this
+audit: a point-in-polygon test against a rectangle returns an answer with total
+confidence and no relationship to where the boundary actually runs.
+
+Replaced with the real ADM2 polygons for all seventeen Plateau LGAs, extracted
+from **geoBoundaries gbOpen NGA ADM2 (CC BY 4.0, www.geoboundaries.org)** —
+92 KB, attribution carried inside the file. The names are the same seventeen
+the test above pins, which is what lets a resolved polygon be matched back to a
+jurisdiction the apps understand.
+
+### Wards and polling units are still missing
+
+geoBoundaries publishes no ADM3 for Nigeria, so ward polygons are not available
+from that source, and polling units are points that no open release in reach
+provides. The chain can therefore resolve an incident to its **LGA**, and no
+finer. Routing an alert to the correct *polling unit* — the bottom rung, and
+the one the whole chain hangs off — still needs INEC ward and PU geometry as an
+input.
+
+## Deep search for ward and polling-unit geometry
+
+The routing decision was GPS → polling unit. This is what is actually
+obtainable, after searching the open sources reachable from here. Most are
+not: HDX, geoboundaries.org, Overpass and Nominatim are all refused by the
+egress policy. `raw.githubusercontent.com` is open, which is what made the
+rest possible.
+
+| layer | status | source |
+|---|---|---|
+| **LGA polygons** | **obtained, integrated** | geoBoundaries gbOpen NGA ADM2, CC BY 4.0 — 774 national, 17 extracted for Plateau |
+| **Ward centroids** | **obtained, added** | `temikeezy/nigeria-geojson-data`, MIT — 8,809 national, 207 for Plateau, all 17 LGAs |
+| **PU list** (names, codes, ward) | available, not taken | `sadiqsalau/inec-ng-data` — 35 MB, complete, but see below |
+| **PU coordinates** | **does not exist openly** | — |
+
+### Wards are centroids, not boundaries
+
+The ward data is one lat/long per ward, not a polygon. A point can therefore be
+resolved to the **nearest ward centroid inside its LGA polygon** — an
+approximation, and it will be wrong near a boundary between two wards of very
+different size. That is honest routing with a stated error mode, which is a
+different thing from the rectangles it replaces: those were wrong everywhere
+and said so nowhere.
+
+`public/plateau_wards.json` carries the 207 centroids and states this limit in
+the file itself.
+
+### Polling-unit coordinates are not open data
+
+`sadiqsalau/inec-ng-data` has the complete INEC hierarchy — every state, LGA,
+ward and polling unit — and each unit carries only `name` and `abbreviation`.
+No coordinates. The geocoded polling-unit sets that do exist are per-state
+research datasets for election analysis (Lagos, Abia, Anambra), built by
+geocoding unit names after the fact; none covers Plateau and none is
+authoritative. INEC's own per-unit coordinates sit behind a single-voter lookup
+on the CVR portal, not a bulk download.
+
+**So GPS cannot resolve a polling unit, and the bottom rung of the chain
+cannot be reached from coordinates alone.** What is achievable today is
+GPS → LGA (real polygons) → nearest ward centroid. Assigning an alert to a
+specific PU requires either the reporter selecting it, or INEC PU geometry
+supplied as an input.
+
+### A ward-list discrepancy that was not one
+
+An initial comparison suggested the app was missing five Mangu wards. It is
+not. The app writes `GINDIRI 1`, `GINDIRI 11`, `MANGU 1`, `MANGU 11` where the
+official list writes `Gindiri I`, `Gindiri II`, `Mangu I`, `Mangu II`, and a
+normaliser that strips non-letters collapsed each pair to one key. The app's
+ward list is complete at 207.
+
+Worth noting for a future reader rather than as a defect: `GINDIRI 11` and
+`MANGU 11` are Arabic-numeral renderings of the Roman `II`, so they read as
+eleven. They match nothing in the official list except by the numeral-stripping
+comparison above, which is the kind of near-miss that produced the two real LGA
+mismatches.
+
+---
+
+## Driving one incident the whole length of the chain
+
+The command chain had been proven a rung at a time: the database climbs on a
+timeout (real PostgreSQL, 19 assertions), each tier's dashboard renders and
+names itself (8 roles, 203 screenshots), each control does something (62
+controls). What none of those could see is the **handover** — and that is where
+the remaining defects were.
+
+`scripts/local_e2e/chain_lifecycle.js` follows one incident from a citizen's
+phone to a dispatched officer, in a browser, taking a screenshot and reading the
+database at every hop. 51 assertions, 26 screenshots:
+
+| | |
+|---|---|
+| a citizen reports in all 10 categories | each row written, each landing at `assigned_tier = 'UNIT'` |
+| the jurisdiction on each report | resolved from the reporter's GPS — e.g. `JOS NORTH / TUDUN WADA - KABONG` |
+| UNIT → WARD → LGA → HQ | ENGAGE, the action sheet, the authorization fallback, the SITREP and CONFIRM ESCALATION, photographed at each rung |
+| after each hop | `assigned_tier`, `status`, the named commander, the restarted clock and the cleared acknowledgement, read back by id |
+| the tier below | no longer sees what it handed up |
+| HQ | offered no escalation — there is nothing above it |
+| HQ overriding | DISPATCH UNIT → the responder picker → a polling-unit officer, three rungs down |
+| that officer | can see the mission |
+
+### Four more real defects, all in the handover
+
+**`alert['assignedToUid']` — a key PostgREST never returns.** Read in three
+places on rows that come straight from the database, where the key is the
+column: `assigned_to`. Every one of those reads was a constant `null` and every
+comparison against them a constant `false`, silently.
+
+The worse half is the first: the visibility filter opens with *"if this alert is
+assigned to me, show it"*, and that is the **only** rule that can put an
+incident on the screen of an officer outside its tier. It is what an HQ override
+*is*. So HQ reaching down to a polling-unit officer produced a mission that
+officer could not see. The other half: the tactical action sheet gates EN ROUTE,
+ON SITE, RESOLVE MISSION, MISSION INTEL and SECURE CHAT on `isAssignedToMe`, so
+an officer holding a mission was offered a generic DEPLOY button forever and
+could not advance or resolve it from the feed.
+
+Fixed in `lib/features/agent/alert_row.dart`, one function so there is one
+answer, and it refuses to read an unknown session as "this is mine".
+
+**HQ had no way to send anyone.** `DISPATCH UNIT` was gated on
+`assignedTier == 'WARD' || == 'LGA'`, and the whole action row on
+`assignedTier != 'HQ'`. The one rung whose purpose is to override when nobody
+below responds was the one rung with no dispatch control: an incident that
+climbed the entire chain *because it was ignored* arrived at the only desk that
+could not answer it. Dispatch is now gated on `canDispatchFrom`, escalation on
+there being a rung above at all — so HQ keeps dispatch and correctly loses the
+up-arrow that would have escalated HQ to itself.
+
+**Neither clock the escalation job reads was ever written.**
+`escalate_overdue_alerts()` measures a tier's window from `tier_assigned_at` and
+stops climbing when `acknowledged_at` is set. Nothing in either app wrote either
+column.
+
+* A manual escalation left `tier_assigned_at` at the insert time, so the WARD
+  was handed an alert whose WARD window had already expired — and cron moved it
+  to the LGA, then to HQ, within a minute or two. One hand escalation of an
+  alert older than ten minutes landed at HQ having visibly skipped every rung it
+  was meant to climb.
+* Accepting a mission never set `acknowledged_at`, so the guard that exists to
+  stop an alert being taken off the responder who has it could not fire.
+
+Both are now written by the app and by the console, and asserted against real
+PostgreSQL: `command_chain_behaviour_test.sql` replays the app's **old** payload
+to demonstrate the cascade, then the new one to show the WARD gets its full
+window and still climbs when *that* window passes.
+
+**The console handed the officer down but not the tier.** HQ escalating to an
+LGA commander wrote `assigned_to` and `escalated_to_agency` and left
+`assigned_tier` at `'HQ'`. Since the responder app shows an officer their own
+tier and above, the LGA commander's whole team could not see it — only the one
+named officer, and only through the "assigned to me" rule that was itself dead.
+`hqOverride` had the mirror problem: HQ took command without owning the rung or
+stopping the clock, so the timeout escalated the incident onward from under HQ
+minutes later.
+
+Two smaller things fell out of the same read: the console wrote an LGA **name**
+into `escalation_log.to_tier`, where the app and the database job both write a
+tier **label**, so one timeline rendered `HQ → LGA` and the next `HQ → JOS
+SOUTH` with nothing to say which was which; and the portal rendering that
+timeline read `by_email`, which the database job does not write, so every
+automatic escalation was attributed to `undefined`.
+
+### The override assertion, mutation-tested
+
+"The officer HQ dispatched can see the mission" is the assertion carrying the
+whole override claim, so it was worth checking that it fails for the reason
+stated rather than passing for some other one. The fix was reverted — a single
+line, back to `alert['assignedToUid']` — the app rebuilt, and the run repeated:
+
+```
+FAIL  the officer HQ dispatched (UNIT_COMMAND) can see the mission
+50/51 checks passed
+```
+
+Exactly one assertion flips, which is the right shape. The chain still climbs,
+HQ still dispatches, the database still records the assignment correctly. The
+only thing that breaks is the officer at the bottom being able to SEE the
+mission HQ reached down to give them — which is what the defect was, and it is
+worth being precise about how it would have presented in the field: the console
+and the database would both show the incident correctly assigned, and the
+officer's phone would show nothing.
+
+The picker deliberately selects the POLLING-UNIT officer rather than the first
+row offered. The incident is owned by tier HQ and a unit officer is three rungs
+below it, so tier visibility cannot explain the pass — only the assignee rule
+can. Picking any higher-tier officer would have made the assertion pass whether
+the rule worked or not.
+
+### The drift gate could not see the first class at all
+
+It reads select lists and insert/update payloads — where a bad column name fails
+loudly. A camelCase key read off a row fails *silently*, which is the worse
+half, and that is how `alert['assignedToUid']` survived in three places.
+`check_schema_drift.py` now flags camelCase subscripts in Dart files that query
+Supabase, with the four maps that legitimately are not database rows named and
+explained (a GoRouter `extra`, an FCM payload, a WebRTC ICE candidate, a
+background-service message). Verified by restoring the bug and watching the gate
+fail.
+
+### Four harness faults, caught before any of them was reported as a defect
+
+Worth recording, because each one produced a run that read exactly like a broken
+app:
+
+1. **The followed alert was the oldest.** Kidnap was submitted first; the feed
+   sorts newest-first; Flutter web only builds semantics nodes for widgets it
+   actually renders. So the followed card was not in the page, and the run
+   reported that no tier could see its own incidents.
+2. **A wheel event went to the app bar**, because the pointer had never moved
+   from (0, 0). Nothing below the fold could ever be reached.
+3. **Semantics leaves carry their text in `aria-label`, not `textContent`.**
+   Reading only the latter found no incident on any card.
+4. **"The first ENGAGE below the incident text" picked a neighbouring card**,
+   because the incident type also appears above the feed in the map markers and
+   the critical-incident summary. The whole chain then ran *correctly* on a
+   different alert while every by-id assertion failed. The button is now located
+   structurally, by the card that contains the incident.
+
+The stand-in also had to learn column `DEFAULT`s, **with their types**:
+`'[]'::jsonb` is an empty list and `'{}'` on a `TEXT[]` is an empty array, and
+getting that wrong made the chain of custody read as empty at every hop.
+
+### And the eight-role capture no longer dies on the eighth
+
+One CanvasKit browser, eight accounts, twenty-four routes each, exhausted the
+container on the last role: the process died mid-screenshot and the run ended on
+a `TargetCloseError` with no report written — a partial run that looks like a
+crash rather than like missing coverage. The browser is now replaced between
+roles, with the tile log and the error log kept across the restart since those
+are the evidence. 8/8 roles, 203 screenshots, 15/15 checks.
+
+---
+
+## Offline, and the question of a mesh network
+
+Asked whether the app works without internet, and whether mesh networking would
+help. Three separate answers, and they are not the same.
+
+### There is no mesh network, and nothing resembling one
+
+No Bluetooth, no Wi-Fi Direct, no Nearby Connections, no peer-to-peer of any
+kind, in the Dart, the Android project or the iOS project. This is worth being
+plain about because the app's vocabulary suggests otherwise — "UPLINK",
+"RELAY", "TRANSMISSION" — and none of that is a radio. Every byte this app
+moves goes over IP to Supabase.
+
+### The offline QUEUE is real and well built
+
+`SqliteService` holds an on-device queue; `SyncService` watches
+`Connectivity().onConnectivityChanged` and replays it when the network returns.
+It is the most carefully tested part of this codebase — thirteen unit tests,
+including a regression for a fault where **every alert queued while offline
+reached HQ with no coordinates**, in exactly the no-signal scenario the queue
+exists for.
+
+So: a report written with no signal is not lost. It is held, and it goes when
+the phone can reach the network again.
+
+### But the "emergency cellular relay" did not exist
+
+`offline_overlay.dart` showed "UPLINK DISRUPTED — Initiating emergency cellular
+relay…", ran a progress bar, and finished on a green tick reading **SIGNAL
+TRANSMITTED**. It is a four-second animation on a timer. Its own doc comment
+says so: *"Simulates a resilient offline dispatch … falls back to a simulated
+localized SMS burst."*
+
+There is no cellular relay to initiate. The app has no SMS capability at all —
+no `SEND_SMS` permission in the manifest, no telephony plugin, nothing. The one
+SMS path in the system is `POST /api/sos/dispatch-sms`, which asks the HQ
+backend to send one via Termii — over the internet. It is an out-of-band way to
+reach a commander who is not watching the dashboard. It is not a fallback for a
+handset with no signal, and it cannot be: it needs exactly the connectivity
+that is missing.
+
+The overlay was never mounted, so it was telling nobody this. It has been
+deleted rather than left for somebody to wire up, because "SIGNAL TRANSMITTED"
+shown to a person with no signal is the most dangerous sentence this app could
+contain.
+
+### And the success screen was reading the radio, not the outcome
+
+The report flow decided between **REPORT TRANSMITTED** and **REPORT QUEUED
+LOCALLY** from `connectivityResult.contains(ConnectivityResult.none)` — a
+reading of the radio, taken BEFORE the submit.
+
+That answers "does this phone have a network interface up". The question is
+"did the report arrive", and the two come apart in every case that matters: a
+captive portal, DNS failure, an expired token, a row-level-security refusal, a
+column the schema does not have, or the backend being down. In all of them the
+radio says connected, the insert fails, the alert lands in the local queue —
+and the person was shown a green REPORT TRANSMITTED with a shield on it.
+
+This is the same failure mode that hid `alerts.reportedBy` for months: an
+insert the database refused looked exactly like one that succeeded, because the
+queue caught it. `AlertService.wasQueuedOffline` reads the returned id, which
+already carried the truth — a uuid when it arrived, `OFFLINE_…` when it did
+not — and the screen now reports what happened rather than what was predicted.
+
+### Would a mesh actually help here?
+
+Honestly assessed, rather than as a feature wish:
+
+It would help in the one scenario this system is most likely to face — a
+deliberate network shutdown during unrest, where handsets still have power and
+each other but no tower. A store-and-forward mesh would let a report hop
+between phones until one of them reaches a working uplink.
+
+It is also a large piece of work with sharp edges that matter for this
+particular app: peers would relay alerts they can read, which is a privacy
+question the current RLS model has no answer for; a duress alert must not be
+readable by the phone carrying it; and range is tens of metres, so it helps a
+crowd and not a farmstead. None of that is a reason against it. It is a reason
+it cannot be bolted on, and should be designed with the threat model in front
+of it.
+
+What can be said today: the queue means nothing is lost, the app is now honest
+about when a report is still on the phone, and there is no second channel of
+any kind. A phone alone with no uplink reaches nobody until it has one.

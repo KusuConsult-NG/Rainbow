@@ -3,7 +3,7 @@
 --   Regenerate with: python3 scripts/build_apply_all.py
 --
 -- Paste the WHOLE of this file into the Supabase dashboard -> SQL Editor and
--- run it. It applies the nine outstanding migrations in order and finishes by
+-- run it. It applies the 14 outstanding migrations in order and finishes by
 -- SELECTing a pass/fail table, so one paste in gives you one answer out.
 --
 -- ---------------------------------------------------------------------------
@@ -22,13 +22,26 @@
 --   ===== RLS DRY RUN — >>> DO NOT APPLY =====    -> stop; it names the policy
 -- ---------------------------------------------------------------------------
 --
--- EVERY MIGRATION HERE IS IDEMPOTENT. Running this file twice changes nothing
--- the second time, so a partial run can simply be re-run.
+-- SAFE TO RE-RUN — but "idempotent" is not quite the right word, and the
+-- difference shows up if you run this file twice.
 --
--- ONE THING TO KNOW ABOUT TRANSACTIONS. The RLS migration carries its own
--- BEGIN/COMMIT, which is deliberate: it applies completely or not at all. The
--- others do not, and are individually idempotent. If the editor reports an
--- error partway, nothing is half-applied in a way re-running cannot fix.
+-- Most of these migrations ARE idempotent: they use IF NOT EXISTS / OR REPLACE
+-- and a second run changes nothing and says nothing.
+--
+-- `20260813000000_rls_least_privilege.sql` is ATOMIC instead. It drops the old
+-- policy set by name and creates a new one, inside its own BEGIN/COMMIT, so it
+-- applies completely or not at all. Running it a SECOND time therefore reports
+--
+--     ERROR: policy "profiles_select_self_or_staff" for table "profiles"
+--            already exists
+--
+-- and rolls itself back. That message means THE POLICIES ARE ALREADY IN PLACE.
+-- It is not a failure to fix, nothing is left half-applied, and the verification
+-- at the end of this file will still report every row PASS. Read the verdict
+-- table, not the error.
+--
+-- So: an interrupted run can simply be re-run, and the state you end up with is
+-- correct either way.
 --
 -- Expect a few `NOTICE: skipping ...` lines. They are the guards that let these
 -- files run against a database that does not have a given table yet.
@@ -1294,13 +1307,924 @@ BEGIN
      AND escalated_to_agency IN ('POLLING_UNIT', 'PU', 'WARD', 'LGA', 'HQ');
 END $tier$;
 
+-- ----------------------------------------------------------------------------
+-- 20260927000000_signup_cannot_choose_role.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20260927000000_signup_cannot_choose_role.sql'; END $apply$;
+
+-- ============================================================================
+-- OPERATION RAINBOW — A SIGNUP MAY NOT CHOOSE ITS OWN ROLE
+--
+-- THE HOLE
+--
+-- `handle_new_user()` has, since the initial schema, created the profile like
+-- this:
+--
+--     role := COALESCE(NEW.raw_user_meta_data->>'role', 'CITIZEN')
+--
+-- `raw_user_meta_data` is `options.data` from `supabase.auth.signUp`, written
+-- by whoever is signing up, with the anon key — which ships inside the APK and
+-- inside the browser bundle, by design, because row-level security is meant to
+-- be the whole access model.
+--
+-- So this was enough to become a commander:
+--
+--     supabase.auth.signUp({
+--       email, password,
+--       options: { data: { role: 'HQ_COMMAND' } },
+--     })
+--
+-- and `is_command()` / `is_staff()` read `profiles.role`, so that account then
+-- passes every policy in the RLS migration: the full incident board, live
+-- telemetry for every citizen who has pressed SOS, dispatch, escalation, mass
+-- broadcast to the whole state.
+--
+-- WHY THE EXISTING GUARD DID NOT COVER IT
+--
+-- `profiles_no_privilege_escalation` is BEFORE UPDATE. The escalation is not an
+-- update — the role is chosen at INSERT, by the signup itself. README.md said
+-- "nothing reads user_metadata", which was true of the policies and not true of
+-- the trigger that creates the row the policies read.
+--
+-- THE FIX
+--
+-- Signup no longer reads `role` at all. Every account created through the
+-- public auth endpoint is a CITIZEN, whatever it asks for, and `full_name` and
+-- `phone` are still honoured because they are not privileges.
+--
+-- Staff are provisioned by a privileged caller instead: create the account,
+-- then set `profiles.role` with the service key. That path is unaffected — the
+-- UPDATE guard already exempts `service_role` — and it is what
+-- `/api/admin/provision` now does. The console's "Provision Security Personnel
+-- Account" form used to rely on the hole: it passed the chosen role in
+-- `options.data` and the trigger obligingly applied it.
+--
+-- A NOTE ON WHAT IS NOT DONE HERE
+--
+-- Existing profiles are left alone. This migration cannot tell an account that
+-- was legitimately provisioned as HQ_COMMAND from one that asked to be. That
+-- audit is in E2E_AUDIT_REPORT.md as an operational step, with the query for
+-- it, because it needs a human who knows who is supposed to be staff.
+--
+-- Idempotent: safe to re-run.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+-- SECURITY DEFINER with no search_path is how a SECURITY DEFINER function gets
+-- hijacked by a schema earlier on the caller's path. Pinned.
+SET search_path = public, pg_temp
+AS $func$
+BEGIN
+  INSERT INTO public.profiles (id, email, phone, full_name, role)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    NEW.phone,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', 'User'),
+    -- NOT from the metadata. A signup does not get to say what it is.
+    'CITIZEN'
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    phone = EXCLUDED.phone,
+    updated_at = NOW();
+  RETURN NEW;
+END;
+$func$;
+
+-- The trigger itself is unchanged in shape; recreated so this file is complete
+-- on a database that somehow lacks it.
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ----------------------------------------------------------------------------
+-- 20260928000000_command_chain_escalation.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20260928000000_command_chain_escalation.sql'; END $apply$;
+
+-- ============================================================================
+-- OPERATION RAINBOW — THE COMMAND CHAIN
+--
+-- An alert lands at the POLLING UNIT. The PU escalates to the WARD, the WARD to
+-- the LGA, the LGA to HQ. HQ is the top: it overrides when the chain below it
+-- is not responding.
+--
+-- Three things were missing for that to be true.
+--
+-- 1. NOTHING PUT AN ALERT AT THE PU.
+--
+--    `assigned_tier` was nullable with no default, so an alert arrived owned by
+--    nobody. The chain had a ladder but no bottom rung. It defaults to 'UNIT'
+--    now, in the DATABASE rather than in a client, because an alert inserted by
+--    the mobile app, by the console, by the offline queue replaying, or by a
+--    future integration must all land in the same place. A client-side default
+--    is one forgotten call site away from an unowned emergency.
+--
+-- 2. THE TIMEOUTS WERE CONFIGURED AND DEAD.
+--
+--    `app_config` has seeded escalation timeouts — PU 2 minutes, WARD 5, LGA 10
+--    — and the console's System Logic screen lets an operator edit them. The
+--    ONLY code that touched those keys was the screen that displays and saves
+--    them. Nothing ever escalated on a timeout. An operator setting "PU
+--    timeout: 2 minutes" was configuring a policy that did not exist.
+--
+--    That is the worst kind of dead setting: it is not missing, it is
+--    reassuring. `escalate_overdue_alerts()` below makes it real.
+--
+-- 3. THERE WAS NO CLOCK ON OWNERSHIP.
+--
+--    Nothing recorded WHEN a tier took an alert, so "has this tier had it too
+--    long?" was unanswerable. `tier_assigned_at` starts that clock on insert
+--    and restarts it on every escalation.
+--
+-- WHY SERVER-SIDE
+--
+-- A tier that is not responding is very often a tier that is offline. An
+-- escalation that only runs while somebody has the console open cannot fire in
+-- exactly the case it exists for. This runs in the database.
+--
+-- Idempotent: safe to re-run.
+-- ============================================================================
+
+-- ── Columns ─────────────────────────────────────────────────────────────────
+
+ALTER TABLE public.alerts
+  -- The rung that OWNS this alert now. 'UNIT' -> 'WARD' -> 'LGA' -> 'HQ'.
+  ADD COLUMN IF NOT EXISTS assigned_tier TEXT,
+  -- When the current owner took it. The timeout is measured from here, not
+  -- from created_at: an alert escalated to the WARD gets the WARD's full
+  -- window, not whatever is left of the PU's.
+  ADD COLUMN IF NOT EXISTS tier_assigned_at TIMESTAMPTZ,
+  -- Set when a responder at the owning tier acknowledges. An acknowledged
+  -- alert stops climbing: somebody has it.
+  ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS acknowledged_by UUID;
+
+-- New alerts land at the polling unit, and the clock starts.
+ALTER TABLE public.alerts
+  ALTER COLUMN assigned_tier SET DEFAULT 'UNIT';
+
+-- Existing rows: anything still open and unowned belongs to the PU.
+UPDATE public.alerts
+   SET assigned_tier = 'UNIT'
+ WHERE assigned_tier IS NULL
+   AND status NOT IN ('RESOLVED', 'CANCELLED');
+
+-- Backfill the clock from the row's own age, so a migration does not make
+-- every historical alert look as though it just arrived — and then instantly
+-- escalate the lot to HQ the first time the job runs.
+UPDATE public.alerts
+   SET tier_assigned_at = COALESCE(updated_at, created_at, NOW())
+ WHERE tier_assigned_at IS NULL;
+
+ALTER TABLE public.alerts
+  ALTER COLUMN tier_assigned_at SET DEFAULT NOW();
+
+-- The job scans on these two.
+CREATE INDEX IF NOT EXISTS alerts_chain_idx
+  ON public.alerts (assigned_tier, tier_assigned_at)
+  WHERE acknowledged_at IS NULL;
+
+-- ── The ladder, as data ─────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.next_tier(current_tier TEXT)
+RETURNS TEXT
+LANGUAGE sql IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT CASE upper(coalesce(current_tier, 'UNIT'))
+           WHEN 'UNIT' THEN 'WARD'
+           WHEN 'WARD' THEN 'LGA'
+           WHEN 'LGA'  THEN 'HQ'
+           -- HQ is the top. NULL means "nowhere left to go", which is what
+           -- stops an alert cycling round the chain forever.
+           ELSE NULL
+         END;
+$$;
+
+COMMENT ON FUNCTION public.next_tier(TEXT) IS
+  'The rung above this one. NULL at HQ: the chain terminates rather than loops.';
+
+-- ── The timeout for a tier, from app_config ─────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.tier_timeout_minutes(tier TEXT)
+RETURNS INTEGER
+LANGUAGE plpgsql STABLE
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  key_name TEXT;
+  raw      TEXT;
+  parsed   INTEGER;
+BEGIN
+  key_name := CASE upper(coalesce(tier, ''))
+                WHEN 'UNIT' THEN 'escalation_timeout_pu'
+                WHEN 'WARD' THEN 'escalation_timeout_ward'
+                WHEN 'LGA'  THEN 'escalation_timeout_lga'
+                ELSE NULL
+              END;
+  IF key_name IS NULL THEN
+    RETURN NULL;  -- HQ, or an unknown tier: no timeout applies.
+  END IF;
+
+  SELECT value INTO raw FROM public.app_config WHERE key = key_name;
+
+  -- A missing or malformed setting must not silently mean "escalate
+  -- immediately" (a timeout of 0) or "never escalate" (NULL treated as
+  -- infinite). Both are dangerous defaults for an emergency queue, so fall
+  -- back to the seeded values.
+  BEGIN
+    parsed := raw::INTEGER;
+  EXCEPTION WHEN others THEN
+    parsed := NULL;
+  END;
+
+  IF parsed IS NULL OR parsed <= 0 THEN
+    parsed := CASE upper(tier)
+                WHEN 'UNIT' THEN 2
+                WHEN 'WARD' THEN 5
+                WHEN 'LGA'  THEN 10
+              END;
+  END IF;
+
+  RETURN parsed;
+END;
+$$;
+
+-- ── The job ─────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.escalate_overdue_alerts()
+RETURNS TABLE (alert_id UUID, from_tier TEXT, to_tier TEXT)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  RETURN QUERY
+  WITH overdue AS (
+    SELECT a.id,
+           upper(a.assigned_tier)               AS current_tier,
+           public.next_tier(a.assigned_tier)    AS target_tier
+      FROM public.alerts a
+     WHERE a.status NOT IN ('RESOLVED', 'CANCELLED')
+       -- Acknowledged means somebody at this tier has it. Climbing past a
+       -- responder who is already on it is how you get two units dispatched
+       -- to the same incident and none to the next one.
+       AND a.acknowledged_at IS NULL
+       AND public.next_tier(a.assigned_tier) IS NOT NULL
+       AND a.tier_assigned_at IS NOT NULL
+       AND a.tier_assigned_at <
+             NOW() - make_interval(
+               mins => public.tier_timeout_minutes(a.assigned_tier)
+             )
+     FOR UPDATE OF a SKIP LOCKED
+  )
+  UPDATE public.alerts a
+     SET assigned_tier    = o.target_tier,
+         tier_assigned_at = NOW(),
+         status           = 'ESCALATED',
+         updated_at       = NOW(),
+         -- Append, never replace: the chain of custody is the point. Written
+         -- in the same shape the apps write, so one reader handles both.
+         escalation_log = COALESCE(a.escalation_log, '[]'::jsonb) || jsonb_build_object(
+           'from_tier',  o.current_tier,
+           'to_tier',    o.target_tier,
+           'reason',     'TIMEOUT',
+           'by',         'SYSTEM',
+           'at',         to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+         )
+    FROM overdue o
+   WHERE a.id = o.id
+  RETURNING a.id, o.current_tier, o.target_tier;
+END;
+$$;
+
+COMMENT ON FUNCTION public.escalate_overdue_alerts() IS
+  'Climbs unacknowledged alerts one rung when their tier has held them longer '
+  'than app_config allows. Returns what it moved. Idempotent per run.';
+
+-- Only the service role runs this. It is SECURITY DEFINER and reassigns
+-- ownership of emergencies; nothing signed in from a phone should call it.
+REVOKE ALL ON FUNCTION public.escalate_overdue_alerts() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.escalate_overdue_alerts() FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.escalate_overdue_alerts() TO service_role;
+
+-- ── Scheduling ──────────────────────────────────────────────────────────────
+--
+-- pg_cron is available on Supabase but is not present in a bare PostgreSQL, so
+-- this is conditional: the harness proves the FUNCTION, and the schedule is
+-- attached wherever the extension exists.
+DO $sched$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_cron') THEN
+    CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+    -- Every minute. The shortest configured timeout is two minutes, so a
+    -- minute of granularity costs at most a minute of delay.
+    PERFORM cron.unschedule('rainbow-escalate-overdue')
+      WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'rainbow-escalate-overdue');
+
+    PERFORM cron.schedule(
+      'rainbow-escalate-overdue',
+      '* * * * *',
+      $job$SELECT public.escalate_overdue_alerts();$job$
+    );
+    RAISE NOTICE 'escalation job scheduled every minute';
+  ELSE
+    RAISE NOTICE 'pg_cron unavailable: escalate_overdue_alerts() must be driven externally';
+  END IF;
+END
+$sched$;
+
+-- ----------------------------------------------------------------------------
+-- 20260929000000_telemetry_is_not_a_standing_feed.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20260929000000_telemetry_is_not_a_standing_feed.sql'; END $apply$;
+
+-- ============================================================================
+-- OPERATION RAINBOW — LOCATION IS BORROWED, NOT KEPT
+--
+-- Three things were true of `telemetry` at once, and together they made this
+-- table a standing surveillance feed on private citizens rather than a live
+-- picture of an emergency in progress.
+--
+-- 1. EVERY STAFF ACCOUNT COULD READ EVERY ROW.
+--
+--    `telemetry_select_self_or_staff` was `user_id = auth.uid() OR
+--    is_staff()`. `is_staff()` is true for a polling-unit officer in Wase as
+--    readily as for the HQ commander, and it is not scoped to an incident, a
+--    jurisdiction, or a shift. So the live position of any citizen who had
+--    ever pressed the panic button was readable by every operational account
+--    in the state, for as long as the row existed.
+--
+-- 2. NOTHING DELETED ANYTHING.
+--
+--    One row per user, updated in place, kept forever. The last known position
+--    of every person who has ever used the panic button sits in this table
+--    indefinitely — long after the emergency, and long after any purpose that
+--    could justify holding it.
+--
+-- 3. THE ROW OUTLIVED THE EMERGENCY.
+--
+--    Nothing linked a track to the incident it was for, and nothing stopped
+--    writing when the incident closed.
+--
+-- The app side of (3) is fixed in `background_tracking_service.dart`, which
+-- now carries `alert_id`, honours an expiry, stops when the alert is resolved
+-- and stops on sign-out. This file fixes the database side, because a client
+-- that stops asking is not the same as a server that stops answering — and it
+-- is the server that decides who may look.
+--
+-- WHAT THIS DELIBERATELY DOES NOT DO
+--
+-- It does not restrict a responder's own operational visibility, and it does
+-- not touch the duress path. A duress PIN keeps a track running on purpose:
+-- the person may still be in danger, and HQ must be able to follow. That stays
+-- true. What changes is that the track now ends, and that only people with a
+-- reason to look can look while it runs.
+--
+-- Idempotent: safe to re-run.
+-- ============================================================================
+
+-- ── Who may read a position ─────────────────────────────────────────────────
+
+DROP POLICY IF EXISTS "telemetry_select_self_or_staff" ON public.telemetry;
+DROP POLICY IF EXISTS "telemetry_select_self_or_responding_staff" ON public.telemetry;
+
+-- A staff member sees another STAFF member's position freely: that is the
+-- movement board, it is what `MOVEMENT` shows, and officers on duty being
+-- visible to each other is the point of it.
+--
+-- A CITIZEN's position is visible only while they have an emergency open — and
+-- then to any staff member, deliberately, because whoever is nearest may not
+-- be whoever it was assigned to. Once the incident is resolved or cancelled,
+-- the row stops being readable by anyone but its owner.
+CREATE POLICY "telemetry_select_self_or_responding_staff" ON public.telemetry
+  FOR SELECT TO authenticated
+  USING (
+    user_id = auth.uid()
+    OR (
+      public.is_staff()
+      AND (
+        -- the subject is themselves on duty
+        EXISTS (
+          SELECT 1 FROM public.profiles p
+           WHERE p.id = telemetry.user_id
+             AND p.role NOT IN ('CITIZEN', 'USER')
+        )
+        -- or the subject has a live emergency right now
+        OR EXISTS (
+          SELECT 1 FROM public.alerts a
+           WHERE a.reported_by = telemetry.user_id
+             AND a.status NOT IN ('RESOLVED', 'CANCELLED')
+        )
+      )
+    )
+  );
+
+COMMENT ON POLICY "telemetry_select_self_or_responding_staff" ON public.telemetry IS
+  'Own position always; a colleague''s position if you are staff; a citizen''s '
+  'position only while they have an emergency open.';
+
+-- ── Nothing is kept forever ─────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.purge_stale_telemetry()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  removed INTEGER;
+BEGIN
+  -- A position older than a day is of no operational use to anybody: the
+  -- emergency is over, and the person has moved. Keeping it is a liability
+  -- with no matching benefit.
+  --
+  -- A row belonging to a CURRENTLY OPEN alert is never purged on age, however
+  -- old, because an unresolved emergency is exactly the case where the last
+  -- known position still matters.
+  DELETE FROM public.telemetry t
+   WHERE t.updated_at < NOW() - INTERVAL '24 hours'
+     AND NOT EXISTS (
+       SELECT 1 FROM public.alerts a
+        WHERE a.reported_by = t.user_id
+          AND a.status NOT IN ('RESOLVED', 'CANCELLED')
+     );
+  GET DIAGNOSTICS removed = ROW_COUNT;
+  RETURN removed;
+END;
+$$;
+
+COMMENT ON FUNCTION public.purge_stale_telemetry() IS
+  'Deletes positions older than 24h that do not belong to an open emergency.';
+
+REVOKE ALL ON FUNCTION public.purge_stale_telemetry() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.purge_stale_telemetry() FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.purge_stale_telemetry() TO service_role;
+
+-- Same conditional shape as the escalation job: pg_cron exists on Supabase and
+-- not in a bare PostgreSQL, so the harness proves the FUNCTION and the schedule
+-- attaches wherever the extension is available.
+DO $sched$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_cron') THEN
+    CREATE EXTENSION IF NOT EXISTS pg_cron;
+    PERFORM cron.unschedule('rainbow-purge-telemetry')
+      WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'rainbow-purge-telemetry');
+    PERFORM cron.schedule(
+      'rainbow-purge-telemetry',
+      '17 * * * *',
+      $job$SELECT public.purge_stale_telemetry();$job$
+    );
+    RAISE NOTICE 'telemetry purge scheduled hourly';
+  ELSE
+    RAISE NOTICE 'pg_cron unavailable: purge_stale_telemetry() must be driven externally';
+  END IF;
+END
+$sched$;
+
+-- ============================================================================
+-- CHAT: YOU MAY ONLY WRITE INTO A CONVERSATION YOU ARE PART OF
+--
+-- `chat_select_participant_or_staff` is careful: you read a thread if you sent
+-- the message, or you are staff, or you are the alert's reporter or assignee.
+--
+-- `chat_insert_as_self` checked one thing — `sender_id = auth.uid()` — which
+-- says you cannot forge somebody else's name. It says nothing about WHICH
+-- conversation you may write into. So any authenticated account could post
+-- into any incident's tactical channel, including incidents they cannot read,
+-- given an alert id. On a channel that responders act on, injecting messages
+-- into somebody else's emergency is the whole attack.
+--
+-- The asymmetry is the bug: reading was scoped to participation and writing
+-- was not. Now both are.
+-- ============================================================================
+
+DROP POLICY IF EXISTS "chat_insert_as_self" ON public.chat_messages;
+DROP POLICY IF EXISTS "chat_insert_participant" ON public.chat_messages;
+
+CREATE POLICY "chat_insert_participant" ON public.chat_messages
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    sender_id = auth.uid()
+    AND (
+      public.is_staff()
+      OR EXISTS (
+        SELECT 1 FROM public.alerts a
+         WHERE a.id = chat_messages.alert_id
+           AND (a.reported_by = auth.uid() OR a.assigned_to = auth.uid())
+      )
+    )
+  );
+
+COMMENT ON POLICY "chat_insert_participant" ON public.chat_messages IS
+  'Write as yourself, and only into a thread you are a participant in. Mirrors '
+  'chat_select_participant_or_staff, which was already scoped this way.';
+
+-- ----------------------------------------------------------------------------
+-- 20260930000000_sms_device_keys.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20260930000000_sms_device_keys.sql'; END $apply$;
+
+-- ============================================================================
+-- OPERATION RAINBOW — A KEY PER HANDSET, FOR THE SMS FALLBACK
+--
+-- The SMS fallback carries an alert as 54 encrypted bytes, so that a report
+-- sent when there is cell signal but no data is readable by HQ and by nobody
+-- else — not the carrier, not anyone holding the handset and reading its sent
+-- folder. That needs a key, and WHICH key it is decides what the channel is
+-- worth.
+--
+-- WHY PER-DEVICE, AND NOT ONE APP KEY
+--
+-- A single key compiled into the app is extracted from the APK with `unzip`,
+-- as this project already learned the expensive way with the Termii
+-- credential. With one shared key, anyone who pulls it can forge an emergency
+-- from any citizen and read every SMS alert in the state. Per-device means a
+-- compromised handset compromises that handset.
+--
+-- WHY SYMMETRIC, AND NOT PUBLIC-KEY
+--
+-- Two reasons, and the second is the binding one:
+--
+--   * It authenticates as well as conceals. The AES-GCM tag proves the message
+--     came from that device. The `smsWebhook` this replaces accepted anything
+--     that reached it, so anyone who knew the number could inject an emergency.
+--   * It is 32 bytes smaller on the wire than carrying an ephemeral public
+--     key, and those 32 bytes are what keep the message inside ONE segment.
+--     A second segment is a second charge on every alert.
+--
+-- The cost is honest and worth writing down: HQ holds material that can both
+-- decrypt and forge these messages. That is not a new exposure — HQ already
+-- holds every alert in plaintext — but it does mean this table is as sensitive
+-- as `emergency_pins`, and it is protected the same way.
+--
+-- THE KEY IS NEVER READABLE THROUGH THE API
+--
+-- Not by the API roles, not by the device's own owner, not once. It is
+-- returned exactly once, by the SECURITY DEFINER function that creates it, and
+-- after that the only thing that can read it is the service role during SMS
+-- ingest. A device that loses its key registers again.
+--
+-- Idempotent: safe to re-run.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.sms_device_keys (
+  -- HQ's four-byte handle for this key, sent in the clear in the message so
+  -- ingest knows which key to try. Four bytes is 4.3 billion; collisions are
+  -- handled by retrying on the unique constraint at registration.
+  device_ref   BYTEA PRIMARY KEY,
+  user_id      UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  -- 32 bytes. Never selected by anything but the service role.
+  secret       BYTEA NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_used_at TIMESTAMPTZ,
+  -- Set rather than deleted, so an alert already in flight over a slow SMS
+  -- queue can still be attributed after the device is retired.
+  revoked_at   TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS sms_device_keys_user_idx
+  ON public.sms_device_keys (user_id) WHERE revoked_at IS NULL;
+
+ALTER TABLE public.sms_device_keys ENABLE ROW LEVEL SECURITY;
+
+-- No policies at all, deliberately. With RLS enabled and nothing granted, the
+-- API roles cannot read, write or even count this table. Everything legitimate
+-- goes through the functions below.
+REVOKE ALL ON TABLE public.sms_device_keys FROM PUBLIC, anon, authenticated;
+
+-- ── Registration ────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.register_sms_device()
+RETURNS TABLE (device_ref BYTEA, secret BYTEA)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp, extensions
+AS $$
+DECLARE
+  uid      UUID := auth.uid();
+  new_ref  BYTEA;
+  new_key  BYTEA;
+  attempts INT := 0;
+BEGIN
+  IF uid IS NULL THEN
+    RAISE EXCEPTION 'not signed in';
+  END IF;
+
+  -- One live key per user at a time. Registering again retires the old one
+  -- rather than accumulating keys a stolen handset could keep using.
+  UPDATE public.sms_device_keys
+     SET revoked_at = NOW()
+   WHERE user_id = uid AND revoked_at IS NULL;
+
+  LOOP
+    attempts := attempts + 1;
+    new_ref := gen_random_bytes(4);
+    EXIT WHEN NOT EXISTS (
+      SELECT 1 FROM public.sms_device_keys k WHERE k.device_ref = new_ref
+    );
+    IF attempts > 8 THEN
+      RAISE EXCEPTION 'could not allocate a device reference';
+    END IF;
+  END LOOP;
+
+  new_key := gen_random_bytes(32);
+
+  INSERT INTO public.sms_device_keys (device_ref, user_id, secret)
+  VALUES (new_ref, uid, new_key);
+
+  -- Returned ONCE. There is no function that reads it back.
+  RETURN QUERY SELECT new_ref, new_key;
+END;
+$$;
+
+COMMENT ON FUNCTION public.register_sms_device() IS
+  'Issues a per-device key for the encrypted SMS fallback. Returns it once; '
+  'nothing can read it back. Retires any previous key for the same user.';
+
+-- ── Does this device still have a live key? ─────────────────────────────────
+--
+-- So the app can tell "never registered" from "registered and still valid"
+-- without ever asking for the key itself.
+
+CREATE OR REPLACE FUNCTION public.has_sms_device_key(p_ref BYTEA)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.sms_device_keys k
+     WHERE k.device_ref = p_ref
+       AND k.user_id = auth.uid()
+       AND k.revoked_at IS NULL
+  );
+$$;
+
+-- ── Retiring a key ──────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.revoke_sms_device_keys()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  n INT;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'not signed in';
+  END IF;
+  UPDATE public.sms_device_keys
+     SET revoked_at = NOW()
+   WHERE user_id = auth.uid() AND revoked_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END;
+$$;
+
+COMMENT ON FUNCTION public.revoke_sms_device_keys() IS
+  'Retires this user''s SMS device keys. Called on sign-out and on uninstall.';
+
+-- ── Ingest ──────────────────────────────────────────────────────────────────
+--
+-- Service role only. This is the one thing in the system that may read a
+-- secret, and it exists so the SMS inbound endpoint can look a key up by the
+-- four bytes the message carried in the clear.
+
+CREATE OR REPLACE FUNCTION public.sms_key_for_ingest(p_ref BYTEA)
+RETURNS TABLE (user_id UUID, secret BYTEA)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  RETURN QUERY
+  UPDATE public.sms_device_keys k
+     SET last_used_at = NOW()
+   WHERE k.device_ref = p_ref
+     AND k.revoked_at IS NULL
+  RETURNING k.user_id, k.secret;
+END;
+$$;
+
+COMMENT ON FUNCTION public.sms_key_for_ingest(BYTEA) IS
+  'Service role only. Looks up a device key during SMS ingest and stamps its '
+  'last use. Never reachable from a phone or a browser.';
+
+-- ── Grants ──────────────────────────────────────────────────────────────────
+
+REVOKE ALL ON FUNCTION public.register_sms_device()        FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.has_sms_device_key(BYTEA)    FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.revoke_sms_device_keys()     FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.sms_key_for_ingest(BYTEA)
+  FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.register_sms_device()     TO authenticated;
+GRANT EXECUTE ON FUNCTION public.has_sms_device_key(BYTEA) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.revoke_sms_device_keys()  TO authenticated;
+GRANT EXECUTE ON FUNCTION public.sms_key_for_ingest(BYTEA) TO service_role;
+
+-- ── Where an SMS-borne alert says it came from ──────────────────────────────
+--
+-- A dispatcher must be able to see that this alert arrived over a degraded
+-- channel. Not because the content is untrusted — it is authenticated — but
+-- because a phone that could not reach the network is itself operationally
+-- significant, and because an SMS can sit in a carrier queue for minutes.
+
+ALTER TABLE public.alerts
+  ADD COLUMN IF NOT EXISTS arrived_via TEXT;
+
+COMMENT ON COLUMN public.alerts.arrived_via IS
+  'NULL for the ordinary path. ''SMS'' when the report reached us over the '
+  'encrypted SMS fallback, meaning the reporter had no data connection.';
+
+-- ----------------------------------------------------------------------------
+-- 20261001000000_mesh_ingest.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20261001000000_mesh_ingest.sql'; END $apply$;
+
+-- ============================================================================
+-- OPERATION RAINBOW — RECOGNISING THE SAME MESH ENVELOPE TWICE
+--
+-- The mesh floods. That is not a flaw in it; it is how a report crosses a crowd
+-- when there is no tower. Every phone that takes an envelope on offers it to
+-- every phone it then meets, so the same emergency reaches HQ by several paths,
+-- from several relays, minutes apart. Without a memory, one kidnapping becomes
+-- six incidents and six units are dispatched to one place while the next call
+-- waits.
+--
+-- WHY THE ENVELOPE ID AND NOT THE CONTENTS
+--
+-- Because this check happens BEFORE decryption and must. The envelope id is 128
+-- random bits chosen by the originating handset and is the only thing a relay
+-- can see, so it is also the only thing HQ can use to drop a duplicate without
+-- first spending an ECDH and an AES-GCM open on it. On an unauthenticated write
+-- path that ordering is the difference between a flood costing us a table lookup
+-- and a flood costing us a key agreement per frame.
+--
+-- The second dedup key — `alerts.local_id`, from inside the ciphertext — still
+-- does the other half of the job: it catches the same incident arriving by SMS,
+-- by mesh, and again from the reporter's own offline queue when their phone
+-- recovers. Three channels, one incident. Neither check replaces the other.
+--
+-- WHY THE COUNT IS KEPT
+--
+-- `arrivals` is the only measure of mesh health that exists. Nothing else can
+-- tell us whether relaying is actually working in the field: handsets cannot
+-- report on each other without identifying who carried what, which is the thing
+-- the design forbids. How many times one envelope reached HQ, by how many
+-- distinct uploads, is an aggregate that identifies nobody.
+--
+-- WHAT THIS TABLE MUST NOT BECOME
+--
+-- A log of who relayed what. There is no relay column, no IP, no uploader. An
+-- envelope id is 128 random bits with no meaning, `first_seen_at` is coarse, and
+-- rows are purged after 48 hours. If someone later adds "which relay uploaded
+-- it" to make debugging easier, they will have built the surveillance tool this
+-- whole channel was designed to avoid being.
+--
+-- Idempotent: safe to re-run.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.mesh_envelopes_seen (
+  -- 16 random bytes chosen by the originating handset. Carries no meaning and
+  -- is not linkable to a device: two alerts from the same phone share nothing.
+  envelope_id   BYTEA PRIMARY KEY,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- How many times this envelope reached us. Mesh health, and nothing else.
+  arrivals      INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS mesh_envelopes_seen_first_idx
+  ON public.mesh_envelopes_seen (first_seen_at);
+
+ALTER TABLE public.mesh_envelopes_seen ENABLE ROW LEVEL SECURITY;
+
+-- No policies at all, deliberately, exactly as with sms_device_keys. With RLS
+-- enabled and nothing granted, the API roles cannot read, write or count this
+-- table. The one thing that touches it is the function below, as service_role.
+REVOKE ALL ON TABLE public.mesh_envelopes_seen FROM PUBLIC, anon, authenticated;
+
+-- ── Note an arrival ─────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.mesh_note_envelope(p_id BYTEA)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  is_new BOOLEAN;
+BEGIN
+  IF p_id IS NULL OR octet_length(p_id) <> 16 THEN
+    RAISE EXCEPTION 'an envelope id is 16 bytes';
+  END IF;
+
+  -- One statement, so two relays uploading the same envelope at the same instant
+  -- cannot both be told they are first. A SELECT-then-INSERT here would be a
+  -- race that shows up exactly when the mesh is busiest.
+  INSERT INTO public.mesh_envelopes_seen AS m (envelope_id)
+  VALUES (p_id)
+  ON CONFLICT (envelope_id) DO UPDATE
+     SET arrivals     = m.arrivals + 1,
+         last_seen_at = NOW()
+  -- arrivals is 1 only on the row this statement inserted; the conflict branch
+  -- always increments it past 1.
+  RETURNING (m.arrivals = 1) INTO is_new;
+
+  RETURN COALESCE(is_new, TRUE);
+END;
+$$;
+
+COMMENT ON FUNCTION public.mesh_note_envelope(BYTEA) IS
+  'Service role only. Records that a mesh envelope arrived and returns TRUE the '
+  'first time. Called before decryption, so a flood costs a lookup rather than '
+  'a key agreement.';
+
+-- ── Purge ───────────────────────────────────────────────────────────────────
+--
+-- 48 hours: twice the age at which any relay will still carry an envelope
+-- (`meshMaxAge` is 24h), so a frame cannot outlive our memory of it and become
+-- new again. Rows kept longer would be a record of mesh traffic with no purpose.
+
+CREATE OR REPLACE FUNCTION public.purge_stale_mesh_envelopes()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  n INT;
+BEGIN
+  DELETE FROM public.mesh_envelopes_seen
+   WHERE first_seen_at < NOW() - INTERVAL '48 hours';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END;
+$$;
+
+COMMENT ON FUNCTION public.purge_stale_mesh_envelopes() IS
+  'Deletes envelope ids older than 48 hours — twice the longest a relay will '
+  'carry one, so nothing can outlive our memory of it.';
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    PERFORM cron.unschedule('purge-stale-mesh-envelopes')
+      WHERE EXISTS (
+        SELECT 1 FROM cron.job WHERE jobname = 'purge-stale-mesh-envelopes'
+      );
+    PERFORM cron.schedule(
+      'purge-stale-mesh-envelopes', '17 * * * *',
+      'SELECT public.purge_stale_mesh_envelopes();'
+    );
+  ELSE
+    -- Said out loud rather than assumed. A retention policy that depends on an
+    -- extension nobody enabled is not a retention policy.
+    RAISE NOTICE 'pg_cron is not installed: run purge_stale_mesh_envelopes() from a scheduled job.';
+  END IF;
+END
+$$;
+
+-- ── Grants ──────────────────────────────────────────────────────────────────
+
+REVOKE ALL ON FUNCTION public.mesh_note_envelope(BYTEA)
+  FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.purge_stale_mesh_envelopes()
+  FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.mesh_note_envelope(BYTEA)      TO service_role;
+GRANT EXECUTE ON FUNCTION public.purge_stale_mesh_envelopes()   TO service_role;
+
+-- ── Where an offline alert says it came from ─────────────────────────────────
+--
+-- 'MESH' joins 'SMS'. Both mean the reporter could not reach the network, and a
+-- dispatcher needs to know that: the handset cannot be called back through the
+-- app, nothing further is coming from it, and in the mesh case the position may
+-- be some minutes old because it crossed a crowd to get here.
+
+COMMENT ON COLUMN public.alerts.arrived_via IS
+  'NULL for the ordinary path. ''SMS'' when the report reached us over the '
+  'encrypted SMS fallback. ''MESH'' when it was relayed through nearby phones '
+  'to one that had a network. Either way the reporter had no data connection.';
+
 
 
 -- ============================================================================
 -- DID IT WORK?
 --
 -- One row per thing that had to be true. `result` is PASS or FAIL; nothing here
--- writes. If every row says PASS, the nine migrations are applied.
+-- writes. If every row says PASS, the 14 migrations are applied.
 --
 -- These check BEHAVIOUR-ADJACENT FACTS, not just that statements ran: that anon
 -- holds no policy at all, that the escalation columns exist (their absence made
@@ -1368,7 +2292,74 @@ WITH checks(ord, name, ok) AS (
             AND column_name = 'assigned_tier')),
     (14, 'no tier label left in the agency column',
         (SELECT count(*) = 0 FROM public.alerts
-          WHERE escalated_to_agency IN ('POLLING_UNIT','PU','WARD','LGA','HQ')))
+          WHERE escalated_to_agency IN ('POLLING_UNIT','PU','WARD','LGA','HQ'))),
+    -- The signup path must not read a role out of client-supplied metadata.
+    -- Anyone holding the anon key could otherwise enrol themselves as
+    -- HQ_COMMAND, and every policy in the system trusts profiles.role.
+    (15, 'a signup cannot choose its own role',
+        (SELECT pg_get_functiondef(p.oid) NOT LIKE '%raw_user_meta_data->>''role''%'
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'handle_new_user')),
+    -- The chain: an alert must land at the PU, and the timeouts that were
+    -- configured and dead must now be enforced by something.
+    (16, 'new alerts land at the polling unit',
+        (SELECT column_default LIKE '%UNIT%' FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'alerts'
+            AND column_name = 'assigned_tier')),
+    (17, 'the escalation job exists and is service-role only',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.escalate_overdue_alerts()', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'escalate_overdue_alerts')),
+    (18, 'the chain terminates at HQ',
+        (SELECT public.next_tier('HQ') IS NULL AND public.next_tier('UNIT') = 'WARD')),
+    -- Location is borrowed, not kept. A citizen's position must stop being
+    -- readable by staff once their emergency closes, nothing may be kept
+    -- forever, and a message must not be injectable into somebody else's
+    -- channel.
+    (19, 'a citizen''s position is not a standing staff feed',
+        EXISTS (SELECT 1 FROM pg_policies
+                 WHERE schemaname = 'public' AND tablename = 'telemetry'
+                   AND policyname = 'telemetry_select_self_or_responding_staff')),
+    (20, 'stale positions are purged, and only by the service role',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.purge_stale_telemetry()', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'purge_stale_telemetry')),
+    (21, 'chat writes are restricted to a participant of the thread',
+        EXISTS (SELECT 1 FROM pg_policies
+                 WHERE schemaname = 'public' AND tablename = 'chat_messages'
+                   AND policyname = 'chat_insert_participant')),
+    -- The SMS fallback's per-device key. It can both decrypt and forge that
+    -- citizen's emergency traffic, so nothing but the service role may reach
+    -- it, and the table must not be selectable at all.
+    (22, 'SMS device keys exist and are unreadable through the API',
+        (SELECT relrowsecurity FROM pg_class
+          WHERE oid = 'public.sms_device_keys'::regclass)
+        AND NOT EXISTS (SELECT 1 FROM pg_policies
+                         WHERE schemaname = 'public'
+                           AND tablename = 'sms_device_keys')),
+    (23, 'only the service role can resolve an SMS key for ingest',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.sms_key_for_ingest(bytea)', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'sms_key_for_ingest')),
+    -- Without this, one mesh alert flooded by several relays becomes several
+    -- incidents and several units sent to one place.
+    (24, 'the mesh can recognise the same envelope arriving twice',
+        (SELECT to_regclass('public.mesh_envelopes_seen') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM pg_proc p
+                          JOIN pg_namespace n ON n.oid = p.pronamespace
+                         WHERE n.nspname = 'public'
+                           AND p.proname = 'mesh_note_envelope'))),
+    -- And it must not become a record of which handset carried whose emergency.
+    (25, 'mesh traffic is not readable through the API',
+        (SELECT relrowsecurity
+            AND NOT EXISTS (SELECT 1 FROM pg_policies
+                             WHERE schemaname = 'public'
+                               AND tablename = 'mesh_envelopes_seen')
+           FROM pg_class
+          WHERE oid = 'public.mesh_envelopes_seen'::regclass))
 )
 SELECT
   CASE WHEN ok THEN 'PASS' ELSE '*** FAIL ***' END AS result,

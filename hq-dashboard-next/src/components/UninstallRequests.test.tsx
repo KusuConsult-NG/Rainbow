@@ -22,19 +22,40 @@ vi.mock('@/lib/supabase', () => ({
   },
 }));
 
+// The row as the DATABASE actually holds it.
+//
+// This fixture used to carry `created_at` and an embedded `profiles` object,
+// because that is what the component asked for — and neither was real. The
+// table's timestamp is `submitted_at`, and `user_id` references `auth.users`,
+// not `public.profiles`, so PostgREST could not embed the one from the other
+// and rejected the query outright. The tests passed throughout, because a stub
+// returns whatever shape it is handed.
+//
+// That is the trap in a characterisation test written against a stub: it pins
+// the behaviour and the data shape together, and if the shape was wrong the
+// test defends the bug. The assertions below are unchanged; only the fixture
+// moved to what production can return.
 const PENDING = {
   id: 'req-1',
   user_id: 'user-aaaaaaaa',
   reason: 'Phone replaced',
   remarks: 'Old handset returned to store',
   status: 'PENDING',
-  created_at: '2026-09-01T09:00:00Z',
-  profiles: { full_name: 'Officer Danjuma', role: 'LGA_COMMANDER', geo_lga: 'JOS SOUTH' },
+  submitted_at: '2026-09-01T09:00:00Z',
+};
+
+const REPORTER = {
+  id: 'user-aaaaaaaa',
+  full_name: 'Officer Danjuma',
+  role: 'LGA_COMMANDER',
+  geo_lga: 'JOS SOUTH',
 };
 
 describe('UninstallRequests', () => {
   beforeEach(() => {
     db = makeSupabaseStub();
+    // The reporter's name comes from a second query now, not an embed.
+    db.setRows('profiles', [REPORTER]);
   });
 
   it('shows a loading state, then the requests it fetched', async () => {

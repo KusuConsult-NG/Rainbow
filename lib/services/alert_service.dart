@@ -3,11 +3,14 @@ import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:rainbow_app/core/offline/offline_escalation.dart';
+import 'package:rainbow_app/core/offline/offline_ref.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
+import 'package:rainbow_app/core/geo/jurisdiction_resolver.dart';
 import 'package:rainbow_app/services/sqlite_service.dart';
 
 /// Documentation for this public member.
@@ -41,6 +44,19 @@ class AlertService {
     String? geoPu,
     String syncStatus = 'COMPLETED',
   }) async {
+    /// `isCritical` was a parameter that did nothing.
+    ///
+    /// It was declared, callers set it, and the body never read it — so
+    /// `startEmergency()`, which passes `isCritical: true` and no `priority`,
+    /// filed every PANIC SOS at the default: MEDIUM. The most urgent thing a
+    /// citizen can do arrived on the HQ board graded medium, below a report of
+    /// a blocked drain, and outside the CRITICAL filter entirely.
+    ///
+    /// Caught by pressing the button and reading the row that came out
+    /// (`severity: MEDIUM`), not by reading the code — the parameter is right
+    /// there in the call and looks like it works.
+    final effectivePriority = isCritical ? AlertPriority.critical : priority;
+
     // Coordinates stay NULL when there is no real fix.
     //
     // This previously defaulted to (9.9167, 8.8917) — the centre of Jos — so an
@@ -71,7 +87,65 @@ class AlertService {
       );
     }
 
-    final localId = 'OFFLINE_${DateTime.now().millisecondsSinceEpoch}';
+    // ── Which jurisdiction owns this incident ───────────────────────────
+    //
+    // The command chain starts at the tier responsible for the GROUND the
+    // incident happened on, so an alert has to carry that ground. Nothing
+    // attached it: a citizen report carried no geography at all unless the
+    // reporter opened the manual override, and the panic SOS carried the
+    // reporter's REGISTERED lga/ward — where they live, not where they are.
+    // Every tier filter then fell through its `IS NULL` fail-open and showed
+    // every alert to everybody, so the routing existed but never ran.
+    //
+    // Order of preference, most trustworthy first:
+    //   1. what the caller passed  — a manual override by the reporter
+    //   2. the coordinates          — measured, and the point of all this
+    //   3. nothing                  — unresolved is a real answer
+    //
+    // The reporter's profile is deliberately NOT a fallback here. Filing an
+    // incident against the address someone registered at is how a report from
+    // Mangu is routed to a unit in Jos, and it would be indistinguishable
+    // afterwards from a measured position. C-5 was this mistake with
+    // coordinates; this is the same mistake with jurisdiction.
+    var finalLga = geoLga;
+    var finalWard = geoWard;
+    final finalPu = geoPu;
+
+    if (finalLga == null || finalWard == null) {
+      try {
+        await JurisdictionResolver.instance.ensureLoaded();
+        final j = JurisdictionResolver.instance.resolve(finalLat, finalLng);
+        if (j.isResolved) {
+          finalLga ??= j.lga;
+          finalWard ??= j.ward;
+          debugPrint('[ALERT_SERVICE] jurisdiction from GPS: $j');
+        } else {
+          debugPrint(
+            '[ALERT_SERVICE] coordinates did not resolve to a Plateau LGA — '
+            'submitting without jurisdiction rather than guessing one.',
+          );
+        }
+      } catch (e) {
+        debugPrint('[ALERT_SERVICE] jurisdiction lookup failed: $e');
+      }
+    }
+
+    // There is no polling unit from coordinates, and there cannot be: no open
+    // dataset gives polling units a position. A PU arrives only when the
+    // reporter picks one.
+
+    final localId = newOfflineLocalId();
+    // ^ `OFFLINE_<millis>_<12 hex>`. Two things are load-bearing:
+    //
+    //   * the PREFIX, because `wasQueuedOffline` below is how a caller tells a
+    //     report that reached the database from one sitting in the local queue,
+    //     and the screens use it to decide what to tell the person;
+    //   * the TAG, because it is the only identity this report has across the
+    //     three ways it can reach HQ. It used to be `OFFLINE_<millis>` alone,
+    //     and HQ's dedup — `local_id LIKE '%<hex>%'` — could therefore never
+    //     match anything, so one emergency arriving by SMS and by queue would
+    //     have become two incidents and two dispatches. See
+    //     lib/core/offline/offline_ref.dart.
 
     try {
       final connectivityResult = await Connectivity().checkConnectivity();
@@ -84,9 +158,10 @@ class AlertService {
           description: description,
           lat: finalLat,
           lng: finalLng,
-          priority: priority.name.toUpperCase(),
+          priority: effectivePriority.name.toUpperCase(),
           isAnonymous: false,
           createdAt: DateTime.now().toIso8601String(),
+          reportedBy: reportedBy,
         );
 
         if (attachments != null) {
@@ -97,6 +172,17 @@ class AlertService {
             );
           }
         }
+
+        // The radio says there is no data path. Try the ones that do not need
+        // one — SMS if there is cell signal and this is urgent enough to spend a
+        // message on, and the mesh, which costs nothing.
+        await _escalateOffline(
+          localId: localId,
+          type: type,
+          severity: effectivePriority.name.toUpperCase(),
+          latitude: finalLat,
+          longitude: finalLng,
+        );
 
         await BackgroundTrackingService().startSosTracking(localId, reportedBy);
         return localId;
@@ -144,15 +230,27 @@ class AlertService {
         'type': type,
         'description': description,
         'reported_by': reportedBy,
-        'reportedBy': reportedBy,
+        // `'reportedBy': reportedBy` used to sit here too — a camelCase twin of
+        // the line above, and not a column. PostgREST rejects an insert naming
+        // an unknown column IN FULL, so EVERY alert this app submitted was
+        // refused: every SOS, every incident report.
+        //
+        // It was invisible because the failure path is a fallback, not an
+        // error: the catch below enqueues the alert into offline SQLite, and
+        // the UI says the report was sent. It looked like an app that worked
+        // offline. It was an app that was always offline.
+        //
+        // The drift gate missed it too — its Dart key pattern was
+        // `[a-z_][a-z0-9_]*` with no IGNORECASE, so a camelCase key did not
+        // match and was skipped in silence. Fixed in check_schema_drift.py.
         'latitude': finalLat,
         'longitude': finalLng,
         'status': 'PENDING',
-        'severity': priority.name.toUpperCase(),
-        'geo_lga': geoLga,
-        'geo_ward': geoWard,
+        'severity': effectivePriority.name.toUpperCase(),
+        'geo_lga': finalLga,
+        'geo_ward': finalWard,
         'geo_siec_ward': geoSiecWard,
-        'geo_pu': geoPu,
+        'geo_pu': finalPu,
         'media_urls': mediaUrls,
       };
 
@@ -176,9 +274,10 @@ class AlertService {
           description: description,
           lat: finalLat,
           lng: finalLng,
-          priority: priority.name.toUpperCase(),
+          priority: effectivePriority.name.toUpperCase(),
           isAnonymous: false,
           createdAt: DateTime.now().toIso8601String(),
+          reportedBy: reportedBy,
         );
 
         if (attachments != null) {
@@ -190,6 +289,20 @@ class AlertService {
           }
         }
 
+        // This branch matters MORE than the no-radio one above, and it is the
+        // one a connectivity check cannot see. The radio said connected and the
+        // insert was still refused: a captive portal, a congested tower that
+        // carries a text but not a TLS handshake, an expired token, an RLS
+        // refusal, a column the schema lacks, HQ simply down. The report reached
+        // nobody, so the offline channels are exactly as necessary here.
+        await _escalateOffline(
+          localId: localId,
+          type: type,
+          severity: effectivePriority.name.toUpperCase(),
+          latitude: finalLat,
+          longitude: finalLng,
+        );
+
         await BackgroundTrackingService().startSosTracking(localId, reportedBy);
         return localId;
       }
@@ -198,6 +311,77 @@ class AlertService {
       return localId;
     }
   }
+
+  /// Test seam: the offline channels, so the send path can be tested without a
+  /// SIM, a keystore or a radio.
+  @visibleForTesting
+  static Future<OfflineEscalationReport> Function({
+    required String localId,
+    required String type,
+    required String severity,
+    double? latitude,
+    double? longitude,
+  })? escalateOverride;
+
+  Future<void> _escalateOffline({
+    required String localId,
+    required String type,
+    required String severity,
+    double? latitude,
+    double? longitude,
+  }) async {
+    try {
+      if (escalateOverride != null) {
+        await escalateOverride!(
+          localId: localId,
+          type: type,
+          severity: severity,
+          latitude: latitude,
+          longitude: longitude,
+        );
+        return;
+      }
+      // `mesh` is null until the BLE radio's native halves exist, so today this
+      // is the SMS path only. Said out loud rather than left to be assumed.
+      await OfflineEscalation().escalate(
+        localId: localId,
+        type: type,
+        severity: severity,
+        latitude: latitude,
+        longitude: longitude,
+      );
+    } catch (e) {
+      // The report is already in the queue. This was the attempt to do better.
+      debugPrint('[ALERT_SERVICE] offline escalation failed: $e');
+    }
+  }
+
+  /// Did this submission end up in the local queue rather than the database?
+  ///
+  /// `submitAlert` returns a real uuid when the insert succeeded and an
+  /// `OFFLINE_…` id when it fell back to SQLite, so the answer is already in
+  /// the value every caller receives.
+  ///
+  /// WHY THIS EXISTS RATHER THAN A CONNECTIVITY CHECK.
+  ///
+  /// The report screen decided what to tell the user from
+  /// `connectivityResult.contains(ConnectivityResult.none)` — a reading of the
+  /// RADIO, taken BEFORE the submit. That answers "does this phone have a
+  /// network interface up", which is not the question. The question is "did the
+  /// report arrive", and the two come apart in every case that matters: a
+  /// captive portal, DNS failure, an expired token, a row-level-security
+  /// refusal, a column the schema does not have, or the backend simply being
+  /// down. In all of those the radio says connected, the insert fails, the
+  /// alert goes to the local queue — and the person was shown a green REPORT
+  /// TRANSMITTED with a shield on it.
+  ///
+  /// That is precisely the failure mode that hid `alerts.reportedBy` for
+  /// months: an insert the database refused looked exactly like one that
+  /// succeeded, because the offline queue caught it and the screen was reading
+  /// the radio instead of the outcome.
+  static bool wasQueuedOffline(String? alertId) =>
+      alertId != null &&
+      (alertId.startsWith('OFFLINE_') || alertId.startsWith('LOCAL_'));
 
   /// Builds the Supabase `alerts` payload for one row of the local offline queue.
   ///
@@ -226,7 +410,44 @@ class AlertService {
       'severity': row['priority'],
       'status': 'PENDING',
       if (row['created_at'] != null) 'created_at': row['created_at'],
+      // REGRESSION GUARD: this key was absent, so every alert synced from the
+      // offline queue reached HQ with `reported_by` NULL. A dispatcher could not
+      // call the reporter back, the reporter could not see their own report
+      // under RLS, and the offline-channel dedup — which scopes by reporter —
+      // could never match it. Null here now means one thing only: the report was
+      // filed anonymously, or it was queued by a build older than v3 of the
+      // local database.
+      if (row['reported_by'] != null) 'reported_by': row['reported_by'],
     };
+  }
+
+  /// Test seam: the "has this already arrived?" lookup, so the flush can be
+  /// tested without Supabase.
+  @visibleForTesting
+  static Future<String?> Function(String tagHex)? alreadyDeliveredOverride;
+
+  /// The id of an alert already carrying this report's tag, or null.
+  Future<String?> _findAlreadyDelivered(String localId) async {
+    final tag = offlineRefHexOf(localId);
+    if (tag == null) return null;
+    try {
+      if (alreadyDeliveredOverride != null) {
+        return await alreadyDeliveredOverride!(tag);
+      }
+      final rows = await SupabaseConfig.client
+          .from('alerts')
+          .select('id')
+          .like('local_id', '%$tag%')
+          .limit(1);
+      if (rows.isEmpty) return null;
+      return rows.first['id'] as String?;
+    } catch (e) {
+      // Fail towards DELIVERING. A duplicate incident is visible to a dispatcher
+      // and can be merged; a report dropped because a dedup lookup failed is
+      // visible to nobody.
+      debugPrint('[SYNC] dedup lookup failed ($e) — filing the report anyway');
+      return null;
+    }
   }
 
   /// Replays pending alerts once connectivity is restored.
@@ -240,6 +461,26 @@ class AlertService {
       for (final row in offlineQueue) {
         final localId = row['local_id'] as String;
         try {
+          // Did this report already reach HQ by SMS or through the mesh while
+          // the phone had no data? If so, inserting it again means two incidents
+          // and two units sent to one place.
+          //
+          // HQ records an offline-channel alert with `local_id` set to the
+          // twelve-hex tag, and the queued id ends with that same tag, so one
+          // LIKE finds it. The anonymous case cannot be deduplicated this way and
+          // is not meant to be: an anonymous report is deliberately not linked to
+          // its reporter, so this phone cannot prove the row is its own.
+          final alreadyThere = await _findAlreadyDelivered(localId);
+          if (alreadyThere != null) {
+            debugPrint(
+              '[SYNC] $localId already reached HQ over an offline channel — '
+              'marking synced instead of filing it twice.',
+            );
+            mappings[localId] = alreadyThere;
+            await _sqliteService.markAlertSynced(localId);
+            continue;
+          }
+
           final payload = buildOfflineSyncPayload(row);
 
           final response = await SupabaseConfig.client

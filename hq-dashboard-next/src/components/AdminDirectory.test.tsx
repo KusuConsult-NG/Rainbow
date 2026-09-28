@@ -15,6 +15,27 @@ import { makeSupabaseStub, type SupabaseStub } from '@/test/supabase-stub';
 
 let db: SupabaseStub;
 
+/**
+ * Provisioning is a server call now, not `supabase.auth.signUp`.
+ *
+ * It had to move: the old path put the chosen role in `options.data`, and
+ * `handle_new_user()` copied that onto the profile — so anyone holding the anon
+ * key could sign themselves up as HQ_COMMAND. The role is now decided by
+ * `/api/admin/provision`, which checks who is asking. These tests therefore
+ * stub `fetch` where they used to stub the auth client; what they assert about
+ * the PANEL — the roster reloads on success, a failure is reported rather than
+ * dressed as success — is unchanged.
+ */
+function stubProvision(result: { ok: boolean; body: unknown; status?: number }) {
+  const spy = vi.fn(async () => ({
+    ok: result.ok,
+    status: result.status ?? (result.ok ? 201 : 400),
+    json: async () => result.body,
+  }));
+  vi.stubGlobal('fetch', spy);
+  return spy;
+}
+
 vi.mock('@/lib/supabase', () => ({
   get supabase() {
     return db.client;
@@ -72,7 +93,10 @@ describe('AdminDirectory', () => {
 
   it('creates an account and re-reads the roster', async () => {
     db.setRows('profiles', []);
-    db.authResult = { data: { user: { id: 'new-officer' } }, error: null };
+    const provision = stubProvision({
+      ok: true,
+      body: { id: 'new-officer', email: 'b.yakubu@operationrainbow.plateau.gov.ng', role: 'UNIT_COMMAND' },
+    });
     const AdminDirectory = await load();
 
     render(<AdminDirectory />);
@@ -84,6 +108,30 @@ describe('AdminDirectory', () => {
 
     expect(await screen.findByText(/registered successfully/i)).toBeInTheDocument();
     await waitFor(() => expect(db.selectCount('profiles')).toBeGreaterThan(before));
+
+    // The role must travel to the server, not to the database from here.
+    expect(provision).toHaveBeenCalledWith(
+      '/api/admin/provision',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  // The whole point of moving this server-side: the browser must not be able to
+  // write a role itself, whatever it puts in the form.
+  it('does not try to set the role from the browser', async () => {
+    db.setRows('profiles', []);
+    stubProvision({ ok: true, body: { id: 'new-officer', role: 'UNIT_COMMAND' } });
+    const AdminDirectory = await load();
+
+    render(<AdminDirectory />);
+    await waitFor(() => expect(db.selectCount('profiles')).toBeGreaterThan(0));
+
+    await fillForm();
+    await userEvent.click(screen.getByRole('button', { name: /Register|Provision|Create/i }));
+    await screen.findByText(/registered successfully/i);
+
+    expect(db.updates.filter((w) => w.table === 'profiles')).toHaveLength(0);
+    expect(db.inserts.filter((w) => w.table === 'profiles')).toHaveLength(0);
   });
 
   // The failure mode that matters: a rejected sign-up that still showed the
@@ -91,7 +139,7 @@ describe('AdminDirectory', () => {
   // an officer can log in when they cannot.
   it('reports a failed sign-up rather than claiming success', async () => {
     db.setRows('profiles', []);
-    db.authResult = { data: null, error: { message: 'Email already registered' } };
+    stubProvision({ ok: false, body: { error: 'Email already registered' } });
     const AdminDirectory = await load();
 
     render(<AdminDirectory />);

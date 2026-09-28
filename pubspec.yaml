@@ -37,6 +37,14 @@ dependencies:
   path: ^1.9.0
   path_provider: ^2.1.3
   permission_handler: ^12.0.1
+  # Already in the tree transitively; declared directly because both offline
+  # channels encrypt with AES-GCM, HKDF and P-256 from this package. A
+  # transitive dependency can change version under you without notice, and this
+  # one is on the path that carries a duress alert.
+  #
+  # Alphabetical order is enforced by `sort_pub_dependencies`, which is an ERROR
+  # here, so this went in one line too early and turned the analyze gate red.
+  pointycastle: ^4.0.0
   record: ^6.2.1
   riverpod_annotation: any
   sentry_flutter: ^8.14.2
@@ -80,6 +88,16 @@ flutter:
     # reaching a Google CDN. `main.dart` sets allowRuntimeFetching = false so a
     # missing weight fails loudly in development instead of silently at 3am.
     - assets/google_fonts/
+    # Jurisdiction geometry, so an incident's coordinates can be resolved to
+    # the LGA and ward that own it. Bundled rather than fetched: routing an
+    # emergency must not depend on reaching a network that may be the reason
+    # the emergency is being reported.
+    #
+    #   plateau_boundaries.json  17 real LGA polygons
+    #                            (geoBoundaries gbOpen NGA ADM2, CC BY 4.0)
+    #   plateau_wards.json       207 ward CENTROIDS, not polygons
+    #                            (temikeezy/nigeria-geojson-data, MIT)
+    - assets/geo/
 
 flutter_launcher_icons:
   android: true

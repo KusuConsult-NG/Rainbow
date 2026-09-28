@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate scripts/apply_all_migrations.sql — the nine unapplied migrations,
+"""Generate scripts/apply_all_migrations.sql — every unapplied migration,
 in order, as one paste, with a pass/fail readout at the end.
 
 WHY THIS IS GENERATED RATHER THAN HAND-WRITTEN
@@ -28,27 +28,51 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "scripts/apply_all_migrations.sql"
 
-# In order. The four historical files (initial schema, phase1-3) are NOT here:
-# they are already applied on production, and re-running them would re-create
-# the permissive policies that 20260813 exists to remove.
-MIGRATIONS = [
-    "20260812000000_agency_tables.sql",
-    "20260813000000_rls_least_privilege.sql",
-    "20260902000000_per_user_emergency_pins.sql",
-    "20260903000000_realtime_publication.sql",
-    "20260903000001_incident_media_storage.sql",
-    "20260903000002_system_alerts_broadcast.sql",
-    "20260903000003_alert_escalation_columns.sql",
-    "20260903000004_profiles_badge_number.sql",
-    "20260903000005_alerts_assigned_tier.sql",
-]
+# ── The outstanding migrations, DERIVED from the directory ──────────────────
+#
+# This used to be a hand-maintained list, and that is a trap rather than a
+# chore. Adding a migration and running this generator produced no diff, no
+# warning and a successful exit — while the script an operator pastes into
+# production silently lacked the new file. The CI check only diffs this
+# script's OUTPUT against the committed copy, so a migration that was never in
+# the list was never in the diff either, and nothing anywhere said so.
+#
+# It is derived now. HISTORICAL_FILES is the exclusion list, and it is short,
+# closed and explained: those four built the original schema, they are already
+# applied on production, and re-running them would re-create the permissive
+# `USING (true)` policies that 20260813 exists to remove.
+HISTORICAL_FILES = {
+    "20260720000000_initial_schema.sql",
+    "phase1_foundation.sql",
+    "phase2_assigned_responders.sql",
+    "phase3_profile_columns_and_config.sql",
+}
 
-HEADER = """-- ============================================================================
+
+def outstanding_migrations() -> list[str]:
+    """Every migration that is not part of the already-applied original schema.
+
+    Sorted by filename, which is the timestamp prefix, which is the order they
+    must apply in.
+    """
+    names = sorted(
+        p.name
+        for p in (ROOT / "supabase/migrations").glob("*.sql")
+        if p.name not in HISTORICAL_FILES
+    )
+    if not names:
+        raise SystemExit("no migrations found — is supabase/migrations present?")
+    return names
+
+
+MIGRATIONS = outstanding_migrations()
+
+HEADER = f"""-- ============================================================================
 -- APPLY ALL OUTSTANDING MIGRATIONS — generated file, do not edit by hand.
 --   Regenerate with: python3 scripts/build_apply_all.py
 --
 -- Paste the WHOLE of this file into the Supabase dashboard -> SQL Editor and
--- run it. It applies the nine outstanding migrations in order and finishes by
+-- run it. It applies the {len(MIGRATIONS)} outstanding migrations in order and finishes by
 -- SELECTing a pass/fail table, so one paste in gives you one answer out.
 --
 -- ---------------------------------------------------------------------------
@@ -67,13 +91,26 @@ HEADER = """-- =================================================================
 --   ===== RLS DRY RUN — >>> DO NOT APPLY =====    -> stop; it names the policy
 -- ---------------------------------------------------------------------------
 --
--- EVERY MIGRATION HERE IS IDEMPOTENT. Running this file twice changes nothing
--- the second time, so a partial run can simply be re-run.
+-- SAFE TO RE-RUN — but "idempotent" is not quite the right word, and the
+-- difference shows up if you run this file twice.
 --
--- ONE THING TO KNOW ABOUT TRANSACTIONS. The RLS migration carries its own
--- BEGIN/COMMIT, which is deliberate: it applies completely or not at all. The
--- others do not, and are individually idempotent. If the editor reports an
--- error partway, nothing is half-applied in a way re-running cannot fix.
+-- Most of these migrations ARE idempotent: they use IF NOT EXISTS / OR REPLACE
+-- and a second run changes nothing and says nothing.
+--
+-- `20260813000000_rls_least_privilege.sql` is ATOMIC instead. It drops the old
+-- policy set by name and creates a new one, inside its own BEGIN/COMMIT, so it
+-- applies completely or not at all. Running it a SECOND time therefore reports
+--
+--     ERROR: policy "profiles_select_self_or_staff" for table "profiles"
+--            already exists
+--
+-- and rolls itself back. That message means THE POLICIES ARE ALREADY IN PLACE.
+-- It is not a failure to fix, nothing is left half-applied, and the verification
+-- at the end of this file will still report every row PASS. Read the verdict
+-- table, not the error.
+--
+-- So: an interrupted run can simply be re-run, and the state you end up with is
+-- correct either way.
 --
 -- Expect a few `NOTICE: skipping ...` lines. They are the guards that let these
 -- files run against a database that does not have a given table yet.
@@ -81,13 +118,13 @@ HEADER = """-- =================================================================
 
 """
 
-VERIFY = """
+VERIFY = f"""
 
 -- ============================================================================
 -- DID IT WORK?
 --
 -- One row per thing that had to be true. `result` is PASS or FAIL; nothing here
--- writes. If every row says PASS, the nine migrations are applied.
+-- writes. If every row says PASS, the {len(MIGRATIONS)} migrations are applied.
 --
 -- These check BEHAVIOUR-ADJACENT FACTS, not just that statements ran: that anon
 -- holds no policy at all, that the escalation columns exist (their absence made
@@ -155,7 +192,74 @@ WITH checks(ord, name, ok) AS (
             AND column_name = 'assigned_tier')),
     (14, 'no tier label left in the agency column',
         (SELECT count(*) = 0 FROM public.alerts
-          WHERE escalated_to_agency IN ('POLLING_UNIT','PU','WARD','LGA','HQ')))
+          WHERE escalated_to_agency IN ('POLLING_UNIT','PU','WARD','LGA','HQ'))),
+    -- The signup path must not read a role out of client-supplied metadata.
+    -- Anyone holding the anon key could otherwise enrol themselves as
+    -- HQ_COMMAND, and every policy in the system trusts profiles.role.
+    (15, 'a signup cannot choose its own role',
+        (SELECT pg_get_functiondef(p.oid) NOT LIKE '%raw_user_meta_data->>''role''%'
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'handle_new_user')),
+    -- The chain: an alert must land at the PU, and the timeouts that were
+    -- configured and dead must now be enforced by something.
+    (16, 'new alerts land at the polling unit',
+        (SELECT column_default LIKE '%UNIT%' FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'alerts'
+            AND column_name = 'assigned_tier')),
+    (17, 'the escalation job exists and is service-role only',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.escalate_overdue_alerts()', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'escalate_overdue_alerts')),
+    (18, 'the chain terminates at HQ',
+        (SELECT public.next_tier('HQ') IS NULL AND public.next_tier('UNIT') = 'WARD')),
+    -- Location is borrowed, not kept. A citizen's position must stop being
+    -- readable by staff once their emergency closes, nothing may be kept
+    -- forever, and a message must not be injectable into somebody else's
+    -- channel.
+    (19, 'a citizen''s position is not a standing staff feed',
+        EXISTS (SELECT 1 FROM pg_policies
+                 WHERE schemaname = 'public' AND tablename = 'telemetry'
+                   AND policyname = 'telemetry_select_self_or_responding_staff')),
+    (20, 'stale positions are purged, and only by the service role',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.purge_stale_telemetry()', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'purge_stale_telemetry')),
+    (21, 'chat writes are restricted to a participant of the thread',
+        EXISTS (SELECT 1 FROM pg_policies
+                 WHERE schemaname = 'public' AND tablename = 'chat_messages'
+                   AND policyname = 'chat_insert_participant')),
+    -- The SMS fallback's per-device key. It can both decrypt and forge that
+    -- citizen's emergency traffic, so nothing but the service role may reach
+    -- it, and the table must not be selectable at all.
+    (22, 'SMS device keys exist and are unreadable through the API',
+        (SELECT relrowsecurity FROM pg_class
+          WHERE oid = 'public.sms_device_keys'::regclass)
+        AND NOT EXISTS (SELECT 1 FROM pg_policies
+                         WHERE schemaname = 'public'
+                           AND tablename = 'sms_device_keys')),
+    (23, 'only the service role can resolve an SMS key for ingest',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.sms_key_for_ingest(bytea)', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'sms_key_for_ingest')),
+    -- Without this, one mesh alert flooded by several relays becomes several
+    -- incidents and several units sent to one place.
+    (24, 'the mesh can recognise the same envelope arriving twice',
+        (SELECT to_regclass('public.mesh_envelopes_seen') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM pg_proc p
+                          JOIN pg_namespace n ON n.oid = p.pronamespace
+                         WHERE n.nspname = 'public'
+                           AND p.proname = 'mesh_note_envelope'))),
+    -- And it must not become a record of which handset carried whose emergency.
+    (25, 'mesh traffic is not readable through the API',
+        (SELECT relrowsecurity
+            AND NOT EXISTS (SELECT 1 FROM pg_policies
+                             WHERE schemaname = 'public'
+                               AND tablename = 'mesh_envelopes_seen')
+           FROM pg_class
+          WHERE oid = 'public.mesh_envelopes_seen'::regclass))
 )
 SELECT
   CASE WHEN ok THEN 'PASS' ELSE '*** FAIL ***' END AS result,
@@ -163,6 +267,43 @@ SELECT
 FROM checks
 ORDER BY ok, ord;
 """
+
+
+# ── Labels must not read as DDL to a linter ─────────────────────────────────
+#
+# Supabase's SQL editor lints the buffer BEFORE running it, and its parser reads
+# words out of quoted strings as identifiers. A check labelled
+# "...written into your own channel" made it warn
+#
+#   This query creates a table without enabling Row Level Security. Clients
+#   using anon or authenticated keys may be able to access `your`.
+#
+# about a table that does not exist, and made another path fail with
+# `42P01: relation "your" does not exist`. Renaming the word moved the warning to
+# the new word — `into somebody` became `somebody` — which is how the mechanism
+# became clear: it takes whatever follows `INTO`.
+#
+# These four are the keywords a relation name follows in real SQL, so they are
+# the ones a naive parser reads a table name after. An operator cannot tell a
+# parser quirk from a real finding on a file they are about to paste into
+# production, and the safe response to not knowing is to stop — so the trigger is
+# banned rather than explained.
+FORBIDDEN_IN_LABELS = ("into", "from", "join", "table")
+
+
+def check_labels(text: str) -> None:
+    import re as _re
+    bad = []
+    for m in _re.finditer(r"^    \(\d+, '([^']+)'", text, _re.M):
+        label = m.group(1)
+        for word in FORBIDDEN_IN_LABELS:
+            if _re.search(rf"\b{word}\b", label, _re.I):
+                bad.append((word, label))
+    if bad:
+        for word, label in bad:
+            print(f"label contains '{word}', which Supabase's linter reads as "
+                  f"DDL: {label!r}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 def main() -> int:
@@ -182,6 +323,7 @@ def main() -> int:
         parts.append(path.read_text().rstrip() + "\n\n")
     parts.append(VERIFY)
 
+    check_labels(VERIFY)
     OUT.write_text("".join(parts))
     print(f"wrote {OUT.relative_to(ROOT)} "
           f"({len(MIGRATIONS)} migrations, {OUT.read_text().count(chr(10))} lines)")

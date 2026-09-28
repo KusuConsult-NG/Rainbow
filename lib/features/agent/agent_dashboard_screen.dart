@@ -14,6 +14,8 @@ import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/alerts_feed.dart';
+import 'package:rainbow_app/features/agent/alert_row.dart';
+import 'package:rainbow_app/features/agent/responder_tier.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/auth_service.dart';
 import 'package:rainbow_app/services/tts_service.dart';
@@ -107,6 +109,8 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
           return 'WARD COMMAND';
         case ResponderTier.pu:
           return 'UNIT COMMAND';
+        case ResponderTier.hq:
+          return 'HQ COMMAND';
         // ignore: no_default_cases, Stylistic override to match system design
         default:
           return 'OPERATIONAL UNIT';
@@ -115,20 +119,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
     return 'CITIZEN';
   }
 
-  String get _assignedTier {
-    final auth = ref.watch(authProvider);
-    switch (auth.tier) {
-      case ResponderTier.pu:
-        return 'UNIT';
-      case ResponderTier.ward:
-        return 'WARD';
-      case ResponderTier.lga:
-        return 'LGA';
-      // ignore: no_default_cases, Stylistic override to match system design
-      default:
-        return 'UNIT';
-    }
-  }
+  String get _assignedTier => assignedTierLabel(ref.watch(authProvider).tier);
 
   bool _showMap = false;
 
@@ -254,6 +245,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
         appBar: AppBar(
           leading: Builder(
             builder: (context) => IconButton(
+                                    tooltip: 'Open the command menu',
               icon: const Icon(Icons.menu_rounded, color: Colors.white),
               onPressed: () {
                 var state = Scaffold.maybeOf(context);
@@ -363,6 +355,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
               },
             ),
             IconButton(
+              tooltip: 'Switch between the map and the incident list',
               icon: Icon(
                 _showMap ? Icons.view_headline_rounded : Icons.radar_rounded,
                 color: Colors.white,
@@ -374,10 +367,12 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
             ),
             if (profile['role'] == 'HQ_COMMAND' || profile['role'] == 'LGA_COMMAND')
               IconButton(
+                tooltip: 'Send a command broadcast',
                 icon: const Icon(Icons.campaign_rounded, color: Colors.white),
                 onPressed: () => context.push(AppRoutes.adminBroadcast),
               ),
             IconButton(
+              tooltip: 'Sign out',
               icon: const Icon(
                 Icons.power_settings_new_rounded,
                 color: Colors.white70,
@@ -502,10 +497,27 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
       // below. A transient auth read failure would show every responder every
       // alert in the state. You cannot be assigned something when we do not
       // know who you are.
-      if (uid != null && alert['assignedToUid'] == uid) return true;
+      if (alertIsAssignedTo(alert, uid)) return true;
 
 
       final auth = ref.watch(authProvider);
+
+      // OWNER TIER AND EVERYONE ABOVE.
+      //
+      // Before this the filter was geography alone, and every branch of it
+      // ended in an `alert['geo_*'] == null` fail-open. Since nothing
+      // populated the geography, that fallback was the ONLY path that ever
+      // ran: every alert was visible to every responder at every tier, and
+      // the chain's ownership meant nothing on screen.
+      //
+      // Geography still scopes WHERE an officer looks; the tier now scopes
+      // WHAT they are shown of it.
+      if (!tierCanSee(
+        viewerTier: assignedTierLabel(auth.tier),
+        alertTier: alert['assigned_tier'] as String?,
+      )) {
+        return false;
+      }
 
       if (auth.tier == ResponderTier.lga) {
         return assignedLgas.contains(alert['geo_lga']) ||
@@ -795,9 +807,7 @@ class _MissionCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authProvider);
-    final assignedTier = auth.tier == ResponderTier.pu
-        ? 'UNIT'
-        : (auth.tier == ResponderTier.ward ? 'WARD' : 'LGA');
+    final assignedTier = assignedTierLabel(auth.tier);
 
     final status = alert['status'] ?? 'OPEN';
     final severity = alert['severity'] ?? 'MEDIUM';
@@ -805,7 +815,7 @@ class _MissionCard extends ConsumerWidget {
     // Same null trap as the tier filter: with no session, `null == null` marks
     // every unassigned alert as this officer's own and highlights the lot.
     final isMine = uid != null &&
-        (alert['assignedToUid'] == uid || alert['assigned_to'] == uid);
+        alertIsAssignedTo(alert, uid);
 
     final statusColors = {
       'OPEN': AppColors.warning,
@@ -875,10 +885,12 @@ class _MissionCard extends ConsumerWidget {
                       const SizedBox(width: 8),
                       Text(
                         _formatTime(
-                          alert['created_at'] ??
-                              alert['createdAt'] ??
-                              alert['reportedAt'] ??
-                              alert['timestamp'],
+                          // `created_at` is the column, is NOT NULL, and has a
+                          // default. The three fallbacks that used to follow it
+                          // — createdAt, reportedAt, timestamp — name nothing
+                          // this table has, so they were unreachable code that
+                          // read as robustness.
+                          alert['created_at'],
                         ),
                         style: GoogleFonts.outfit(
                           fontSize: 11,
@@ -1016,7 +1028,18 @@ class _MissionCard extends ConsumerWidget {
                           ),
                         ),
                       ),
-                      if (assignedTier == 'WARD' || assignedTier == 'LGA') ...[
+                      // HQ IS THE TIER THAT MOST NEEDS THIS.
+                      //
+                      // This read `assignedTier == 'WARD' || 'LGA'`, so the one
+                      // rung with no dispatch control was HQ — the rung whose
+                      // whole purpose is to override when the chain below it is
+                      // not responding. An incident that climbed all the way up
+                      // because nobody answered arrived at the only desk that
+                      // could not send anyone to it.
+                      //
+                      // A polling-unit officer is still excluded, deliberately:
+                      // they ARE the field unit, and ENGAGE self-deploys them.
+                      if (canDispatchFrom(assignedTier)) ...[
                         const SizedBox(width: 8),
                         IconButton(
                           tooltip: 'Dispatch Unit',
@@ -1033,6 +1056,12 @@ class _MissionCard extends ConsumerWidget {
                           ),
                         ),
                       ],
+                      // No up-arrow at HQ: there is nothing above it, and the
+                      // dialog behind this button would have offered to escalate
+                      // HQ to HQ. `escalationTargetFor` is the single answer to
+                      // "is there a rung above me", so the button and the dialog
+                      // cannot disagree.
+                      if (escalationTargetFor(assignedTier) != null) ...[
                       const SizedBox(width: 8),
                       IconButton(
                         tooltip: 'Escalate Mission',
@@ -1052,6 +1081,7 @@ class _MissionCard extends ConsumerWidget {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                       ),
+                      ],
                       const SizedBox(width: 8),
                       IconButton(
                         tooltip: 'Secure Chat',
@@ -1151,8 +1181,8 @@ class _TacticalActionSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final alert = alertDoc;
     final status = alert['status'] ?? 'OPEN';
-    final uid = SupabaseConfig.client.auth.currentUser?.id ?? 'STAFF';
-    final isAssignedToMe = alert['assignedToUid'] == uid;
+    final uid = SupabaseConfig.client.auth.currentUser?.id;
+    final isAssignedToMe = alertIsAssignedTo(alert, uid);
 
     var buttonLabel = 'DEPLOY';
     var buttonColor = AppColors.primary;
@@ -1238,6 +1268,26 @@ class _TacticalActionSheet extends StatelessWidget {
                     'status': nextStatus,
                     if ((status == 'OPEN' || status == 'ACTIVE' || status == 'PENDING') && uid != null)
                       'assigned_to': uid,
+                    // STOP THE ESCALATION CLOCK.
+                    //
+                    // `escalate_overdue_alerts()` climbs any alert whose tier
+                    // has held it past the configured timeout AND whose
+                    // `acknowledged_at` is null. Nothing in either app ever
+                    // wrote `acknowledged_at`, so that guard could not fire:
+                    // an officer who accepted a mission and set out had it
+                    // escalated out from under them two minutes later, and the
+                    // tier above was told nobody had responded.
+                    //
+                    // Status alone cannot carry this. The job cannot key off
+                    // 'ACKNOWLEDGED' because an alert legitimately moves on to
+                    // ON_ROUTE and ON_SITE, and those must not restart the
+                    // clock either. A timestamp that is set once and stays set
+                    // is the whole point of the column.
+                    if (nextStatus == 'ACKNOWLEDGED' && uid != null) ...{
+                      'acknowledged_at': DateTime.now().toIso8601String(),
+                      'acknowledged_by': uid,
+                    },
+                    'updated_at': DateTime.now().toIso8601String(),
                   }).eq('id', alertId);
                 }
               } catch (e) {
@@ -1282,11 +1332,17 @@ class _TacticalActionSheet extends StatelessWidget {
               ],
             ),
           ],
-          if (status != 'RESOLVED' && assignedTier != 'HQ') ...[
+          // `assignedTier != 'HQ'` guarded this whole row, so HQ lost DISPATCH
+          // UNIT along with the escalate button it genuinely has no use for.
+          // Split the two: escalation is gated on there being a rung above,
+          // dispatch on the tier being one that commands field units.
+          if (status != 'RESOLVED' &&
+              (canDispatchFrom(assignedTier) ||
+                  escalationTargetFor(assignedTier) != null)) ...[
             const SizedBox(height: 16),
             Row(
               children: [
-                if (assignedTier == 'WARD' || assignedTier == 'LGA') ...[
+                if (canDispatchFrom(assignedTier)) ...[
                   Expanded(
                     child: _TacticalButton(
                       label: 'DISPATCH UNIT',
@@ -1311,6 +1367,7 @@ class _TacticalActionSheet extends StatelessWidget {
                   ),
                   const SizedBox(width: 12),
                 ],
+                if (escalationTargetFor(assignedTier) != null)
                 Expanded(
                   child: _EscalateButton(
                     onTap: () => verifyAndExecute(() async {
@@ -1380,9 +1437,7 @@ class _EscalationDialogState extends State<_EscalationDialog> {
   }
 
   Future<void> _loadTargetCommanders() async {
-    var targetTier = 'WARD';
-    if (widget.assignedTier == 'WARD') targetTier = 'LGA';
-    if (widget.assignedTier == 'LGA') targetTier = 'HQ';
+    final targetTier = escalationTargetFor(widget.assignedTier) ?? 'HQ';
 
     // Map tier to role string
     final roleMap = {'WARD': 'WARD_COMMAND', 'LGA': 'LGA_COMMAND', 'HQ': 'HQ_COMMAND'};
@@ -1424,9 +1479,7 @@ class _EscalationDialogState extends State<_EscalationDialog> {
 
   @override
   Widget build(BuildContext context) {
-    var targetTier = 'WARD';
-    if (widget.assignedTier == 'WARD') targetTier = 'LGA';
-    if (widget.assignedTier == 'LGA') targetTier = 'HQ';
+    final targetTier = escalationTargetFor(widget.assignedTier) ?? 'HQ';
 
     return AlertDialog(
       backgroundColor: AppColors.surfaceContainer,
@@ -1642,9 +1695,7 @@ class _EscalationDialogState extends State<_EscalationDialog> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSubmitting = true);
 
-    var targetTier = 'WARD';
-    if (widget.assignedTier == 'WARD') targetTier = 'LGA';
-    if (widget.assignedTier == 'LGA') targetTier = 'HQ';
+    final targetTier = escalationTargetFor(widget.assignedTier) ?? 'HQ';
 
     try {
       final alertId = widget.alertDoc['id'] as String?;
@@ -1696,6 +1747,25 @@ class _EscalationDialogState extends State<_EscalationDialog> {
         // so an internal escalation to LGA sat in the same field as a handover
         // to the police, and neither read cleanly.
         'assigned_tier': targetTier,
+        // RESTART THE CLOCK FOR THE TIER TAKING IT.
+        //
+        // The timeout is measured from `tier_assigned_at`, and this UPDATE did
+        // not touch it — so an alert handed up to the WARD carried the
+        // timestamp from when it was first inserted at the POLLING UNIT. The
+        // WARD's five-minute window was already spent before the WARD saw it,
+        // and the next run of `escalate_overdue_alerts()` moved it straight on
+        // to the LGA, then to HQ. A single manual escalation of an alert more
+        // than ten minutes old landed at HQ within two minutes of cron,
+        // skipping every rung it was supposed to climb.
+        //
+        // `acknowledged_*` clears for the same reason: the officer who
+        // acknowledged it at the tier below is not the officer who has it now,
+        // and leaving their acknowledgement in place freezes the clock
+        // permanently at the new tier — the alert would then never escalate
+        // again, no matter how long HQ's predecessors sat on it.
+        'tier_assigned_at': DateTime.now().toIso8601String(),
+        'acknowledged_at': null,
+        'acknowledged_by': null,
         'escalation_log': newLog,
         'ai_summary': existingSummary.isEmpty ? note : '$existingSummary\n$note',
         'updated_at': DateTime.now().toIso8601String(),

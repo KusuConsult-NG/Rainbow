@@ -1,4 +1,6 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -24,11 +26,38 @@ class SecureChatScreen extends ConsumerStatefulWidget {
 class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
   final _controller = TextEditingController();
 
+  /// THE SUBSCRIPTION IS CREATED ONCE, NOT ON EVERY FRAME.
+  ///
+  /// This used to be built inline in `build()`:
+  ///
+  ///     stream: SupabaseConfig.client.from('chat_messages')
+  ///         .stream(primaryKey: ['id']).eq('alert_id', alertId),
+  ///
+  /// `.stream()` opens a realtime channel, so writing it there opens a NEW one
+  /// on every rebuild and discards the one before it. Sending a message clears
+  /// the text field, which rebuilds, which churned the channel — and the
+  /// replacement came up in an error state. So the sender's own screen replaced
+  /// the conversation with "Error loading channel messages" at the exact moment
+  /// they sent something, while the message itself was written perfectly well.
+  /// Every message after that was invisible to them until they left the screen
+  /// and came back.
+  ///
+  /// A `late final` initialised in `initState` gives the widget one channel for
+  /// its lifetime, which is what a subscription is meant to be.
+  late final Stream<List<Map<String, dynamic>>> _messages;
+
+  @override
+  void initState() {
+    super.initState();
+    _messages = SupabaseConfig.client
+        .from('chat_messages')
+        .stream(primaryKey: ['id'])
+        .eq('alert_id', widget.alertData['id'] as String);
+  }
+
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
-
-    _controller.clear();
 
     final auth = ref.read(authProvider);
     final user = auth.user;
@@ -36,16 +65,54 @@ class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
 
     final alertId = widget.alertData['id'] as String;
 
+    // CLEAR ONLY ONCE IT IS SENT.
+    //
+    // This cleared the box first and then swallowed any failure in a
+    // `debugPrint`. On a tactical channel that means the operator types a
+    // message, watches it disappear, sees it never arrive in the thread, and
+    // has nothing to tell them whether it went. Row-level security, an expired
+    // session and a dead network all present identically: as silence.
+    _controller.clear();
     try {
       await SupabaseConfig.client.from('chat_messages').insert({
         'alert_id': alertId,
         'sender_id': user.id,
         'sender_name': auth.profile?['full_name'] ?? 'Tactical Unit',
-        'sender_role': auth.role.name.toUpperCase(),
+        // WHO IS SPEAKING, NOT MERELY THAT THEY ARE STAFF.
+        //
+        // This wrote `auth.role.name.toUpperCase()`, and `UserRole` has three
+        // values: citizen, responder, unknown. So EVERY staff message on a
+        // tactical channel was signed 'RESPONDER' — an HQ commander's
+        // instruction labelled identically to a neighbouring unit's remark.
+        // On a channel people act on, the rank attached to "hold position" is
+        // most of its meaning.
+        //
+        // It also put a third vocabulary in one column: the citizen's screen
+        // and the console both write the real `profiles.role`, so the same
+        // thread carried HQ_COMMAND from one writer and RESPONDER from another
+        // for the same person. The profile role is the answer everywhere now,
+        // with the coarse enum only as a fallback for a session whose profile
+        // has not loaded.
+        'sender_role': (auth.profile?['role'] as String?)?.toUpperCase()
+            ?? auth.role.name.toUpperCase(),
         'message': text,
       });
     } catch (e) {
       debugPrint('[CHAT_ERR] Secure chat insert failed: $e');
+      if (!mounted) return;
+      // Give the text back, so it can be retried rather than retyped.
+      _controller.text = text;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.error,
+          content: const Text('MESSAGE NOT SENT — check your connection and retry'),
+          action: SnackBarAction(
+            label: 'RETRY',
+            textColor: Colors.white,
+            onPressed: () => unawaited(_sendMessage()),
+          ),
+        ),
+      );
     }
   }
 
@@ -63,10 +130,7 @@ class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
         children: [
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: SupabaseConfig.client
-                  .from('chat_messages')
-                  .stream(primaryKey: ['id'])
-                  .eq('alert_id', alertId),
+              stream: _messages,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return Center(
@@ -175,6 +239,7 @@ class _SecureChatScreenState extends ConsumerState<SecureChatScreen> {
                   ),
                 ),
                 IconButton(
+                  tooltip: 'Send',
                   icon: const Icon(Icons.send_rounded, color: AppColors.primary),
                   onPressed: _sendMessage,
                 ),

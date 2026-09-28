@@ -120,6 +120,45 @@ describe('escalateAlert', () => {
     expect(alertUpdate().values).not.toHaveProperty('geo_lga');
   });
 
+  // THE TIER, NOT JUST THE OFFICER.
+  //
+  // The responder app shows an officer the alerts of their own tier and above.
+  // This write left `assigned_tier` at 'HQ', so an incident handed to an LGA
+  // commander stayed owned by the tier above them: their whole team could not
+  // see it, and only the one named officer could, and only through the
+  // "assigned to me" rule.
+  it('hands the TIER down to the LGA, not only the named commander', async () => {
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', { targetLga: 'JOS SOUTH' }, HQ);
+
+    expect(alertUpdate().values.assigned_tier).toBe('LGA');
+  });
+
+  // The timeout is measured from `tier_assigned_at`. Leaving HQ's timestamp on
+  // an incident handed to an LGA gives that LGA whatever is left of somebody
+  // else's window — often none of it.
+  it('restarts the ownership clock for the tier taking it', async () => {
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', { targetLga: 'JOS SOUTH' }, HQ);
+
+    const at = alertUpdate().values.tier_assigned_at as string;
+    expect(at).toBeTypeOf('string');
+    expect(Date.now() - Date.parse(at)).toBeLessThan(60_000);
+    expect(alertUpdate().values.acknowledged_at).toBeNull();
+    expect(alertUpdate().values.acknowledged_by).toBeNull();
+  });
+
+  // An outside agency is a different axis from the internal chain. Handing an
+  // incident to the police does not move it down to an LGA desk.
+  it('leaves the tier alone when only an external agency is targeted', async () => {
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', { targetAgency: 'POLICE' }, HQ);
+
+    expect(alertUpdate().values).not.toHaveProperty('assigned_tier');
+    expect(alertUpdate().values).not.toHaveProperty('tier_assigned_at');
+    expect(alertUpdate().values.escalated_to_agency).toBe('POLICE');
+  });
+
   it('APPENDS to the escalation log rather than replacing it', async () => {
     const prior = { from_tier: 'LGA', to_tier: 'HQ', reason: 'earlier handover' };
     db.setRows('alerts', [{ ...ALERT, escalation_log: [prior] }]);
@@ -132,12 +171,28 @@ describe('escalateAlert', () => {
     expect(log[0]).toEqual(prior);
     expect(log[1]).toMatchObject({
       from_tier: 'HQ',
-      to_tier: 'JOS SOUTH',
+      // A rung, matching what the mobile app and the timeout job write into
+      // this field. The LGA is the destination PLACE and has its own key.
+      to_tier: 'LGA',
+      to_lga: 'JOS SOUTH',
       to_officer_id: 'lga-commander-uuid',
       to_officer_name: 'ACP Ibrahim Sule',
       reason: 'riot spreading',
       by_email: HQ.email,
     });
+  });
+
+  // One timeline, one vocabulary. The agency portal renders this field as
+  // `from_tier → to_tier`, and a place sitting where every other writer puts a
+  // rung made two adjacent entries unreadable side by side.
+  it('never writes a place name into to_tier', async () => {
+    const { escalateAlert } = await actions();
+    await escalateAlert('alert-1', { targetLga: 'JOS SOUTH', targetAgency: 'POLICE' }, HQ);
+
+    const log = alertUpdate().values.escalation_log as Array<Record<string, unknown>>;
+    expect(['UNIT', 'WARD', 'LGA', 'HQ', 'POLICE', 'ARMY', 'ALL'])
+      .toContain(log[log.length - 1].to_tier);
+    expect(log[log.length - 1].to_tier).not.toBe('JOS SOUTH');
   });
 
   it('APPENDS to the notes rather than overwriting them', async () => {
@@ -211,6 +266,33 @@ describe('hqOverride', () => {
       assigned_to: HQ.id,
     });
     expect(alertUpdate().in).toEqual(['id', ['alert-1']]);
+  });
+
+  // HQ TAKING COMMAND HAS TO STOP THE CLOCK.
+  //
+  // An override is most often used on an incident nobody below answered, so its
+  // `assigned_tier` is typically still 'UNIT'. Writing only status and assignee
+  // left the server-side escalation job free to keep climbing it — HQ took
+  // command and the timeout then escalated the incident onward from under HQ.
+  it('owns the top rung and records the acknowledgement', async () => {
+    const { hqOverride } = await actions();
+    await hqOverride('alert-1', HQ);
+
+    const v = alertUpdate().values;
+    expect(v.assigned_tier).toBe('HQ');
+    expect(Date.now() - Date.parse(v.tier_assigned_at as string)).toBeLessThan(60_000);
+    expect(Date.now() - Date.parse(v.acknowledged_at as string)).toBeLessThan(60_000);
+    expect(v.acknowledged_by).toBe(HQ.id);
+  });
+
+  it('records the acknowledgement even with no operator to attribute it to', async () => {
+    const { hqOverride } = await actions();
+    await hqOverride('alert-1', {});
+
+    // Somebody at HQ pressed the button; we just cannot name them. The
+    // timestamp is what the escalation job reads, so it must still be set.
+    expect(alertUpdate().values.acknowledged_at).toBeTypeOf('string');
+    expect(alertUpdate().values).not.toHaveProperty('acknowledged_by');
   });
 
   it('overrides every member of a cluster in one write', async () => {
@@ -362,5 +444,63 @@ describe('dispatchAlert', () => {
       ok: false,
       error: 'permission denied',
     });
+  });
+});
+
+// The dispatcher could not reply. The console read `chat_messages` in two
+// places and wrote nowhere, so the citizen's DISPATCHER CHAT had no dispatcher
+// on the other end — only a responder with that incident open on a handset.
+describe('sendChatMessage', () => {
+  beforeEach(() => {
+    db = makeSupabaseStub();
+    db.setRows('alerts', [ALERT]);
+  });
+
+  const inserted = () => db.inserts.find(i => i.table === 'chat_messages')!
+    .values as Record<string, unknown>;
+
+  it('sends as the signed-in operator', async () => {
+    const { sendChatMessage } = await actions();
+    const res = await sendChatMessage('alert-1', 'Units are ten minutes out.', {
+      ...HQ, name: 'ACP Musa Ibrahim', role: 'HQ_COMMAND',
+    });
+
+    expect(res.ok).toBe(true);
+    expect(inserted()).toMatchObject({
+      alert_id: 'alert-1',
+      sender_id: HQ.id,
+      sender_name: 'ACP Musa Ibrahim',
+      sender_role: 'HQ_COMMAND',
+      message: 'Units are ten minutes out.',
+    });
+  });
+
+  it('trims the message', async () => {
+    const { sendChatMessage } = await actions();
+    await sendChatMessage('alert-1', '   hold position   ', { ...HQ });
+    expect(inserted().message).toBe('hold position');
+  });
+
+  it('refuses an empty message rather than writing a blank line', async () => {
+    const { sendChatMessage } = await actions();
+    expect(await sendChatMessage('alert-1', '   ', { ...HQ }))
+      .toEqual({ ok: false, error: 'Nothing to send' });
+    expect(db.inserts.find(i => i.table === 'chat_messages')).toBeUndefined();
+  });
+
+  // `sender_id` must equal auth.uid() for the insert policy to admit it, and
+  // an unattributed instruction on an emergency channel is worse than none.
+  it('refuses to send with nobody signed in', async () => {
+    const { sendChatMessage } = await actions();
+    expect(await sendChatMessage('alert-1', 'move in', { email: 'x@y.z' }))
+      .toEqual({ ok: false, error: 'Not signed in' });
+    expect(db.inserts.find(i => i.table === 'chat_messages')).toBeUndefined();
+  });
+
+  it('reports a rejected insert instead of swallowing it', async () => {
+    db.setInsertError('chat_messages', { message: 'row level security' });
+    const { sendChatMessage } = await actions();
+    expect(await sendChatMessage('alert-1', 'move in', { ...HQ }))
+      .toEqual({ ok: false, error: 'row level security' });
   });
 });

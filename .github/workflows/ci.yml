@@ -123,6 +123,37 @@ jobs:
       - name: Test
         run: flutter test
 
+      # The two offline channels each have a wire format with two
+      # implementations — Dart on the handset, TypeScript at HQ — checked against
+      # vectors the DART encoder produces. That only works if the committed
+      # vectors are what the current encoder actually writes. Regenerating them
+      # here and failing on a diff means a change to the codec cannot land while
+      # the fixtures still describe the old bytes, with both sides passing their
+      # own tests and disagreeing only on a handset in the field.
+      - name: Assert the wire-format vectors match the encoder that made them
+        run: |
+          set -euo pipefail
+          flutter test test/gen_sms_vectors_test.dart test/gen_mesh_vectors_test.dart
+          if ! git diff --quiet -- test/fixtures; then
+            echo "::error::regenerating the vectors changed them — the committed fixtures do not match the Dart encoder. Commit the regenerated files."
+            git --no-pager diff --stat -- test/fixtures
+            exit 1
+          fi
+          echo "OK: the committed vectors are what the encoder produces."
+
+      # And the console must be reading the same file, not a stale copy of it.
+      - name: Assert the console reads the same vectors
+        run: python3 scripts/check_vectors_synced.py
+
+      # The mesh sealer shipped with DateTime.now().microsecondsSinceEpoch as the
+      # seed for the generator that produces every AES-GCM nonce AND HQ's own
+      # keypair. Two seals in one microsecond would then repeat a nonce, which
+      # leaks the XOR of the plaintexts and the authentication subkey — enough to
+      # forge — and the keypair itself had a searchable keyspace. Nothing about
+      # the resulting ciphertext looks wrong, so no behaviour test finds it.
+      - name: Assert crypto randomness is not derived from a clock
+        run: python3 scripts/check_crypto_entropy.py
+
       # SupabaseConfig.clientOverride exists so widget tests can render screens
       # that reach for the client. It is a static mutable pointing at
       # the whole app's database access, so production code must never call it:
@@ -585,6 +616,7 @@ jobs:
           python3 scripts/build_rls_dryrun.py
           python3 scripts/build_rls_inventory.py
           python3 scripts/build_apply_all.py
+          python3 scripts/build_apply_in_parts.py
           python3 scripts/build_bootstrap.py
           GEN="scripts/rls_production_dryrun.sql scripts/rls_inventory.sql scripts/apply_all_migrations.sql scripts/bootstrap_staging.sql"
           if ! git diff --quiet -- $GEN; then
@@ -593,6 +625,35 @@ jobs:
             exit 1
           fi
           echo "OK: all four generated scripts match the migrations."
+
+      # A stale script and an INCOMPLETE one fail differently, and only the
+      # first was checked. The two apply-scripts used to carry a hand-written
+      # list of migrations, so adding one and re-running the generators
+      # produced no diff, no warning and a clean exit — while the file an
+      # operator pastes into production silently lacked it. The diff above
+      # cannot see that: a migration that was never in the list was never in
+      # the output to differ. The lists are derived from the directory now;
+      # this asserts the derivation actually reached every file.
+      - name: Assert every migration reaches the apply scripts
+        run: |
+          set -euo pipefail
+          MISSING=0
+          for f in supabase/migrations/*.sql; do
+            name=$(basename "$f")
+            case "$name" in
+              20260720000000_initial_schema.sql|phase1_foundation.sql| \
+              phase2_assigned_responders.sql|phase3_profile_columns_and_config.sql)
+                # The original schema, already applied on production. Re-running
+                # it would re-create the permissive policies 20260813 removes.
+                continue ;;
+            esac
+            grep -q -- "$name" scripts/apply_all_migrations.sql || {
+              echo "::error::$name is missing from scripts/apply_all_migrations.sql"; MISSING=1; }
+            grep -q -- "$name" scripts/bootstrap_staging.sql || {
+              echo "::error::$name is missing from scripts/bootstrap_staging.sql"; MISSING=1; }
+          done
+          [ "$MISSING" -eq 0 ] || exit 1
+          echo "OK: every migration is present in both apply scripts."
 
       # The inventory's "is this policy ours?" list is extracted from the
       # migration files. A hand-written version was tried first and was
@@ -603,7 +664,8 @@ jobs:
         run: |
           set -euo pipefail
           for NAME in alerts_select_own_or_staff profiles_select_self_or_staff \
-                      telemetry_select_self_or_staff safe_zones_read uninstall_read_own_or_staff; do
+                      telemetry_select_self_or_responding_staff chat_insert_participant \
+                      safe_zones_read uninstall_read_own_or_staff; do
             grep -q "'$NAME'" scripts/rls_inventory.sql || {
               echo "::error::$NAME is created by a migration but missing from the inventory's known list."
               exit 1
@@ -647,6 +709,13 @@ jobs:
           sudo apt-get install -y -qq postgresql-16
       - name: Apply it exactly as pasted
         run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_apply_all.sh
+
+      # scripts/apply_in_parts/ exists for an operator who cannot paste 2,300
+      # lines into a browser tab in one go. That convenience is only safe if the
+      # parts, run in order, land the same database as the whole file — otherwise
+      # the split is a way to skip a migration and never find out.
+      - name: And the split parts land the same database
+        run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_apply_in_parts.sh
 
   bootstrap:
     name: Supabase — the staging bootstrap builds a correct project from zero
@@ -702,6 +771,12 @@ jobs:
       - name: Assert neither app names a column or function the schema lacks
         run: python3 scripts/check_schema_drift.py
 
+      # An icon with no tooltip has no accessible name — for a responder using
+      # a screen reader, and for any test. Four of the five buttons in the agent
+      # dashboard's app bar had none, and one of them signs the officer out.
+      - name: Assert every icon-only control has an accessible name
+        run: python3 scripts/check_control_labels.py
+
       - name: Assert every realtime subscription is on a published table
         run: |
           set -euo pipefail
@@ -754,6 +829,183 @@ jobs:
           sudo apt-get install -y -qq postgresql-16
       - name: Verify the dry run emits a verdict and keeps nothing
         run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_dryrun_emits.sh
+
+  console-e2e:
+    name: HQ console — every screen and every control, in a real browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: hq-dashboard-next/package-lock.json
+
+      - run: npm ci
+        working-directory: hq-dashboard-next
+
+      # Every console screen in this repository went unrendered until this job
+      # existed, because rendering one looked as though it needed a live
+      # Supabase. It does not: the run serves a stand-in built from the
+      # migrations, so a query naming a column that no migration defines is
+      # rejected here exactly as PostgREST rejects it in production.
+      #
+      # This job proves the SCREENS. It does not prove row-level security —
+      # that is the `rls` job, against a real staging project.
+      # Two passes. The first renders every screen for every role; the second
+      # presses every control and checks each action against the database write
+      # it is supposed to cause. A button that looks right and writes nothing is
+      # invisible to a screenshot.
+      - name: Render every screen, then press every button
+        run: ./scripts/local_e2e/run.sh
+
+      # The screenshots are the evidence. Keep them whether or not the run
+      # passed: a failure is exactly when somebody wants to see the screen.
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: console-screens
+          path: local_e2e_screenshots/
+          retention-days: 14
+
+  mobile-screens:
+    name: Mobile app — every screen and every control, at phone size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: hq-dashboard-next/package-lock.json
+
+      # puppeteer and its browser come from the console's lockfile; the mobile
+      # capture drives the Flutter web build with the same tooling.
+      - run: npm ci
+        working-directory: hq-dashboard-next
+
+      # No screen of the mobile app had ever been rendered before this job
+      # existed: there is no emulator here, so "it builds and its tests pass"
+      # was the whole of the evidence. Flutter's web target builds the same
+      # widget tree from the same Dart, which is not a device but is the real
+      # screens.
+      #
+      # The build is pointed at the local stand-in. Without --dart-define the
+      # project URL compiled into the app is PRODUCTION's, and a screenshot run
+      # would sign in to the live system and write to it.
+      # The same script run.sh uses. Writing this out longhand here is what
+      # broke it: appending the demo keys on top of the empty ones
+      # .env.example already declares left the first, empty value winning, so
+      # the demo login had no credentials and every screenshot in CI was the
+      # login page while every local run was fine.
+      - name: Provision .env and point the build at the stand-in
+        run: ./scripts/local_e2e/provision_env.sh
+
+      - name: Build the app for the browser
+        run: |
+          flutter pub get
+          flutter build web --release --no-web-resources-cdn \
+            --dart-define=SUPABASE_URL=http://127.0.0.1:54321 \
+            --dart-define=SUPABASE_ANON_KEY=local-e2e-anon-key-not-a-real-credential
+
+      # Two passes, as for the console. The second is the one that matters
+      # here: the app's alert submission FALLS BACK to an offline SQLite queue
+      # and tells the user the report was sent, so an insert the database
+      # refuses looks identical to one that succeeded. Only watching the
+      # database can tell them apart — which is how `alerts.reportedBy`, a
+      # column that does not exist, was found sitting in every SOS payload.
+      - name: Render every screen, then use the app
+        run: |
+          node scripts/local_e2e/fake_supabase.js &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
+            sleep 0.5
+          done
+          node scripts/local_e2e/mobile_capture.js
+          node scripts/local_e2e/mobile_interact.js
+
+      # A third pass, and the only one that is about the SYSTEM rather than a
+      # screen: one incident driven the length of the command chain — citizen to
+      # polling unit to ward to LGA to HQ, then HQ overriding back down to a
+      # field officer — with the database read after every hop.
+      #
+      # It catches what the two passes above cannot. Each rung's controls worked
+      # in isolation the whole time; what was broken was the handover. A manual
+      # escalation did not restart the tier clock, so an alert handed up by hand
+      # cascaded past the tier that took it; accepting a mission never set
+      # `acknowledged_at`, so it was escalated off the responder who had it; and
+      # HQ, the rung that exists to override, had no dispatch control at all.
+      # None of those is visible in a screenshot of a working screen.
+      # Every control on the responder dashboard, pressed as every tier.
+      #
+      # The tier-specific controls are the tier boundaries themselves —
+      # DISPATCH UNIT is WARD/LGA/HQ, the escalate arrow is everyone but HQ,
+      # the broadcast button is HQ/LGA — and none of them had been pressed by a
+      # test. The general sweep ran as a plain `responder`, which is the one
+      # account whose tier-specific controls do not exist, and reported a single
+      # control named `(icon)` for the whole screen because four of the five
+      # app-bar buttons had no accessible name.
+      # The live camera and microphone, and the citizen's own settings.
+      #
+      # The stream is the control with the largest gap in this repository
+      # between what it does and what had been verified about it: it takes the
+      # camera and the mic and offers them to HQ, and no test had ever pressed
+      # it, because a headless browser has no capture device. Chromium can
+      # synthesise one. Pressing it found that the negotiation could never
+      # begin — the Dart realtime client overwrites the `type` key the service
+      # used as its own discriminator, so HQ saw `type: 'broadcast'` and never
+      # answered, while the phone told the person it was broadcasting.
+      - name: The live stream, and the citizen settings including the duress PIN
+        run: |
+          node scripts/local_e2e/fake_supabase.js &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
+            sleep 0.5
+          done
+          node scripts/local_e2e/user_features.js
+
+      - name: A message sent by one person, read by another
+        run: |
+          node scripts/local_e2e/fake_supabase.js &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
+            sleep 0.5
+          done
+          node scripts/local_e2e/chat_thread.js
+
+      - name: Press every control, as every tier
+        run: |
+          node scripts/local_e2e/fake_supabase.js &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
+            sleep 0.5
+          done
+          node scripts/local_e2e/tier_controls.js
+
+      - name: Drive one incident up the whole command chain
+        run: |
+          node scripts/local_e2e/fake_supabase.js &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
+            sleep 0.5
+          done
+          node scripts/local_e2e/chain_lifecycle.js
+
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-screens
+          path: local_e2e_screenshots/
+          retention-days: 14
 
   rls:
     name: Supabase — RLS anon-access probe

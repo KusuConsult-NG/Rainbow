@@ -8,7 +8,7 @@ already has them and re-running the initial schema would re-create the
 permissive `USING (true)` policies that 20260813 exists to remove.
 
 A fresh Supabase project has none of it. So this file is all THIRTEEN migrations
-in order — the four that built the original schema, then the nine outstanding
+in order — the ones that built the original schema, then every outstanding
 ones — which is the only way to get a staging project that matches production's
 shape rather than a subset of it.
 
@@ -38,17 +38,15 @@ HISTORICAL = [
     "phase2_assigned_responders.sql",
     "phase3_profile_columns_and_config.sql",
 ]
-OUTSTANDING = [
-    "20260812000000_agency_tables.sql",
-    "20260813000000_rls_least_privilege.sql",
-    "20260902000000_per_user_emergency_pins.sql",
-    "20260903000000_realtime_publication.sql",
-    "20260903000001_incident_media_storage.sql",
-    "20260903000002_system_alerts_broadcast.sql",
-    "20260903000003_alert_escalation_columns.sql",
-    "20260903000004_profiles_badge_number.sql",
-    "20260903000005_alerts_assigned_tier.sql",
-]
+# Derived, for the reason given in build_apply_all.py: a hand-maintained list
+# silently omits any migration nobody remembers to add, and the in-sync check
+# cannot see the omission because the missing file was never in the output to
+# diff.
+OUTSTANDING = sorted(
+    p.name
+    for p in (ROOT / "supabase/migrations").glob("*.sql")
+    if p.name not in set(HISTORICAL)
+)
 
 HEADER = """-- ============================================================================
 -- BOOTSTRAP A STAGING PROJECT — generated file, do not edit by hand.
@@ -209,7 +207,25 @@ WITH checks(ord, name, ok) AS (
     (15, 'the helper functions exist (4)',
         (SELECT count(*) = 4 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public'
-            AND p.proname IN ('auth_role','is_staff','is_command','liaison_agency')))
+            AND p.proname IN ('auth_role','is_staff','is_command','liaison_agency'))),
+    -- The signup path must not read a role out of client-supplied metadata.
+    -- Anyone holding the anon key could otherwise enrol themselves as
+    -- HQ_COMMAND, and every policy in the system trusts profiles.role.
+    (16, 'a signup cannot choose its own role',
+        (SELECT pg_get_functiondef(p.oid) NOT LIKE '%raw_user_meta_data->>''role''%'
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'handle_new_user')),
+    (17, 'new alerts land at the polling unit',
+        (SELECT column_default LIKE '%UNIT%' FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'alerts'
+            AND column_name = 'assigned_tier')),
+    (18, 'the escalation job exists and is service-role only',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.escalate_overdue_alerts()', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'escalate_overdue_alerts')),
+    (19, 'the chain terminates at HQ',
+        (SELECT public.next_tier('HQ') IS NULL AND public.next_tier('UNIT') = 'WARD'))
 )
 SELECT
   CASE WHEN ok THEN 'PASS' ELSE '*** FAIL ***' END AS result,

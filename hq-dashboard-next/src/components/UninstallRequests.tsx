@@ -9,7 +9,7 @@ interface UninstallRequest {
   reason: string;
   remarks: string;
   status: string;
-  created_at: string;
+  submitted_at: string;
   profiles?: { full_name: string; role: string; geo_lga: string };
 }
 
@@ -21,15 +21,48 @@ interface UninstallRequest {
  * on failure so the caller can tell "the query failed" from "there are no
  * requests"; blanking the list on an error would claim there is nothing to
  * authorise when we simply could not ask.
+ *
+ * TWO THINGS THIS QUERY USED TO DO, BOTH OF WHICH PostgREST REFUSES OUTRIGHT —
+ * found by rendering this panel in a browser, not by reading it:
+ *
+ *   .order('created_at')   — `uninstall_requests` has no `created_at`. Its
+ *                            timestamp is `submitted_at`, and has been since
+ *                            the table was created in phase1_foundation.sql.
+ *   profiles(...)          — embedding needs a declared foreign key, and
+ *                            `user_id` references `auth.users`, not
+ *                            `public.profiles`. PostgREST answers PGRST200.
+ *
+ * Either one fails the whole query, so `loadRequests` returned null on every
+ * call and the panel showed its "could not load" state permanently. The
+ * fail-closed design above is why that was survivable rather than a lie — but
+ * nobody could authorise an uninstall request through this console.
+ *
+ * The reporter's name is fetched separately rather than by adding a foreign
+ * key: `user_id` is nullable ON DELETE SET NULL and rows may reference users
+ * with no profile row, so a FK would be a migration that can fail on real data
+ * to save one round trip.
  */
 async function loadRequests(): Promise<UninstallRequest[] | null> {
   const { data, error } = await supabase
     .from('uninstall_requests')
-    .select('*, profiles(full_name, role, geo_lga)')
-    .order('created_at', { ascending: false })
+    .select('*')
+    .order('submitted_at', { ascending: false })
     .limit(50);
   if (error || !data) return null;
-  return data as UninstallRequest[];
+
+  const rows = data as UninstallRequest[];
+  const ids = [...new Set(rows.map((r) => r.user_id).filter(Boolean))];
+  if (ids.length === 0) return rows;
+
+  const { data: people } = await supabase
+    .from('profiles')
+    .select('id, full_name, role, geo_lga')
+    .in('id', ids);
+
+  // A failed lookup must not empty the list: the request still needs
+  // authorising whether or not we can name who made it.
+  const byId = new Map((people ?? []).map((p) => [p.id, p]));
+  return rows.map((r) => ({ ...r, profiles: byId.get(r.user_id) ?? undefined }));
 }
 
 export default function UninstallRequests() {
@@ -138,7 +171,7 @@ export default function UninstallRequests() {
                 </div>
               )}
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: req.status === 'PENDING' ? 12 : 0 }}>
-                Submitted: {new Date(req.created_at).toLocaleString()}
+                Submitted: {new Date(req.submitted_at).toLocaleString()}
               </div>
               {req.status === 'PENDING' && (
                 <div style={{ display: 'flex', gap: 8 }}>

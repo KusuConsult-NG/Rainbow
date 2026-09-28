@@ -71,6 +71,22 @@ class BackgroundTrackingService {
     }
   }
 
+  /// The longest an SOS track may run without anyone renewing it.
+  ///
+  /// There has to be a limit, and the duress path is why. A duress PIN
+  /// deliberately leaves tracking running while telling the person their
+  /// emergency has ended — that is the point of a duress code, and it is
+  /// defensible while they may still be in danger. What is NOT defensible is
+  /// that it had no end: nothing stopped it, so one duress entry meant that
+  /// phone transmitting its position every five seconds for the life of the
+  /// install, to a person who believed they had cancelled.
+  ///
+  /// Twelve hours is long enough to cover any plausible response to an
+  /// emergency and short enough that "while they may be in danger" stays true.
+  /// It is a ceiling, not a target: the ordinary paths still stop tracking the
+  /// moment the incident closes.
+  static const Duration sosTrackingMaxAge = Duration(hours: 12);
+
   /// Starts transient tracking for a citizen SOS event.
   Future<void> startSosTracking(String alertId, String userId) async {
     try {
@@ -83,6 +99,10 @@ class BackgroundTrackingService {
       await prefs.setString('trackingMode', 'sos');
       await prefs.setString('activeTrackingAlertId', alertId);
       await prefs.setString('activeTrackingUserId', userId);
+      await prefs.setInt(
+        'trackingExpiresAt',
+        DateTime.now().add(sosTrackingMaxAge).millisecondsSinceEpoch,
+      );
 
       final service = FlutterBackgroundService();
       if (!await service.isRunning()) await service.startService();
@@ -103,6 +123,7 @@ class BackgroundTrackingService {
     await prefs.remove('activeTrackingAlertId');
     await prefs.remove('activeTrackingUserId');
     await prefs.remove('responderStatus');
+    await prefs.remove('trackingExpiresAt');
 
     FlutterBackgroundService().invoke('stopService');
   }
@@ -113,6 +134,19 @@ class BackgroundTrackingService {
 
     FlutterBackgroundService().invoke('updateStatus', {'status': status});
   }
+}
+
+/// Forget everything that says this device is tracking anybody.
+///
+/// Shared by the three stop conditions in the isolate so none of them can
+/// leave a key behind that makes the next launch resume a track the user
+/// believes ended.
+Future<void> _clearTrackingPrefs(SharedPreferences prefs) async {
+  await prefs.remove('trackingMode');
+  await prefs.remove('activeTrackingAlertId');
+  await prefs.remove('activeTrackingUserId');
+  await prefs.remove('responderStatus');
+  await prefs.remove('trackingExpiresAt');
 }
 
 @pragma('vm:entry-point')
@@ -140,6 +174,12 @@ Future<void> onStart(ServiceInstance service) async {
     final prefs = await SharedPreferences.getInstance();
     var modeStr = prefs.getString('trackingMode');
     var currentUserId = prefs.getString('activeTrackingUserId');
+    // The alert this track belongs to. `startSosTracking` has always passed it
+    // and the `updateMode` listener below has always thrown it away, so
+    // `telemetry.alert_id` — a real column, with a foreign key to alerts — was
+    // never written by anything and never read by anything. A live SOS track
+    // could not be tied to the SOS it was for.
+    var currentAlertId = prefs.getString('activeTrackingAlertId');
     String? currentStatus = prefs.getString('responderStatus') ??
         (modeStr == 'sos' ? 'EMERGENCY' : 'PATROLLING');
 
@@ -191,6 +231,61 @@ Future<void> onStart(ServiceInstance service) async {
           final userId = currentUserId ?? 'UNKNOWN';
           if (userId == 'UNKNOWN') return;
 
+          // THREE REASONS TO STOP TRANSMITTING SOMEBODY'S POSITION.
+          //
+          // None of them existed. Tracking started, and the only thing that
+          // ever ended it was the person entering their safe PIN on that
+          // handset — so a duress entry, a responder closing the incident, or
+          // the user signing out all left the phone reporting its location
+          // every few seconds, indefinitely, with nothing on screen to say so.
+
+          // 1. The window expired. See `sosTrackingMaxAge`.
+          final expiry = prefs.getInt('trackingExpiresAt');
+          if (expiry != null && DateTime.now().millisecondsSinceEpoch > expiry) {
+            debugPrint('[TELEMETRY_STOP] tracking window expired');
+            await _clearTrackingPrefs(prefs);
+            await positionStream?.cancel();
+            unawaited(service.stopSelf());
+            return;
+          }
+
+          // 2. Nobody is signed in on this device any more. The background
+          //    isolate re-initialises Supabase on its own, so a signed-out
+          //    session here is genuinely no session — not a race.
+          if (SupabaseConfig.client.auth.currentUser == null) {
+            debugPrint('[TELEMETRY_STOP] no session — not tracking a signed-out user');
+            await _clearTrackingPrefs(prefs);
+            await positionStream?.cancel();
+            unawaited(service.stopSelf());
+            return;
+          }
+
+          // 3. The incident this track exists for is closed. A responder
+          //    resolving an alert from the console or the feed never told the
+          //    reporter's phone anything, so the citizen kept transmitting long
+          //    after the emergency was over.
+          if (modeStr == 'sos' && currentAlertId != null) {
+            try {
+              final row = await SupabaseConfig.client
+                  .from('alerts')
+                  .select('status')
+                  .eq('id', currentAlertId!)
+                  .maybeSingle();
+              final status = row?['status'] as String?;
+              if (status == 'RESOLVED' || status == 'CANCELLED') {
+                debugPrint('[TELEMETRY_STOP] alert $status — ending the track');
+                await _clearTrackingPrefs(prefs);
+                await positionStream?.cancel();
+                unawaited(service.stopSelf());
+                return;
+              }
+            } catch (e) {
+              // Unreachable backend must never silently end an SOS track: the
+              // emergency is exactly when the network is worst. Keep going.
+              debugPrint('[TELEMETRY_CHECK_WARN] could not read alert status: $e');
+            }
+          }
+
           if (lastPosition != null && modeStr != 'sos') {
             final dist = Geolocator.distanceBetween(
               lastPosition!.latitude,
@@ -208,6 +303,7 @@ Future<void> onStart(ServiceInstance service) async {
 
             final telemetryPayload = {
               'user_id': userId,
+              if (currentAlertId != null) 'alert_id': currentAlertId,
               'latitude': pos.latitude,
               'longitude': pos.longitude,
               'mode': modeStr ?? 'responder',
@@ -253,6 +349,8 @@ Future<void> onStart(ServiceInstance service) async {
     if (event != null) {
       modeStr = event['mode'] as String?;
       currentUserId = event['userId'] as String?;
+      // `alertId` has always been in this payload and was never read out of it.
+      currentAlertId = event['alertId'] as String?;
       startTelemetry();
     }
   });

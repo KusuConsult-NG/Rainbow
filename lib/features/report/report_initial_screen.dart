@@ -45,6 +45,7 @@ class ReportInitialScreen extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: IconButton(
+                           tooltip: 'Close',
                     onPressed: () => context.pop(),
                     icon: const Icon(
                       Icons.close_rounded,

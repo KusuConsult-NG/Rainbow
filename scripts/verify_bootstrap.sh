@@ -75,7 +75,7 @@ printf '%s\n' "$OUT" | grep -E '^\s*(PASS|\*\*\* FAIL)' || true
 FAILED=$(printf '%s\n' "$OUT" | grep -c '\*\*\* FAIL \*\*\*' || true)
 PASSED=$(printf '%s\n' "$OUT" | grep -c '^ PASS' || true)
 echo "  checks passed: $PASSED   failed: $FAILED"
-[ "$FAILED" -eq 0 ] && [ "$PASSED" -ge 15 ] || {
+[ "$FAILED" -eq 0 ] && [ "$PASSED" -ge 19 ] || {
   echo "::error::the bootstrap's own verification reported a failure"; exit 1; }
 
 # ── 2. The guard must refuse a database that already holds data ──────────────
@@ -100,8 +100,26 @@ ROWS=$(psql_q occupied "SELECT count(*) FROM public.alerts")
 
 GUARD=$(su postgres -s /bin/bash -c \
   "$PGBIN/psql -h $PGROOT/sock -p $PORT -U postgres -d occupied -f $PGROOT/bootstrap_staging.sql" 2>&1) || true
-printf '%s\n' "$GUARD" | grep -q "REFUSING TO RUN" || {
-  echo "::error::the guard did not announce itself on a non-empty database"; exit 1; }
+# A bash string match, NOT `printf ... | grep -q`.
+#
+# `grep -q` exits the moment it matches, which closes the pipe; `printf` is
+# still writing, gets EPIPE, and returns non-zero. Under `set -o pipefail` the
+# pipeline is then non-zero EVEN THOUGH GREP MATCHED, so this branch ran and
+# declared the guard broken while the guard had worked perfectly.
+#
+# It is a race on the pipe buffer: with short output printf finishes first and
+# the check passes. That is why it failed in CI, passed locally on the retry,
+# and was briefly written off as stale state. A gate that fails a green build
+# at random is worse than no gate — people start re-running it until it is
+# green, which is the same as deleting it.
+case "$GUARD" in
+  *"REFUSING TO RUN"*) ;;
+  *)
+    echo "::error::the guard did not announce itself on a non-empty database"
+    printf '%s\n' "$GUARD" | tail -25 || true
+    exit 1
+    ;;
+esac
 
 # The real assertion: nothing was applied. assigned_tier is added by the LAST
 # migration in the file, so its absence proves the run was rolled back whole.
@@ -126,12 +144,18 @@ for f in 20260720000000_initial_schema phase1_foundation \
          phase2_assigned_responders phase3_profile_columns_and_config; do
   psql_f replayed "$f.sql" >/dev/null 2>&1 || true
 done
-for f in 20260812000000_agency_tables 20260813000000_rls_least_privilege \
-         20260902000000_per_user_emergency_pins 20260903000000_realtime_publication \
-         20260903000001_incident_media_storage 20260903000002_system_alerts_broadcast \
-         20260903000003_alert_escalation_columns 20260903000004_profiles_badge_number \
-         20260903000005_alerts_assigned_tier; do
-  psql_f replayed "$f.sql" >/dev/null
+# EVERY outstanding migration, read from the directory rather than listed here.
+#
+# This was a hand-written list, and it had silently fallen three migrations
+# behind. The comparison below is an EQUIVALENCE check — "the one-paste
+# bootstrap produces the same schema as replaying the migrations" — so a short
+# replay list does not fail loudly, it just weakens the claim to nothing for
+# the migrations it omits. It kept passing only because the two it was missing
+# happened to add no policies; the first one that did exposed it.
+for f in $(cd "$REPO/supabase/migrations" && ls *.sql \
+            | grep -vE '^(20260720000000_initial_schema|phase[123]_)' \
+            | sort); do
+  psql_f replayed "$f" >/dev/null
 done
 
 SNAP="select tablename||'|'||policyname||'|'||cmd from pg_policies where schemaname='public' order by 1"
@@ -145,7 +169,7 @@ echo "  ok: identical policy sets ($(printf '%s\n' "$A" | wc -l) policies)"
 
 cat <<EOF
 
-✓ bootstrap_staging.sql builds a correct project from zero ($PASSED/15 PASS),
+✓ bootstrap_staging.sql builds a correct project from zero ($PASSED/19 PASS),
   refuses a database that already holds data, and produces exactly the schema
   the migration replay produces.
 EOF

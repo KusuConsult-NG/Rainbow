@@ -33,14 +33,29 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
   String? _lastMessageId;
 
+  /// ONE CHANNEL, NOT TWO PLUS ONE PER FRAME.
+  ///
+  /// This screen opened a realtime subscription in `initState` to speak new
+  /// messages aloud, AND built a second one inline in `build()` for the
+  /// StreamBuilder — two channels on the same topic — and the second was
+  /// recreated on every rebuild, including the rebuild that sending a message
+  /// causes. The agent's Secure Chat had the same inline-stream problem and it
+  /// showed: the sender's own screen fell into "Error loading channel
+  /// messages" the moment they sent something.
+  ///
+  /// One broadcast stream now, created once, with both the speaker and the
+  /// list listening to it.
+  late final Stream<List<Map<String, dynamic>>> _messages;
+
   @override
   void initState() {
     super.initState();
-    _subscription = SupabaseConfig.client
+    _messages = SupabaseConfig.client
         .from('chat_messages')
         .stream(primaryKey: ['id'])
         .eq('alert_id', widget.alertId)
-        .listen((messages) {
+        .asBroadcastStream();
+    _subscription = _messages.listen((messages) {
       if (messages.isNotEmpty) {
         final newest = messages.last;
         final msgId = newest['id'] as String;
@@ -75,6 +90,10 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
     final fullName = profile['full_name'] as String? ?? profile['name'] as String? ?? (user.email?.split('@')[0] ?? 'User');
     final role = (profile['role'] as String? ?? 'CITIZEN').toUpperCase();
 
+    // Cleared here, and handed back below if the send fails. It used to be
+    // cleared before the insert with the failure swallowed in a debugPrint, so
+    // a message that never left the phone looked exactly like one that did —
+    // to a person who may be in an emergency and is waiting for an answer.
     _controller.clear();
 
     try {
@@ -87,6 +106,19 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
       });
     } catch (e) {
       debugPrint('[CHAT_ERR] Message insert failed: $e');
+      if (!mounted) return;
+      _controller.text = text;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.error,
+          content: const Text('MESSAGE NOT SENT — check your connection and retry'),
+          action: SnackBarAction(
+            label: 'RETRY',
+            textColor: Colors.white,
+            onPressed: () => unawaited(_sendMessage()),
+          ),
+        ),
+      );
     }
   }
 
@@ -120,10 +152,7 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
         children: [
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: SupabaseConfig.client
-                  .from('chat_messages')
-                  .stream(primaryKey: ['id'])
-                  .eq('alert_id', widget.alertId),
+              stream: _messages,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return Center(
@@ -221,6 +250,7 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
             child: Row(
               children: [
                 IconButton(
+                  tooltip: 'Dictate a message',
                   icon: Icon(
                     _isListening ? Icons.mic : Icons.mic_none,
                     color: _isListening ? AppColors.danger : AppColors.primary,
@@ -239,6 +269,7 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
                   ),
                 ),
                 IconButton(
+                  tooltip: 'Send',
                   icon: const Icon(Icons.send_rounded, color: AppColors.primary),
                   onPressed: _sendMessage,
                 ),

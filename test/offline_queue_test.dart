@@ -4,8 +4,10 @@
 // so the schema and the code that reads it are checked against each other. That
 // is the whole point: the bug these tests were written for was a column-name
 // mismatch between the two, which no mock would have caught.
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/sqlite_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -19,6 +21,8 @@ void main() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   });
+
+  _severityRegressionTests();
 
   // A queued alert is an UNSENT EMERGENCY. The v1 -> v2 migration rebuilds the
   // table to drop NOT NULL from lat/lng, so it must carry existing rows across
@@ -98,6 +102,87 @@ void main() {
       expect(
         after.firstWhere((r) => r['local_id'] == 'POST_UPGRADE_NO_FIX')['lat'],
         isNull,
+      );
+    });
+  });
+
+  // v3 adds reported_by, because the queue did not record WHO raised a report
+  // and so every alert it replayed reached HQ unattributed.
+  group('v2 -> v3 schema migration', () {
+    test('a report queued before the upgrade survives it, without a reporter',
+        () async {
+      final dir = await databaseFactory.getDatabasesPath();
+      final path = p.join(dir, 'rainbow_offline.db');
+      await databaseFactory.deleteDatabase(path);
+
+      // A v2 database by hand: nullable lat/lng, no reported_by.
+      final v2 = await databaseFactory.openDatabase(
+        path,
+        options: OpenDatabaseOptions(
+          version: 2,
+          onCreate: (db, _) async {
+            await db.execute('''
+              CREATE TABLE offline_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                local_id TEXT UNIQUE NOT NULL,
+                type TEXT NOT NULL,
+                description TEXT,
+                lat REAL,
+                lng REAL,
+                priority TEXT NOT NULL,
+                is_anonymous INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                sync_status TEXT NOT NULL
+              )
+            ''');
+            await db.execute('''
+              CREATE TABLE offline_media (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                local_alert_id TEXT NOT NULL,
+                local_file_path TEXT NOT NULL,
+                remote_storage_path TEXT,
+                upload_status TEXT NOT NULL
+              )
+            ''');
+          },
+        ),
+      );
+      await v2.insert('offline_queue', {
+        'local_id': 'V2_SOS_1',
+        'type': 'SOS',
+        'description': 'Queued by a build that did not record the reporter',
+        'lat': null,
+        'lng': null,
+        'priority': 'CRITICAL',
+        'is_anonymous': 0,
+        'created_at': '2026-09-01T09:00:00.000Z',
+        'sync_status': 'PENDING',
+      });
+      await v2.close();
+
+      final pending = await SqliteService().getPendingAlerts();
+      final legacy = pending.where((r) => r['local_id'] == 'V2_SOS_1');
+      expect(legacy, isNotEmpty,
+          reason: 'a queued alert is an unsent emergency');
+      // Null is the truth about it: that build never recorded a reporter, and
+      // inventing one would attribute an emergency to the wrong person.
+      expect(legacy.first['reported_by'], isNull);
+
+      await SqliteService().enqueueAlert(
+        localId: 'POST_V3',
+        type: 'SOS',
+        description: 'after the upgrade',
+        lat: null,
+        lng: null,
+        priority: 'HIGH',
+        isAnonymous: false,
+        createdAt: '2026-09-28T15:00:00.000Z',
+        reportedBy: 'citizen-uuid',
+      );
+      final after = await SqliteService().getPendingAlerts();
+      expect(
+        after.firstWhere((r) => r['local_id'] == 'POST_V3')['reported_by'],
+        'citizen-uuid',
       );
     });
   });
@@ -247,6 +332,112 @@ void main() {
       final media = await sqlite.getPendingMedia('OFFLINE_TEST_8');
       expect(media, hasLength(1));
       expect(media.first['local_file_path'], '/tmp/evidence.jpg');
+    });
+  });
+}
+
+// ── REGRESSION: a panic SOS filed as MEDIUM ─────────────────────────────────
+//
+// `submitAlert` took an `isCritical` flag, and never read it. The body graded
+// every alert from `priority`, which defaults to MEDIUM — so
+// `EmergencyNotifier.startEmergency()`, which passes `isCritical: true` and no
+// `priority`, filed every PANIC SOS at MEDIUM. On the HQ board that put the
+// most urgent thing a citizen can do below a report of a blocked drain, and
+// outside the CRITICAL filter entirely.
+//
+// Nothing caught it: the provider's own test verifies that `isCritical: true`
+// is PASSED, which it was. The parameter is right there in the call and looks
+// like it works. It was found by pressing the button in a browser and reading
+// the row that came out.
+//
+// The assertion goes through the offline queue because that is a real path
+// through the real `submitAlert`: with no Supabase client configured the insert
+// throws, the catch enqueues, and the queued row carries the same severity the
+// insert would have.
+void _severityRegressionTests() {
+  group('REGRESSION: isCritical must reach the severity that is stored', () {
+    late SqliteService sqlite;
+
+    setUp(() async {
+      // submitAlert reaches for platform channels (location, connectivity)
+      // before it writes anything; without the binding it throws before the
+      // offline fallback and nothing is queued at all.
+      TestWidgetsFlutterBinding.ensureInitialized();
+
+      // submitAlert asks connectivity_plus whether it is online, and
+      // geolocator where it is, before it writes anything. Neither plugin has
+      // an implementation in a test, and the MissingPluginException escapes
+      // the whole method — so without these stubs nothing is written and
+      // nothing is queued either, which is worth knowing in its own right.
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('dev.fluttercommunity.plus/connectivity'),
+        (call) async => call.method == 'check' ? <String>['wifi'] : null,
+      );
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('flutter.baseflow.com/geolocator'),
+        (call) async {
+          switch (call.method) {
+            case 'isLocationServiceEnabled':
+              return false;
+            case 'checkPermission':
+            case 'requestPermission':
+              return 0; // denied — the C-5 path: no fix, no fabricated pin
+            default:
+              return null;
+          }
+        },
+      );
+
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      final dir = await databaseFactory.getDatabasesPath();
+      await databaseFactory.deleteDatabase(p.join(dir, 'rainbow_offline.db'));
+      sqlite = SqliteService();
+    });
+
+    Future<String?> queuedPriority() async {
+      final pending = await sqlite.getPendingAlerts();
+      return pending.isEmpty ? null : pending.last['priority'] as String?;
+    }
+
+    test('isCritical: true is stored as CRITICAL, not the MEDIUM default',
+        () async {
+      await AlertService().submitAlert(
+        type: 'PANIC SOS',
+        description: 'Public Panic Button Activated',
+        reportedBy: 'test-user',
+        isCritical: true,
+      );
+
+      expect(
+        await queuedPriority(),
+        'CRITICAL',
+        reason: 'startEmergency() passes isCritical: true and no priority. '
+            'If this reads MEDIUM, every panic SOS is mis-graded again.',
+      );
+    });
+
+    test('without isCritical the explicit priority is honoured', () async {
+      await AlertService().submitAlert(
+        type: 'INCIDENT',
+        description: 'Blocked drainage',
+        reportedBy: 'test-user',
+        priority: AlertPriority.high,
+      );
+
+      expect(await queuedPriority(), 'HIGH');
+    });
+
+    test('an ordinary report with neither is still MEDIUM', () async {
+      await AlertService().submitAlert(
+        type: 'INCIDENT',
+        description: 'Something minor',
+        reportedBy: 'test-user',
+      );
+
+      expect(await queuedPriority(), 'MEDIUM');
     });
   });
 }

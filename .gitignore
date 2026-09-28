@@ -78,3 +78,9 @@ GoogleService-Info*.plist
 hq-00*-auth.json
 hq-00*-test.json
 users.json
+
+# The local end-to-end run's screenshots (scripts/local_e2e/run.sh). They are
+# evidence, not source: CI keeps them as a build artifact and a local run
+# regenerates them in about two minutes. 28 MB of committed screenshots is a
+# mistake this repository has already made once.
+local_e2e_screenshots/
