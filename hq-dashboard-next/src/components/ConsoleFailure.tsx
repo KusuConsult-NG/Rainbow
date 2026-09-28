@@ -36,7 +36,7 @@ export interface ConsoleFailureProps {
   onRetry?: () => void;
 }
 
-const DURESS = '#dc2626';
+const DURESS = '#E31E24';
 
 export default function ConsoleFailure({ scope, error, onRetry }: ConsoleFailureProps) {
   return (
@@ -49,8 +49,8 @@ export default function ConsoleFailure({ scope, error, onRetry }: ConsoleFailure
         alignItems: 'center',
         justifyContent: 'center',
         padding: 24,
-        background: '#f8fafc',
-        color: '#0f172a',
+        background: '#F5F5F5',
+        color: '#1A1A1A',
         fontFamily: 'var(--font-inter), system-ui, -apple-system, sans-serif',
       }}
     >
@@ -77,11 +77,11 @@ export default function ConsoleFailure({ scope, error, onRetry }: ConsoleFailure
 
         {/* The operational instruction comes before the technical detail: it is
             the part that matters in the first two seconds. */}
-        <p style={{ fontSize: 14, lineHeight: 1.6, margin: '0 0 10px', color: '#334155' }}>
+        <p style={{ fontSize: 14, lineHeight: 1.6, margin: '0 0 10px', color: '#212121' }}>
           This screen stopped working. <strong>Incidents may be arriving that you cannot
           see here.</strong> Treat the board as offline until it comes back.
         </p>
-        <p style={{ fontSize: 14, lineHeight: 1.6, margin: '0 0 18px', color: '#334155' }}>
+        <p style={{ fontSize: 14, lineHeight: 1.6, margin: '0 0 18px', color: '#212121' }}>
           Fall back to radio for dispatch and hand-off. Nothing already recorded is lost —
           this is a display failure, not a data failure.
         </p>
@@ -117,8 +117,8 @@ export default function ConsoleFailure({ scope, error, onRetry }: ConsoleFailure
               padding: '11px 18px',
               borderRadius: 10,
               border: '1px solid rgba(148, 163, 184, 0.5)',
-              background: '#f1f5f9',
-              color: '#0f172a',
+              background: '#F5F5F5',
+              color: '#1A1A1A',
               fontSize: 13,
               fontWeight: 700,
               cursor: 'pointer',
@@ -141,7 +141,7 @@ export default function ConsoleFailure({ scope, error, onRetry }: ConsoleFailure
               paddingTop: 14,
               borderTop: '1px solid rgba(148, 163, 184, 0.35)',
               fontSize: 11,
-              color: '#64748b',
+              color: '#616161',
             }}
           >
             Quote this when reporting the fault: <code style={{ fontWeight: 700 }}>{error.digest}</code>

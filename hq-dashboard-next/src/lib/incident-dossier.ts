@@ -231,28 +231,28 @@ export function resolveAssignee(
 export function statusColour(status?: string): string {
   switch ((status || '').toUpperCase()) {
     case 'DURESS':
-      return '#DC2626';
+      return '#E31E24'; // AppColors.danger
     case 'PENDING':
     case 'OPEN':
     case 'ACTIVE':
-      return '#F59E0B';
+      return '#FF9800'; // AppColors.warning
     case 'DISPATCHED':
-      return '#2563EB';
+      return '#0277BD'; // AppColors.info
     case 'ACKNOWLEDGED':
     case 'IN_PROGRESS':
-      return '#0EA5E9';
+      return '#00838F';
     case 'ESCALATED':
-      return '#7C3AED';
+      return '#4527A0';
     case 'ON_ROUTE':
-      return '#DB2777';
+      return '#6A1B9A';
     case 'ON_SITE':
-      return '#0891B2';
+      return '#00695C';
     case 'RESOLVED':
-      return '#16A34A';
+      return '#1B5E20'; // AppColors.success
     case 'CANCELLED':
-      return '#64748B';
+      return '#757575';
     default:
-      return '#F59E0B';
+      return '#FF9800';
   }
 }
 
@@ -289,17 +289,17 @@ export function statusLabel(status?: string): string {
 export function severityColour(severity?: string): string {
   switch ((severity || '').toUpperCase()) {
     case 'CRITICAL':
-      return '#DC2626';
+      return '#E31E24'; // AppColors.danger
     case 'HIGH':
-      return '#EA580C';
+      return '#EF6C00';
     case 'MEDIUM':
-      return '#F59E0B';
+      return '#FF9800'; // AppColors.warning
     case 'LOW':
-      return '#16A34A';
+      return '#1B5E20'; // AppColors.success
     default:
       // UNKNOWN is what the page assigns to a row with no severity. It must not
       // borrow the colour of a grade nobody gave it.
-      return '#64748B';
+      return '#757575';
   }
 }
 
@@ -556,7 +556,6 @@ export function incidentDetailRows(
 export interface PopupOptions {
   reporter: Reporter;
   usersMap?: Record<string, any>;
-  theme?: 'light' | 'dark';
   now?: Date;
 }
 
@@ -570,14 +569,24 @@ export interface PopupOptions {
  * supplies one.
  */
 export function incidentPopupHtml(alert: Alert, opts: PopupOptions): string {
-  const { reporter, usersMap = {}, theme = 'light', now = new Date() } = opts;
-  const dark = theme === 'dark';
+  const { reporter, usersMap = {}, now = new Date() } = opts;
 
-  const ink = dark ? '#E2E8F0' : '#0F172A';
-  const dim = dark ? '#94A3B8' : '#64748B';
-  const rule = dark ? 'rgba(255,255,255,0.10)' : 'rgba(15,23,42,0.10)';
-  const panel = dark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.03)';
-  const warn = '#DC2626';
+  // The card takes its surface colours from the SAME tokens as every other
+  // panel in the console, which are the app's palette (see globals.css). It
+  // used to carry its own light/dark hexes, which is how a product ends up
+  // looking like two products: a card that is nearly the right grey is more
+  // jarring than one that is obviously different.
+  //
+  // The popup is rendered inside the console's DOM, so the variables resolve,
+  // and the theme switch needs no branch here at all — `.dark-theme` on
+  // <body> redefines them. The status and severity colours below are the
+  // exception: they are concatenated with alpha suffixes (`${colour}22`) and
+  // used on a Leaflet div icon, and a `var()` cannot take either.
+  const ink = 'var(--text-primary)';
+  const dim = 'var(--text-dim)';
+  const rule = 'var(--border)';
+  const panel = 'var(--input-bg)';
+  const warn = 'var(--duress)';
 
   const colour = statusColour(alert.status);
   const sevColour = severityColour(alert.severity || alert.priority);
@@ -611,8 +620,8 @@ export function incidentPopupHtml(alert: Alert, opts: PopupOptions): string {
 
   const actions = [
     button('DOSSIER', '#4F46E5', `window._hqDossier('${id}')`),
-    canDispatch(alert.status) ? button('DISPATCH', '#2563EB', `window._hqShowDispatch('${id}')`) : '',
-    canResolve(alert.status) ? button('RESOLVE', '#059669', `window._hqResolve('${id}')`) : '',
+    canDispatch(alert.status) ? button('DISPATCH', '#0277BD', `window._hqShowDispatch('${id}')`) : '',
+    canResolve(alert.status) ? button('RESOLVE', '#1B5E20', `window._hqResolve('${id}')`) : '',
     isDiallable(reporter.contact)
       ? `<a href="tel:${escapeHtml(reporter.contact.replace(/[^\d+]/g, ''))}" style="flex:1 1 auto;min-width:74px;padding:7px 10px;background:#0F766E;color:#fff;border-radius:7px;font-size:10px;font-weight:800;letter-spacing:0.5px;text-align:center;text-decoration:none">CALL</a>`
       : '',

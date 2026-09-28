@@ -263,9 +263,16 @@ describe('LiveMap', () => {
     expect(popup.textContent).toContain('<img');
   });
 
-  it('a theme toggle does not throw, and restyles the popup', async () => {
+  it('a theme toggle does not throw, and re-filters the tiles', async () => {
     // `mapInstanceRef.current.getPane(...)` — the ref holds `{ map, L }`, so
-    // this threw "not a function" inside an effect on every theme toggle.
+    // this threw "not a function" inside an effect on every theme toggle, and
+    // took the whole board down with it: the harness caught the console
+    // rendering its CONSOLE FAILED boundary for all six roles.
+    //
+    // The popup no longer has a per-theme class to check, which is the point:
+    // its colours come from CSS variables that `.dark-theme` on <body>
+    // redefines. The tile filter is the one thing that still has to change
+    // here, because a filter is not a colour.
     const LiveMap = await load();
     const props = {
       alerts: [alert('a-1', 9.9167, 8.8917)],
@@ -275,10 +282,12 @@ describe('LiveMap', () => {
     };
     const { container, rerender } = render(<LiveMap {...props} theme="dark" />);
     await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
-    expect(container.querySelector('.hq-map-dark')).not.toBeNull();
+
+    const tilePane = () => container.querySelector('.leaflet-tile-pane') as HTMLElement;
+    expect(tilePane().style.filter).toContain('invert');
 
     expect(() => rerender(<LiveMap {...props} theme="light" />)).not.toThrow();
-    await waitFor(() => expect(container.querySelector('.hq-map-dark')).toBeNull());
+    await waitFor(() => expect(tilePane().style.filter).toBe('none'));
   });
 
   it('rebuilds the popup when the profiles arrive after the alerts', async () => {

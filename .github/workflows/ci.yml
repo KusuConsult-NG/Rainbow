@@ -145,6 +145,14 @@ jobs:
       - name: Assert the console reads the same vectors
         run: python3 scripts/check_vectors_synced.py
 
+      # The console and the app are one product and stopped looking like it:
+      # the app is white and red, the console was white and cobalt blue with
+      # slate neutrals. Each screen was internally consistent, which is why it
+      # lasted. The console's tokens are now the app's palette, and this fails
+      # the build if the two files drift apart again.
+      - name: Assert the console and the app state the same palette
+        run: python3 scripts/check_palette_parity.py
+
       # The mesh sealer shipped with DateTime.now().microsecondsSinceEpoch as the
       # seed for the generator that produces every AES-GCM nonce AND HQ's own
       # keypair. Two seals in one microsecond would then repeat a nonce, which

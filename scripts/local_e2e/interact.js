@@ -210,11 +210,29 @@ async function writeMark() {
   });
   if (themed) {
     await sleep(2500);
-    const darkAsked = tiles.slice(lightTiles).some((t) => t.dark);
+    // This used to assert that the toggle REPOINTED the base layer at a dark
+    // provider, and it passed for as long as that provider was CARTO — which
+    // now answers unauthenticated callers with a placeholder tile reading
+    // "API key required". The fix was to stop swapping providers: one tile
+    // source, darkened locally with a CSS filter on the tile pane, so the map
+    // cannot stop working because of somebody else's pricing change.
+    //
+    // So the assertion is inverted. A dark theme must (a) filter the tiles and
+    // (b) NOT refetch every visible tile from a second provider.
+    const paneFilter = await page.evaluate(() => {
+      const pane = document.querySelector('.leaflet-tile-pane');
+      return pane ? getComputedStyle(pane).filter : '';
+    });
     check(
-      'switching theme repoints the map to the dark basemap',
-      darkAsked,
-      darkAsked ? 'dark tiles requested' : 'no dark tile requested after the toggle',
+      'the dark theme darkens the tiles it already has',
+      /invert/i.test(paneFilter),
+      paneFilter || '(no filter on the tile pane)',
+    );
+    const refetched = tiles.slice(lightTiles).length;
+    check(
+      'the dark theme does not refetch the basemap from a second provider',
+      !tiles.slice(lightTiles).some((t) => t.dark),
+      `${refetched} tile request(s) after the toggle, none from a dark provider`,
     );
     await shot(page, '51-map-dark-theme');
     await page.evaluate(() => {

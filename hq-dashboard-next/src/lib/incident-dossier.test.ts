@@ -425,20 +425,29 @@ describe('incidentPopupHtml, as a whole', () => {
     expect(html).toContain('ARMED_ROBBERY');
   });
 
-  it('reads on both themes', () => {
-    const light = incidentPopupHtml(alert(), {
+  it('takes its surface colours from the shared tokens, not its own palette', () => {
+    // The card used to carry light/dark hexes of its own — #0F172A on one
+    // theme, #E2E8F0 on the other — which are slate, not the app's neutral
+    // greys. It now reads the same variables as every other panel in the
+    // console, which are the app's palette, so a theme toggle restyles a popup
+    // that is already open and nothing here can drift from globals.css.
+    const html = incidentPopupHtml(alert(), {
       reporter: resolveReporterDetails(alert(), {}),
-      theme: 'light',
       now: NOW,
     });
-    const dark = incidentPopupHtml(alert(), {
-      reporter: resolveReporterDetails(alert(), {}),
-      theme: 'dark',
-      now: NOW,
-    });
-    expect(light).toContain('#0F172A');
-    expect(dark).toContain('#E2E8F0');
-    expect(dark).not.toContain('color:#0F172A');
+    expect(html).toContain('var(--text-primary)');
+    expect(html).toContain('var(--border)');
+    expect(html).not.toContain('#0F172A');
+    expect(html).not.toContain('#E2E8F0');
+  });
+
+  it('keeps status and severity as literal colours, because they are concatenated', () => {
+    // `${colour}22` builds a hex with an alpha suffix, and the same value goes
+    // on a Leaflet div icon. A var() cannot do either, so these two stay
+    // literal — and are the app's palette spelled out.
+    expect(severityColour('CRITICAL')).toBe('#E31E24'); // AppColors.danger
+    expect(statusColour('RESOLVED')).toBe('#1B5E20');   // AppColors.success
+    expect(statusColour('PENDING')).toBe('#FF9800');    // AppColors.warning
   });
 
   it('says so when there is no description, instead of leaving a gap', () => {

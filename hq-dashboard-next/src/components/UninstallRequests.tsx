@@ -157,7 +157,7 @@ export default function UninstallRequests() {
                   padding: '3px 8px',
                   borderRadius: 4,
                   background: req.status === 'PENDING' ? 'rgba(245,158,11,0.2)' : req.status === 'APPROVED' ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)',
-                  color: req.status === 'PENDING' ? '#f59e0b' : req.status === 'APPROVED' ? '#10b981' : '#ef4444',
+                  color: req.status === 'PENDING' ? '#FF9800' : req.status === 'APPROVED' ? '#1B5E20' : '#E31E24',
                 }}>
                   {req.status}
                 </span>
@@ -179,7 +179,7 @@ export default function UninstallRequests() {
                     onClick={() => handleAction(req.id, 'APPROVED')}
                     disabled={actionId === req.id}
                     className="btn-tactical"
-                    style={{ flex: 1, padding: '8px 16px', background: 'rgba(16,185,129,0.2)', border: '1px solid #10b981', color: '#10b981', borderRadius: 6, fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, cursor: 'pointer' }}
+                    style={{ flex: 1, padding: '8px 16px', background: 'rgba(16,185,129,0.2)', border: '1px solid #1B5E20', color: '#1B5E20', borderRadius: 6, fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, cursor: 'pointer' }}
                   >
                     <CheckCircle size={14} /> APPROVE
                   </button>
@@ -187,7 +187,7 @@ export default function UninstallRequests() {
                     onClick={() => handleAction(req.id, 'DENIED')}
                     disabled={actionId === req.id}
                     className="btn-tactical"
-                    style={{ flex: 1, padding: '8px 16px', background: 'rgba(239,68,68,0.2)', border: '1px solid #ef4444', color: '#ef4444', borderRadius: 6, fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, cursor: 'pointer' }}
+                    style={{ flex: 1, padding: '8px 16px', background: 'rgba(239,68,68,0.2)', border: '1px solid #E31E24', color: '#E31E24', borderRadius: 6, fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, cursor: 'pointer' }}
                   >
                     <XCircle size={14} /> DENY
                   </button>

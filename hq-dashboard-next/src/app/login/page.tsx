@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { usePersistedTheme } from '@/hooks/usePersistedTheme';
 import { Shield, ShieldAlert, Loader2, Eye, EyeOff, Lock, User as UserIcon, Radio, Sparkles, KeyRound, CheckCircle2, ArrowRight } from 'lucide-react';
 
 // Quick-fill presets are a development convenience only. They are compiled out of
@@ -73,9 +74,19 @@ export default function LoginPage() {
   const [reachable, setReachable] = useState<boolean | null>(null);
   const [selectedDemo, setSelectedDemo] = useState<string | null>(null);
 
+  // The sign-in screen used to force the dark theme on, whatever the operator
+  // had chosen, because it was built as a dark page with its colours written
+  // into it. The app's sign-in screen is white — white ground, the emblem, two
+  // fields and one red button — and this is the first thing anybody sees of
+  // the console, so it is where the mismatch was loudest.
+  //
+  // It now takes the theme the operator chose, like every other screen. The
+  // dashboard's own effect syncs the class from persisted state; removing this
+  // one means signing out no longer silently flips the whole console to dark.
+  const [theme] = usePersistedTheme();
   useEffect(() => {
-    document.body.classList.add('dark-theme');
-  }, []);
+    document.body.classList.toggle('dark-theme', theme === 'dark');
+  }, [theme]);
 
   const handleQuickFill = (acc: typeof DEMO_ACCOUNTS[0]) => {
     setBadgeId(acc.badge);
@@ -156,7 +167,7 @@ export default function LoginPage() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'radial-gradient(ellipse at 50% 20%, #1e1b4b 0%, #0f172a 45%, #020617 100%)',
+      background: 'var(--bg-primary)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -165,41 +176,13 @@ export default function LoginPage() {
       overflow: 'hidden',
       fontFamily: "var(--font-inter), sans-serif"
     }}>
-      {/* Background Ambient Glow Orbs */}
-      <div style={{
-        position: 'absolute',
-        width: '650px',
-        height: '650px',
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(99, 102, 241, 0.25) 0%, rgba(79, 70, 229, 0.08) 45%, transparent 70%)',
-        top: '-15%',
-        left: '20%',
-        pointerEvents: 'none',
-        filter: 'blur(60px)',
-        animation: 'pulse 8s ease-in-out infinite alternate'
-      }} />
-      <div style={{
-        position: 'absolute',
-        width: '550px',
-        height: '550px',
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.05) 50%, transparent 70%)',
-        bottom: '-10%',
-        right: '15%',
-        pointerEvents: 'none',
-        filter: 'blur(70px)',
-        animation: 'pulse 10s ease-in-out infinite alternate-reverse'
-      }} />
-
-      {/* Cybernetic Tech Grid Pattern */}
-      <div style={{
-        position: 'absolute',
-        inset: 0,
-        opacity: 0.07,
-        backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px)',
-        backgroundSize: '40px 40px',
-        pointerEvents: 'none'
-      }} />
+      {/* The two blurred indigo/emerald glow orbs and the "cybernetic tech
+          grid" that used to sit here are gone. The app's sign-in screen is a
+          plain white field with the emblem, two fields and one red button —
+          nothing ambient behind it — and this is the first screen anybody sees
+          of the console. An officer who signs in on the handset and then opens
+          this used to arrive somewhere that looked like a different product
+          made by a different team. */}
 
       {/* Main Container Card */}
       <div style={{
@@ -214,9 +197,9 @@ export default function LoginPage() {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '10px 18px',
-          background: 'rgba(15, 23, 42, 0.75)',
-          backdropFilter: 'blur(16px)',
-          border: '1px solid rgba(99, 102, 241, 0.3)',
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border)',
+          borderBottom: 'none',
           borderRadius: '16px 16px 0 0',
           marginBottom: -1
         }}>
@@ -225,11 +208,11 @@ export default function LoginPage() {
               width: 8,
               height: 8,
               borderRadius: '50%',
-              background: reachable === false ? '#ef4444' : reachable === true ? '#10b981' : '#64748b',
-              boxShadow: reachable === false ? '0 0 10px #ef4444' : reachable === true ? '0 0 10px #10b981' : 'none',
+              background: reachable === false ? 'var(--duress)' : reachable === true ? 'var(--success)' : 'var(--text-dim)',
+              boxShadow: 'none',
               display: 'inline-block'
             }} />
-            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, color: '#e2e8f0', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
               {reachable === false
                 ? 'HQ COMMAND NODE · UNREACHABLE'
                 : reachable === true
@@ -237,7 +220,7 @@ export default function LoginPage() {
                   : 'HQ COMMAND NODE · CHECKING…'}
             </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#818cf8', fontWeight: 600 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-dim)', fontWeight: 600 }}>
             <Radio size={12} className="spin-slow" />
             <span>256-BIT ENCRYPTED</span>
           </div>
@@ -246,11 +229,10 @@ export default function LoginPage() {
         {/* Hero Card */}
         <div className="tactical-panel" style={{
           padding: '36px 32px 32px',
-          background: 'rgba(15, 23, 42, 0.82)',
-          backdropFilter: 'blur(24px) saturate(200%)',
-          borderRadius: '0 0 24px 24px',
-          border: '1px solid rgba(99, 102, 241, 0.25)',
-          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.8), 0 0 40px rgba(79, 70, 229, 0.25)',
+          background: 'var(--bg-card)',
+          borderRadius: '0 0 var(--radius-card) var(--radius-card)',
+          border: '1px solid var(--border)',
+          boxShadow: 'var(--shadow-md)',
           position: 'relative'
         }}>
           {/* Header Brand */}
@@ -262,13 +244,13 @@ export default function LoginPage() {
               <div style={{
                 width: 84,
                 height: 84,
-                borderRadius: 24,
-                background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.3) 0%, rgba(16, 185, 129, 0.2) 100%)',
-                border: '2px solid rgba(129, 140, 248, 0.4)',
+                borderRadius: 'var(--radius-card)',
+                background: 'var(--primary-dim)',
+                border: '1px solid var(--border)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 10px 30px rgba(79, 70, 229, 0.3), inset 0 0 20px rgba(255, 255, 255, 0.1)',
+                boxShadow: 'none',
                 padding: 10
               }}>
                 {/* eslint-disable-next-line @next/next/no-img-element -- a local static emblem, above the fold, with a JS fallback on error. images.unoptimized is set so next/image would serve the same bytes, and it lazy-loads by default — wrong for the first thing on the sign-in page, which would then need `priority` to undo. */}
@@ -284,17 +266,16 @@ export default function LoginPage() {
                   }}
                 />
                 <div className="logo-fb" style={{ display: 'none', alignItems: 'center', justifyContent: 'center' }}>
-                  <Shield size={44} color="#818cf8" />
+                  <Shield size={44} color="var(--primary)" />
                 </div>
               </div>
               <div style={{
                 position: 'absolute',
                 bottom: -4,
                 right: -4,
-                background: '#10b981',
+                background: 'var(--success)',
                 borderRadius: '50%',
-                padding: 4,
-                boxShadow: '0 0 12px #10b981'
+                padding: 4
               }}>
                 <Sparkles size={12} color="#ffffff" />
               </div>
@@ -304,11 +285,10 @@ export default function LoginPage() {
               fontSize: 22,
               fontWeight: 900,
               letterSpacing: 2,
-              color: '#ffffff',
+              color: 'var(--text-primary)',
               textAlign: 'center',
               fontFamily: "var(--font-outfit), sans-serif",
-              marginBottom: 4,
-              textShadow: '0 2px 10px rgba(0,0,0,0.5)'
+              marginBottom: 4
             }}>
               OPERATION RAINBOW
             </h1>
@@ -316,7 +296,7 @@ export default function LoginPage() {
               fontSize: 11,
               fontWeight: 700,
               letterSpacing: 2.5,
-              color: '#818cf8',
+              color: 'var(--text-muted)',
               textAlign: 'center',
               fontFamily: "var(--font-outfit), sans-serif",
               textTransform: 'uppercase'
@@ -328,9 +308,9 @@ export default function LoginPage() {
           {/* Quick-Fill Demo Accounts Section — development builds only */}
           {SHOW_DEMO_ACCOUNTS && (
           <div style={{
-            background: 'rgba(30, 41, 59, 0.6)',
-            border: '1px solid rgba(148, 163, 184, 0.15)',
-            borderRadius: 16,
+            background: 'var(--input-bg)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-card)',
             padding: 14,
             marginBottom: 24
           }}>
@@ -340,11 +320,11 @@ export default function LoginPage() {
               justifyContent: 'space-between',
               marginBottom: 10
             }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <KeyRound size={13} color="#fbbf24" />
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <KeyRound size={13} color="var(--warning)" />
                 ONE-TAP QUICK LOGIN PRESETS
               </span>
-              <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 500 }}>Select to Auto-Fill</span>
+              <span style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 500 }}>Select to Auto-Fill</span>
             </div>
             
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
@@ -357,24 +337,24 @@ export default function LoginPage() {
                     onClick={() => handleQuickFill(acc)}
                     style={{
                       background: isActive 
-                        ? 'linear-gradient(135deg, rgba(79, 70, 229, 0.4) 0%, rgba(99, 102, 241, 0.3) 100%)' 
-                        : 'rgba(15, 23, 42, 0.7)',
+                        ? 'var(--primary-dim)'
+                        : 'var(--bg-secondary)',
                       border: isActive 
-                        ? '1px solid #818cf8' 
-                        : '1px solid rgba(255, 255, 255, 0.08)',
+                        ? '1px solid var(--primary)'
+                        : '1px solid var(--border)',
                       borderRadius: 10,
                       padding: '8px 6px',
                       cursor: 'pointer',
                       textAlign: 'center',
                       transition: 'all 0.2s ease',
-                      boxShadow: isActive ? '0 0 15px rgba(99, 102, 241, 0.3)' : 'none'
+                      boxShadow: 'none'
                     }}
                   >
-                    <div style={{ fontSize: 11, fontWeight: 800, color: isActive ? '#ffffff' : '#e2e8f0', marginBottom: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
-                      {isActive && <CheckCircle2 size={10} color="#34d399" />}
+                    <div style={{ fontSize: 11, fontWeight: 800, color: isActive ? 'var(--primary)' : 'var(--text-secondary)', marginBottom: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
+                      {isActive && <CheckCircle2 size={10} color="var(--success)" />}
                       {acc.label}
                     </div>
-                    <div style={{ fontSize: 9, color: isActive ? '#c7d2fe' : '#94a3b8', fontWeight: 600 }}>
+                    <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 600 }}>
                       {acc.badge}
                     </div>
                   </button>
@@ -392,17 +372,17 @@ export default function LoginPage() {
               from "the console cannot reach the server". */}
           {error && (
             <div role="alert" style={{
-              background: 'rgba(239, 68, 68, 0.15)',
-              border: '1px solid rgba(239, 68, 68, 0.4)',
-              borderRadius: 12,
+              background: 'var(--duress-dim)',
+              border: '1px solid var(--duress)',
+              borderRadius: 'var(--radius-control)',
               padding: '12px 16px',
               marginBottom: 20,
               display: 'flex',
               alignItems: 'center',
               gap: 10
             }}>
-              <ShieldAlert size={18} color="#f87171" style={{ flexShrink: 0 }} />
-              <p style={{ color: '#fca5a5', fontSize: 12, fontWeight: 600, margin: 0 }}>{error}</p>
+              <ShieldAlert size={18} color="var(--duress)" style={{ flexShrink: 0 }} />
+              <p style={{ color: 'var(--duress)', fontSize: 12, fontWeight: 700, margin: 0 }}>{error}</p>
             </div>
           )}
 
@@ -415,7 +395,7 @@ export default function LoginPage() {
               <label htmlFor="badge-id" style={{
                 display: 'block',
                 fontSize: 11,
-                color: '#cbd5e1',
+                color: 'var(--text-muted)',
                 fontWeight: 700,
                 letterSpacing: 1,
                 marginBottom: 8,
@@ -438,14 +418,14 @@ export default function LoginPage() {
                     width: '100%',
                     paddingLeft: 44,
                     height: 48,
-                    background: 'rgba(30, 41, 59, 0.7)',
-                    border: '1px solid rgba(148, 163, 184, 0.25)',
-                    color: '#ffffff',
+                    background: 'var(--input-bg)',
+                    border: '1px solid var(--input-border)',
+                    color: 'var(--text-primary)',
                     fontSize: 14,
                     fontWeight: 600
                   }}
                 />
-                <UserIcon size={18} color="#818cf8" style={{
+                <UserIcon size={18} color="var(--primary)" style={{
                   position: 'absolute',
                   left: 14,
                   top: '50%',
@@ -459,7 +439,7 @@ export default function LoginPage() {
               <label htmlFor="security-pin" style={{
                 display: 'block',
                 fontSize: 11,
-                color: '#cbd5e1',
+                color: 'var(--text-muted)',
                 fontWeight: 700,
                 letterSpacing: 1,
                 marginBottom: 8,
@@ -484,15 +464,15 @@ export default function LoginPage() {
                     paddingLeft: 44,
                     paddingRight: 48,
                     height: 48,
-                    background: 'rgba(30, 41, 59, 0.7)',
-                    border: '1px solid rgba(148, 163, 184, 0.25)',
-                    color: '#ffffff',
+                    background: 'var(--input-bg)',
+                    border: '1px solid var(--input-border)',
+                    color: 'var(--text-primary)',
                     fontSize: 14,
                     fontWeight: 600,
                     letterSpacing: showPin ? 0 : 3
                   }}
                 />
-                <Lock size={18} color="#818cf8" style={{
+                <Lock size={18} color="var(--primary)" style={{
                   position: 'absolute',
                   left: 14,
                   top: '50%',
@@ -518,13 +498,13 @@ export default function LoginPage() {
                     background: 'none',
                     border: 'none',
                     cursor: 'pointer',
-                    color: '#94a3b8',
+                    color: 'var(--text-dim)',
                     padding: 4,
                     display: 'flex',
                     alignItems: 'center'
                   }}
                 >
-                  {showPin ? <EyeOff size={18} color="#cbd5e1" /> : <Eye size={18} color="#94a3b8" />}
+                  {showPin ? <EyeOff size={18} color="var(--text-secondary)" /> : <Eye size={18} color="var(--text-dim)" />}
                 </button>
               </div>
             </div>
@@ -537,10 +517,10 @@ export default function LoginPage() {
                 width: '100%',
                 height: 52,
                 marginTop: 8,
-                background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)',
+                background: 'var(--primary)',
                 color: '#ffffff',
                 border: 'none',
-                borderRadius: 14,
+                borderRadius: 'var(--radius-card)',
                 fontSize: 14,
                 fontWeight: 800,
                 letterSpacing: 1.2,
@@ -550,7 +530,7 @@ export default function LoginPage() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 10,
-                boxShadow: '0 10px 25px -5px rgba(79, 70, 229, 0.5), 0 0 15px rgba(59, 130, 246, 0.3)',
+                boxShadow: 'var(--shadow-sm)',
                 transition: 'all 0.2s ease',
                 opacity: loading ? 0.75 : 1
               }}
@@ -573,12 +553,12 @@ export default function LoginPage() {
           <div style={{
             marginTop: 28,
             paddingTop: 18,
-            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+            borderTop: '1px solid var(--border)',
             textAlign: 'center'
           }}>
             <p style={{
               fontSize: 10,
-              color: '#94a3b8',
+              color: 'var(--text-dim)',
               lineHeight: 1.6,
               fontWeight: 500
             }}>

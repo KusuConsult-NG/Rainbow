@@ -520,7 +520,6 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
       const popupContent = incidentPopupHtml(alert, {
         reporter: resolveReporterDetails(alert, usersMap),
         usersMap,
-        theme,
       });
 
       const existingMarker = alertMarkersRef.current.get(alert.id);
@@ -553,12 +552,16 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
         alertMarkersRef.current.delete(id);
       }
     });
-    // `usersMap` and `theme` belong here. Profiles load in their OWN effect,
-    // which resolves AFTER the first alerts arrive, so a popup built without
-    // this dependency would be built once — before any profile existed — and
-    // every reporter would read "profile not loaded" for the life of the
-    // session even though the name was sitting in state.
-  }, [alerts, mapReady, usersMap, theme]);
+    // `usersMap` belongs here. Profiles load in their OWN effect, which
+    // resolves AFTER the first alerts arrive, so a popup built without this
+    // dependency would be built once — before any profile existed — and every
+    // reporter would read "profile not loaded" for the life of the session
+    // even though the name was sitting in state.
+    //
+    // `theme` does NOT belong here any more: the card takes its surface
+    // colours from CSS variables, so a theme toggle restyles the popup that is
+    // already open without rebuilding anything.
+  }, [alerts, mapReady, usersMap]);
 
   useEffect(() => {
     if (!mapInstanceRef.current) return;
@@ -619,7 +622,7 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
           existingPolyline.setLatLngs(latlngs);
         } else {
           const polyline = L.polyline(latlngs, {
-            color: isDuress ? '#EF4444' : '#3B82F6',
+            color: isDuress ? '#E31E24' : '#0277BD',
             weight: 3.5,
             opacity: 0.8,
             dashArray: '5, 8',
@@ -707,26 +710,20 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
         }
         .leaflet-container { background: var(--bg-primary); }
 
-        /* The incident card. Leaflet's default popup is a white bubble with a
-           white tip, which on the dark console looked like a browser dialog
-           that had landed on the map. The class goes on the map CONTAINER, not
-           on each popup, so a theme toggle restyles popups that are already
-           open — a per-popup class is fixed at bindPopup time and would leave
-           whatever the operator had open in the previous theme. */
-        .hq-map .leaflet-popup-content-wrapper {
-          border-radius: 14px;
-          box-shadow: 0 18px 44px rgba(2, 6, 23, 0.32);
-          padding: 2px;
-        }
+        /* The incident card's SURFACE is styled once, in globals.css, from the
+           shared tokens: the rule for .leaflet-popup-content-wrapper there
+           already takes --bg-secondary, --text-primary and --border, which are
+           the app's palette. Restyling it here with its own hexes is how the
+           console ended up with two greys for the same object. Only the
+           spacing the dossier layout needs belongs to this component.
+           (No backticks in this comment — it lives inside a template literal,
+           and one would end the stylesheet here.) */
         .hq-map .leaflet-popup-content { margin: 12px 14px; line-height: 1.35; }
-        .hq-map-dark .leaflet-popup-content-wrapper,
-        .hq-map-dark .leaflet-popup-tip {
-          background: #111726;
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          color: #e2e8f0;
+        .hq-map .leaflet-popup-tip {
+          background: var(--bg-secondary);
+          border: 1px solid var(--border);
         }
-        .hq-map-dark .leaflet-popup-close-button { color: #94a3b8 !important; }
-        .hq-map-dark .leaflet-popup-tip { border-top: none; border-left: none; }
+        .hq-map .leaflet-popup-close-button { color: var(--text-dim) !important; }
         .tactical-tooltip {
           background: transparent !important;
           border: none !important;
@@ -740,7 +737,7 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
       `}</style>
       <div
         ref={mapRef}
-        className={theme === 'dark' ? 'hq-map hq-map-dark' : 'hq-map'}
+        className="hq-map"
         style={{ height: '100%', width: '100%' }}
       />
 
@@ -766,14 +763,14 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
         WebkitBackdropFilter: 'blur(8px)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '1.5px', color: theme === 'dark' ? '#f8fafc' : '#0f172a' }}>
+          <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '1.5px', color: theme === 'dark' ? '#F5F5F5' : '#1A1A1A' }}>
             FORECASTING HUD
           </span>
           <button
             onClick={() => setShowRiskGrid(!showRiskGrid)}
             style={{
               background: showRiskGrid ? 'var(--duress, #ff4d4d)' : (theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'),
-              color: showRiskGrid ? 'white' : (theme === 'dark' ? '#cbd5e1' : '#475569'),
+              color: showRiskGrid ? 'white' : (theme === 'dark' ? '#E0E0E0' : '#616161'),
               border: 'none',
               borderRadius: '8px',
               padding: '4px 8px',
@@ -789,20 +786,20 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
 
         {showRiskGrid && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ fontSize: '9px', color: theme === 'dark' ? '#94a3b8' : '#64748b', marginBottom: '4px' }}>
+            <div style={{ fontSize: '9px', color: theme === 'dark' ? '#757575' : '#616161', marginBottom: '4px' }}>
               SPATIAL-TEMPORAL RISK DENSITY:
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '12px', height: '12px', background: '#F44336', borderRadius: '3px', opacity: 0.8 }} />
-              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#e2e8f0' : '#334155', fontWeight: 600 }}>Critical Hotspot (4+ alerts)</span>
+              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>Critical Hotspot (4+ alerts)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '12px', height: '12px', background: '#FF9800', borderRadius: '3px', opacity: 0.8 }} />
-              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#e2e8f0' : '#334155', fontWeight: 600 }}>Elevated Risk (2-3 alerts)</span>
+              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>Elevated Risk (2-3 alerts)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '12px', height: '12px', background: '#FFC107', borderRadius: '3px', opacity: 0.8 }} />
-              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#e2e8f0' : '#334155', fontWeight: 600 }}>Moderate Risk (1 alert)</span>
+              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>Moderate Risk (1 alert)</span>
             </div>
           </div>
         )}

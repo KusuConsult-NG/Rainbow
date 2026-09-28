@@ -158,7 +158,7 @@ export default function TacticalSelect({
             zIndex: 9999,
             minWidth: 220,
             maxHeight: 280,
-            background: 'var(--bg-secondary, #1e293b)',
+            background: 'var(--bg-secondary, #212121)',
             backdropFilter: 'blur(16px)',
             WebkitBackdropFilter: 'blur(16px)',
             border: '1px solid var(--border, rgba(148, 163, 184, 0.3))',

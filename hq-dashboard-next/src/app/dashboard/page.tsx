@@ -1124,8 +1124,8 @@ export default function DashboardPage() {
                   boxShadow: '0 0 15px rgba(245, 158, 11, 0.2)'
                 }}
               >
-                <Radio size={13} color="#fbbf24" className="spin-slow" />
-                <span style={{ fontSize: 10, fontWeight: 900, color: '#fbbf24' }}>{smsFallbackCount} SMS</span>
+                <Radio size={13} color="#FF9800" className="spin-slow" />
+                <span style={{ fontSize: 10, fontWeight: 900, color: '#FF9800' }}>{smsFallbackCount} SMS</span>
               </div>
             )}
 
@@ -1134,19 +1134,19 @@ export default function DashboardPage() {
               title={enableClustering ? 'Spatial-Temporal Proximity Clustering Active' : 'Clustering Off'}
               style={{
                 background: enableClustering ? 'rgba(79, 70, 229, 0.15)' : 'var(--bg-secondary)',
-                border: enableClustering ? '1px solid #818cf8' : '1px solid var(--border)',
+                border: enableClustering ? '1px solid var(--accent)' : '1px solid var(--border)',
                 borderRadius: 8,
                 padding: '6px 12px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
                 cursor: 'pointer',
-                color: enableClustering ? '#818cf8' : 'var(--text-muted)',
+                color: enableClustering ? 'var(--accent)' : 'var(--text-muted)',
                 fontSize: 10,
                 fontWeight: 800
               }}
             >
-              <Sparkles size={13} color={enableClustering ? '#818cf8' : 'var(--text-muted)'} />
+              <Sparkles size={13} color={enableClustering ? 'var(--accent)' : 'var(--text-muted)'} />
               <span>{enableClustering ? 'CLUSTERING: ON' : 'RAW FEED'}</span>
             </button>
 
@@ -1196,7 +1196,7 @@ export default function DashboardPage() {
                 value={filterStatus}
                 options={statusSelectOptions}
                 onChange={v => setFilterStatus(v)}
-                accentColor="#f59e0b"
+                accentColor="#FF9800"
                 maxWidth={160}
               />
               
@@ -1211,7 +1211,7 @@ export default function DashboardPage() {
                   setFilterWard('ALL');
                   setFilterPu('ALL');
                 }}
-                accentColor="#34d399"
+                accentColor="#1B5E20"
                 maxWidth={180}
                 icon={<MapPin size={13} />}
                 placeholder="LGA"
@@ -1231,7 +1231,7 @@ export default function DashboardPage() {
                     if (parentLga) setFilterLga(parentLga.name);
                   }
                 }}
-                accentColor="#818cf8"
+                accentColor="var(--accent)"
                 maxWidth={170}
                 placeholder="WARD"
                 searchable
@@ -1257,7 +1257,7 @@ export default function DashboardPage() {
                     }
                   }
                 }}
-                accentColor="#fbbf24"
+                accentColor="#FF9800"
                 maxWidth={210}
                 placeholder="BEAT (PU)"
                 searchable
@@ -1304,7 +1304,7 @@ export default function DashboardPage() {
                         // the map silently under-reports the situation.
                         <div title="Alerts with no GPS fix are listed below but cannot be plotted"
                              style={{ background: 'var(--warning)', padding: '4px 8px', borderRadius: 20 }}>
-                          <span style={{ fontSize: 10, fontWeight: 900, color: '#0f172a' }}>
+                          <span style={{ fontSize: 10, fontWeight: 900, color: '#1A1A1A' }}>
                             {filtered.filter(a => a.lat == null || a.lng == null).length} UNLOCATED
                           </span>
                         </div>
@@ -1676,7 +1676,7 @@ export default function DashboardPage() {
                         <span style={{ 
                           fontSize: 11, 
                           fontWeight: 900, 
-                          color: '#818cf8', 
+                          color: 'var(--accent)', 
                           background: 'rgba(99, 102, 241, 0.15)', 
                           border: '1px solid rgba(99, 102, 241, 0.3)',
                           padding: '3px 10px', 
@@ -2225,7 +2225,7 @@ Respond ONLY with a JSON object with this exact shape:
           alignItems: 'center',
           justifyContent: 'space-between'
         }}>
-          <span style={{ fontSize: 10, fontWeight: 900, color: '#fbbf24', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 10, fontWeight: 900, color: '#FF9800', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
             📡 SMS FALLBACK REPORT (OFFLINE CITIZEN)
           </span>
           <span style={{ fontSize: 9, fontWeight: 700, color: '#fde68a', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4 }}>
@@ -2245,7 +2245,7 @@ Respond ONLY with a JSON object with this exact shape:
           alignItems: 'center',
           justifyContent: 'space-between'
         }}>
-          <span style={{ fontSize: 10, fontWeight: 900, color: '#818cf8', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--accent)', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
             👥 HIGH-SCALE CLUSTER: {alert.witness_count.toLocaleString()} WITNESS REPORTS AGGREGATED
           </span>
           <span style={{ fontSize: 9, fontWeight: 800, color: '#c7d2fe', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4 }}>
@@ -2545,7 +2545,7 @@ Respond ONLY with a JSON object with this exact shape:
           </div>
           <div style={{ 
             fontSize: 9, 
-            color: '#818cf8', 
+            color: 'var(--accent)', 
             marginTop: 6, 
             fontWeight: 800, 
             background: 'rgba(99, 102, 241, 0.12)', 
