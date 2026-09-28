@@ -49,7 +49,8 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/production_readiness_behaviour_test.sql \
    "$REPO"/scripts/signup_role_escalation_test.sql \
    "$REPO"/scripts/command_chain_behaviour_test.sql \
-   "$REPO"/scripts/privacy_behaviour_test.sql "$PGROOT/"
+   "$REPO"/scripts/privacy_behaviour_test.sql \
+   "$REPO"/scripts/sms_device_keys_behaviour_test.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
 psql_run() {
@@ -171,6 +172,20 @@ echo "▶ Applying 20260929000000_telemetry_is_not_a_standing_feed.sql"
 psql_run "-f $PGROOT/20260929000000_telemetry_is_not_a_standing_feed.sql" >/dev/null
 echo "▶ Re-applying it (must be idempotent)"
 psql_run "-f $PGROOT/20260929000000_telemetry_is_not_a_standing_feed.sql" >/dev/null
+
+echo "▶ Applying 20260930000000_sms_device_keys.sql"
+psql_run "-f $PGROOT/20260930000000_sms_device_keys.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20260930000000_sms_device_keys.sql" >/dev/null
+
+echo "▶ Asserting nobody can get at an SMS device key"
+SMS_OUT=$(psql_run "-f $PGROOT/sms_device_keys_behaviour_test.sql" 2>&1) && SMS_RC=0 || SMS_RC=$?
+echo "$SMS_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$SMS_RC" -ne 0 ]; then
+  echo "$SMS_OUT"
+  echo "✗ SMS device key assertions failed"
+  exit 1
+fi
 
 echo "▶ Asserting who can watch whom, and for how long"
 PRIV_OUT=$(psql_run "-f $PGROOT/privacy_behaviour_test.sql" 2>&1) && PRIV_RC=0 || PRIV_RC=$?

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
+import 'package:rainbow_app/core/offline/sms_device_key.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/services/secure_storage_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -210,6 +211,10 @@ class AuthService {
   @visibleForTesting
   static Future<void> Function()? stopTrackingOverride;
 
+  /// Test seam: the SMS key service reaches secure storage and Supabase.
+  @visibleForTesting
+  static Future<void> Function()? forgetSmsKeyOverride;
+
   /// Sign out user session.
   ///
   /// STOPPING LOCATION IS PART OF SIGNING OUT.
@@ -228,6 +233,14 @@ class AuthService {
       await (stopTrackingOverride ?? BackgroundTrackingService().stopTracking)();
     } catch (e) {
       debugPrint('[SIGNOUT_TRACKING_ERR] could not stop tracking: $e');
+    }
+    // And give up the SMS device key, for the same reason tracking stops: this
+    // handset is no longer authorised to speak for that person, and the key
+    // can both send an emergency in their name and decrypt the ones they send.
+    try {
+      await (forgetSmsKeyOverride ?? SmsDeviceKeyService().forget)();
+    } catch (e) {
+      debugPrint('[SIGNOUT_SMSKEY_ERR] could not retire the SMS key: $e');
     }
     await SupabaseConfig.client.auth.signOut();
     await _secureStorage.deleteAll();

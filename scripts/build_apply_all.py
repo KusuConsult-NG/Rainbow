@@ -216,7 +216,21 @@ WITH checks(ord, name, ok) AS (
     (21, 'a message can only be written into your own channel',
         EXISTS (SELECT 1 FROM pg_policies
                  WHERE schemaname = 'public' AND tablename = 'chat_messages'
-                   AND policyname = 'chat_insert_participant'))
+                   AND policyname = 'chat_insert_participant')),
+    -- The SMS fallback's per-device key. It can both decrypt and forge that
+    -- citizen's emergency traffic, so nothing but the service role may reach
+    -- it, and the table must not be selectable at all.
+    (22, 'SMS device keys exist and are unreadable through the API',
+        (SELECT relrowsecurity FROM pg_class
+          WHERE oid = 'public.sms_device_keys'::regclass)
+        AND NOT EXISTS (SELECT 1 FROM pg_policies
+                         WHERE schemaname = 'public'
+                           AND tablename = 'sms_device_keys')),
+    (23, 'only the service role can resolve an SMS key for ingest',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.sms_key_for_ingest(bytea)', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'sms_key_for_ingest'))
 )
 SELECT
   CASE WHEN ok THEN 'PASS' ELSE '*** FAIL ***' END AS result,
