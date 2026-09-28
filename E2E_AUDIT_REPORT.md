@@ -2952,3 +2952,91 @@ a `TargetCloseError` with no report written — a partial run that looks like a
 crash rather than like missing coverage. The browser is now replaced between
 roles, with the tile log and the error log kept across the restart since those
 are the evidence. 8/8 roles, 203 screenshots, 15/15 checks.
+
+---
+
+## Offline, and the question of a mesh network
+
+Asked whether the app works without internet, and whether mesh networking would
+help. Three separate answers, and they are not the same.
+
+### There is no mesh network, and nothing resembling one
+
+No Bluetooth, no Wi-Fi Direct, no Nearby Connections, no peer-to-peer of any
+kind, in the Dart, the Android project or the iOS project. This is worth being
+plain about because the app's vocabulary suggests otherwise — "UPLINK",
+"RELAY", "TRANSMISSION" — and none of that is a radio. Every byte this app
+moves goes over IP to Supabase.
+
+### The offline QUEUE is real and well built
+
+`SqliteService` holds an on-device queue; `SyncService` watches
+`Connectivity().onConnectivityChanged` and replays it when the network returns.
+It is the most carefully tested part of this codebase — thirteen unit tests,
+including a regression for a fault where **every alert queued while offline
+reached HQ with no coordinates**, in exactly the no-signal scenario the queue
+exists for.
+
+So: a report written with no signal is not lost. It is held, and it goes when
+the phone can reach the network again.
+
+### But the "emergency cellular relay" did not exist
+
+`offline_overlay.dart` showed "UPLINK DISRUPTED — Initiating emergency cellular
+relay…", ran a progress bar, and finished on a green tick reading **SIGNAL
+TRANSMITTED**. It is a four-second animation on a timer. Its own doc comment
+says so: *"Simulates a resilient offline dispatch … falls back to a simulated
+localized SMS burst."*
+
+There is no cellular relay to initiate. The app has no SMS capability at all —
+no `SEND_SMS` permission in the manifest, no telephony plugin, nothing. The one
+SMS path in the system is `POST /api/sos/dispatch-sms`, which asks the HQ
+backend to send one via Termii — over the internet. It is an out-of-band way to
+reach a commander who is not watching the dashboard. It is not a fallback for a
+handset with no signal, and it cannot be: it needs exactly the connectivity
+that is missing.
+
+The overlay was never mounted, so it was telling nobody this. It has been
+deleted rather than left for somebody to wire up, because "SIGNAL TRANSMITTED"
+shown to a person with no signal is the most dangerous sentence this app could
+contain.
+
+### And the success screen was reading the radio, not the outcome
+
+The report flow decided between **REPORT TRANSMITTED** and **REPORT QUEUED
+LOCALLY** from `connectivityResult.contains(ConnectivityResult.none)` — a
+reading of the radio, taken BEFORE the submit.
+
+That answers "does this phone have a network interface up". The question is
+"did the report arrive", and the two come apart in every case that matters: a
+captive portal, DNS failure, an expired token, a row-level-security refusal, a
+column the schema does not have, or the backend being down. In all of them the
+radio says connected, the insert fails, the alert lands in the local queue —
+and the person was shown a green REPORT TRANSMITTED with a shield on it.
+
+This is the same failure mode that hid `alerts.reportedBy` for months: an
+insert the database refused looked exactly like one that succeeded, because the
+queue caught it. `AlertService.wasQueuedOffline` reads the returned id, which
+already carried the truth — a uuid when it arrived, `OFFLINE_…` when it did
+not — and the screen now reports what happened rather than what was predicted.
+
+### Would a mesh actually help here?
+
+Honestly assessed, rather than as a feature wish:
+
+It would help in the one scenario this system is most likely to face — a
+deliberate network shutdown during unrest, where handsets still have power and
+each other but no tower. A store-and-forward mesh would let a report hop
+between phones until one of them reaches a working uplink.
+
+It is also a large piece of work with sharp edges that matter for this
+particular app: peers would relay alerts they can read, which is a privacy
+question the current RLS model has no answer for; a duress alert must not be
+readable by the phone carrying it; and range is tens of metres, so it helps a
+crowd and not a farmstead. None of that is a reason against it. It is a reason
+it cannot be bolted on, and should be designed with the threat model in front
+of it.
+
+What can be said today: the queue means nothing is lost, the app is now honest
+about when a report is still on the phone, and there is no second channel of
+any kind. A phone alone with no uplink reaches nobody until it has one.

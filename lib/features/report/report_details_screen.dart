@@ -231,7 +231,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           AppRoutes.reportSuccess,
           extra: {
             'alertId': alertId ?? '',
-            'isOffline': isOffline,
+            // The OUTCOME, not the pre-flight radio reading. `isOffline` above
+            // is still used to choose the queue's syncStatus, where a guess is
+            // fine; what the person is told must come from what actually
+            // happened. See AlertService.wasQueuedOffline.
+            'isOffline': AlertService.wasQueuedOffline(alertId),
             'type': '${widget.categoryInfo.label} - ${widget.subType}',
           },
         );

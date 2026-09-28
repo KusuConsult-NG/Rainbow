@@ -133,6 +133,9 @@ class AlertService {
     // reporter picks one.
 
     final localId = 'OFFLINE_${DateTime.now().millisecondsSinceEpoch}';
+    // ^ The prefix is load-bearing: `wasQueuedOffline` below is how a caller
+    //   tells a report that reached the database from one sitting in the local
+    //   queue, and the screens use it to decide what to tell the person.
 
     try {
       final connectivityResult = await Connectivity().checkConnectivity();
@@ -271,6 +274,33 @@ class AlertService {
       return localId;
     }
   }
+
+  /// Did this submission end up in the local queue rather than the database?
+  ///
+  /// `submitAlert` returns a real uuid when the insert succeeded and an
+  /// `OFFLINE_…` id when it fell back to SQLite, so the answer is already in
+  /// the value every caller receives.
+  ///
+  /// WHY THIS EXISTS RATHER THAN A CONNECTIVITY CHECK.
+  ///
+  /// The report screen decided what to tell the user from
+  /// `connectivityResult.contains(ConnectivityResult.none)` — a reading of the
+  /// RADIO, taken BEFORE the submit. That answers "does this phone have a
+  /// network interface up", which is not the question. The question is "did the
+  /// report arrive", and the two come apart in every case that matters: a
+  /// captive portal, DNS failure, an expired token, a row-level-security
+  /// refusal, a column the schema does not have, or the backend simply being
+  /// down. In all of those the radio says connected, the insert fails, the
+  /// alert goes to the local queue — and the person was shown a green REPORT
+  /// TRANSMITTED with a shield on it.
+  ///
+  /// That is precisely the failure mode that hid `alerts.reportedBy` for
+  /// months: an insert the database refused looked exactly like one that
+  /// succeeded, because the offline queue caught it and the screen was reading
+  /// the radio instead of the outcome.
+  static bool wasQueuedOffline(String? alertId) =>
+      alertId != null &&
+      (alertId.startsWith('OFFLINE_') || alertId.startsWith('LOCAL_'));
 
   /// Builds the Supabase `alerts` payload for one row of the local offline queue.
   ///
