@@ -2884,6 +2884,32 @@ SOUTH` with nothing to say which was which; and the portal rendering that
 timeline read `by_email`, which the database job does not write, so every
 automatic escalation was attributed to `undefined`.
 
+### The override assertion, mutation-tested
+
+"The officer HQ dispatched can see the mission" is the assertion carrying the
+whole override claim, so it was worth checking that it fails for the reason
+stated rather than passing for some other one. The fix was reverted — a single
+line, back to `alert['assignedToUid']` — the app rebuilt, and the run repeated:
+
+```
+FAIL  the officer HQ dispatched (UNIT_COMMAND) can see the mission
+50/51 checks passed
+```
+
+Exactly one assertion flips, which is the right shape. The chain still climbs,
+HQ still dispatches, the database still records the assignment correctly. The
+only thing that breaks is the officer at the bottom being able to SEE the
+mission HQ reached down to give them — which is what the defect was, and it is
+worth being precise about how it would have presented in the field: the console
+and the database would both show the incident correctly assigned, and the
+officer's phone would show nothing.
+
+The picker deliberately selects the POLLING-UNIT officer rather than the first
+row offered. The incident is owned by tier HQ and a unit officer is three rungs
+below it, so tier visibility cannot explain the pass — only the assignee rule
+can. Picking any higher-tier officer would have made the assertion pass whether
+the rule worked or not.
+
 ### The drift gate could not see the first class at all
 
 It reads select lists and insert/update payloads — where a bad column name fails
