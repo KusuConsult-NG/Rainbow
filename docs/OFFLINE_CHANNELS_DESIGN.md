@@ -344,13 +344,26 @@ difference.
 * SMS payload encoding, segment count, and that the duress flag is absent;
 * HQ-side dedup against `alerts.local_id`.
 
+* chunking a frame into eleven 20-byte BLE writes and reassembling it, including
+  every way a hostile peer can abuse that;
+* a peer disconnecting mid-frame, a write failing, a queue filling, and one dead
+  link not stopping the peer that works;
+* the platform channel's decoding of everything a native side might send,
+  including what it should not.
+
 **Needs real devices, and will not be verified by me:**
 
-* discovery, pairing and background behaviour on Nearby and BLE;
+* discovery, pairing and background behaviour on BLE — and the native halves are
+  not even written yet;
+* whether MTU negotiation succeeds, and what happens on the handsets where it
+  does not;
 * battery cost of relaying;
 * actual range in the field;
-* iOS permission behaviour;
+* iOS permission and background behaviour;
 * sending and receiving a real SMS.
+
+The seam is at `BleRadio` precisely so that this list is short and the list above
+it is long. Everything in the second list is about a radio finding another radio.
 
 ## Decisions
 
@@ -468,8 +481,42 @@ case it exists for.
    * Two new CI gates, both of which caught something before they were
      committed: `check_vectors_synced.py` (the console's copy of the vectors must
      equal the Dart-generated one) and `check_crypto_entropy.py` (see above).
-4. **The BLE transport**, written against the interface and marked unverified
-   until it has been run on handsets. Nearby stays optional, Android-only.
+4. **The BLE transport — everything above the radio is BUILT. The radio is not.**
+   The seam is `BleRadio`, four verbs wide: who is in range, what they wrote,
+   how much may be written at once, write this. Above it, tested:
+   * `mesh_chunking.dart` — the reason this step is not trivial. A frame is 166
+     bytes and a **default BLE write carries 20**, so every frame is split into
+     eleven pieces and reassembled by a stranger's phone. That makes it the most
+     dangerous file in the mesh: it is the one place where bytes somebody else
+     chose are assembled into a buffer whose size they choose. Hence a declared
+     length that may not change, a 512-byte cap, four open messages per peer, a
+     20-second expiry, and the rule that only the last chunk may be short. 25
+     tests, most of them refusals.
+   * `ble_mesh_transport.dart` — one write at a time per peer (BLE stacks drop
+     parallel writes on one link), a bounded queue that drops the OLDEST frame,
+     and isolation between peers so one dead link cannot stop the phone that can
+     actually carry the alert out. 10 tests, driven by a fake radio that enforces
+     the MTU, fails writes, drops them silently and disconnects mid-frame.
+   * `mesh_node.dart` — the schedule, which nothing else owned: on meeting a
+     peer, offer everything held; on receiving, apply the relay's rules before
+     storing; on sign-out, stop and forget. 5 tests, including a duress alert
+     crossing two strangers to a phone with a network, through the real chunker.
+   * `method_channel_ble_radio.dart` — the platform contract, written as code so
+     the remaining work is "implement these five messages" rather than "add
+     Bluetooth". 15 tests, most of them sending things no correct native side
+     would send, because a platform channel hands over `Map<Object?, Object?>`
+     with nothing checked and a crash there takes down a relay carrying
+     somebody's duress alert.
+
+   **What remains, and it is all native:** an Android implementation (GATT server
+   + scanner, `BLUETOOTH_ADVERTISE` / `BLUETOOTH_CONNECT` / `BLUETOOTH_SCAN` with
+   `neverForLocation`) and an iOS one (`CBPeripheralManager` +
+   `CBCentralManager`). The permissions are deliberately **not** in the manifest
+   yet: declaring a capability the app does not have is noise in a Play review.
+   The four requirements that are easy to miss — an unstable `peerId` that is not
+   an identity, reporting the MTU actually negotiated, advertising no identity at
+   all, and reporting disconnects promptly — are written at the top of
+   `method_channel_ble_radio.dart`.
 5. **Field test**, which is yours: two phones, aeroplane mode, and a walk.
 
 Nothing in steps 2 and 3 is wasted if step 4's radio choice changes.
