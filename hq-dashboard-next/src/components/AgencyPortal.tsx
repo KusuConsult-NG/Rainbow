@@ -72,7 +72,11 @@ const AGENCIES = [
   { code: 'DSS',      label: 'Dept. of State Services',     color: '#8b5cf6', icon: '🕵️' },
   { code: 'NSCDC',    label: 'NSCDC',                       color: '#f59e0b', icon: '🛡️' },
   { code: 'FRSC',     label: 'Federal Road Safety Corps',   color: '#ef4444', icon: '🚨' },
-  { code: 'AMOTEKUN', label: 'Operation Amotekun',          color: '#14b8a6', icon: '🦁' },
+  // Operation Safe Haven, not Amotekun. Amotekun is a SOUTH-WEST outfit —
+  // Ondo, Ekiti, Oyo, Ogun, Osun — with no presence in Plateau. OPSH is the
+  // military joint task force that actually covers Plateau, Bauchi and
+  // Kaduna, and is who an incident here would be handed to.
+  { code: 'OPSH',     label: 'Operation Safe Haven',        color: '#14b8a6', icon: '🛰️' },
 ];
 
 const STATUS_COLORS: Record<string, string> = {

@@ -25,8 +25,12 @@ const AGENCY_CONTACTS: Record<string, { phone: string; webhook?: string }> = {
     phone: process.env.FRSC_LIAISON_PHONE || '',
     webhook: process.env.FRSC_WEBHOOK_URL || '',
   },
-  'AMOTEKUN': {
-    phone: process.env.AMOTEKUN_LIAISON_PHONE || '',
+  // Operation Safe Haven — the joint task force covering Plateau. Amotekun,
+  // which was here, is a South-West outfit and has no liaison in this state, so
+  // an escalation to it would have been addressed to nobody.
+  'OPSH': {
+    phone: process.env.OPSH_LIAISON_PHONE || '',
+    webhook: process.env.OPSH_WEBHOOK_URL || '',
   },
 };
 

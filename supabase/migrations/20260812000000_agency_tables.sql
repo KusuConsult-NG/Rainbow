@@ -35,7 +35,7 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS agency TEXT;
 -- Officers an agency liaison has registered for their agency.
 CREATE TABLE IF NOT EXISTS public.agency_personnel (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  agency        TEXT NOT NULL,                 -- POLICE, ARMY, DSS, NSCDC, FRSC, AMOTEKUN
+  agency        TEXT NOT NULL,                 -- POLICE, ARMY, DSS, NSCDC, FRSC, OPSH
   name          TEXT NOT NULL,
   rank          TEXT,
   badge_number  TEXT,

@@ -9,7 +9,7 @@ const AGENCIES = [
   { code: 'DSS', label: 'Dept. of State Services', icon: '🕵️' },
   { code: 'NSCDC', label: 'NSCDC', icon: '🛡️' },
   { code: 'FRSC', label: 'Federal Road Safety Corps', icon: '🚨' },
-  { code: 'AMOTEKUN', label: 'Operation Amotekun', icon: '🦁' },
+  { code: 'OPSH', label: 'Operation Safe Haven', icon: '🛰️' },
 ];
 
 interface LiaisonUser {

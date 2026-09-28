@@ -103,7 +103,46 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   const isNarrow = useMediaQuery('(max-width: 1024px)');
 
   // Plateau State Tactical Bounds
-  const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.50, 10.80]];
+  /**
+ * Where tiles come from. ONE definition — there were two, and they disagreed.
+ *
+ * CARTO's basemaps were used for the dark theme. CARTO now requires an account
+ * and answers unauthenticated requests with a placeholder tile reading
+ * "API key required", so the command map rendered as a grid of watermarks with
+ * the incident markers floating on top. That is worse than a blank map: a blank
+ * map is obviously broken, whereas a map covered in text looks like somebody
+ * else's configuration problem while every street and landmark is gone.
+ *
+ * The second bug was the divergence. The initial layer used OpenStreetMap for
+ * the light theme; the theme-change effect used CARTO for BOTH. So a dark/light
+ * toggle moved even the light theme onto the watermarked provider, and which
+ * tiles you got depended on whether you had touched the theme since loading.
+ *
+ * OpenStreetMap needs no key. It is light, so dark is produced here with a CSS
+ * filter on the tile pane — markers and boundaries live in other panes and keep
+ * their own colours, which matters because a filter over the whole map would
+ * turn a red critical marker green.
+ *
+ * NEXT_PUBLIC_MAP_TILE_URL overrides it, so moving to a keyed or self-hosted
+ * provider is a config change rather than a code change. OSM's tile policy is
+ * aimed at modest use; a statewide service in daily operation should be on its
+ * own or a commercial provider, and this is the seam for that.
+ */
+const TILE_URL =
+  process.env.NEXT_PUBLIC_MAP_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+/** A provider's own dark tiles must not be darkened again. */
+const TILES_ALREADY_DARK = /dark|night/i.test(TILE_URL);
+
+/** Invert, then pull back towards neutral so inverted water is not orange. */
+const DARK_TILE_FILTER = 'invert(0.92) hue-rotate(180deg) saturate(0.75) brightness(0.95)';
+
+function tileFilterFor(theme: string): string {
+  if (TILES_ALREADY_DARK) return 'none';
+  return theme === 'dark' ? DARK_TILE_FILTER : 'none';
+}
+
+const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.50, 10.80]];
 
   // Leaflet is loaded from the LOCAL package, not a CDN.
   //
@@ -174,15 +213,16 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
 
     Leaflet.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    const tileUrl = theme === 'dark'
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-
-    const tileLayer = Leaflet.tileLayer(tileUrl, {
+    const tileLayer = Leaflet.tileLayer(TILE_URL, {
       attribution: '© OpenStreetMap contributors',
       maxZoom: 19,
     }).addTo(map);
     tileLayerRef.current = tileLayer;
+
+    // The tile pane only. Markers, boundaries and the risk grid are in their own
+    // panes and must keep their colours.
+    const pane = map.getPane('tilePane');
+    if (pane) pane.style.filter = tileFilterFor(theme);
 
     // Force map to adjust size to container after render
     setTimeout(() => {
@@ -303,11 +343,12 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   }, [alerts, showRiskGrid, mapReady]);
 
   useEffect(() => {
-    if (!mapInstanceRef.current || !tileLayerRef.current) return;
-    const tileUrl = theme === 'dark'
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
-    tileLayerRef.current.setUrl(tileUrl);
+    if (!mapInstanceRef.current) return;
+    // Filter the pane; do NOT swap the provider. Swapping is what made the two
+    // definitions diverge, and it also refetches every visible tile on a theme
+    // toggle for no reason.
+    const pane = mapInstanceRef.current.getPane('tilePane');
+    if (pane) pane.style.filter = tileFilterFor(theme);
   }, [theme]);
 
   // Global action handlers for popup buttons
