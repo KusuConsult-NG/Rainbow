@@ -3091,3 +3091,181 @@ of it.
 What can be said today: the queue means nothing is lost, the app is now honest
 about when a report is still on the phone, and there is no second channel of
 any kind. A phone alone with no uplink reaches nobody until it has one.
+
+## The marker was a label, not an incident
+
+HQ watches one screen. On it, the thing an operator clicks first is a pin. What
+the pin gave them was the incident type, a status word, the description, and two
+buttons. Everything needed to act on an emergency was in the row and none of it
+reached the card: not who reported it, not a number to ring them on, not how
+long it had been waiting, not whether anybody had taken it, not which tier owned
+it, not whether the report had come in over SMS because the reporter had no data
+connection at all.
+
+Four separate defects, three of them silent.
+
+### The map was reading Firebase field names
+
+`LiveMap.tsx` declared its own alert interface, and in it:
+
+```ts
+reportedBy?: string;
+reportedAt?: { seconds: number };
+```
+
+Those are Firestore shapes. PostgREST returns `reported_by` and `created_at`,
+and it never returns a camelCase key — so both fields were `undefined` for every
+alert that has ever been drawn, and would have stayed `undefined` if the popup
+had tried to render them. Nothing errored. This is the same defect class as
+`alert['assignedToUid']` and the `profiles` query that named three columns which
+do not exist: a read that cannot succeed, on a path with no test, producing an
+absence that looks like an empty field.
+
+The local interface is gone. The component imports the canonical `Alert` from
+`src/app/dashboard/types.ts`, so a field the database does not have is now a
+type error rather than a silent `undefined`, and a column the schema gains is
+available to the map the day the type learns about it.
+
+`reportedBy` and `reportedAt` have been removed from that canonical type as
+well, along with the two `created_at || reportedAt` fallbacks that read them.
+A fallback that can never fire makes the real source look optional.
+
+### The map was never given the profiles
+
+Reporter and officer names come from `usersMap`, which the dashboard fills from
+`profiles`. `LiveMap` was not passed it and had no prop for it, so even with the
+right column names it could not have named anybody.
+
+It is passed now — and the lookup was widened at the same time, because the
+profile query is `limit(1000)`. That is fine for a staff directory and wrong for
+reporters: this is a citizen app in a state of about four million people, so the
+1001st citizen to raise an alert would render as an unidentified reporter
+forever, on a query that succeeded. The alerts fetch now also loads the profiles
+that the alerts on screen actually name — bounded by what is displayed, at most
+500 rows — and merges them in. Both effects merge rather than replace, because
+they race and whichever finished last used to win.
+
+### A newly reported emergency could not be dispatched from the map
+
+The DISPATCH button rendered only when:
+
+```ts
+alert.status === 'OPEN' || alert.status === 'ACTIVE'
+```
+
+Neither is a status this database produces. `alerts.status` defaults to
+`'PENDING'`, and the values written anywhere in this system are PENDING,
+DISPATCHED, ACKNOWLEDGED, IN_PROGRESS, ON_ROUTE, ON_SITE, ESCALATED, RESOLVED,
+DURESS and CANCELLED. So every incident in the state at which dispatching
+matters most — one just reported, nobody sent — offered RESOLVE and no way to
+send anyone. The operator had to leave the map, find the same incident in the
+feed, and dispatch from there.
+
+The fixtures agreed with the bug: `LiveMap.test.tsx` built its alerts with
+`status: 'ACTIVE'`, which is the one value that made the button appear. They now
+say PENDING, which is what the database writes.
+
+While confirming this, two statuses the console itself writes —
+`ESCALATED` and `IN_PROGRESS`, both from `src/lib/alert-actions.ts` — turned out
+to be missing from the `Alert['status']` union. They have been added. The status
+colour table in the old popup had no entry for `PENDING` either; it fell through
+to the same orange as an open incident, which was right by luck.
+
+### A citizen's description was executed as HTML
+
+The popup is built by string concatenation, because Leaflet's `bindPopup` takes
+HTML, and the description went in raw:
+
+```ts
+<p ...>${alert.description || 'No additional details'}</p>
+```
+
+A report whose description contains `<img src=x onerror=…>` runs that script in
+the authenticated session of whoever clicks the pin — in the console that holds
+the service-role-backed admin endpoints. It was reachable from the mobile app
+before; since the SMS channel opened it is reachable by anyone holding a device
+key, and since the mesh ingest is unauthenticated by design, by anyone at all
+who can seal a frame.
+
+Every value interpolated into the card now passes through `escapeHtml`,
+including the incident id inside the `onclick` attributes.
+
+### What the card carries now
+
+One tested module, `src/lib/incident-dossier.ts`, builds it — shared with the
+incident feed and the dossier modal, which had their own copy of the reporter
+resolution 200 lines into a 3,000-line component where the map could not reach
+it. The card states, in the order a dispatcher needs them: how long ago it was
+raised and at what time; whether it has been acknowledged and for how long it
+has not; severity; which command tier owns it and since when; who it is assigned
+to; the agency it was escalated to; the channel it arrived over; the reporter,
+their badge if they are staff, their contact, and what kind of reporter they are;
+the LGA, ward and polling unit; the coordinates; how many reports the marker
+stands for if it is a cluster; attached media; the device reference for an
+offline-queued report; and the incident id. Then the description, the triage
+summary if there is one, and four actions — DOSSIER, DISPATCH, RESOLVE and, when
+there is a number, CALL.
+
+The rule it follows is the one C-5 established: **absence is rendered as
+absence**. A report with no reporter says so. A report the reporter filed
+anonymously says *that*, distinctly, because the offline ingest writes
+`reported_by: NULL` deliberately and "unidentified" would send an operator
+looking for a name the server was asked never to keep. A missing severity reads
+NOT GRADED, not HIGH. A missing timestamp reads TIME NOT RECORDED — the dossier
+modal used to read `JUST NOW`, which asserts a brand-new emergency on the
+strength of an empty column. A report with no GPS fix says NO GPS FIX ON THIS
+REPORT rather than showing a coordinate.
+
+### Live, and visibly unclaimed
+
+Reports already reach the map without a reload: `alerts` is in the
+`supabase_realtime` publication and the dashboard subscribes to it, refetching
+on any change. What was missing was that an operator could not tell, at a
+glance, which pins were nobody's.
+
+An incident with `acknowledged_at IS NULL` — the exact condition the escalation
+cron watches before climbing a tier — now pulses, and is drawn slightly larger.
+That is the state where a clock is running and no human has taken the incident,
+and it is the one thing on the map worth an operator's attention before they
+click anything.
+
+### Two more defects found in the same file
+
+Neither is about the popup, and both were live.
+
+**Every theme toggle threw.** The tile-filter effect called
+`mapInstanceRef.current.getPane('tilePane')`. That ref holds `{ map, L }`, not
+the map, so it was `undefined('tilePane')` — inside an effect, which takes the
+render with it. Introduced by the fix that moved the tiles off CARTO, and caught
+by adding a test that toggles the theme.
+
+**Two effects were fighting over the popup's globals.** `_hqResolve` and
+`_hqShowDispatch` were installed by two different effects 200 lines apart, and
+they disagreed: the first called `onEscalate(id, 'DISPATCH')`, the second raised
+an `hq-show-dispatch` event for the page to catch. React runs effects in order,
+so the second silently won and the first was dead code that still owned the
+cleanup — so on unmount, two of the four globals were removed and two were left
+pointing at a dead component. One effect now installs all four and removes all
+four.
+
+### What is proven, and how
+
+`src/lib/incident-dossier.test.ts` covers the string builder and every decision
+in it — 44 assertions, including the XSS cases, the PENDING dispatch
+regression, anonymous versus unknown reporters, and clock skew on a phone's
+timestamp. `src/components/LiveMap.test.tsx` drives the real component under
+jsdom with real Leaflet: it opens a marker's popup and reads the reporter's name
+and number out of the DOM, asserts the injected `<img>` is not in it, toggles
+the theme without throwing, and proves the popup is rebuilt when the profiles
+arrive after the alerts — which is the dependency that, left out, would have
+made the reporter's name load into state and never reach the screen.
+
+The browser harness clicks a pin in Chromium and asserts on the rendered card
+(`scripts/local_e2e/capture.js`, screen `31-hq-map-incident-card`), because the
+popup is HTML inserted by Leaflet outside React and a real click is the only
+thing that proves the wiring end to end.
+
+One honest limitation: the jsdom test asserts the DOSSIER button's `onclick`
+attribute and calls the handler directly rather than clicking it, because jsdom
+evaluates an inline `onclick` in a global scope that is not the one vitest hands
+the test. The real click is covered in Chromium by the harness.

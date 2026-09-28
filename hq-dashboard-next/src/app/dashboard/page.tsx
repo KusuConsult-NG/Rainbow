@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import type { Alert } from './types';
 import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
+import { resolveReporterDetails } from '@/lib/incident-dossier';
 import * as alertActions from '@/lib/alert-actions';
 import type { AlertIds } from '@/lib/alert-actions';
 
@@ -63,7 +64,10 @@ const formatAlertTimestamp = (alert: Alert | null | undefined, type: 'reported' 
   if (!alert) return '—';
   let dateVal: any = null;
   if (type === 'reported') {
-    dateVal = alert.created_at || alert.reportedAt;
+    // `|| alert.reportedAt` used to be here. PostgREST does not return
+    // camelCase keys, so it was never reached; it only made `created_at` look
+    // like one of two possible sources when it is the only one.
+    dateVal = alert.created_at;
   } else {
     dateVal = alert.resolved_at || alert.created_at;
   }
@@ -193,47 +197,11 @@ const formatIncidentId = (id?: string): string => {
   return `#INC-${id.substring(0, 8).toUpperCase()}`;
 };
 
-const resolveReporterDetails = (alert: Alert, usersMap: Record<string, any>) => {
-  const reporterId = alert.reported_by || alert.reportedBy || '';
-  const alertPhone = (alert as any).phone_number || (alert as any).reporter_phone || (alert as any).phone || (alert as any).contact;
-  
-  const profile = reporterId ? usersMap[reporterId] : null;
-
-  let name = 'Registered Citizen';
-  let contact = 'No Phone Registered';
-  let type = 'Citizen Mobile SOS';
-
-  // 1. Resolve phone number from alert or profile
-  if (alertPhone) {
-    contact = alertPhone;
-  } else if (profile?.phone || profile?.phone_number || profile?.mobile) {
-    contact = profile.phone || profile.phone_number || profile.mobile;
-  } else if (profile?.email) {
-    contact = profile.email;
-  } else if (reporterId.startsWith('+') || /^\+?\d{7,}$/.test(reporterId)) {
-    contact = reporterId;
-  }
-
-  // 2. Resolve name
-  if (profile?.full_name || profile?.name || profile?.displayName) {
-    name = profile.full_name || profile.name || profile.displayName;
-  } else if (reporterId && reporterId.includes('@')) {
-    name = `Officer ${reporterId.split('@')[0].toUpperCase()}`;
-    if (!alertPhone && !profile?.phone) contact = reporterId;
-  } else if (reporterId && !/^[0-9a-fA-F-]{24,}$/.test(reporterId) && !reporterId.startsWith('+')) {
-    name = reporterId;
-  }
-
-  // 3. Resolve role / type
-  if (profile?.role) {
-    type = profile.role === 'ADMIN' || profile.role === 'HQ_OFFICER' ? 'HQ Command Center' :
-           profile.role === 'RESPONDER' ? 'Field Tactical Responder' : 'Citizen Mobile App';
-  } else if (reporterId.includes('operationrainbow')) {
-    type = 'Field Operator';
-  }
-
-  return { name, contact, type };
-};
+// resolveReporterDetails used to live here, 200 lines into a 3,000-line client
+// component, and the map had no way to reach it — so the marker popup showed no
+// reporter at all while the incident card 1,800 lines below showed one. It is
+// now src/lib/incident-dossier.ts: one implementation, tested, shared by the
+// card, the dossier and the map.
 
 const renderFormattedSummary = (text: string) => {
   if (!text) return null;
@@ -546,6 +514,42 @@ export default function DashboardPage() {
         }));
         setAlerts(mapped as Alert[]);
         setHistory(mapped.filter((a: any) => a.status === 'RESOLVED') as Alert[]);
+
+        // Make sure the people named on these alerts are actually loadable.
+        //
+        // Reporter and officer names come from `usersMap`, which is filled by a
+        // separate effect with `profiles ... limit(1000)`. That is fine for the
+        // staff directory and wrong for reporters: this is a citizen app in a
+        // state of four million people, so the 1001st citizen to raise an alert
+        // would render as "profile not loaded" forever, on a query that
+        // succeeded. Fetching the profiles these alerts actually name is
+        // bounded by what is on screen — at most 500 rows — and merges into the
+        // same map. Same pattern the telemetry path already uses.
+        const named = Array.from(
+          new Set(
+            mapped
+              .flatMap((a: any) => [a.reported_by, a.assigned_to, a.acknowledged_by])
+              .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0),
+          ),
+        );
+        if (named.length > 0) {
+          const { data: reporters } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, phone, role, badge_number, geo_lga, geo_ward, geo_pu')
+            .in('id', named);
+          if (reporters && reporters.length > 0) {
+            setUsersMap(prev => {
+              // Return the SAME object when nothing is new. `usersMap` is a
+              // dependency of the map's marker effect, so a fresh object on
+              // every realtime refetch would rebuild every popup — including
+              // the one the operator has open — two or three times a minute.
+              if (reporters.every((p: any) => prev[p.id])) return prev;
+              const merged = { ...prev };
+              reporters.forEach((p: any) => { merged[p.id] = p; });
+              return merged;
+            });
+          }
+        }
       }
     };
 
@@ -676,11 +680,15 @@ export default function DashboardPage() {
         .select('id, full_name, email, phone, role, badge_number, geo_lga, geo_ward, geo_pu')
         .limit(1000);
       if (data) {
-        const mapping: Record<string, any> = {};
-        data.forEach((p: any) => {
-          mapping[p.id] = p;
+        // Merge, do not replace. The alerts fetch also puts profiles in here —
+        // the ones the visible alerts name, which for a reporter beyond this
+        // query's 1000-row limit is the only place they come from — and these
+        // two effects race. Replacing would drop them on whichever order won.
+        setUsersMap(prev => {
+          const merged = { ...prev };
+          data.forEach((p: any) => { merged[p.id] = p; });
+          return merged;
         });
-        setUsersMap(mapping);
       }
     };
 
@@ -709,6 +717,19 @@ export default function DashboardPage() {
       toast.update(toastId, 'error', 'Escalation Failed', res.error);
     }
   }, [toast, user]);
+
+  /**
+   * Opens the full dossier for an incident clicked on the map.
+   *
+   * The marker popup carries what a dispatcher acts on; the dossier carries the
+   * rest. Looked up in `alerts` — the raw rows — because the map is handed
+   * `filtered`, whose cards may be cluster masters, and the dossier is about
+   * one report.
+   */
+  const openDossierById = useCallback((id: string) => {
+    const found = alerts.find(a => a.id === id);
+    if (found) setSelectedReport(found);
+  }, [alerts]);
 
   const hqOverride = useCallback(async (alertId: AlertIds) => {
     const toastId = toast.loading('HQ Override...', 'Taking command of incident');
@@ -1259,7 +1280,20 @@ export default function DashboardPage() {
         <div style={{ flex: 1, overflow: activeTab === 'map' ? 'hidden' : 'auto', padding: activeTab === 'map' ? 0 : '32px 40px' }}>
           {activeTab === 'map' && (
             <div style={{ position: 'relative', height: '100%', width: '100%' }}>
-              <LiveMap alerts={filtered} agents={agentLocations} onResolve={resolveAlert} onEscalate={escalateAlert} theme={theme} />
+              <LiveMap
+                alerts={filtered}
+                agents={agentLocations}
+                onResolve={resolveAlert}
+                onEscalate={escalateAlert}
+                // The map could not name a reporter because it was never given
+                // the profiles. It declared `reportedBy`/`reportedAt` — Firebase
+                // names the database does not return — and had no profile map at
+                // all, so a marker could show a type and a status and nothing
+                // about the person who raised it.
+                usersMap={usersMap}
+                onOpenDossier={openDossierById}
+                theme={theme}
+              />
               <div className="glass fade-in" style={{ position: 'absolute', top: 24, right: 24, width: 320, maxHeight: 'calc(100% - 48px)', display: isNarrow ? 'none' : 'flex', borderRadius: 20, flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }}>
                 <div style={{ padding: '20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1502,11 +1536,12 @@ export default function DashboardPage() {
           rStatus === 'DISPATCHED' ? 'var(--info)' :
           rStatus === 'ON_ROUTE' || rStatus === 'ON_SITE' || rStatus === 'ENGAGED' ? 'var(--success)' : 'var(--warning)';
 
+        // 'JUST NOW' used to be the fallback for a row with no `created_at`,
+        // which asserts that an emergency is brand new on the strength of an
+        // empty column. A missing timestamp is a missing timestamp.
         const reportedTimeStr = selectedReport.created_at
           ? new Date(selectedReport.created_at).toLocaleString()
-          : selectedReport.reportedAt
-          ? new Date(selectedReport.reportedAt.seconds * 1000).toLocaleString()
-          : 'JUST NOW';
+          : 'TIME NOT RECORDED';
 
         return (
           <div style={{
