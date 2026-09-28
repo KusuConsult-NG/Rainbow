@@ -857,6 +857,27 @@ jobs:
           node scripts/local_e2e/mobile_capture.js
           node scripts/local_e2e/mobile_interact.js
 
+      # A third pass, and the only one that is about the SYSTEM rather than a
+      # screen: one incident driven the length of the command chain — citizen to
+      # polling unit to ward to LGA to HQ, then HQ overriding back down to a
+      # field officer — with the database read after every hop.
+      #
+      # It catches what the two passes above cannot. Each rung's controls worked
+      # in isolation the whole time; what was broken was the handover. A manual
+      # escalation did not restart the tier clock, so an alert handed up by hand
+      # cascaded past the tier that took it; accepting a mission never set
+      # `acknowledged_at`, so it was escalated off the responder who had it; and
+      # HQ, the rung that exists to override, had no dispatch control at all.
+      # None of those is visible in a screenshot of a working screen.
+      - name: Drive one incident up the whole command chain
+        run: |
+          node scripts/local_e2e/fake_supabase.js &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
+            sleep 0.5
+          done
+          node scripts/local_e2e/chain_lifecycle.js
+
       - name: Upload the screenshots
         if: always()
         uses: actions/upload-artifact@v4

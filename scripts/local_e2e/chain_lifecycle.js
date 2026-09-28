@@ -31,6 +31,16 @@ const HERE = { latitude: 9.8965, longitude: 8.8583 }; // Jos North
 
 fs.mkdirSync(OUT, { recursive: true });
 
+// Clear only THIS pass's screenshots, so the directory holds one coherent run.
+// The step numbers shift whenever an assertion is added or an earlier step
+// fails, so a failed run leaves files that a later, shorter run does not
+// overwrite — and the directory then mixes two chains. The other passes'
+// screenshots (`80-mobile-*`, the console's) are left alone: this run does not
+// produce them and must not delete them.
+for (const f of fs.readdirSync(OUT)) {
+  if (/^A\d{2}-.*\.png$/.test(f)) fs.unlinkSync(path.join(OUT, f));
+}
+
 const checks = [];
 const shots = [];
 let step = 0;

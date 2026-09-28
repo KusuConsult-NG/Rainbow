@@ -2796,3 +2796,133 @@ Worth noting for a future reader rather than as a defect: `GINDIRI 11` and
 eleven. They match nothing in the official list except by the numeral-stripping
 comparison above, which is the kind of near-miss that produced the two real LGA
 mismatches.
+
+---
+
+## Driving one incident the whole length of the chain
+
+The command chain had been proven a rung at a time: the database climbs on a
+timeout (real PostgreSQL, 19 assertions), each tier's dashboard renders and
+names itself (8 roles, 203 screenshots), each control does something (62
+controls). What none of those could see is the **handover** — and that is where
+the remaining defects were.
+
+`scripts/local_e2e/chain_lifecycle.js` follows one incident from a citizen's
+phone to a dispatched officer, in a browser, taking a screenshot and reading the
+database at every hop. 51 assertions, 26 screenshots:
+
+| | |
+|---|---|
+| a citizen reports in all 10 categories | each row written, each landing at `assigned_tier = 'UNIT'` |
+| the jurisdiction on each report | resolved from the reporter's GPS — e.g. `JOS NORTH / TUDUN WADA - KABONG` |
+| UNIT → WARD → LGA → HQ | ENGAGE, the action sheet, the authorization fallback, the SITREP and CONFIRM ESCALATION, photographed at each rung |
+| after each hop | `assigned_tier`, `status`, the named commander, the restarted clock and the cleared acknowledgement, read back by id |
+| the tier below | no longer sees what it handed up |
+| HQ | offered no escalation — there is nothing above it |
+| HQ overriding | DISPATCH UNIT → the responder picker → a polling-unit officer, three rungs down |
+| that officer | can see the mission |
+
+### Four more real defects, all in the handover
+
+**`alert['assignedToUid']` — a key PostgREST never returns.** Read in three
+places on rows that come straight from the database, where the key is the
+column: `assigned_to`. Every one of those reads was a constant `null` and every
+comparison against them a constant `false`, silently.
+
+The worse half is the first: the visibility filter opens with *"if this alert is
+assigned to me, show it"*, and that is the **only** rule that can put an
+incident on the screen of an officer outside its tier. It is what an HQ override
+*is*. So HQ reaching down to a polling-unit officer produced a mission that
+officer could not see. The other half: the tactical action sheet gates EN ROUTE,
+ON SITE, RESOLVE MISSION, MISSION INTEL and SECURE CHAT on `isAssignedToMe`, so
+an officer holding a mission was offered a generic DEPLOY button forever and
+could not advance or resolve it from the feed.
+
+Fixed in `lib/features/agent/alert_row.dart`, one function so there is one
+answer, and it refuses to read an unknown session as "this is mine".
+
+**HQ had no way to send anyone.** `DISPATCH UNIT` was gated on
+`assignedTier == 'WARD' || == 'LGA'`, and the whole action row on
+`assignedTier != 'HQ'`. The one rung whose purpose is to override when nobody
+below responds was the one rung with no dispatch control: an incident that
+climbed the entire chain *because it was ignored* arrived at the only desk that
+could not answer it. Dispatch is now gated on `canDispatchFrom`, escalation on
+there being a rung above at all — so HQ keeps dispatch and correctly loses the
+up-arrow that would have escalated HQ to itself.
+
+**Neither clock the escalation job reads was ever written.**
+`escalate_overdue_alerts()` measures a tier's window from `tier_assigned_at` and
+stops climbing when `acknowledged_at` is set. Nothing in either app wrote either
+column.
+
+* A manual escalation left `tier_assigned_at` at the insert time, so the WARD
+  was handed an alert whose WARD window had already expired — and cron moved it
+  to the LGA, then to HQ, within a minute or two. One hand escalation of an
+  alert older than ten minutes landed at HQ having visibly skipped every rung it
+  was meant to climb.
+* Accepting a mission never set `acknowledged_at`, so the guard that exists to
+  stop an alert being taken off the responder who has it could not fire.
+
+Both are now written by the app and by the console, and asserted against real
+PostgreSQL: `command_chain_behaviour_test.sql` replays the app's **old** payload
+to demonstrate the cascade, then the new one to show the WARD gets its full
+window and still climbs when *that* window passes.
+
+**The console handed the officer down but not the tier.** HQ escalating to an
+LGA commander wrote `assigned_to` and `escalated_to_agency` and left
+`assigned_tier` at `'HQ'`. Since the responder app shows an officer their own
+tier and above, the LGA commander's whole team could not see it — only the one
+named officer, and only through the "assigned to me" rule that was itself dead.
+`hqOverride` had the mirror problem: HQ took command without owning the rung or
+stopping the clock, so the timeout escalated the incident onward from under HQ
+minutes later.
+
+Two smaller things fell out of the same read: the console wrote an LGA **name**
+into `escalation_log.to_tier`, where the app and the database job both write a
+tier **label**, so one timeline rendered `HQ → LGA` and the next `HQ → JOS
+SOUTH` with nothing to say which was which; and the portal rendering that
+timeline read `by_email`, which the database job does not write, so every
+automatic escalation was attributed to `undefined`.
+
+### The drift gate could not see the first class at all
+
+It reads select lists and insert/update payloads — where a bad column name fails
+loudly. A camelCase key read off a row fails *silently*, which is the worse
+half, and that is how `alert['assignedToUid']` survived in three places.
+`check_schema_drift.py` now flags camelCase subscripts in Dart files that query
+Supabase, with the four maps that legitimately are not database rows named and
+explained (a GoRouter `extra`, an FCM payload, a WebRTC ICE candidate, a
+background-service message). Verified by restoring the bug and watching the gate
+fail.
+
+### Four harness faults, caught before any of them was reported as a defect
+
+Worth recording, because each one produced a run that read exactly like a broken
+app:
+
+1. **The followed alert was the oldest.** Kidnap was submitted first; the feed
+   sorts newest-first; Flutter web only builds semantics nodes for widgets it
+   actually renders. So the followed card was not in the page, and the run
+   reported that no tier could see its own incidents.
+2. **A wheel event went to the app bar**, because the pointer had never moved
+   from (0, 0). Nothing below the fold could ever be reached.
+3. **Semantics leaves carry their text in `aria-label`, not `textContent`.**
+   Reading only the latter found no incident on any card.
+4. **"The first ENGAGE below the incident text" picked a neighbouring card**,
+   because the incident type also appears above the feed in the map markers and
+   the critical-incident summary. The whole chain then ran *correctly* on a
+   different alert while every by-id assertion failed. The button is now located
+   structurally, by the card that contains the incident.
+
+The stand-in also had to learn column `DEFAULT`s, **with their types**:
+`'[]'::jsonb` is an empty list and `'{}'` on a `TEXT[]` is an empty array, and
+getting that wrong made the chain of custody read as empty at every hop.
+
+### And the eight-role capture no longer dies on the eighth
+
+One CanvasKit browser, eight accounts, twenty-four routes each, exhausted the
+container on the last role: the process died mid-screenshot and the run ended on
+a `TargetCloseError` with no report written — a partial run that looks like a
+crash rather than like missing coverage. The browser is now replaced between
+roles, with the tile log and the error log kept across the restart since those
+are the evidence. 8/8 roles, 203 screenshots, 15/15 checks.

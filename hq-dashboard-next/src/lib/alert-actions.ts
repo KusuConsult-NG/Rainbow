@@ -94,7 +94,17 @@ export async function escalateAlert(
     const at = new Date().toISOString();
     const logEntry = {
       from_tier: 'HQ',
-      to_tier: lgaTarget,
+      // A RUNG, NOT A PLACE.
+      //
+      // This wrote `lgaTarget` — an LGA NAME such as 'JOS SOUTH'. The mobile
+      // app and the database's timeout job both write a tier LABEL here
+      // ('UNIT', 'WARD', 'LGA', 'HQ'), and the agency portal renders the field
+      // as `from_tier → to_tier`. So one entry in the same timeline read
+      // "HQ → LGA" and the next read "HQ → JOS SOUTH", and nothing said which
+      // kind of thing either was. The place has its own key now, so both facts
+      // survive and the column has one meaning.
+      to_tier: lgaTarget && lgaTarget !== 'ALL' ? 'LGA' : agencyTarget,
+      to_lga: lgaTarget,
       to_agency: agencyTarget,
       to_officer_id: targetCommanderId,
       to_officer_name: targetCommanderName,
@@ -124,6 +134,31 @@ export async function escalateAlert(
         ai_summary: existingNotes ? `${existingNotes}\n${escNote}` : escNote,
         updated_at: at,
       };
+
+      // HAND THE TIER DOWN, NOT JUST THE OFFICER.
+      //
+      // This wrote `assigned_to` and `escalated_to_agency` and left
+      // `assigned_tier` alone, so an incident HQ handed to an LGA commander was
+      // still owned by tier HQ. The responder app shows an officer the alerts of
+      // their own tier and above, so the LGA commander's whole team could not
+      // see it — only the one named officer, and only through the "assigned to
+      // me" rule. Everyone else at that LGA was looking at a queue the incident
+      // had been removed from.
+      //
+      // `tier_assigned_at` restarts with it, because the server-side timeout is
+      // measured from there and the LGA needs its own window rather than
+      // whatever is left of HQ's. `acknowledged_*` clears: nobody at the new
+      // tier has acknowledged anything yet.
+      //
+      // Only when a TIER is the target. Escalating to an outside agency is a
+      // different axis — `escalated_to_agency` — and must not move the incident
+      // down the internal chain.
+      if (lgaTarget && lgaTarget !== 'ALL') {
+        updateData.assigned_tier = 'LGA';
+        updateData.tier_assigned_at = at;
+        updateData.acknowledged_at = null;
+        updateData.acknowledged_by = null;
+      }
 
       // Assign to the resolved commander UUID — NOT the HQ operator's own ID
       if (targetCommanderId) {
@@ -162,16 +197,38 @@ export async function escalateAlert(
   }
 }
 
-/** HQ takes command of an incident itself. */
+/**
+ * HQ takes command of an incident itself.
+ *
+ * "HQ overrides where the chain is not accessible" is the whole point of this
+ * button, and it used to write only severity, status and the operator's uuid.
+ * Two consequences, both silent:
+ *
+ *   * `assigned_tier` stayed wherever the incident was — typically 'UNIT', since
+ *     an override is most often used on something nobody below answered. So the
+ *     server-side escalation job kept climbing it: HQ took command and the alert
+ *     was then escalated onward from under HQ, minutes later, by a timeout.
+ *   * `acknowledged_at` stayed null, which is what that job reads to mean "no
+ *     one has this". HQ taking command is the clearest possible case of somebody
+ *     having it.
+ *
+ * Taking command means owning the rung and stopping the clock.
+ */
 export async function hqOverride(alertIds: AlertIds, actor: Actor): Promise<ActionResult> {
   const ids = idsOf(alertIds);
   try {
+    const at = new Date().toISOString();
     const updateData: Record<string, unknown> = {
       severity: 'CRITICAL',
       status: 'IN_PROGRESS',
+      assigned_tier: 'HQ',
+      tier_assigned_at: at,
+      acknowledged_at: at,
+      updated_at: at,
     };
     if (actor.id) {
       updateData.assigned_to = actor.id;
+      updateData.acknowledged_by = actor.id;
     }
     const { error } = await supabase.from('alerts').update(updateData).in('id', ids);
     if (error) throw error;
