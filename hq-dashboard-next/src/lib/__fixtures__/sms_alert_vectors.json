@@ -1,0 +1,13 @@
+{
+  "generatedBy": "test/gen_sms_vectors_test.dart",
+  "keyBase64": "AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK+2vcTL0tk=",
+  "deviceRefHex": "a1b2c3d4",
+  "sentAtIso": "2026-09-28T14:30:05.000Z",
+  "localRefHex": "010203040506",
+  "cases": {
+    "ordinary": "OR1AaGyw9QAAQIDBAUGBwgJCguUHyF3yMrpU5Qokc__JD13Fd-QlBC8P4vCf75gZgiwaAiyOyzZ",
+    "duress": "OR1AaGyw9QAAQIDBAUGBwgJCguV6SF3yMrpU5Qokc__JD13Fd-QlBAKnULj46nZgT-OWVSDOc-p",
+    "noFix": "OR1AaGyw9QAAQIDBAUGBwgJCguQFiB3x9M_U5ms1s__JD13Fd-QlBBALQ_zajJM_NsjheGJBy9h",
+    "anonymous": "OR1AaGyw9QAAQIDBAUGBwgJCguWESOIOmUvU7eEvs__JD13Fd-QlBDCEvseb_lViYf44FZfJg7C"
+  }
+}
