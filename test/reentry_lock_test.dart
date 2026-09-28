@@ -137,7 +137,7 @@ void main() {
     test('it does not, once there is no session', () {
       expect(
         lockSurvivesSessionChange(
-          lockedSession: 'citizen-1@12:00',
+          lockedSession: 'citizen-1#1',
           currentSession: null,
         ),
         isFalse,
@@ -149,8 +149,8 @@ void main() {
       // number and an OTP, which is more proof than the lock screen asks for.
       expect(
         lockSurvivesSessionChange(
-          lockedSession: 'citizen-1@12:00',
-          currentSession: 'citizen-1@12:05',
+          lockedSession: 'citizen-1#1',
+          currentSession: 'citizen-1#2',
         ),
         isFalse,
       );
@@ -159,8 +159,8 @@ void main() {
     test('it does not pass to a different person', () {
       expect(
         lockSurvivesSessionChange(
-          lockedSession: 'citizen-1@12:00',
-          currentSession: 'colleague-2@12:05',
+          lockedSession: 'citizen-1#1',
+          currentSession: 'colleague-2#2',
         ),
         isFalse,
       );
@@ -169,8 +169,8 @@ void main() {
     test('it stands for the session that earned it', () {
       expect(
         lockSurvivesSessionChange(
-          lockedSession: 'citizen-1@12:00',
-          currentSession: 'citizen-1@12:00',
+          lockedSession: 'citizen-1#1',
+          currentSession: 'citizen-1#1',
         ),
         isTrue,
       );
@@ -178,7 +178,7 @@ void main() {
 
     test('an unlocked app is not locked by a session appearing', () {
       expect(
-        lockSurvivesSessionChange(lockedSession: null, currentSession: 'x@1'),
+        lockSurvivesSessionChange(lockedSession: null, currentSession: 'x#1'),
         isFalse,
       );
     });

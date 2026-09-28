@@ -44,16 +44,22 @@ final emergencyActiveProvider = Provider<bool>(
 /// The user id is not enough on its own. Signing out and signing straight back
 /// in as the same person gives the same id, so an id-only key cannot tell that
 /// apart from nothing having happened — and that is precisely the case the lock
-/// has to notice, because signing in again means passing an OTP. Pairing the id
-/// with the sign-in time makes each sign-in its own session.
+/// has to notice, because signing in again means passing an OTP.
+///
+/// Pairing the id with `last_sign_in_at` was the first attempt and was wrong:
+/// that is a value the backend controls. The local stand-in stamps it once at
+/// start-up, so two sign-ins carried an identical timestamp and the lock
+/// survived across them — the browser sweep caught it a second time. The count
+/// of sign-ins this app has actually observed depends on nothing but this app.
 ///
 /// Everything else about the auth state is deliberately excluded: `authProvider`
 /// rebuilds whenever the profile, role or tier resolves, and a lock lifted by a
 /// background refresh would be no lock at all.
 final sessionIdentityProvider = Provider<String?>((ref) {
-  final user = ref.watch(authProvider).user;
+  final auth = ref.watch(authProvider);
+  final user = auth.user;
   if (user == null) return null;
-  return '${user.id}@${user.lastSignInAt ?? ''}';
+  return '${user.id}#${auth.sessionEpoch}';
 });
 
 /// Whether the app is currently locked behind a re-entry code.

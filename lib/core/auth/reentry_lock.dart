@@ -160,7 +160,8 @@ String lockScreenExplanation(UnlockPath path) {
 /// "Session" here means one sign-in, not one person. A user id alone cannot
 /// distinguish signing out and back in as the same person from nothing having
 /// happened at all, and that is the case this exists for; the caller pairs the
-/// id with the sign-in time so each sign-in is its own session.
+/// id with the count of sign-ins it has observed so each sign-in is its own
+/// session.
 bool lockSurvivesSessionChange({
   required String? lockedSession,
   required String? currentSession,

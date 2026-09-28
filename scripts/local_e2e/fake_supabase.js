@@ -132,6 +132,12 @@ const authUsers = PEOPLE.map((p) => ({
 const sessions = new Map();
 
 function session(user) {
+  // Real Supabase stamps this at each sign-in. The stand-in used to set it once
+  // when the user list was built, so every sign-in in a run carried the same
+  // timestamp — which made two different sign-ins indistinguishable to anything
+  // keying off it, and hid a re-entry-lock defect behind a backend that was not
+  // behaving like the real one.
+  user.last_sign_in_at = new Date().toISOString();
   const access_token = mintToken(user);
   sessions.set(access_token, user);
   return {

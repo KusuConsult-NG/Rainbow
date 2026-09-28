@@ -18,10 +18,11 @@ void main() {
   // Who is signed in, as a knob a test can turn part-way through. The lock is
   // scoped to a session, so signing out and signing back in has to be
   // expressible here — it is the case that was broken.
-  // A session key, not a person: the provider pairs the user id with the
-  // sign-in time, so signing in again as the same person yields a new value.
+  // A session key, not a person: the provider pairs the user id with the count
+  // of sign-ins this app has observed, so signing in again as the same person
+  // yields a new value.
   final whoIsSignedIn =
-      StateProvider<String?>((ref) => 'citizen-1@2026-09-28T12:00:00Z');
+      StateProvider<String?>((ref) => 'citizen-1#1');
 
   ProviderContainer containerWith({
     required bool signedIn,
@@ -202,7 +203,7 @@ void main() {
     // Signing in again means the number AND an OTP — strictly more proof than
     // the lock screen asks for. Same person, new sign-in, so a new session key.
     container.read(whoIsSignedIn.notifier).state =
-        'citizen-1@2026-09-28T12:05:00Z';
+        'citizen-1#2';
 
     expect(container.read(reentryLockProvider), isFalse);
   });
@@ -217,7 +218,7 @@ void main() {
 
     container.read(reentryLockProvider.notifier).lockNow();
     container.read(whoIsSignedIn.notifier).state =
-        'colleague-2@2026-09-28T12:05:00Z';
+        'colleague-2#2';
 
     expect(container.read(reentryLockProvider), isFalse);
   });
@@ -231,7 +232,7 @@ void main() {
 
     container.read(reentryLockProvider.notifier).lockNow();
     container.read(whoIsSignedIn.notifier).state =
-        'citizen-1@2026-09-28T12:00:00Z'; // unchanged
+        'citizen-1#1'; // unchanged
 
     expect(container.read(reentryLockProvider), isTrue);
   });
@@ -245,7 +246,7 @@ void main() {
     container.read(reentryLockProvider.notifier).lockNow();
     container.read(whoIsSignedIn.notifier).state = null;
     container.read(whoIsSignedIn.notifier).state =
-        'citizen-1@2026-09-28T12:05:00Z';
+        'citizen-1#2';
 
     // A brief, innocent absence for the new session.
     container
