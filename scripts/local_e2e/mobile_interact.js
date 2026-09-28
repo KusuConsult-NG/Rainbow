@@ -610,6 +610,48 @@ async function logMark() {
   /** Controls that were found but had gone from the DOM by the time we pressed. */
   let unreachable = 0;
 
+  // The control list, rebuilt in the page every time it is needed.
+  //
+  // It used to be captured once into `window.__mb` and then indexed across
+  // several page.evaluate round-trips. Flutter rebuilds its semantics tree on
+  // every change — and it changes constantly — so those nodes were detached
+  // long before they were clicked: 87 of them in one run, silently skipped.
+  //
+  // Holding no reference at all removes the whole class of problem. The list is
+  // rebuilt at the moment of the click, so index i always refers to something
+  // that exists now.
+  const CONTROL_QUERY = `
+    const all = [...document.querySelectorAll(
+      'flt-semantics[role="button"], flt-semantics[flt-tappable],'
+      + ' flt-semantics[role="link"], flt-semantics[role="checkbox"]',
+    )].filter((b) => {
+      const r = b.getBoundingClientRect();
+      return r.width > 4 && r.height > 4;
+    });
+    // Innermost only: Flutter nests semantics, so a tappable card containing a
+    // tappable button would otherwise be counted and pressed twice.
+    const mb = all.filter((n) => !all.some((o) => o !== n && n.contains(o)));
+  `;
+
+  const listControls = () => page.evaluate(new Function(`
+    ${CONTROL_QUERY}
+    window.__coverage = {
+      nodes: document.querySelectorAll('flt-semantics').length,
+      matched: all.length,
+      innermost: mb.length,
+    };
+    return mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
+  `));
+
+  const clickControl = (idx) => page.evaluate(new Function('idx', `
+    ${CONTROL_QUERY}
+    const b = mb[idx];
+    if (!b) return false;
+    b.click();
+    return true;
+  `), idx);
+
+
   // WHAT COUNTS AS "IT DID SOMETHING".
   //
   // URL, innerHTML length and network traffic miss a whole class of real effect
@@ -648,39 +690,7 @@ async function logMark() {
     const landed = await page.evaluate(() => window.location.hash);
     if (!landed.includes(route)) sweptElsewhere += 1;
 
-    const captureControls = () => page.evaluate(() => {
-      // `flt-semantics[role="button"]` alone found under two controls per
-      // screen — 34 across nineteen screens, against the console sweep's 140.
-      // Flutter only gives role="button" to widgets it considers semantic
-      // buttons; an InkWell, a ListTile, a GestureDetector and a tappable card
-      // are marked `flt-tappable` with no role, and those are most of this
-      // app's controls. A sweep that cannot see them is not a sweep.
-      const all = [...document.querySelectorAll(
-        'flt-semantics[role="button"], flt-semantics[flt-tappable],'
-        + ' flt-semantics[role="link"], flt-semantics[role="checkbox"]',
-      )].filter((b) => {
-        const r = b.getBoundingClientRect();
-        return r.width > 4 && r.height > 4;
-      });
-      // Keep the innermost only. Flutter nests semantics, so a tappable card
-      // containing a tappable button would otherwise be counted and pressed
-      // twice — and pressing the wrapper does not necessarily do what pressing
-      // the button does.
-      window.__mb = all.filter((n) => !all.some((o) => o !== n && n.contains(o)));
-      window.__coverage = {
-        // Every semantics node on the screen, against the ones we can press.
-        // Reported so a low control count is attributable: a sweep that finds
-        // two controls on a screen with forty nodes is a selector problem, and
-        // one that finds two on a screen with eight is the app exposing
-        // nothing — a screen reader would see the same eight.
-        nodes: document.querySelectorAll('flt-semantics').length,
-        matched: all.length,
-        innermost: window.__mb.length,
-      };
-      return window.__mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
-    });
-
-    let labels = await captureControls();
+    let labels = await listControls();
 
     const cov = await page.evaluate(() => window.__coverage);
     coverage.push({ route, ...cov });
@@ -710,14 +720,7 @@ async function logMark() {
       const before = snapshot();
       const reqBefore = await logMark();
 
-      const clicked = await page.evaluate((idx) => {
-        const b = window.__mb?.[idx];
-        if (!b || !b.isConnected) return false;
-        const r = b.getBoundingClientRect();
-        if (r.width < 4) return false;
-        b.click();
-        return true;
-      }, i);
+      const clicked = await clickControl(i);
       if (!clicked) {
         unreachable += 1;
         continue;
@@ -750,7 +753,7 @@ async function logMark() {
       // screen.
       if (effect.length) {
         await go(route, 1800);
-        labels = await captureControls();
+        labels = await listControls();
       }
     }
     await shot(`94-mobile-sweep${route.replace(/\//g, '-')}`);
@@ -792,21 +795,7 @@ async function logMark() {
       state.screen = `sweep:responder:${route}`;
       await go(route, 2800);
 
-      const captureStaffControls = () => page.evaluate(() => {
-        // Same widening as the citizen sweep above: role="button" alone misses
-        // every InkWell, ListTile and tappable card, which is most of them.
-        const all = [...document.querySelectorAll(
-          'flt-semantics[role="button"], flt-semantics[flt-tappable],'
-          + ' flt-semantics[role="link"], flt-semantics[role="checkbox"]',
-        )].filter((b) => {
-          const r = b.getBoundingClientRect();
-          return r.width > 4 && r.height > 4;
-        });
-        window.__mb = all.filter((n) => !all.some((o) => o !== n && n.contains(o)));
-        return window.__mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
-      });
-
-      let labels = await captureStaffControls();
+      let labels = await listControls();
       for (let i = 0; i < labels.length; i++) {
         const label = labels[i];
         if (/sign ?out|log ?out|terminate|power/i.test(label)) {
@@ -816,13 +805,7 @@ async function logMark() {
 
         const before = snapshot();
         const reqBefore = await logMark();
-        const clicked = await page.evaluate((idx) => {
-          const b = window.__mb?.[idx];
-          if (!b || !b.isConnected) return false;
-          if (b.getBoundingClientRect().width < 4) return false;
-          b.click();
-          return true;
-        }, i);
+        const clicked = await clickControl(i);
         if (!clicked) {
           unreachable += 1;
           continue;
@@ -845,7 +828,7 @@ async function logMark() {
         // that did anything detached every node after it.
         if (effect.length) {
           await go(route, 1800);
-          labels = await captureStaffControls();
+          labels = await listControls();
         }
       }
       await shot(`95-mobile-responder-sweep${route.replace(/\//g, '-')}`);
