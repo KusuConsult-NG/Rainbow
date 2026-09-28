@@ -599,6 +599,11 @@ async function logMark() {
   // notice reports "34 controls exercised" over thirteen copies of one screen.
   let sweptElsewhere = 0;
 
+  // Controls deliberately not pressed. Reported alongside the count that WAS
+  // pressed, so a sweep that skipped most of the app cannot read as a clean
+  // one — which is exactly how the over-wide pattern above went unnoticed.
+  let skipped = 0;
+
   for (const route of SCREENS) {
     state.screen = `sweep:${route}`;
     await go(route, 2600);
@@ -624,7 +629,16 @@ async function logMark() {
       // "EMERGENCY — SEND SOS NOW". So the sweep pressed the panic button on
       // every screen that carries one, and the only reason this did not file a
       // dozen false CRITICAL alerts is that it reported them as doing nothing.
-      if (/sign ?out|log ?out|terminate|sos|panic|emergency/i.test(label)) continue;
+      //
+      // Widening it to the bare word `emergency` then went too far the other
+      // way: "Add Emergency Contact", "Emergency Contacts" and the
+      // emergency-alerts toggle are ordinary controls, and skipping them
+      // dropped the sweep to 22 controls over nineteen screens — a pass earned
+      // by pressing almost nothing. Match the panic button's own wording.
+      if (/sign ?out|log ?out|terminate|send sos|silent sos|\bsos\b|panic/i.test(label)) {
+        skipped += 1;
+        continue;
+      }
 
       const before = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
       const reqBefore = await logMark();
@@ -702,7 +716,10 @@ async function logMark() {
 
       for (let i = 0; i < buttons.length; i++) {
         const label = buttons[i];
-        if (/sign ?out|log ?out|terminate|power/i.test(label)) continue;
+        if (/sign ?out|log ?out|terminate|power/i.test(label)) {
+        skipped += 1;
+        continue;
+      }
 
         const before = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
         const reqBefore = await logMark();
@@ -745,7 +762,7 @@ async function logMark() {
     deadControls.length === 0,
     deadControls.length
       ? `${deadControls.length} did nothing: ${deadControls.slice(0, 8).map((d) => `${d.route}/"${d.label}"`).join(', ')}`
-      : `${sweepLog.length} controls exercised`,
+      : `${sweepLog.length} controls exercised, ${skipped} deliberately skipped`,
   );
 
   /**
