@@ -25,10 +25,30 @@ compromised, rotate all keys, and do not deploy until C-1 through C-4 are fixed.
 **Current position:** C-1, C-2, C-4 and C-5 are fixed and verified. **Two need a
 human, for different reasons.**
 
-**C-3** is addressed in code and no longer unverified: the migration has been proven
-correct against a real PostgreSQL 16 (`./scripts/verify_rls_migration.sh`, also a CI
-job). It just has not been *run* on your database, which needs credentials this audit
-does not have.
+**C-3 is CLOSED, on the live database, 2026-09-28.** All fourteen outstanding
+migrations were applied to the production Supabase project and its own verification
+reported **25/25 PASS**. The permissive policy set is gone: 44 policies became 29,
+and `no policy grants anon or public anything` passes.
+
+What that run closed, measured on the real database rather than argued from the
+migration text:
+
+| was true before | now |
+|---|---|
+| any citizen could `update profiles set role='ADMIN' where id=auth.uid()` and become HQ | `profiles_no_privilege_escalation` blocks it |
+| any authenticated account could update **any** alert — resolve somebody else's emergency | responders only |
+| every signed-in account could read every citizen's live GPS, kept forever | only while that citizen has an open emergency, purged after 24h |
+| every alert, profile and incident chat readable by every account | scoped |
+| any account could write the four agency tables | scoped |
+| `app_config` readable by `anon` | scoped |
+
+The database was empty when this ran — zero users, zero alerts — so none of the
+above was ever exploited. It was applied before the first citizen existed, which is
+the only comfortable time to do it.
+
+Also now live: the command chain's timeouts, which had been *configured and dead*
+since the beginning (`rainbow-escalate-overdue`, every minute), the telemetry purge,
+and the mesh envelope purge. All three confirmed active in `cron.job`.
 
 **C-6** cannot be addressed in code at all. Deleting `functions/` does not undeploy
 anything, so the only action that closes it is `firebase functions:list` against
@@ -2090,13 +2110,20 @@ clean.
 
 ## Applying the migrations, in two pastes
 
-Nine migrations meant nine trips to the SQL editor, each with its own
-verification snippet to run and read — nine chances to skip one, apply them out
+Fourteen migrations would mean fourteen trips to the SQL editor, each with its own
+verification snippet to run and read — fourteen chances to skip one, apply them out
 of order, or believe a step worked because no error appeared.
 
 `scripts/apply_all_migrations.sql` is generated from the migration files and
-contains all nine in order, ending in a fourteen-row PASS/FAIL table. One paste
-in, one answer out.
+contains all of them in order, ending in a 25-row PASS/FAIL table. One paste in,
+one answer out. `scripts/apply_in_parts/` is the same SQL split for an editor that
+will not take 2,300 lines at once, and CI proves the parts land the same database
+as the whole.
+
+**Counts in this file are derived now, not written.** An earlier version of the
+generated header said "the nine outstanding migrations" while the file applied
+fourteen — on a file an operator pastes into production, a header that miscounts by
+five costs its reader's trust in everything under it.
 
 It does **not** replace the dry run, and says so in its own header. The RLS
 migration drops prior policies by exact name, a hand-made dashboard policy
@@ -2436,6 +2463,30 @@ so that last claim is checkable rather than assumed.
 **Still outstanding, and it needs a human.** The migration cannot tell an
 account legitimately provisioned as `HQ_COMMAND` from one that asked to be.
 `docs/PRODUCTION_DEPLOYMENT.md` carries the audit query for the existing roster.
+On the project this was applied to on 2026-09-28 the answer was easy — there were
+zero accounts of any kind — but that will not be true of a project that has been
+running.
+
+**And one thing this fix created, found while using it.** `/api/admin/provision`
+opens with `requireRole(COMMAND_ROLES)`, and the migration makes every signup a
+CITIZEN. So on a database with no staff, **there is no way in**: the only route
+that can set a role refuses everyone, because nobody holds a role yet. It is a
+genuine bootstrap deadlock, not a misconfiguration, and it appeared the first time
+anybody stood the system up from nothing.
+
+The first account therefore has to be made out of band, once, per deployment:
+
+```sql
+-- after creating the auth user in the Supabase dashboard
+update public.profiles
+   set role = 'HQ_COMMAND', full_name = '...', badge_number = 'HQ-001'
+ where email = '...';
+```
+
+That works because `profiles_no_privilege_escalation` exempts a caller with no
+`auth.uid()`, which is what the SQL editor is. Every account after the first goes
+through the route. Written down here because the deadlock is invisible until the
+moment it blocks you, and at that moment it looks like the console is broken.
 
 ### Six more harness faults, again not app faults
 

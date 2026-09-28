@@ -28,26 +28,88 @@ emergencies. The full instructions are in `E2E_AUDIT_REPORT.md`.
 
 ## 1. Database
 
-Eleven migrations, in filename order. `docs/APPLYING_THE_MIGRATIONS.md` is the
-step-by-step runbook, including the mandatory read-only dry run; do not apply
-the RLS migration without it.
+**Applied to the production project on 2026-09-28: 25/25 PASS.** What follows is
+for a new project — staging, DR, or a second deployment — and as the record of what
+each file does.
+
+Fourteen migrations, in filename order. The fastest route is one paste of
+`scripts/apply_all_migrations.sql`, which contains all fourteen in order and ends
+in a 25-row PASS/FAIL table; `scripts/apply_in_parts/` is the same SQL split into
+numbered files for an editor that will not take 2,300 lines at once.
+`docs/APPLYING_THE_MIGRATIONS.md` is the step-by-step runbook, including the
+mandatory read-only dry run; do not apply the RLS migration without it.
 
 | Order | File | What it does |
 |---|---|---|
-| 1 | `20260812000000_agency_tables.sql` | Creates the four `agency_*` tables and `profiles.agency`. **On production these already exist and this is a no-op**; it exists so a staging or DR project is not missing the agency portal's backend. |
+| 1 | `20260812000000_agency_tables.sql` | Creates the four `agency_*` tables and `profiles.agency`. |
 | 2 | `20260813000000_rls_least_privilege.sql` | Closes C-3/C-4/H-7. Needs the dry run first. |
-| 3 | `20260902000000_per_user_emergency_pins.sql` | Per-user, server-verified duress PINs. |
-| 4 | `20260903000000_realtime_publication.sql` | Adds the three tables the console subscribes to that were never published. |
+| 3 | `20260902000000_per_user_emergency_pins.sql` | Per-user, server-verified duress PINs. Until it runs the duress PIN does not work at all. |
+| 4 | `20260903000000_realtime_publication.sql` | Adds the three tables the console subscribes to that were never published. A subscription outside the publication does not error — it silently never fires. |
 | 5 | `20260903000001_incident_media_storage.sql` | Creates and secures the `incident-media` bucket. |
 | 6 | `20260903000002_system_alerts_broadcast.sql` | Makes mass broadcast work. Until it runs, every broadcast fails on a NOT NULL `title` and six non-existent columns. |
-| 7 | `20260903000003_alert_escalation_columns.sql` | Adds `alerts.escalated_to_agency` and `escalation_log`. Already present on production; a no-op there. |
-| 8 | `20260903000004_profiles_badge_number.sql` | Adds `profiles.badge_number`, the label both apps show for an officer. A no-op if production has it. |
+| 7 | `20260903000003_alert_escalation_columns.sql` | Adds `alerts.escalated_to_agency` and `escalation_log`. |
+| 8 | `20260903000004_profiles_badge_number.sql` | Adds `profiles.badge_number`, the label both apps show for an officer. Without it the mobile responder list comes back empty and an agent cannot dispatch anyone. |
 | 9 | `20260903000005_alerts_assigned_tier.sql` | Adds `alerts.assigned_tier` and moves tier labels out of `escalated_to_agency`. Until it runs, a mobile escalation with no named commander is **rejected in full**. |
-| 11 | `20260928000000_command_chain_escalation.sql` | Makes the command chain real: an alert lands at the **polling unit**, and unacknowledged alerts climb UNIT→WARD→LGA→HQ on the timeouts that `app_config` has always held and nothing has ever enforced. Schedules the job with pg_cron where available. |
 | 10 | `20260927000000_signup_cannot_choose_role.sql` | **Closes a privilege escalation.** `handle_new_user()` copied `raw_user_meta_data->>'role'` onto the new profile, so anyone holding the anon key — which ships in the APK and the browser — could sign up as `HQ_COMMAND`. Apply this one first if you apply nothing else. |
+| 11 | `20260928000000_command_chain_escalation.sql` | Makes the command chain real: an alert lands at the **polling unit**, and unacknowledged alerts climb UNIT→WARD→LGA→HQ on the timeouts `app_config` has always held and nothing has ever enforced. Schedules the job with pg_cron where available. |
+| 12 | `20260929000000_telemetry_is_not_a_standing_feed.sql` | A citizen's live position stops being readable by every staff account and starts being deleted. Also scopes chat writes to a thread you are part of. |
+| 13 | `20260930000000_sms_device_keys.sql` | The per-device key the encrypted SMS fallback authenticates with, plus `alerts.arrived_via`. |
+| 14 | `20261001000000_mesh_ingest.sql` | The mesh envelope-dedup table, so one alert flooded by several relays is one incident. |
 
-All eleven are idempotent and every one of them is proven on a real PostgreSQL by
-the `rls-migration` CI job before it reaches you.
+Every one of them is proven on a real PostgreSQL by the `rls-migration` CI job
+before it reaches you.
+
+**"Idempotent" is not quite right, and the difference shows if you re-run.** Most
+of these are: `IF NOT EXISTS` / `OR REPLACE`, and a second run says nothing.
+`20260813000000_rls_least_privilege.sql` is **atomic** instead — it drops the old
+policy set by name and creates a new one inside its own BEGIN/COMMIT — so a second
+run reports
+
+```
+ERROR: policy "profiles_select_self_or_staff" for table "profiles" already exists
+```
+
+and rolls itself back. That means **the policies are already in place**. Nothing is
+half-applied, the verification will still report every row PASS, and the thing to
+read is the verdict table rather than the error.
+
+### Then make the first staff account, once, out of band
+
+`/api/admin/provision` is the only thing that may set `profiles.role` — and it
+opens with `requireRole(COMMAND_ROLES)`. On a database with no staff that refuses
+everyone, because nobody holds a role yet. It is a real bootstrap deadlock and it
+appears the first time anybody stands the system up from nothing; at that moment it
+looks like the console is broken.
+
+Create the auth user in the Supabase dashboard (Authentication → Users → Add user),
+then:
+
+```sql
+update public.profiles
+   set role = 'HQ_COMMAND', full_name = 'Real Name', badge_number = 'HQ-001'
+ where email = 'the-account@example.gov.ng';
+
+select id, email, role, badge_number from public.profiles where role <> 'CITIZEN';
+```
+
+This works because `profiles_no_privilege_escalation` exempts a caller with no
+`auth.uid()`, which is what the SQL editor is. Every account after the first goes
+through the route, which enforces the hierarchy.
+
+### And confirm the scheduled jobs attached
+
+pg_cron exists on Supabase but is not enabled by default, and the escalation
+timeouts are worthless without it — the failure mode the command-chain migration
+was written to fix is a timeout that is configured and never fires.
+
+```sql
+select jobname, schedule, active from cron.job order by jobname;
+```
+
+Three rows: `rainbow-escalate-overdue` (`* * * * *`), `rainbow-purge-telemetry`
+(`17 * * * *`), `purge-stale-mesh-envelopes` (`17 * * * *`). If `cron.job` does not
+exist, enable `pg_cron` under Database → Extensions and re-run migrations 11, 12
+and 14 — each attaches its schedule wherever the extension is present.
 
 ### After applying migration 10, audit who is already staff
 
