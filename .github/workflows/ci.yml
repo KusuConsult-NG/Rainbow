@@ -803,6 +803,38 @@ jobs:
           [ "$MISSING" -eq 0 ] || exit 1
           echo "OK: every realtime subscription targets a published table."
 
+  sms-end-to-end:
+    name: Supabase — the SMS channel, from the issued key to the decoded alert
+    runs-on: ubuntu-latest
+    # Every piece of the SMS channel was tested against material a test invented:
+    # the Dart encoder seals with a key it made up, the TypeScript decoder reads
+    # vectors from a fixture, and the SQL test checks that register_sms_device()
+    # returns 4 and 32 bytes without ever using them. Nothing checked the JOIN —
+    # that the key PostgreSQL issues, rendered the way PostgREST renders BYTEA,
+    # opens a message the handset sealed. That is three encodings deep and every
+    # one of them is somewhere the channel could fail silently.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: hq-dashboard-next/package-lock.json
+      - run: cp .env.example .env
+      - run: flutter pub get
+      - run: npm ci
+        working-directory: hq-dashboard-next
+      - name: Install PostgreSQL 16
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-16
+      - name: Seal with the key the database issued, decode with the HQ codec
+        run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_sms_end_to_end.sh
+
   dryrun-speaks:
     name: Supabase — the production dry run actually reports something
     runs-on: ubuntu-latest
