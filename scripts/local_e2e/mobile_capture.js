@@ -27,7 +27,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
-const { DOMAIN, PASSWORD } = require('./fixtures');
+const { DOMAIN, PASSWORD, byKey } = require('./fixtures');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -225,8 +225,10 @@ async function semanticsText(page) {
    * Sign in.
    *
    * Two different paths, because the app has two:
-   *   citizen — phone number, then an OTP (08000000000 / 123456 is the demo
-   *             bypass, which signs in with DEMO_CITIZEN_* from .env)
+   *   citizen — phone number, then the code sent to it. The real path: the
+   *             demo bypass this used to take is compiled out of release
+   *             builds, and the stand-in answers /auth/v1/otp and
+   *             /auth/v1/verify so the harness exercises what ships.
    *   staff   — an access code, which is the email; signInWithAccessCode pairs
    *             it with AGENT_DEFAULT_PASS and there is no second step
    *
@@ -269,7 +271,21 @@ async function semanticsText(page) {
     await sleep(1800);
 
     if (role === 'citizen') {
-      await typeInto('08000000000');
+      // The REAL citizen sign-in: a phone number, then a code sent to it.
+      //
+      // This used to type 08000000000 and 123456 — the app's demo bypass,
+      // which swapped in an email/password login behind the scenes. That is
+      // compiled out of release builds now (AuthService.isDemoNumber returns
+      // false under kReleaseMode), because in a shipped APK it was a published
+      // credential: the number is in the source and the password is in the
+      // bundled .env, which extracts with `unzip`.
+      //
+      // So the harness could not sign a citizen in at all — which is worth
+      // recording, because it means every citizen test here had been
+      // travelling through a door production does not have. The stand-in
+      // answers /auth/v1/otp and /auth/v1/verify now, so this is the path a
+      // citizen actually takes.
+      await typeInto(byKey('citizen').phone.replace('+234', '0'));
       await tapLabelled('authorize access');
       await sleep(2800);
       await typeInto('123456');
@@ -305,10 +321,6 @@ async function semanticsText(page) {
     ['/safe-zone', 'safe-zone', 'safe_zone_screen.dart'],
     ['/dispatcher-chat', 'dispatcher-chat', 'dispatcher_chat_screen.dart'],
     ['/settings', 'settings', 'settings_screen.dart'],
-    // Reached through Settings → Lock This Phone, not by URL: the router
-    // redirects away from /lock when nothing is locked, which is the point of
-    // it. See the lock section in mobile_interact.js.
-    ['/lock', 'lock', 'lock_screen.dart'],
     ['/uninstall-request', 'uninstall-request', 'uninstall_request_screen.dart'],
     // Staff only. A citizen is redirected away from every one of these, which
     // is why capturing them needs a responder, an LGA commander and HQ —
@@ -318,6 +330,21 @@ async function semanticsText(page) {
     ['/mission-resolution', 'mission-resolution', 'mission_resolution_screen.dart'],
     ['/secure-chat', 'secure-chat', 'secure_chat_screen.dart'],
     ['/admin-broadcast', 'admin-broadcast', 'admin_broadcast_screen.dart'],
+    // LAST, and it has to be.
+    //
+    // Two things about this route are unlike every other one here. It cannot
+    // be reached by URL — the router sends anybody at /lock who is not locked
+    // back to their home screen, which is what stops a lock screen appearing
+    // over a live emergency — so it is reached the way a person reaches it,
+    // through Settings → Lock This Phone.
+    //
+    // And reaching it LOCKS THE APP. Put it in the middle of this list and
+    // every route after it correctly redirects to /lock, so the walk captures
+    // the lock screen over and over and reports the rest as unreachable. The
+    // first version of this sat after /settings and did exactly that, which is
+    // a good demonstration that the gate works and a bad way to photograph
+    // twenty-five screens.
+    ['/lock', 'lock', 'lock_screen.dart'],
   ];
 
   // The whole command chain, bottom to top, plus a citizen and an untiered

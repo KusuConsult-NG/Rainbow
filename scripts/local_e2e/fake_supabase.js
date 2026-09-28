@@ -99,13 +99,25 @@ function mintToken(user) {
   return `${header}.${payload}.${sig}`;
 }
 
+/** Digits only, so `0803…`, `+234803…` and `234803…` compare equal. */
+function normalisePhone(value) {
+  const digits = String(value || '').replace(/[^0-9]/g, '');
+  if (!digits) return '';
+  const national = digits.startsWith('234') ? digits.slice(3) : digits.replace(/^0/, '');
+  return national;
+}
+
 const authUsers = PEOPLE.map((p) => ({
   id: p.id,
   aud: 'authenticated',
   role: 'authenticated',
   email: `${p.key}@${DOMAIN}`,
   email_confirmed_at: '2026-09-01T08:00:00.000Z',
-  phone: '',
+  // The number the account was created with. A citizen has no email and no
+  // password in production — the phone IS the identity — so the stand-in has
+  // to know it in order to answer a real OTP sign-in.
+  phone: PEOPLE.find((q) => q.key === p.key)?.phone || '',
+  phone_confirmed_at: '2026-09-01T08:00:00.000Z',
   confirmed_at: '2026-09-01T08:00:00.000Z',
   last_sign_in_at: new Date().toISOString(),
   app_metadata: { provider: 'email', providers: ['email'] },
@@ -365,6 +377,50 @@ const server = http.createServer(async (req, res) => {
       return send(200, session(user));
     }
     return send(400, { error: 'unsupported_grant_type' });
+  }
+
+  // ── Phone OTP: the only way a citizen signs in ─────────────────────────────
+  //
+  // The harness used to sign the citizen in through the app's demo bypass —
+  // 08000000000 with the code 123456, which swapped in an email/password login
+  // behind the scenes. That bypass is compiled out of release builds now
+  // (AuthService.isDemoNumber returns false under kReleaseMode), because in a
+  // shipped APK it was a published credential: the number is in the source and
+  // the password is in the bundled .env, which extracts with `unzip`.
+  //
+  // So the harness could no longer sign a citizen in at all — which is itself
+  // worth recording, because it means every citizen test in this suite had been
+  // travelling through a door that production does not have. The stand-in
+  // answers the REAL endpoints now, and the harness exercises the path a
+  // citizen actually takes.
+  //
+  // The code is not checked against anything sent: there is no SMS here. Any
+  // six digits are accepted for a known number, and an unknown number is
+  // refused — which is the part that matters, because "the number decides which
+  // account you land in" is the behaviour being relied on.
+  if (url.pathname === '/auth/v1/otp' && req.method === 'POST') {
+    const b = await body(req);
+    const phone = normalisePhone(b?.phone);
+    if (!phone) return send(400, { error: 'validation_failed', msg: 'phone is required' });
+    const user = authUsers.find((u) => normalisePhone(u.phone) === phone);
+    if (!user) {
+      // GoTrue answers 200 whether or not the number is known, so that this
+      // endpoint cannot be used to find out who has an account. The stand-in
+      // does the same, and the sign-in fails at the verify step instead.
+      return send(200, {});
+    }
+    return send(200, {});
+  }
+
+  if (url.pathname === '/auth/v1/verify' && req.method === 'POST') {
+    const b = await body(req);
+    const phone = normalisePhone(b?.phone);
+    const token = String(b?.token || '');
+    const user = authUsers.find((u) => normalisePhone(u.phone) === phone);
+    if (!user || !/^\d{6}$/.test(token)) {
+      return send(400, { error: 'invalid_grant', error_description: 'Token has expired or is invalid' });
+    }
+    return send(200, session(user));
   }
 
   if (url.pathname === '/auth/v1/user') {

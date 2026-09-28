@@ -27,7 +27,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
-const { DOMAIN } = require('./fixtures');
+const { DOMAIN, byKey } = require('./fixtures');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -239,7 +239,8 @@ async function logMark() {
   await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
   await sleep(2000);
 
-  await typeInto('08000000000');
+  // The real citizen sign-in — see the note in mobile_capture.js.
+  await typeInto(byKey('citizen').phone.replace('+234', '0'));
   await tap('authorize access', { role: 'button' });
   await sleep(2500);
   await typeInto('123456');
@@ -549,7 +550,7 @@ async function logMark() {
   // is the only way out of it that does not need a code, which is itself the
   // thing being relied on here.
   await tap('sign out', { role: 'button', settle: 3000 });
-  await typeInto('08000000000');
+  await typeInto(byKey('citizen').phone.replace('+234', '0'));
   await tap('authorize access', { role: 'button', settle: 2800 });
   await typeInto('123456');
   await tap('verify otp', { role: 'button', settle: 6000 });
