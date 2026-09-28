@@ -226,7 +226,7 @@ WITH checks(ord, name, ok) AS (
                   'public.purge_stale_telemetry()', 'EXECUTE')
            FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public' AND p.proname = 'purge_stale_telemetry')),
-    (21, 'a message cannot be forged into somebody elses channel',
+    (21, 'chat writes are restricted to a participant of the thread',
         EXISTS (SELECT 1 FROM pg_policies
                  WHERE schemaname = 'public' AND tablename = 'chat_messages'
                    AND policyname = 'chat_insert_participant')),
@@ -269,6 +269,43 @@ ORDER BY ok, ord;
 """
 
 
+# ── Labels must not read as DDL to a linter ─────────────────────────────────
+#
+# Supabase's SQL editor lints the buffer BEFORE running it, and its parser reads
+# words out of quoted strings as identifiers. A check labelled
+# "...written into your own channel" made it warn
+#
+#   This query creates a table without enabling Row Level Security. Clients
+#   using anon or authenticated keys may be able to access `your`.
+#
+# about a table that does not exist, and made another path fail with
+# `42P01: relation "your" does not exist`. Renaming the word moved the warning to
+# the new word — `into somebody` became `somebody` — which is how the mechanism
+# became clear: it takes whatever follows `INTO`.
+#
+# These four are the keywords a relation name follows in real SQL, so they are
+# the ones a naive parser reads a table name after. An operator cannot tell a
+# parser quirk from a real finding on a file they are about to paste into
+# production, and the safe response to not knowing is to stop — so the trigger is
+# banned rather than explained.
+FORBIDDEN_IN_LABELS = ("into", "from", "join", "table")
+
+
+def check_labels(text: str) -> None:
+    import re as _re
+    bad = []
+    for m in _re.finditer(r"^    \(\d+, '([^']+)'", text, _re.M):
+        label = m.group(1)
+        for word in FORBIDDEN_IN_LABELS:
+            if _re.search(rf"\b{word}\b", label, _re.I):
+                bad.append((word, label))
+    if bad:
+        for word, label in bad:
+            print(f"label contains '{word}', which Supabase's linter reads as "
+                  f"DDL: {label!r}", file=sys.stderr)
+        raise SystemExit(1)
+
+
 def main() -> int:
     parts = [HEADER]
     for filename in MIGRATIONS:
@@ -286,6 +323,7 @@ def main() -> int:
         parts.append(path.read_text().rstrip() + "\n\n")
     parts.append(VERIFY)
 
+    check_labels(VERIFY)
     OUT.write_text("".join(parts))
     print(f"wrote {OUT.relative_to(ROOT)} "
           f"({len(MIGRATIONS)} migrations, {OUT.read_text().count(chr(10))} lines)")
