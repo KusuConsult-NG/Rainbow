@@ -53,7 +53,8 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/sms_device_keys_behaviour_test.sql \
    "$REPO"/scripts/mesh_ingest_behaviour_test.sql \
    "$REPO"/scripts/alert_category_behaviour_test.sql \
-   "$REPO"/scripts/alert_scoping_behaviour_test.sql "$PGROOT/"
+   "$REPO"/scripts/alert_scoping_behaviour_test.sql \
+   "$REPO"/scripts/notification_outbox_behaviour_test.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
 psql_run() {
@@ -247,6 +248,22 @@ echo "$SCOPE_OUT" | grep -E "PASS|FAIL|ERROR" || true
 if [ "$SCOPE_RC" -ne 0 ]; then
   echo "$SCOPE_OUT"
   echo "✗ alert scoping assertions failed"
+  exit 1
+fi
+
+# The timeout escalation moved the incident and told nobody: every notification
+# in this system is sent by a human pressing a button in the console.
+echo "▶ Applying 20261007000000_notification_outbox.sql"
+psql_run "-f $PGROOT/20261007000000_notification_outbox.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261007000000_notification_outbox.sql" >/dev/null
+
+echo "▶ Asserting an automatic escalation owes somebody a notification"
+OUTBOX_OUT=$(psql_run "-f $PGROOT/notification_outbox_behaviour_test.sql" 2>&1) && OUTBOX_RC=0 || OUTBOX_RC=$?
+echo "$OUTBOX_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$OUTBOX_RC" -ne 0 ]; then
+  echo "$OUTBOX_OUT"
+  echo "✗ notification outbox assertions failed"
   exit 1
 fi
 
