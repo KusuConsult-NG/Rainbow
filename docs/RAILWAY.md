@@ -23,14 +23,42 @@ subdirectory, so Railway must be told which one to build.
 | setting | value |
 |---|---|
 | **Root Directory** | `hq-dashboard-next` |
-| Builder | Nixpacks (the default; `railway.json` names it explicitly) |
+| Builder | leave as the default (Railpack detects Node) |
 | Build command | `npm ci && npm run build` |
 | Start command | `npm run start` |
 | Healthcheck path | `/login` |
 
 Root Directory is a **service setting**, not something `railway.json` can
-express — if it is left at the repository root, the build fails looking for a
-`package.json` that describes the Flutter project's tooling instead.
+express, and getting it wrong is the first thing that happens. Left at the
+repository root, the build fails like this:
+
+```
+╭─────────────────╮
+│ Railpack 0.40.0 │
+╰─────────────────╯
+  ⚠ Script start.sh not found
+  ✖ Railpack could not determine how to build the app.
+  ...
+  The app contents that Railpack analyzed contains:
+  ./
+  ├── android/
+  ├── hq-dashboard-next/
+  ├── ios/
+  ├── lib/
+  ├── pubspec.yaml
+```
+
+Read that listing: it analysed the **Flutter project**. There is no
+`package.json` at the repository root, so no language matched — and note that
+`hq-dashboard-next/railway.json` was never read either, because Railway looks for
+it inside the service's root directory. Until Root Directory is set, none of the
+configuration in this repository applies.
+
+Railway's current builder is **Railpack**, not Nixpacks. `railway.json` therefore
+names no builder at all and lets the platform choose; pinning `"builder":
+"NIXPACKS"` was wrong and is removed. Railpack detects Node from
+`hq-dashboard-next/package.json` on its own, and the `build` and `start` scripts
+are the ones Next.js expects.
 
 `/login` is the healthcheck rather than `/`, because `/` is a redirect to it and
 a 307 is not a health signal.
