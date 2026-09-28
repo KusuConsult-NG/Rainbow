@@ -338,6 +338,53 @@ describe('LiveMap', () => {
     expect(thrown.map(String)).toEqual([]);
   });
 
+  it('cancels the boundary fetch and the resize timer when it unmounts', async () => {
+    // Signing out unmounts the map. Two things were still in flight and both
+    // touched it afterwards: the 250ms `invalidateSize` timer, which read
+    // `_leaflet_pos` off a pane that had been removed, and the boundary fetch,
+    // which added a GeoJSON layer to a map with no panes to append it to. The
+    // browser harness caught both on a role switch.
+    //
+    // Asserted on the MECHANISM — the signal is aborted, the timer never fires
+    // — rather than on "nothing threw". jsdom tolerates both calls against a
+    // dead map without raising, so an assertion about throwing would pass with
+    // the fix removed, which is worse than no test. Chromium does raise, and
+    // the harness fails the run on it.
+    const LiveMap = await load();
+    const signals: (AbortSignal | null | undefined)[] = [];
+    (globalThis.fetch as unknown) = vi.fn((_url: string, init?: RequestInit) => {
+      signals.push(init?.signal);
+      // Never resolves: the unmount must be what ends this, not the response.
+      return new Promise(() => {});
+    });
+
+    const { container, unmount } = render(
+      <LiveMap
+        alerts={[alert('a-1', 9.9167, 8.8917)]}
+        agents={[]}
+        onResolve={noop}
+        onEscalate={noop}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('.leaflet-container')).not.toBeNull());
+
+    const Leaflet = (window as unknown as { L: { Map: { prototype: Record<string, unknown> } } }).L;
+    const invalidateSize = vi.spyOn(Leaflet.Map.prototype as never, 'invalidateSize');
+
+    unmount();
+    // Well past the 250ms resize timer.
+    await new Promise((r) => setTimeout(r, 500));
+
+    expect(signals.length, 'the boundary overlay is fetched').toBeGreaterThan(0);
+    expect(signals[0]?.aborted, 'the fetch is aborted by the unmount').toBe(true);
+    expect(
+      invalidateSize,
+      'the resize timer must not fire on a map that has been removed',
+    ).not.toHaveBeenCalled();
+    invalidateSize.mockRestore();
+  });
+
   it('unmounts without throwing', async () => {
     const LiveMap = await load();
     const { container, unmount } = render(

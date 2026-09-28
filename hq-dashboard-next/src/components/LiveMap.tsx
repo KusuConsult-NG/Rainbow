@@ -247,15 +247,30 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
     const pane = map.getPane('tilePane');
     if (pane) pane.style.filter = tileFilterFor(theme);
 
+    // Both of the async steps below outlive the map if nobody stops them, and
+    // both then touch it. Signing out, or switching tab within a second of the
+    // map appearing, used to throw twice:
+    //
+    //   TypeError: Cannot read properties of undefined (reading '_leaflet_pos')
+    //   Failed to load boundaries: ... (reading 'appendChild')
+    //
+    // The first is this resize timer calling `invalidateSize()` on a map whose
+    // panes are gone; the second is the boundary fetch resolving afterwards and
+    // adding a layer to it. Neither was cancelled, because neither looks like
+    // something that needs cancelling.
+    let alive = true;
+    const boundaries = new AbortController();
+
     // Force map to adjust size to container after render
-    setTimeout(() => {
-      map.invalidateSize();
+    const resizeTimer = setTimeout(() => {
+      if (alive) map.invalidateSize();
     }, 250);
 
     // Fetch and draw Geo-Boundaries
-    fetch('/plateau_boundaries.json')
+    fetch('/plateau_boundaries.json', { signal: boundaries.signal })
       .then(res => res.json())
       .then(data => {
+        if (!alive) return;
         Leaflet.geoJSON(data, {
           style: {
             color: 'var(--duress)',
@@ -277,12 +292,22 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
           }
         }).addTo(map);
       })
-      .catch(err => console.error('Failed to load boundaries:', err));
+      .catch(err => {
+        // An abort is this component being unmounted, which is not a failure
+        // and must not be reported as one — the boundary overlay failing to
+        // load is a real condition worth logging, and burying it under noise
+        // from every tab change is how a real one gets ignored.
+        if (boundaries.signal.aborted) return;
+        console.error('Failed to load boundaries:', err);
+      });
 
     mapInstanceRef.current = { map, L: Leaflet };
     readySignal.set(true);
 
     return () => {
+      alive = false;
+      clearTimeout(resizeTimer);
+      boundaries.abort();
       readySignal.set(false);
       if (mapInstanceRef.current) {
         // Stop any animation FIRST.
