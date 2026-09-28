@@ -187,4 +187,43 @@ void main() {
       expect(attempted, isTrue);
     });
   });
+
+  group('signing IN is where the key comes from', () {
+    // The channels authenticate with a key fetched from the server, and their
+    // whole purpose is to work when there is no data — so the key cannot be
+    // fetched at the moment it is needed. Sign-in is the one moment the app is
+    // guaranteed to have both a session and a network.
+    tearDown(() => AuthService.provisionSmsKeyOverride = null);
+
+    test('a new session provisions the device key', () async {
+      var provisioned = false;
+      AuthService.provisionSmsKeyOverride = () async => provisioned = true;
+      final ok = await AuthService(SecureStorageService())
+          .onSessionEstablished(true);
+      expect(ok, isTrue);
+      expect(provisioned, isTrue,
+          reason: 'otherwise the SMS and mesh channels are dead on a handset '
+              'that has been signed in for months');
+    });
+
+    test('a failed sign-in provisions nothing', () async {
+      var provisioned = false;
+      AuthService.provisionSmsKeyOverride = () async => provisioned = true;
+      final ok = await AuthService(SecureStorageService())
+          .onSessionEstablished(false);
+      expect(ok, isFalse);
+      expect(provisioned, isFalse);
+    });
+
+    test('a provisioning failure does not block the sign-in', () async {
+      // A handset with no key still works normally; it just has one fewer way to
+      // reach HQ when the network dies. Refusing the sign-in over it would be a
+      // far worse outcome than the thing it protects against.
+      AuthService.provisionSmsKeyOverride =
+          () async => throw StateError('offline at sign-in');
+      final ok = await AuthService(SecureStorageService())
+          .onSessionEstablished(true);
+      expect(ok, isTrue);
+    });
+  });
 }

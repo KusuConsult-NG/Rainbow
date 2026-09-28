@@ -26,7 +26,15 @@ class SqliteService {
       // v2: lat/lng became nullable. An SOS raised with no GPS fix must be
       // queued WITHOUT coordinates rather than with invented ones — see
       // E2E_AUDIT_REPORT.md C-5.
-      version: 2,
+      //
+      // v3: reported_by. The queue did not store WHO raised the report, so
+      // `buildOfflineSyncPayload` could not carry it and **every alert synced
+      // from the offline queue reached HQ with no reporter**. A dispatcher could
+      // not call them back, the reporter could not see their own report under
+      // RLS, and HQ's offline-channel dedup — which scopes by reporter — could
+      // never match it. Found while wiring the offline channels, which is the
+      // first thing that needed both ends of this to line up.
+      version: 3,
       onUpgrade: _upgrade,
       onCreate: (db, version) async {
         await db.execute('''
@@ -40,7 +48,8 @@ class SqliteService {
             priority TEXT NOT NULL,
             is_anonymous INTEGER NOT NULL,
             created_at TEXT NOT NULL,
-            sync_status TEXT NOT NULL
+            sync_status TEXT NOT NULL,
+            reported_by TEXT
           )
         ''');
 
@@ -90,6 +99,13 @@ class SqliteService {
         await txn.execute('DROP TABLE offline_queue_v1');
       });
     }
+    if (oldVersion < 3) {
+      // ADD COLUMN rather than a rebuild: SQLite supports it, it is nullable, and
+      // queued alerts are unsent emergencies that must survive the upgrade
+      // untouched. Rows written before v3 keep a null reporter, which is the
+      // truth about them — they were queued by a build that never recorded it.
+      await db.execute('ALTER TABLE offline_queue ADD COLUMN reported_by TEXT');
+    }
   }
 
   Future<int> enqueueAlert({
@@ -102,6 +118,7 @@ class SqliteService {
     required bool isAnonymous,
     required String createdAt,
     String syncStatus = 'PENDING',
+    String? reportedBy,
   }) async {
     final db = await database;
     return db.insert(
@@ -116,6 +133,9 @@ class SqliteService {
         'is_anonymous': isAnonymous ? 1 : 0,
         'created_at': createdAt,
         'sync_status': syncStatus,
+        // Null for an anonymous report, and only then. Anything else means the
+        // report reaches HQ unattributed.
+        'reported_by': isAnonymous ? null : reportedBy,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );

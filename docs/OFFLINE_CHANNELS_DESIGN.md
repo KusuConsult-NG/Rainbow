@@ -517,17 +517,78 @@ case it exists for.
    an identity, reporting the MTU actually negotiated, advertising no identity at
    all, and reporting disconnects promptly — are written at the top of
    `method_channel_ble_radio.dart`.
-5. **Field test**, which is yours: two phones, aeroplane mode, and a walk.
+5. **The app actually calls them — BUILT.** Everything above was built, tested
+   and **unreachable**: a report raised with no data went into the local queue and
+   nothing in the app called the SMS codec, the device key, the sealing, the relay
+   or the transport. Three joins were missing, and finding them turned up two
+   defects that no amount of testing the pieces separately could have found.
+   * `offline_escalation.dart` — called at the two moments a report fails to
+     reach the database: the radio says there is no network, **and** the insert
+     was refused. The second matters more and is the one a connectivity check
+     cannot see — a captive portal, a congested tower that carries a text but not
+     a TLS handshake, an expired token, an RLS refusal, HQ down. One sealed body
+     goes to both channels. 17 tests, most about when NOT to spend a message.
+   * `offline_ref.dart` — **the dedup could never have matched.** HQ recognises a
+     repeat delivery with `local_id LIKE '%<hex>%'`, the offline channels carry
+     six bytes of it, and the queue's id was `OFFLINE_<milliseconds>` — a string
+     those bytes do not appear in under any encoding. So one emergency arriving by
+     SMS and again from the queue would have become two incidents and two
+     dispatches. The id now ends in a random 12-hex tag, and the queue's own flush
+     checks for a row already carrying it, so both orders are covered — which
+     matters because in the field the SMS usually wins and the design assumed the
+     queue would. The tag is random rather than a truncated timestamp because a
+     dedup collision is not a duplicate, it is a **dropped** emergency.
+   * `sqlite_service.dart` v3 — **the queue did not record who reported.** So
+     `buildOfflineSyncPayload` could not carry it and every alert replayed from
+     the offline queue reached HQ with `reported_by` NULL: no callback number for
+     the dispatcher, no visibility for the reporter under RLS, and nothing for the
+     dedup to scope by. Fixed with a nullable column and a migration that leaves
+     older rows null, because null is the truth about them.
+   * The key is obtained at **sign-in** (`AuthService.onSessionEstablished`), and
+     it has to be: the channels exist for when there is no data, so the key cannot
+     be fetched at the moment it is needed. Failure never blocks the sign-in.
+
+   **A flag nothing can set, stated rather than left to be discovered.** The SMS
+   payload carries a duress bit, and no code path sets it today. Duress is
+   established by a **server-verified** PIN — deliberately, since the alternative
+   is PIN material on the handset, which is what this audit removed — and the
+   server is exactly what is unreachable when these channels are in use. So an
+   offline duress signal would need a different mechanism, not a different call
+   site. The bit stays in the format because adding it later would be a wire
+   change; claiming the capability now would be a lie.
+6. **Field test**, which is yours: two phones, aeroplane mode, and a walk.
 
 Nothing in steps 2 and 3 is wasted if step 4's radio choice changes.
 
-### What the mesh still needs before it can be switched on
+### What each channel still needs before it can be switched on
+
+**SMS** — all of it operational, none of it code:
+* file the Play Permissions Declaration for `SEND_SMS`;
+* provision the gateway and set `SMS_EMERGENCY_SHORTCODE` (app) and
+  `SMS_GATEWAY_SECRET` (HQ);
+* a field test: two handsets, data off, cell on.
+
+Until the shortcode is set the app skips SMS entirely rather than sending a
+message with nowhere to go.
+
+**Mesh** — the radio, and one key:
 
 * **`MESH_HQ_PRIVATE_KEY`.** Generate the pair offline with
   `MESH_KEYGEN=1 flutter test test/mesh_keygen_test.dart`, which verifies that
   the pair it prints opens what it seals. The private half goes into the HQ
-  server's environment and nowhere else; the public half ships to handsets
-  through `app_config` so it can be rotated without a release.
+  server's environment and nowhere else.
+* **`MESH_HQ_PUBLIC_KEY`** in the app's `.env`, as 66 hex characters. Safe to
+  bundle — it can only seal — and refused outright unless it is a well-formed
+  compressed point, because a phone that believes it has a working channel is
+  worse than one that knows it has not.
+
+  **Correction to this document:** it said earlier that the public key would ship
+  through `app_config`, "so it can be rotated without a release". As built it is
+  a bundled `.env` value, which means rotation **does** need a release. The
+  envelope still carries a `keyId`, so HQ can accept two keys during a rotation,
+  but the handset side of that is a release. Moving the value to `app_config`
+  with the bundled one as a fallback is a small change and the right one before
+  the first rotation; it is not done.
 * **A decision on relaying by default**, still open (item 5 below).
 * **The radio**, which is step 4.
 * **Edge rate limiting**, per the note above.

@@ -106,6 +106,87 @@ void main() {
     });
   });
 
+  // v3 adds reported_by, because the queue did not record WHO raised a report
+  // and so every alert it replayed reached HQ unattributed.
+  group('v2 -> v3 schema migration', () {
+    test('a report queued before the upgrade survives it, without a reporter',
+        () async {
+      final dir = await databaseFactory.getDatabasesPath();
+      final path = p.join(dir, 'rainbow_offline.db');
+      await databaseFactory.deleteDatabase(path);
+
+      // A v2 database by hand: nullable lat/lng, no reported_by.
+      final v2 = await databaseFactory.openDatabase(
+        path,
+        options: OpenDatabaseOptions(
+          version: 2,
+          onCreate: (db, _) async {
+            await db.execute('''
+              CREATE TABLE offline_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                local_id TEXT UNIQUE NOT NULL,
+                type TEXT NOT NULL,
+                description TEXT,
+                lat REAL,
+                lng REAL,
+                priority TEXT NOT NULL,
+                is_anonymous INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                sync_status TEXT NOT NULL
+              )
+            ''');
+            await db.execute('''
+              CREATE TABLE offline_media (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                local_alert_id TEXT NOT NULL,
+                local_file_path TEXT NOT NULL,
+                remote_storage_path TEXT,
+                upload_status TEXT NOT NULL
+              )
+            ''');
+          },
+        ),
+      );
+      await v2.insert('offline_queue', {
+        'local_id': 'V2_SOS_1',
+        'type': 'SOS',
+        'description': 'Queued by a build that did not record the reporter',
+        'lat': null,
+        'lng': null,
+        'priority': 'CRITICAL',
+        'is_anonymous': 0,
+        'created_at': '2026-09-01T09:00:00.000Z',
+        'sync_status': 'PENDING',
+      });
+      await v2.close();
+
+      final pending = await SqliteService().getPendingAlerts();
+      final legacy = pending.where((r) => r['local_id'] == 'V2_SOS_1');
+      expect(legacy, isNotEmpty,
+          reason: 'a queued alert is an unsent emergency');
+      // Null is the truth about it: that build never recorded a reporter, and
+      // inventing one would attribute an emergency to the wrong person.
+      expect(legacy.first['reported_by'], isNull);
+
+      await SqliteService().enqueueAlert(
+        localId: 'POST_V3',
+        type: 'SOS',
+        description: 'after the upgrade',
+        lat: null,
+        lng: null,
+        priority: 'HIGH',
+        isAnonymous: false,
+        createdAt: '2026-09-28T15:00:00.000Z',
+        reportedBy: 'citizen-uuid',
+      );
+      final after = await SqliteService().getPendingAlerts();
+      expect(
+        after.firstWhere((r) => r['local_id'] == 'POST_V3')['reported_by'],
+        'citizen-uuid',
+      );
+    });
+  });
+
   group('offline queue round-trip', () {
     late SqliteService sqlite;
 

@@ -58,7 +58,7 @@ class AuthService {
           email: demoEmail,
           password: demoPass,
         );
-        return res.session != null;
+        return await _sessionEstablished(res.session);
       } catch (e) {
         _lastAuthError = e.toString();
         return false;
@@ -71,7 +71,7 @@ class AuthService {
         token: otpCode,
         phone: cleanPhone,
       );
-      return res.session != null;
+      return await _sessionEstablished(res.session);
     } catch (e) {
       _lastAuthError = e.toString();
       return false;
@@ -93,7 +93,7 @@ class AuthService {
         email: email,
         password: password,
       );
-      return res.session != null;
+      return await _sessionEstablished(res.session);
     } catch (e) {
       _lastAuthError = e.toString();
       return false;
@@ -173,7 +173,7 @@ class AuthService {
           );
           if (res.session != null) {
             _pendingPhone = null;
-            return true;
+            return await _sessionEstablished(res.session);
           }
           _lastAuthError = 'DEMO LOGIN FAILED — CHECK SUPABASE CONFIGURATION';
           return false;
@@ -196,7 +196,7 @@ class AuthService {
       );
       if (res.session != null) {
         _pendingPhone = null;
-        return true;
+        return await _sessionEstablished(res.session);
       }
       _lastAuthError = 'OTP VERIFICATION FAILED';
       return false;
@@ -204,6 +204,48 @@ class AuthService {
       _lastAuthError = e.toString();
       return false;
     }
+  }
+
+  /// Test seam: obtaining the SMS device key, which reaches secure storage and
+  /// Supabase and so cannot run under `flutter test`.
+  @visibleForTesting
+  static Future<void> Function()? provisionSmsKeyOverride;
+
+  /// Everything that has to happen once a session exists.
+  ///
+  /// THE OFFLINE CHANNELS ARE OBTAINED HERE OR NOT AT ALL.
+  ///
+  /// The SMS and mesh channels both authenticate with a per-device key that has
+  /// to be fetched from the server. The whole point of them is that they work
+  /// when there is no data connection, so the key cannot be fetched at the moment
+  /// it is needed — by then there is nothing to fetch it over. Sign-in is the one
+  /// moment the app is guaranteed to have both a session and a network, so this
+  /// is where it happens.
+  ///
+  /// It runs on EVERY sign-in and costs one secure-storage read when a key is
+  /// already held. Failure is never fatal and never blocks the sign-in: a handset
+  /// with no key still works normally, it simply has one fewer way to reach HQ
+  /// when the network dies. Saying so out loud matters, because the failure is
+  /// silent until the night it counts.
+  Future<bool> _sessionEstablished(Session? session) =>
+      onSessionEstablished(session != null);
+
+  /// The body of [_sessionEstablished], taking a bool rather than a `Session`.
+  ///
+  /// Split out only so it can be tested: constructing a real gotrue `Session` in
+  /// a unit test means constructing a `User`, a token and an expiry, none of
+  /// which this decision looks at. The production paths all go through
+  /// [_sessionEstablished].
+  @visibleForTesting
+  Future<bool> onSessionEstablished(bool hasSession) async {
+    if (!hasSession) return false;
+    try {
+      await (provisionSmsKeyOverride ??
+          () async => SmsDeviceKeyService().ensureProvisioned())();
+    } catch (e) {
+      debugPrint('[SIGNIN_SMSKEY_ERR] could not obtain a device key: $e');
+    }
+    return true;
   }
 
   /// Test seam: BackgroundTrackingService talks to platform channels, which do
