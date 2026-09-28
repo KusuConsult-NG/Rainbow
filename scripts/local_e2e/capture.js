@@ -207,15 +207,20 @@ async function chooseTactical(page, triggerText, optionText) {
   // -----------------------------------------------------------------------
   // 3. Every role, every screen it can reach.
   // -----------------------------------------------------------------------
+  // Every screen the console has. Which of them a given role is OFFERED is
+  // the role's business — an agency liaison gets two — so this list is a
+  // superset and `openTab` simply returns false for one that is not there.
   const ROLE_TABS = [
     ['Intelligence Map', 'map'],
     ['Incident Feed', 'feed'],
+    ['Incidents For Us', 'feed'],
     ['Mission History', 'history'],
     ['Communications & Broadcast', 'broadcast'],
     ['Agent Directory', 'directory'],
     ['Forensic Audit', 'audit'],
     ['System Logic', 'config'],
     ['Uninstall Requests', 'uninstall'],
+    ['Handset SMS Channel', 'sim'],
   ];
 
   const roleReport = {};
@@ -255,6 +260,9 @@ async function chooseTactical(page, triggerText, optionText) {
     currentScreen = `${role}:agency`;
     const agencyOpened =
       (await openTab(page, 'Inter-Agency Command')) ||
+      // What a liaison's own nav calls it now: their desk, not the state's
+      // inter-agency board.
+      (await openTab(page, 'Our Deployments')) ||
       (await openTab(page, 'Agency Portal')) ||
       (await openTab(page, 'ARMY Portal')) ||
       (await openTab(page, 'POLICE Portal'));

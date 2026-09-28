@@ -481,6 +481,80 @@ async function logMark() {
   await go('/settings', 3000);
   await shot('93-mobile-settings');
 
+  // ---- the re-entry lock ---------------------------------------------------
+  //
+  // The lock engages by itself once the app has been away from the foreground
+  // for a couple of minutes, which a browser harness cannot produce. Settings
+  // → "Lock This Phone" is the deliberate version of the same thing, and it is
+  // how this screen is reached on purpose.
+  //
+  // The assertion that matters is not that the lock appears. It is that the
+  // EMERGENCY BUTTON is on it. A lock screen in front of a panic button is a
+  // liability, and the whole design of this feature is the list of things it
+  // must not do.
+  state.screen = 'mobile:lock';
+  const lockOpened = await tap('lock this phone', { role: 'button', settle: 3000 });
+  check('Settings offers a way to lock the phone deliberately', lockOpened);
+  if (lockOpened) {
+    await shot('93b-mobile-lock-screen');
+    const lockText = await screenText();
+    const hash = await page.evaluate(() => window.location.hash);
+    check(
+      'locking the phone reaches the lock screen',
+      /#\/lock/.test(hash),
+      hash || '(no hash)',
+    );
+    check(
+      'the emergency button is on the lock screen',
+      /EMERGENCY|SEND SOS/i.test(lockText),
+      /EMERGENCY|SEND SOS/i.test(lockText) ? '' : 'the panic button is behind the lock',
+    );
+    check(
+      'the lock screen says it will send a code, and to which number',
+      /code/i.test(lockText),
+      lockText.split('\n').map((l) => l.trim()).find((l) => /code/i.test(l)) || '',
+    );
+    check(
+      'a locked phone can still be signed out of',
+      /SIGN OUT/i.test(lockText),
+      '',
+    );
+
+    // A locked app must not be reachable around the lock. The router is where
+    // that is decided — a gate a route can be got around is not a gate, and
+    // this app has thirty-odd routes including deep links into a report in
+    // progress.
+    for (const forbidden of ['/home', '/report-initial', '/incident-history', '/settings']) {
+      await page.evaluate((r) => { window.location.hash = `#${r}`; }, forbidden);
+      await sleep(1800);
+      const landed = await page.evaluate(() => window.location.hash);
+      check(
+        `a locked phone cannot be walked into ${forbidden}`,
+        /#\/lock/.test(landed),
+        landed,
+      );
+    }
+    // And the emergency screen is the ONE exception, deliberately.
+    await page.evaluate(() => { window.location.hash = '#/emergency-active'; });
+    await sleep(1800);
+    const emergency = await page.evaluate(() => window.location.hash);
+    check(
+      'a locked phone still reaches a running emergency',
+      /#\/emergency-active/.test(emergency),
+      emergency,
+    );
+  }
+
+  // Back to a usable app for the sweep below. Signing out of the lock screen
+  // is the only way out of it that does not need a code, which is itself the
+  // thing being relied on here.
+  await tap('sign out', { role: 'button', settle: 3000 });
+  await typeInto('08000000000');
+  await tap('authorize access', { role: 'button', settle: 2800 });
+  await typeInto('123456');
+  await tap('verify otp', { role: 'button', settle: 6000 });
+  await sleep(3000);
+
   // ---- sweep: every button on every screen ---------------------------------
   const SCREENS = [
     '/home', '/report-initial', '/incident-history', '/safe-zone',

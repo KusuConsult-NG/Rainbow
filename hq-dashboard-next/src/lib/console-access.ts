@@ -165,6 +165,25 @@ export function consoleAccess(
     };
   }
 
+  // A field responder has the mobile app; the console is for awareness when
+  // they are at a desk. Three screens, and the two that are missing are
+  // missing because the DATABASE refuses them, not because we are being tidy:
+  // `system_alerts` INSERT requires is_command(), which a RESPONDER is not, so
+  // the broadcast composer could only ever end in a refusal; and the agency
+  // rosters are scoped to liaisons and command, which the production
+  // behaviour test asserts ("responders cannot read agency rosters"), so the
+  // portal would open empty for them.
+  if (normalised === 'RESPONDER' || normalised === 'AGENT') {
+    return {
+      tabs: ['map', 'alerts', 'history'],
+      landing: 'map',
+      agency: null,
+      title: 'Field Unit',
+      subtitle: (options.sector || 'RESPONDER').toUpperCase(),
+      administration: false,
+    };
+  }
+
   if (SECTOR_COMMAND_ROLES.includes(normalised)) {
     return {
       tabs: ['map', 'alerts', 'history', 'broadcast', 'agency'],

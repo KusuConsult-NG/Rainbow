@@ -305,6 +305,10 @@ async function semanticsText(page) {
     ['/safe-zone', 'safe-zone', 'safe_zone_screen.dart'],
     ['/dispatcher-chat', 'dispatcher-chat', 'dispatcher_chat_screen.dart'],
     ['/settings', 'settings', 'settings_screen.dart'],
+    // Reached through Settings → Lock This Phone, not by URL: the router
+    // redirects away from /lock when nothing is locked, which is the point of
+    // it. See the lock section in mobile_interact.js.
+    ['/lock', 'lock', 'lock_screen.dart'],
     ['/uninstall-request', 'uninstall-request', 'uninstall_request_screen.dart'],
     // Staff only. A citizen is redirected away from every one of these, which
     // is why capturing them needs a responder, an LGA commander and HQ —
@@ -380,8 +384,20 @@ async function semanticsText(page) {
     for (const [route, slug] of ROUTES) {
       state.screen = `mobile:${role}:${slug}`;
       n += 1;
-      await page.evaluate((r) => { window.location.hash = `#${r}`; }, route);
-      await sleep(2500);
+      if (route === '/lock') {
+        // The one screen a URL cannot reach, by design: the router sends
+        // anybody at /lock who is not locked back to their home screen, which
+        // is what stops a lock screen appearing over a live emergency. So it
+        // is reached the way a person reaches it — Settings, then "Lock This
+        // Phone".
+        await page.evaluate(() => { window.location.hash = '#/settings'; });
+        await sleep(2500);
+        await tapLabelled('lock this phone');
+        await sleep(2500);
+      } else {
+        await page.evaluate((r) => { window.location.hash = `#${r}`; }, route);
+        await sleep(2500);
+      }
       const name = `80-mobile-${role}-${String(n).padStart(2, '0')}-${slug}`;
       await page.screenshot({ path: path.join(OUT, `${name}.png`) });
       shots.push(`${name}.png`);

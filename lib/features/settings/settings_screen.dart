@@ -7,6 +7,7 @@ import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
+import 'package:rainbow_app/providers/reentry_lock_provider.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -287,6 +288,44 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               style: GoogleFonts.inter(fontSize: 12, color: AppColors.textDim),
             ),
             onTap: () => context.push(AppRoutes.emergencyPins),
+          ),
+          const SizedBox(height: 16),
+
+          // Lock the app now.
+          //
+          // The re-entry lock engages by itself after the app has been away
+          // from the foreground for a couple of minutes. This is for the case
+          // it cannot see: handing the phone to somebody, deliberately, while
+          // staying in the room. Without it the only way to close the app to
+          // another person is to sign out, which also gives up the SMS device
+          // key and the session — a heavy price for lending a phone.
+          //
+          // It is also the only way to REACH the lock screen on purpose, which
+          // is what lets the browser harness photograph it and assert that the
+          // emergency button on it works.
+          ListTile(
+            key: const ValueKey('lock_now_tile'),
+            tileColor: AppColors.surfaceContainer,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            leading: const Icon(Icons.lock_outline, color: AppColors.primary),
+            title: Text(
+              'Lock This Phone',
+              style: GoogleFonts.outfit(
+                fontWeight: FontWeight.bold,
+                color: AppColors.onBackground,
+              ),
+            ),
+            subtitle: Text(
+              'Ask for a code before this app can be used again. '
+              'The emergency button keeps working.',
+              style: GoogleFonts.inter(fontSize: 12, color: AppColors.textDim),
+            ),
+            onTap: () {
+              ref.read(reentryLockProvider.notifier).lockNow();
+              context.go(AppRoutes.lock);
+            },
           ),
           const SizedBox(height: 16),
 

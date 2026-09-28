@@ -93,6 +93,33 @@ describe('Operation Rainbow command', () => {
   });
 });
 
+describe('a field responder', () => {
+  it('keeps operational awareness', () => {
+    const access = consoleAccess('RESPONDER');
+    expect(access.tabs).toContain('map');
+    expect(access.tabs).toContain('alerts');
+    expect(access.tabs).toContain('history');
+  });
+
+  it('is not offered the two screens the database refuses them', () => {
+    // `system_alerts` INSERT requires is_command(), which a RESPONDER is not,
+    // so the broadcast composer could only ever end in a refusal. And the
+    // agency rosters are scoped to liaisons and command — the production
+    // behaviour test asserts "responders cannot read agency rosters" — so the
+    // portal opened empty for them.
+    expect(canOpen('RESPONDER', 'broadcast')).toBe(false);
+    expect(canOpen('RESPONDER', 'agency')).toBe(false);
+  });
+
+  it('is not mistaken for an unresolved role', () => {
+    // It fell into the unknown bucket when this function was introduced, which
+    // narrowed a responder to two screens and labelled the console "RESOLVING
+    // ACCESS". Caught by the browser harness counting screens per role.
+    expect(consoleAccess('RESPONDER').subtitle).not.toBe('RESOLVING ACCESS');
+    expect(consoleAccess('RESPONDER').title).toBe('Field Unit');
+  });
+});
+
 describe('a role that has not resolved yet', () => {
   it('gets the smallest console, not the largest', () => {
     // `userRole` is '' while the profile loads. Defaulting to "show

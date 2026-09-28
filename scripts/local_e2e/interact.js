@@ -440,7 +440,11 @@ async function writeMark() {
   await resetAll();
   await login(page, 'army');
   await sleep(3500);
-  await openTab(page, 'Inter-Agency Command');
+  // The liaison's nav calls this their own desk now. HQ still sees the
+  // state's inter-agency board under the old label, and this harness drives
+  // both, so try each.
+  (await openTab(page, 'Inter-Agency Command')) ||
+    (await openTab(page, 'Our Deployments'));
   await sleep(2000);
 
   // Add an officer.
@@ -470,7 +474,11 @@ async function writeMark() {
 
   // Personnel status change.
   state.screen = 'army:personnel';
-  await openTab(page, 'Inter-Agency Command');
+  // The liaison's nav calls this their own desk now. HQ still sees the
+  // state's inter-agency board under the old label, and this harness drives
+  // both, so try each.
+  (await openTab(page, 'Inter-Agency Command')) ||
+    (await openTab(page, 'Our Deployments'));
   await sleep(800);
   await clickText(page, 'Personnel', { exact: true });
   await sleep(1500);
@@ -570,7 +578,11 @@ async function writeMark() {
   await resetAll();
   await login(page, 'hq');
   await sleep(3500);
-  await openTab(page, 'Inter-Agency Command');
+  // The liaison's nav calls this their own desk now. HQ still sees the
+  // state's inter-agency board under the old label, and this harness drives
+  // both, so try each.
+  (await openTab(page, 'Inter-Agency Command')) ||
+    (await openTab(page, 'Our Deployments'));
   await sleep(2000);
   // HQ sees every agency's portal and opens on one of them; the seeded report
   // is the ARMY's, so choose that before looking for it.
@@ -679,112 +691,166 @@ async function writeMark() {
 
   // -----------------------------------------------------------------------
   // SWEEP: click everything else and see whether anything happens.
+  //
+  // PER ROLE, not just as HQ. This swept the HQ console and nothing else, so a
+  // control that only an LGA commander or an agency liaison ever sees was
+  // never pressed by anybody — and the liaison desk is the newest surface in
+  // the console and the one belonging to people from outside this
+  // organisation. What each role may open now comes from
+  // `src/lib/console-access.ts`, so the tab lists below mirror it.
+  //
+  // Links as well as buttons. A dead `<a>` is exactly as dead as a dead
+  // `<button>`, and the sweep only ever looked at buttons.
   // -----------------------------------------------------------------------
-  const TABS = [
+  const HQ_TABS = [
     'Intelligence Map', 'Incident Feed', 'Mission History',
     'Communications & Broadcast', 'Inter-Agency Command',
     'Agent Directory', 'Forensic Audit', 'System Logic', 'Uninstall Requests',
+    'Handset SMS Channel',
   ];
+  const SWEEPS = [
+    { role: 'hq', tabs: HQ_TABS },
+    { role: 'lga', tabs: ['Intelligence Map', 'Incident Feed', 'Mission History',
+                          'Communications & Broadcast', 'Inter-Agency Command'] },
+    // The desk an officer of another organisation sits at.
+    { role: 'police', tabs: ['Our Deployments', 'Incidents For Us'] },
+  ];
+  const ALL_TAB_LABELS = [
+    ...HQ_TABS, 'Our Deployments', 'Incidents For Us',
+  ].map((t) => t.toLowerCase());
 
-  await resetAll();
-  await login(page, 'hq');
-  await sleep(3500);
+  for (const { role, tabs } of SWEEPS) {
+    await resetAll();
+    await login(page, role);
+    await sleep(3500);
 
-  for (const tab of TABS) {
-    state.screen = `sweep:${tab}`;
-    if (!(await openTab(page, tab))) continue;
-    await sleep(1200);
+    for (const tab of tabs) {
+      state.screen = `sweep:${role}:${tab}`;
+      if (!(await openTab(page, tab))) {
+        check(`${role}: the "${tab}" screen is reachable`, false, 'nav entry not found');
+        continue;
+      }
+      await sleep(1200);
 
-    const count = await page.evaluate(() => {
-      window.__sweep = [...document.querySelectorAll('button')].filter(
-        (b) => !b.disabled && b.offsetParent !== null,
-      );
-      return window.__sweep.length;
-    });
+      const count = await page.evaluate(() => {
+        window.__sweep = [...document.querySelectorAll('button, a[href], [role="button"]')].filter(
+          (b) => !b.disabled && b.offsetParent !== null,
+        );
+        return window.__sweep.length;
+      });
 
-    for (let i = 0; i < count; i++) {
-      const label = await page.evaluate((idx) => {
-        const b = window.__sweep?.[idx];
-        if (!b || !b.isConnected || b.disabled || b.offsetParent === null) return null;
-        return (b.textContent.replace(/\s+/g, ' ').trim()
-          || b.getAttribute('aria-label') || b.title || '(icon)').slice(0, 48);
-      }, i);
-      if (!label) continue;
-      // Leaving the screen mid-sweep would attribute the next tab's controls
-      // to this one, and signing out would end the sweep entirely.
-      if (/terminate uplink|sign out|log ?out/i.test(label)) continue;
-      // Nav entries carry a count badge, so "Incident Feed" arrives as
-      // "Incident Feed5". Clicking the tab you are already on legitimately does
-      // nothing; counting that as a dead control is a false positive.
-      const bare = label.replace(/\d+$/, '').trim().toLowerCase();
-      if (TABS.some((t) => t.toLowerCase() === bare)) continue;
+      for (let i = 0; i < count; i++) {
+        const label = await page.evaluate((idx) => {
+          const b = window.__sweep?.[idx];
+          if (!b || !b.isConnected || b.disabled || b.offsetParent === null) return null;
+          return (b.textContent.replace(/\s+/g, ' ').trim()
+            || b.getAttribute('aria-label') || b.title || '(icon)').slice(0, 48);
+        }, i);
+        if (!label) continue;
+        // Leaving the screen mid-sweep would attribute the next tab's controls
+        // to this one, and signing out would end the sweep entirely.
+        if (/terminate uplink|sign out|log ?out/i.test(label)) continue;
+        // Nav entries carry a count badge, so "Incident Feed" arrives as
+        // "Incident Feed5". Clicking the tab you are already on legitimately
+        // does nothing; counting that as a dead control is a false positive.
+        const bare = label.replace(/\d+$/, '').trim().toLowerCase();
+        if (ALL_TAB_LABELS.includes(bare)) continue;
+        // An external link leaves the console entirely — OpenStreetMap's
+        // attribution, for one — and the sweep cannot come back from it.
+        const external = await page.evaluate((idx) => {
+          const b = window.__sweep?.[idx];
+          const href = b?.getAttribute?.('href') || '';
+          return /^https?:/i.test(href) && !href.includes('127.0.0.1');
+        }, i);
+        if (external) {
+          sweepLog.push({ tab: `${role}:${tab}`, label, effect: 'external link, not followed' });
+          continue;
+        }
 
-      // A length comparison misses a change that swaps equal-length text — for
-      // instance selecting a different agency in the portal. Hash the content.
-      const digest = () => {
-        let h = 5381;
-        const s = document.body.innerHTML;
-        for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
-        return h;
-      };
-      const before = await page.evaluate((fn) => {
-        // eslint-disable-next-line no-eval
-        return { html: eval(`(${fn})`)(), url: location.href };
-      }, digest.toString());
-      const reqBefore = (await control()).log.length;
+        // A length comparison misses a change that swaps equal-length text —
+        // for instance selecting a different agency in the portal. Hash it.
+        const digest = () => {
+          let h = 5381;
+          const s = document.body.innerHTML;
+          for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+          return h;
+        };
+        const before = await page.evaluate((fn) => {
+          // eslint-disable-next-line no-eval
+          return { html: eval(`(${fn})`)(), url: location.href };
+        }, digest.toString());
+        const reqBefore = (await control()).log.length;
 
-      const clicked = await page.evaluate((idx) => {
-        const b = window.__sweep?.[idx];
-        if (!b || !b.isConnected || b.disabled || b.offsetParent === null) return false;
-        b.click();
-        return true;
-      }, i);
-      if (!clicked) continue;
-      await sleep(650);
+        const clicked = await page.evaluate((idx) => {
+          const b = window.__sweep?.[idx];
+          if (!b || !b.isConnected || b.disabled || b.offsetParent === null) return false;
+          b.click();
+          return true;
+        }, i);
+        if (!clicked) continue;
+        await sleep(650);
 
-      const after = await page.evaluate((fn) => {
-        // eslint-disable-next-line no-eval
-        return { html: eval(`(${fn})`)(), url: location.href };
-      }, digest.toString());
-      const reqAfter = (await control()).log.length;
+        const after = await page.evaluate((fn) => {
+          // eslint-disable-next-line no-eval
+          return { html: eval(`(${fn})`)(), url: location.href };
+        }, digest.toString());
+        const reqAfter = (await control()).log.length;
 
-      // A `required` field that blocks submission is the control working, not
-      // failing: the browser shows its own validation bubble and the DOM is
-      // untouched. Counting that as "did nothing" would report every form's
-      // submit button as dead.
-      const blockedByValidation = await page.evaluate((idx) => {
-        const b = window.__sweep?.[idx];
-        const form = b?.form || b?.closest?.('form');
-        if (!form || b?.type !== 'submit') return false;
-        return !form.checkValidity();
-      }, i);
+        // A `required` field that blocks submission is the control working,
+        // not failing: the browser shows its own validation bubble and the DOM
+        // is untouched. Counting that as "did nothing" would report every
+        // form's submit button as dead.
+        const blockedByValidation = await page.evaluate((idx) => {
+          const b = window.__sweep?.[idx];
+          const form = b?.form || b?.closest?.('form');
+          if (!form || b?.type !== 'submit') return false;
+          return !form.checkValidity();
+        }, i);
 
-      // Clicking the tab you are already on is CORRECTLY a no-op, and the
-      // sweep used to record it as a control that does nothing. The app now
-      // says which tab is selected (`aria-selected`), so this can be told apart
-      // from a button wired to nothing — which is the distinction that matters,
-      // and the reason the fix went into the component rather than into a
-      // suppression list here.
-      const alreadySelected = await page.evaluate((idx) => {
-        const b = window.__sweep?.[idx];
-        return b?.getAttribute?.('aria-selected') === 'true';
-      }, i);
+        // Clicking the tab you are already on is CORRECTLY a no-op. The app
+        // says which tab is selected (`aria-selected`), so this can be told
+        // apart from a button wired to nothing — which is the distinction that
+        // matters, and why the fix went into the component rather than into a
+        // suppression list here.
+        const alreadySelected = await page.evaluate((idx) => {
+          const b = window.__sweep?.[idx];
+          return b?.getAttribute?.('aria-selected') === 'true';
+        }, i);
 
-      const effect = [];
-      if (alreadySelected) effect.push('already the selected tab');
-      if (blockedByValidation) effect.push('refused by field validation');
-      if (after.url !== before.url) effect.push('navigated');
-      if (after.html !== before.html) effect.push('changed the page');
-      if (reqAfter > reqBefore) effect.push(`made ${reqAfter - reqBefore} request(s)`);
+        const effect = [];
+        if (alreadySelected) effect.push('already the selected tab');
+        if (blockedByValidation) effect.push('refused by field validation');
+        if (after.url !== before.url) effect.push('navigated');
+        if (after.html !== before.html) effect.push('changed the page');
+        if (reqAfter > reqBefore) effect.push(`made ${reqAfter - reqBefore} request(s)`);
 
-      sweepLog.push({ tab, label, effect: effect.join(', ') || 'nothing' });
-      if (!effect.length) deadControls.push({ tab, label });
+        sweepLog.push({ tab: `${role}:${tab}`, label, effect: effect.join(', ') || 'nothing' });
+        if (!effect.length) deadControls.push({ tab: `${role}:${tab}`, label });
 
-      // Close anything that opened, so the next click starts from the screen.
-      await page.keyboard.press('Escape').catch(() => {});
-      await sleep(200);
+        // Close anything that opened, so the next click starts from the screen.
+        await page.keyboard.press('Escape').catch(() => {});
+        await sleep(200);
+      }
+      await shot(page, `70-sweep-${role}-${tab.toLowerCase().replace(/[^a-z]+/g, '-')}`);
     }
-    await shot(page, `70-sweep-${tab.toLowerCase().replace(/[^a-z]+/g, '-')}`);
+  }
+
+  // An agency liaison must not be OFFERED what the database will refuse them.
+  // `system_alerts` INSERT requires is_command(), so the broadcast composer was
+  // a control that let an officer of another organisation write a statewide
+  // advisory and only then be told no.
+  state.screen = 'police:no-command-screens';
+  const liaisonNav = await page.evaluate(() =>
+    [...document.querySelectorAll('nav *')].map((e) => e.textContent.trim()).join(' | '),
+  );
+  for (const forbidden of ['Intelligence Map', 'Mission History',
+                           'Communications & Broadcast', 'Agent Directory',
+                           'Forensic Audit', 'Uninstall Requests']) {
+    check(
+      `a liaison is not offered "${forbidden}"`,
+      !liaisonNav.includes(forbidden),
+      liaisonNav.includes(forbidden) ? 'still in the navigation' : '',
+    );
   }
 
   check(
