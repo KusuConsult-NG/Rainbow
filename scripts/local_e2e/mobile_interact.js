@@ -549,12 +549,42 @@ async function logMark() {
   // Back to a usable app for the sweep below. Signing out of the lock screen
   // is the only way out of it that does not need a code, which is itself the
   // thing being relied on here.
-  await tap('sign out', { role: 'button', settle: 3000 });
+  //
+  // The check above left the app on /emergency-active — that IS the assertion.
+  // Going straight for the sign-out button from there found nothing to press,
+  // because the button is on the lock screen; the tap silently returned false,
+  // the phone number was typed into no field, and the entire sweep below then
+  // ran against the lock screen. Nothing reported it, because none of these
+  // recovery steps was ever checked. So: come back to the lock screen first,
+  // and assert every step of the way back.
+  await page.evaluate(() => { window.location.hash = '#/lock'; });
+  await sleep(2000);
+
+  const signedOut = await tap('sign out', { role: 'button', settle: 3500 });
+  check('the lock screen offers a way out that needs no code', signedOut);
+  const afterSignOut = await page.evaluate(() => window.location.hash);
+  check(
+    'signing out of the lock screen actually leaves it',
+    !/#\/lock/.test(afterSignOut),
+    afterSignOut || '(no hash)',
+  );
+
   await typeInto(byKey('citizen').phone.replace('+234', '0'));
   await tap('authorize access', { role: 'button', settle: 2800 });
   await typeInto('123456');
   await tap('verify otp', { role: 'button', settle: 6000 });
   await sleep(3000);
+
+  // A completed phone+OTP sign-in is more proof than the lock screen asks for,
+  // so it must land in the app and not back behind the lock. This is also what
+  // makes the sweep below meaningful: without it, a sweep of thirteen lock
+  // screens passes for a sweep of the app.
+  const backIn = await page.evaluate(() => window.location.hash);
+  check(
+    'signing in again after a lock lands in the app, not back on the lock',
+    /#\/home/.test(backIn),
+    backIn || '(no hash)',
+  );
 
   // ---- sweep: every button on every screen ---------------------------------
   const SCREENS = [
@@ -564,9 +594,17 @@ async function logMark() {
     '/onboarding-permissions', '/onboarding-contacts',
   ];
 
+  // How many of the swept screens were actually the screen asked for. A locked
+  // app answers every route with the lock screen, and a sweep that does not
+  // notice reports "34 controls exercised" over thirteen copies of one screen.
+  let sweptElsewhere = 0;
+
   for (const route of SCREENS) {
     state.screen = `sweep:${route}`;
     await go(route, 2600);
+
+    const landed = await page.evaluate(() => window.location.hash);
+    if (!landed.includes(route)) sweptElsewhere += 1;
 
     const buttons = await page.evaluate(() => {
       window.__mb = [...document.querySelectorAll('flt-semantics[role="button"]')].filter((b) => {
@@ -693,6 +731,14 @@ async function logMark() {
       await shot(`95-mobile-responder-sweep${route.replace(/\//g, '-')}`);
     }
   }
+
+  check(
+    'the sweep actually reached the screens it swept',
+    sweptElsewhere === 0,
+    sweptElsewhere
+      ? `${sweptElsewhere}/${SCREENS.length} routes answered with a different screen`
+      : `all ${SCREENS.length} citizen screens reached`,
+  );
 
   check(
     'every mobile control that was pressed did something',
