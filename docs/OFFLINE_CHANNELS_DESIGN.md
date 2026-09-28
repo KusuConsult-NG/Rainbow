@@ -166,9 +166,8 @@ abstract class MeshTransport {
 | `BleMeshTransport` | Android + iOS | 10–30 m | Low throughput — an alert fits, photographs do not. Awkward in the background on iOS. |
 | `LoopbackMeshTransport` | tests | — | In-process peers. Lets the whole protocol be proven without a radio. |
 
-**iOS:** Nearby Connections is Android-only. Cross-platform mesh needs either
-BLE on both or a separate Multipeer Connectivity implementation for iOS. This
-is a decision below, not an assumption.
+**Decided: BLE on both platforms** is the baseline, with Nearby as an optional
+Android-to-Android accelerator. See the decisions section.
 
 ## The SMS channel
 
@@ -194,16 +193,52 @@ fraction of the work.
 160 characters in GSM-7, 70 in UCS-2. Sealing and base64-encoding a payload
 does not fit in one segment, and every segment costs money.
 
-This forces an uncomfortable choice, because **SMS content is visible to the
-carrier** and to anyone with access to it, lawful or otherwise:
+### CORRECTION: the trade-off I described does not exist
 
-* Carry the duress flag, and a duress alert is legible to the telco.
-* Omit it, and a duress SOS degrades to an ordinary SOS when it travels by SMS.
+This section originally said the 160-character limit forced a choice between
+carrying the duress flag and keeping it private, because an encrypted payload
+would not fit. **That was wrong**, and the arithmetic is short enough that it
+should have been done before the question was asked:
 
-My recommendation is to omit it, and to have HQ treat any SMS-origin alert as
-**unverified pending confirmation** — visible on the board, marked as arriving
-by a channel that cannot be trusted to be private. A duress signal that the
-adversary may be able to read is not a duress signal.
+    version      1            flags/type/severity      3
+    device ref   4            latitude                 4
+    nonce       12            longitude                4
+    GCM tag     16            timestamp                4
+                              local ref                6
+    ------------------------------------------------------
+    33 bytes of envelope  +  21 bytes of alert  =  54 bytes
+    base64url, unpadded                        =  72 characters
+    plus the "OR1" prefix                      =  75 characters
+
+A GSM-7 segment holds 160. The whole alert — encrypted and authenticated —
+fits in **one message with 85 characters to spare**. base64url is used rather
+than standard base64 because every character of it is in the GSM-7 default
+alphabet, so the message is never promoted to UCS-2 and cut to 70.
+
+So the duress flag travels, and it is not legible to the carrier, and it costs
+one message. Implemented and tested in `lib/core/offline/sms_alert_payload.dart`
+(21 tests).
+
+Three things fall out of encrypting rather than sending plaintext:
+
+* **The duress flag is carried and concealed.** In the situations a duress PIN
+  exists for, the realistic adversary is frequently the person standing next to
+  you, and a plaintext `DURESS` in the handset's sent folder is the worst
+  possible outcome.
+* **HQ cannot be fed a forgery.** The GCM tag authenticates each message
+  against that device's key. The `smsWebhook` this replaces accepted anything
+  that reached it.
+* **A duress alert is the same size as an ordinary one**, so it is not
+  distinguishable by length either.
+
+What encryption does NOT buy: the carrier still learns that this handset sent a
+short message to the emergency shortcode at a time, from roughly a place.
+Traffic analysis is not defeated here and this design does not claim to defeat
+it. What is protected is the content.
+
+HQ should still mark SMS-origin alerts as arriving by a degraded channel — not
+because the content is untrusted, but because the phone that sent it could not
+reach the network, which is itself operationally significant.
 
 ### Inbound
 
@@ -235,19 +270,49 @@ difference.
 * iOS permission behaviour;
 * sending and receiving a real SMS.
 
-## Decisions I need from you
+## Decisions
 
-These change the work materially. I have given my recommendation on each.
+### Made
 
-1. **iOS mesh, or Android only?** Android-only via Nearby is better in every
-   technical respect. It is only acceptable if your responders and the citizens
-   you most need to reach are on Android. *Recommend: Android-first, BLE for
-   iOS later if the field says it is needed.*
-2. **Duress over SMS: carry it or drop it?** *Recommend: drop it, and mark
-   SMS-origin alerts unverified at HQ.*
+**1. Both iOS and Android.** *(decided)*
+
+This settles the transport. A cross-platform mesh means **BLE as the baseline
+on both platforms**, because Nearby Connections is Android-only and Multipeer
+Connectivity is iOS-only, and maintaining two native stacks to carry the same
+54-byte envelope is not worth it.
+
+The throughput objection to BLE mostly evaporates at this size. The envelope
+was designed to carry nothing but routing metadata and a sealed payload, and a
+sealed alert is tens of bytes — it fits comfortably in a GATT characteristic.
+BLE's low bandwidth would matter if we were relaying photographs. We are not,
+and we should not: media stays in the offline queue and uploads when the
+reporter's own phone has a network.
+
+Nearby Connections stays on the roadmap as an **optional accelerator** for the
+Android-to-Android case, behind the same `MeshTransport` interface. It is not
+required for correctness.
+
+The honest cost of choosing both: **iOS background BLE is restricted.** An
+iOS app in the background advertises in an "overflow" area that other iOS
+devices can see but Android generally cannot, and background scanning requires
+naming service UUIDs up front. In practice an iOS relay works well in the
+foreground, and degrades in the background in ways that need measuring on real
+handsets rather than predicting here.
+
+**2. Carry the duress flag over SMS.** *(decided)*
+
+And, per the correction above, the reason this was ever a question has gone:
+it is carried AND encrypted AND still one segment. A duress SOS that silently
+degrades to an ordinary one when it travels by SMS does not work in the one
+case it exists for.
+
+### Still open
+
 3. **`SEND_SMS` declaration, or `sms:` compose?** The compose route is safe and
    cannot serve a silent SOS. *Recommend: pursue the declaration, with compose
-   as the fallback if review refuses.*
+   as the fallback if review refuses.* Note this only affects Android; iOS
+   cannot send programmatically either way, so on iOS the SMS fallback is
+   necessarily a compose sheet the user taps.
 4. **Who pays for SMS, and through which gateway?** Termii is already used
    HQ-side. Every message is a cost, and a flood of alerts is a flood of cost.
 5. **Does a citizen's phone relay strangers' alerts by default, or by opt-in?**
@@ -260,8 +325,14 @@ These change the work materially. I have given my recommendation on each.
 ## What I would build, in order
 
 1. **SMS fallback.** Smallest, covers the most common failure, and its
-   constraints are known. Roughly: payload encoder, send path, the HQ inbound
-   endpoint, and the "unverified" treatment on the board.
+   constraints are known.
+   * ~~payload codec~~ — **done**, `lib/core/offline/sms_alert_payload.dart`,
+     21 tests: one segment, duress carried and concealed, forgeries rejected,
+     and every failure indistinguishable so the endpoint is not an oracle.
+   * device key provisioning (needs a server endpoint)
+   * the Android send path, and the iOS compose sheet
+   * the HQ inbound endpoint, replacing the deleted `smsWebhook`
+   * the degraded-channel marking on the board
 2. **The mesh protocol core**, fully tested against the loopback transport. No
    radio. At the end of this the whole design above is proven except the radio.
 3. **The Nearby transport**, written against the interface and marked
