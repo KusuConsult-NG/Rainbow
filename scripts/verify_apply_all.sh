@@ -90,7 +90,7 @@ if [ "$FAILED" -ne 0 ] || [ "$PASSED" -lt "$EXPECTED" ]; then
   echo "::error::the apply script's own verification reported a failure"; exit 1
 fi
 
-echo "▶ Running it a second time (it claims to be idempotent)"
+echo "▶ Running it a second time (the RLS part is atomic, so it rolls back and says so)"
 OUT2=$(run_pasted) && RC2=0 || RC2=$?
 if [ "$RC2" -ne 0 ]; then
   printf '%s\n' "$OUT2" | grep -E "ERROR|FATAL" | head -20

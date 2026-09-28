@@ -616,6 +616,7 @@ jobs:
           python3 scripts/build_rls_dryrun.py
           python3 scripts/build_rls_inventory.py
           python3 scripts/build_apply_all.py
+          python3 scripts/build_apply_in_parts.py
           python3 scripts/build_bootstrap.py
           GEN="scripts/rls_production_dryrun.sql scripts/rls_inventory.sql scripts/apply_all_migrations.sql scripts/bootstrap_staging.sql"
           if ! git diff --quiet -- $GEN; then
@@ -708,6 +709,13 @@ jobs:
           sudo apt-get install -y -qq postgresql-16
       - name: Apply it exactly as pasted
         run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_apply_all.sh
+
+      # scripts/apply_in_parts/ exists for an operator who cannot paste 2,300
+      # lines into a browser tab in one go. That convenience is only safe if the
+      # parts, run in order, land the same database as the whole file — otherwise
+      # the split is a way to skip a migration and never find out.
+      - name: And the split parts land the same database
+        run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_apply_in_parts.sh
 
   bootstrap:
     name: Supabase — the staging bootstrap builds a correct project from zero

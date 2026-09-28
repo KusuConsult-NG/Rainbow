@@ -22,13 +22,26 @@
 --   ===== RLS DRY RUN — >>> DO NOT APPLY =====    -> stop; it names the policy
 -- ---------------------------------------------------------------------------
 --
--- EVERY MIGRATION HERE IS IDEMPOTENT. Running this file twice changes nothing
--- the second time, so a partial run can simply be re-run.
+-- SAFE TO RE-RUN — but "idempotent" is not quite the right word, and the
+-- difference shows up if you run this file twice.
 --
--- ONE THING TO KNOW ABOUT TRANSACTIONS. The RLS migration carries its own
--- BEGIN/COMMIT, which is deliberate: it applies completely or not at all. The
--- others do not, and are individually idempotent. If the editor reports an
--- error partway, nothing is half-applied in a way re-running cannot fix.
+-- Most of these migrations ARE idempotent: they use IF NOT EXISTS / OR REPLACE
+-- and a second run changes nothing and says nothing.
+--
+-- `20260813000000_rls_least_privilege.sql` is ATOMIC instead. It drops the old
+-- policy set by name and creates a new one, inside its own BEGIN/COMMIT, so it
+-- applies completely or not at all. Running it a SECOND time therefore reports
+--
+--     ERROR: policy "profiles_select_self_or_staff" for table "profiles"
+--            already exists
+--
+-- and rolls itself back. That message means THE POLICIES ARE ALREADY IN PLACE.
+-- It is not a failure to fix, nothing is left half-applied, and the verification
+-- at the end of this file will still report every row PASS. Read the verdict
+-- table, not the error.
+--
+-- So: an interrupted run can simply be re-run, and the state you end up with is
+-- correct either way.
 --
 -- Expect a few `NOTICE: skipping ...` lines. They are the guards that let these
 -- files run against a database that does not have a given table yet.
