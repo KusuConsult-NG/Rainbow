@@ -15,16 +15,33 @@ void main() {
 
   late DateTime now;
 
+  // Who is signed in, as a knob a test can turn part-way through. The lock is
+  // scoped to a session, so signing out and signing back in has to be
+  // expressible here — it is the case that was broken.
+  // A session key, not a person: the provider pairs the user id with the
+  // sign-in time, so signing in again as the same person yields a new value.
+  final whoIsSignedIn =
+      StateProvider<String?>((ref) => 'citizen-1@2026-09-28T12:00:00Z');
+
   ProviderContainer containerWith({
     required bool signedIn,
     required bool emergency,
   }) {
-    return ProviderContainer(
+    final container = ProviderContainer(
       overrides: <Override>[
         hasSessionProvider.overrideWithValue(signedIn),
         emergencyActiveProvider.overrideWithValue(emergency),
+        sessionIdentityProvider
+            .overrideWith((ref) => ref.watch(whoIsSignedIn)),
       ],
     );
+    // The router holds a live subscription to the lock — `app_router.dart`
+    // listens to it to drive redirects. Without one here, Riverpod is lazy: a
+    // sign-out followed by a sign-in would be collapsed into a single rebuild
+    // at the next read, which never sees the session go away and so is not the
+    // sequence the app actually performs.
+    container.listen(reentryLockProvider, (_, __) {});
+    return container;
   }
 
   setUp(() {
@@ -151,5 +168,89 @@ void main() {
     container.read(reentryLockProvider.notifier).lockNow();
 
     expect(container.read(reentryLockProvider), isTrue);
+  });
+
+  // ---- the lock belongs to one session -------------------------------------
+  //
+  // Found by the browser harness, not by reading the code. SIGN OUT INSTEAD is
+  // the one way off the lock screen that needs no code; the sweep took it,
+  // signed in again with the number and an OTP, and every screen it then
+  // visited was the lock screen again.
+
+  test('a lock does not follow the person who signed out', () {
+    final container = containerWith(signedIn: true, emergency: false);
+    addTearDown(container.dispose);
+
+    container.read(reentryLockProvider.notifier).lockNow();
+    expect(container.read(reentryLockProvider), isTrue);
+
+    // They press SIGN OUT INSTEAD.
+    container.read(whoIsSignedIn.notifier).state = null;
+    expect(
+      container.read(reentryLockProvider),
+      isFalse,
+      reason: 'there is no session left to lock',
+    );
+  });
+
+  test('a fresh sign-in is not asked to prove the same phone twice', () {
+    final container = containerWith(signedIn: true, emergency: false);
+    addTearDown(container.dispose);
+
+    container.read(reentryLockProvider.notifier).lockNow();
+    container.read(whoIsSignedIn.notifier).state = null;
+    // Signing in again means the number AND an OTP — strictly more proof than
+    // the lock screen asks for. Same person, new sign-in, so a new session key.
+    container.read(whoIsSignedIn.notifier).state =
+        'citizen-1@2026-09-28T12:05:00Z';
+
+    expect(container.read(reentryLockProvider), isFalse);
+  });
+
+  test("one person's lock is not shown to the next person", () {
+    // The lock screen names the number a code went to. A lock that survived a
+    // change of account put the previous user's mobile number in front of
+    // whoever signed in after them.
+    final container = containerWith(signedIn: true, emergency: false);
+    addTearDown(container.dispose);
+
+    container.read(reentryLockProvider.notifier).lockNow();
+    container.read(whoIsSignedIn.notifier).state =
+        'colleague-2@2026-09-28T12:05:00Z';
+
+    expect(container.read(reentryLockProvider), isFalse);
+  });
+
+  test('the same session stays locked across a profile refresh', () {
+    // The guard must be the session IDENTITY, not the auth state. `authProvider`
+    // rebuilds whenever the profile, role or tier resolves, and a lock lifted by
+    // a background refresh would be no lock at all.
+    final container = containerWith(signedIn: true, emergency: false);
+    addTearDown(container.dispose);
+
+    container.read(reentryLockProvider.notifier).lockNow();
+    container.read(whoIsSignedIn.notifier).state =
+        'citizen-1@2026-09-28T12:00:00Z'; // unchanged
+
+    expect(container.read(reentryLockProvider), isTrue);
+  });
+
+  test('signing out clears the away-clock, not just the bit', () {
+    // If the timestamp survived, the next session would be locked the instant
+    // it was backgrounded for a moment, having inherited an hour of absence.
+    final container = containerWith(signedIn: true, emergency: false);
+    addTearDown(container.dispose);
+
+    container.read(reentryLockProvider.notifier).lockNow();
+    container.read(whoIsSignedIn.notifier).state = null;
+    container.read(whoIsSignedIn.notifier).state =
+        'citizen-1@2026-09-28T12:05:00Z';
+
+    // A brief, innocent absence for the new session.
+    container
+        .read(reentryLockProvider.notifier)
+        .simulateAway(const Duration(seconds: 5));
+
+    expect(container.read(reentryLockProvider), isFalse);
   });
 }

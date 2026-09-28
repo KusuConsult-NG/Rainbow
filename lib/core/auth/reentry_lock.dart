@@ -128,3 +128,39 @@ String lockScreenExplanation(UnlockPath path) {
           'you have a connection.';
   }
 }
+
+/// Whether a lock should survive a change of session.
+///
+/// It should not, and getting this wrong is worse than it sounds.
+///
+/// The lock is a property of ONE signed-in session: it says "this session has
+/// been away, prove the phone is still yours". It was held as a bare bit that
+/// only a verified code ever cleared, which left two bad outcomes on the one
+/// route out of the lock screen that needs no code — SIGN OUT INSTEAD:
+///
+///   * **A fresh sign-in landed straight back on the lock.** Signing out and
+///     signing in again means entering the number and passing an OTP, which is
+///     strictly more proof than the lock screen asks for. Being shown the lock
+///     screen again immediately afterwards asks the person to do the same thing
+///     twice, and the browser harness walked into exactly that: signed out,
+///     completed the OTP, and every screen of the sweep was the lock screen.
+///
+///   * **It showed the previous person's number to the next one.** The lock
+///     screen names the number a code went to. Hand the phone to a colleague,
+///     let them sign in as themselves, and a stale lock put the last user's
+///     mobile number on their screen.
+///
+/// So: same session, the lock stands. Different session — including no session
+/// at all — the lock is not theirs and does not apply. Ending the session is a
+/// stronger act than unlocking, not a way around it: it leaves the person with
+/// no session and nothing to unlock into.
+///
+/// "Session" here means one sign-in, not one person. A user id alone cannot
+/// distinguish signing out and back in as the same person from nothing having
+/// happened at all, and that is the case this exists for; the caller pairs the
+/// id with the sign-in time so each sign-in is its own session.
+bool lockSurvivesSessionChange({
+  required String? lockedSession,
+  required String? currentSession,
+}) =>
+    lockedSession != null && lockedSession == currentSession;

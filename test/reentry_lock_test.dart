@@ -132,4 +132,55 @@ void main() {
       expect(text, isNot(contains('offline')));
     });
   });
+
+  group('whether a lock outlives the session that earned it', () {
+    test('it does not, once there is no session', () {
+      expect(
+        lockSurvivesSessionChange(
+          lockedSession: 'citizen-1@12:00',
+          currentSession: null,
+        ),
+        isFalse,
+      );
+    });
+
+    test('it does not survive a new sign-in by the same person', () {
+      // The case the browser harness walked into. Signing in again means the
+      // number and an OTP, which is more proof than the lock screen asks for.
+      expect(
+        lockSurvivesSessionChange(
+          lockedSession: 'citizen-1@12:00',
+          currentSession: 'citizen-1@12:05',
+        ),
+        isFalse,
+      );
+    });
+
+    test('it does not pass to a different person', () {
+      expect(
+        lockSurvivesSessionChange(
+          lockedSession: 'citizen-1@12:00',
+          currentSession: 'colleague-2@12:05',
+        ),
+        isFalse,
+      );
+    });
+
+    test('it stands for the session that earned it', () {
+      expect(
+        lockSurvivesSessionChange(
+          lockedSession: 'citizen-1@12:00',
+          currentSession: 'citizen-1@12:00',
+        ),
+        isTrue,
+      );
+    });
+
+    test('an unlocked app is not locked by a session appearing', () {
+      expect(
+        lockSurvivesSessionChange(lockedSession: null, currentSession: 'x@1'),
+        isFalse,
+      );
+    });
+  });
 }

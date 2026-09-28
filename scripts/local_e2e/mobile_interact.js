@@ -580,7 +580,13 @@ async function logMark() {
       const label = buttons[i];
       // Signing out would end the sweep; SOS is asserted separately and files a
       // real alert every time it is pressed.
-      if (/sign ?out|log ?out|terminate|^sos|silent sos/i.test(label)) continue;
+      //
+      // The pattern used to anchor SOS at the start of the label (`^sos`), which
+      // matched nothing the app actually renders — the panic button is labelled
+      // "EMERGENCY — SEND SOS NOW". So the sweep pressed the panic button on
+      // every screen that carries one, and the only reason this did not file a
+      // dozen false CRITICAL alerts is that it reported them as doing nothing.
+      if (/sign ?out|log ?out|terminate|sos|panic|emergency/i.test(label)) continue;
 
       const before = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
       const reqBefore = await logMark();

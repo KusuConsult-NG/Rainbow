@@ -39,6 +39,23 @@ final emergencyActiveProvider = Provider<bool>(
   (ref) => ref.watch(emergencyProvider).isEmergencyActive,
 );
 
+/// Which session is signed in, or null for none.
+///
+/// The user id is not enough on its own. Signing out and signing straight back
+/// in as the same person gives the same id, so an id-only key cannot tell that
+/// apart from nothing having happened — and that is precisely the case the lock
+/// has to notice, because signing in again means passing an OTP. Pairing the id
+/// with the sign-in time makes each sign-in its own session.
+///
+/// Everything else about the auth state is deliberately excluded: `authProvider`
+/// rebuilds whenever the profile, role or tier resolves, and a lock lifted by a
+/// background refresh would be no lock at all.
+final sessionIdentityProvider = Provider<String?>((ref) {
+  final user = ref.watch(authProvider).user;
+  if (user == null) return null;
+  return '${user.id}@${user.lastSignInAt ?? ''}';
+});
+
 /// Whether the app is currently locked behind a re-entry code.
 final reentryLockProvider =
     NotifierProvider<ReentryLockNotifier, bool>(ReentryLockNotifier.new);
@@ -54,6 +71,9 @@ class ReentryLockNotifier extends Notifier<bool> with WidgetsBindingObserver {
 
   bool _observing = false;
 
+  /// The session the current lock belongs to. See [lockSurvivesSessionChange].
+  String? _lockedSession;
+
   @override
   bool build() {
     // The observer is attached lazily and removed when the provider goes, so a
@@ -66,7 +86,20 @@ class ReentryLockNotifier extends Notifier<bool> with WidgetsBindingObserver {
         _observing = false;
       });
     }
-    return false;
+
+    // A lock is one session's. Watching the identity means this rebuilds when
+    // somebody signs out or a different person signs in, and the lock does not
+    // follow them across.
+    final session = ref.watch(sessionIdentityProvider);
+    final held = lockSurvivesSessionChange(
+      lockedSession: _lockedSession,
+      currentSession: session,
+    );
+    if (!held) {
+      _lockedSession = null;
+      _leftAt = null;
+    }
+    return held;
   }
 
   @override
@@ -103,20 +136,27 @@ class ReentryLockNotifier extends Notifier<bool> with WidgetsBindingObserver {
       hasSession: ref.read(hasSessionProvider),
       emergencyActive: ref.read(emergencyActiveProvider),
     )) {
-      state = true;
+      _lock();
     }
   }
 
   /// Lift the lock. Called only after a code has actually been verified.
   void unlock() {
     _leftAt = null;
+    _lockedSession = null;
     state = false;
   }
 
   /// Lock now, without waiting for a lifecycle transition.
   ///
   /// For the case where somebody hands the phone over deliberately.
-  void lockNow() => state = true;
+  void lockNow() => _lock();
+
+  /// Engage the lock, remembering whose it is.
+  void _lock() {
+    _lockedSession = ref.read(sessionIdentityProvider);
+    state = true;
+  }
 
   /// Test seam: pretend the app left the foreground and came back.
   @visibleForTesting
