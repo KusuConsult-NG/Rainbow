@@ -610,6 +610,37 @@ async function logMark() {
   /** Controls that were found but had gone from the DOM by the time we pressed. */
   let unreachable = 0;
 
+  // WHAT COUNTS AS "IT DID SOMETHING".
+  //
+  // URL, innerHTML length and network traffic miss a whole class of real effect
+  // in a CanvasKit app: the pixels live on a canvas, so choosing an option
+  // repaints without changing the DOM at all. The report subtype rows are
+  // exactly this — tapping one calls setState to move the selection and nothing
+  // else; CONTINUE is what navigates. The sweep reported "VEHICLE FIRE did
+  // nothing" when it had done precisely what it is supposed to do.
+  //
+  // The accessibility tree DOES carry selection: aria-checked, aria-selected,
+  // aria-pressed, aria-expanded and aria-disabled. Snapshotting those catches a
+  // selection change without pretending a dead control is alive.
+  //
+  // Defined here rather than installed on `window`: the responder sign-in below
+  // calls page.goto(), which wipes page globals, so a helper living in the page
+  // would be gone by the time the staff sweep used it.
+  const snapshot = () => page.evaluate(() => {
+    const flags = [...document.querySelectorAll('flt-semantics')]
+      .map((n) => [
+        n.getAttribute('aria-checked'), n.getAttribute('aria-selected'),
+        n.getAttribute('aria-pressed'), n.getAttribute('aria-expanded'),
+        n.getAttribute('aria-disabled'),
+      ].join(''))
+      .join('|');
+    return {
+      url: location.hash,
+      len: document.body.innerHTML.length,
+      state: flags,
+    };
+  });
+
   for (const route of SCREENS) {
     state.screen = `sweep:${route}`;
     await go(route, 2600);
@@ -676,7 +707,7 @@ async function logMark() {
         continue;
       }
 
-      const before = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
+      const before = snapshot();
       const reqBefore = await logMark();
 
       const clicked = await page.evaluate((idx) => {
@@ -693,12 +724,13 @@ async function logMark() {
       }
       await sleep(700);
 
-      const after = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
+      const after = snapshot();
       const reqAfter = await logMark();
 
       const effect = [];
       if (after.url !== before.url) effect.push(`navigated to ${after.url}`);
       if (after.len !== before.len) effect.push('changed the screen');
+      if (after.state !== before.state) effect.push('changed a selection');
       if (reqAfter > reqBefore) effect.push(`made ${reqAfter - reqBefore} request(s)`);
 
       sweepLog.push({ route, label, effect: effect.join(', ') || 'nothing' });
@@ -760,7 +792,7 @@ async function logMark() {
       state.screen = `sweep:responder:${route}`;
       await go(route, 2800);
 
-      const buttons = await page.evaluate(() => {
+      const captureStaffControls = () => page.evaluate(() => {
         // Same widening as the citizen sweep above: role="button" alone misses
         // every InkWell, ListTile and tappable card, which is most of them.
         const all = [...document.querySelectorAll(
@@ -774,14 +806,15 @@ async function logMark() {
         return window.__mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
       });
 
-      for (let i = 0; i < buttons.length; i++) {
-        const label = buttons[i];
+      let labels = await captureStaffControls();
+      for (let i = 0; i < labels.length; i++) {
+        const label = labels[i];
         if (/sign ?out|log ?out|terminate|power/i.test(label)) {
-        skipped += 1;
-        continue;
-      }
+          skipped += 1;
+          continue;
+        }
 
-        const before = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
+        const before = snapshot();
         const reqBefore = await logMark();
         const clicked = await page.evaluate((idx) => {
           const b = window.__mb?.[idx];
@@ -790,20 +823,30 @@ async function logMark() {
           b.click();
           return true;
         }, i);
-        if (!clicked) continue;
+        if (!clicked) {
+          unreachable += 1;
+          continue;
+        }
         await sleep(700);
-        const after = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
+        const after = snapshot();
         const reqAfter = await logMark();
 
         const effect = [];
         if (after.url !== before.url) effect.push(`navigated to ${after.url}`);
         if (after.len !== before.len) effect.push('changed the screen');
+        if (after.state !== before.state) effect.push('changed a selection');
         if (reqAfter > reqBefore) effect.push(`made ${reqAfter - reqBefore} request(s)`);
 
         sweepLog.push({ route: `responder${route}`, label, effect: effect.join(', ') || 'nothing' });
         if (!effect.length) deadControls.push({ route: `responder${route}`, label });
 
-        if (after.url !== before.url) await go(route, 2000);
+        // Same as the citizen sweep: Flutter rebuilds its semantics tree on any
+        // change, so without going back and re-reading it, the first control
+        // that did anything detached every node after it.
+        if (effect.length) {
+          await go(route, 1800);
+          labels = await captureStaffControls();
+        }
       }
       await shot(`95-mobile-responder-sweep${route.replace(/\//g, '-')}`);
     }
