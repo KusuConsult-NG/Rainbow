@@ -643,13 +643,32 @@ async function logMark() {
     return mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
   `));
 
-  const clickControl = (idx) => page.evaluate(new Function('idx', `
+  // Click by IDENTITY, not position.
+  //
+  // Indexing failed even with the list rebuilt at click time: pressing a
+  // control changes the screen, the rebuilt list is a different length, and
+  // every later index refers to something else or to nothing — 44 of them in
+  // one run. The label and its occurrence among identical labels survive a
+  // rebuild; a position does not.
+  const clickControl = (key) => page.evaluate(new Function('key', `
     ${CONTROL_QUERY}
-    const b = mb[idx];
-    if (!b) return false;
-    b.click();
-    return true;
-  `), idx);
+    const seen = {};
+    for (const b of mb) {
+      const label = (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40);
+      seen[label] = (seen[label] || 0) + 1;
+      if (label + '#' + (seen[label] - 1) === key) { b.click(); return true; }
+    }
+    return false;
+  `), key);
+
+  /** The same key the page builds, so the two agree. */
+  const keysFor = (labels) => {
+    const seen = {};
+    return labels.map((l) => {
+      seen[l] = (seen[l] || 0) + 1;
+      return `${l}#${seen[l] - 1}`;
+    });
+  };
 
 
   // WHAT COUNTS AS "IT DID SOMETHING".
@@ -696,8 +715,17 @@ async function logMark() {
     coverage.push({ route, ...cov });
     console.log(`      semantics ${route}: ${cov.nodes} nodes, ${cov.matched} tappable, ${cov.innermost} pressable`);
 
-    for (let i = 0; i < labels.length; i++) {
-      const label = labels[i];
+    // Work through the screen by identity: re-list each time, take the first
+    // control not yet pressed. A press that changes the screen no longer
+    // invalidates everything after it.
+    const done = new Set();
+    for (let guard = 0; guard < 60; guard += 1) {
+      const keys = keysFor(labels);
+      const at = keys.findIndex((k) => !done.has(k));
+      if (at === -1) break;
+      const key = keys[at];
+      const label = labels[at];
+      done.add(key);
       // Signing out would end the sweep; SOS is asserted separately and files a
       // real alert every time it is pressed.
       //
@@ -717,17 +745,18 @@ async function logMark() {
         continue;
       }
 
-      const before = snapshot();
+      const before = await snapshot();
       const reqBefore = await logMark();
 
-      const clicked = await clickControl(i);
+      const clicked = await clickControl(key);
       if (!clicked) {
         unreachable += 1;
+        labels = await listControls();
         continue;
       }
       await sleep(700);
 
-      const after = snapshot();
+      const after = await snapshot();
       const reqAfter = await logMark();
 
       const effect = [];
@@ -753,8 +782,8 @@ async function logMark() {
       // screen.
       if (effect.length) {
         await go(route, 1800);
-        labels = await listControls();
       }
+      labels = await listControls();
     }
     await shot(`94-mobile-sweep${route.replace(/\//g, '-')}`);
   }
@@ -796,22 +825,30 @@ async function logMark() {
       await go(route, 2800);
 
       let labels = await listControls();
-      for (let i = 0; i < labels.length; i++) {
-        const label = labels[i];
+      const done = new Set();
+      for (let guard = 0; guard < 60; guard += 1) {
+        const keys = keysFor(labels);
+        const at = keys.findIndex((k) => !done.has(k));
+        if (at === -1) break;
+        const key = keys[at];
+        const label = labels[at];
+        done.add(key);
+
         if (/sign ?out|log ?out|terminate|power/i.test(label)) {
           skipped += 1;
           continue;
         }
 
-        const before = snapshot();
+        const before = await snapshot();
         const reqBefore = await logMark();
-        const clicked = await clickControl(i);
+        const clicked = await clickControl(key);
         if (!clicked) {
           unreachable += 1;
+          labels = await listControls();
           continue;
         }
         await sleep(700);
-        const after = snapshot();
+        const after = await snapshot();
         const reqAfter = await logMark();
 
         const effect = [];
@@ -828,8 +865,8 @@ async function logMark() {
         // that did anything detached every node after it.
         if (effect.length) {
           await go(route, 1800);
-          labels = await listControls();
         }
+        labels = await listControls();
       }
       await shot(`95-mobile-responder-sweep${route.replace(/\//g, '-')}`);
     }
