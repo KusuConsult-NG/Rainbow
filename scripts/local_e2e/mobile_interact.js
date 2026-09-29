@@ -598,21 +598,39 @@ async function logMark() {
   // the same file input on web, so SCAN PHOTO and RECORD VIDEO are exercised as
   // file pickers here; a device test is still the only thing that covers a real
   // camera and a refused camera permission.
+  // The flow is FOUR screens, and /report-initial is the first of them — it
+  // offers groups ("THREAT TO LIFE", "CIVIL HAZARD"), not categories. Going
+  // there and looking for "Fire" found nothing, so this test sat on the group
+  // screen and reported the picker dead. /report-category is where the
+  // categories themselves are, which is the route the category loop above uses.
   state.screen = 'mobile:attachment';
-  await go('/report-initial', 2600);
+  await go('/report-category', 2800);
+
+  for (let attempt = 0; attempt < 16; attempt++) {
+    if (await findNode('Fire', { role: 'button' })) break;
+    await page.mouse.wheel({ deltaY: 300 });
+    await sleep(500);
+  }
+  const attachCat = await tap('Fire', { role: 'button', settle: 2400 });
+
+  // Subtype: the same selector the category loop uses, because the rows carry
+  // no stable name of their own.
   await page.evaluate(() => {
-    const n = [...document.querySelectorAll('flt-semantics')]
-      .find((x) => /fire/i.test(x.textContent || ''));
+    const n = [...document.querySelectorAll('flt-semantics[role="button"]')].find((b) => {
+      const r = b.getBoundingClientRect();
+      const label = (b.textContent || '').trim();
+      return r.y > 120 && r.y < 640 && r.width > 180 && label.length > 3
+        && !/change|initiate|dashboard|movement|new report|home/i.test(label);
+    });
     if (n) n.click();
   });
-  await sleep(1600);
-  await page.evaluate(() => {
-    const n = [...document.querySelectorAll('flt-semantics')]
-      .find((x) => /building fire/i.test(x.textContent || ''));
-    if (n) n.click();
-  });
-  await sleep(900);
-  await tap('initiate tactical report', { role: 'button', settle: 2600 });
+  await sleep(1200);
+  const attachAdvanced = await tap('initiate tactical report', { role: 'button', settle: 2600 });
+  check(
+    'the attachment test reached the details screen',
+    attachCat && attachAdvanced,
+    attachCat ? (attachAdvanced ? '' : 'stopped at the subtype screen') : 'never found the Fire category',
+  );
 
   const FIXTURE = path.join(__dirname, 'fixtures', 'evidence.png');
   let attached = false;
@@ -769,6 +787,18 @@ async function logMark() {
         n.getAttribute('aria-checked'), n.getAttribute('aria-selected'),
         n.getAttribute('aria-pressed'), n.getAttribute('aria-expanded'),
         n.getAttribute('aria-disabled'),
+        // aria-current, and not as an afterthought. Flutter's own source says
+        // why, in material/chip.dart:
+        //
+        //   "On web, aria-selected only works for certain roles: gridcell,
+        //    option, row and tab. If the role doesn't support aria-selected,
+        //    aria-current will be set instead in flutter engine."
+        //
+        // The report subtype rows are Semantics(button: true, selected: ...),
+        // so their selection lands in aria-current. Reading only
+        // aria-selected, this sweep watched an attribute the engine was never
+        // going to write and reported four working controls as dead.
+        n.getAttribute('aria-current'),
       ].join(''))
       .join('|');
     return {
