@@ -56,6 +56,60 @@ describe('a read that failed', () => {
   });
 });
 
+describe('a read that succeeded but was never authenticated', () => {
+  // The failure `error` cannot see. Row-level security is not an error: a
+  // request with no usable token has a NULL auth.uid() in every policy, admits
+  // nothing, and comes back as a successful 200 with []. Identical to the
+  // response an empty Plateau gives.
+  it('does not claim all clear', () => {
+    expect(emptyBoardMeaning({
+      feedError: null, loaded: 0, visible: 0, identityConfirmed: false,
+    })).toBe('SESSION_NOT_RECOGNISED');
+  });
+
+  it('says the emptiness proves nothing, and what to do', () => {
+    const { heading, detail } = emptyBoardWording({
+      feedError: null, loaded: 0, visible: 0, identityConfirmed: false,
+    });
+    expect(heading).toBe('SESSION NOT RECOGNISED');
+    expect(heading).not.toContain('CLEAR');
+    expect(detail.toLowerCase()).toContain('proves nothing');
+    expect(detail.toLowerCase()).toContain('sign out');
+    expect(detail.toLowerCase()).toContain('different project');
+  });
+
+  it('is outranked by an outright error, which is more specific', () => {
+    expect(emptyBoardMeaning({
+      feedError: 'permission denied', loaded: 0, visible: 0, identityConfirmed: false,
+    })).toBe('READ_FAILED');
+  });
+
+  it('outranks the filter explanation', () => {
+    // Otherwise the operator clears the filters, sees nothing, and concludes
+    // the state is quiet.
+    expect(emptyBoardMeaning({
+      feedError: null, loaded: 5, visible: 0, identityConfirmed: false,
+    })).toBe('SESSION_NOT_RECOGNISED');
+  });
+
+  it('a confirmed identity with an empty board IS an all-clear', () => {
+    expect(emptyBoardMeaning({
+      feedError: null, loaded: 0, visible: 0, identityConfirmed: true,
+    })).toBe('ALL_CLEAR');
+  });
+
+  it('an unasked question does not block an all-clear', () => {
+    // null means the check did not run. Treating that as suspicion would put a
+    // red panel on every console that has nothing to report, and an alarm that
+    // is always on is an alarm nobody reads.
+    expect(emptyBoardMeaning({
+      feedError: null, loaded: 0, visible: 0, identityConfirmed: null,
+    })).toBe('ALL_CLEAR');
+    expect(emptyBoardMeaning({ feedError: null, loaded: 0, visible: 0 }))
+      .toBe('ALL_CLEAR');
+  });
+});
+
 describe('incidents loaded but filtered out', () => {
   it('is not an all-clear', () => {
     const state = { feedError: null, loaded: 13, visible: 0 };
@@ -99,17 +153,24 @@ describe('the precedence between the three causes', () => {
     })).toBe('READ_FAILED');
   });
 
-  it('never returns ALL_CLEAR for any state with an error or loaded rows', () => {
-    const errors = [null, 'boom'];
-    for (const feedError of errors) {
+  it('never returns ALL_CLEAR unless the board is live, empty and corroborated', () => {
+    // Exhaustive over every state the board can hold. ALL_CLEAR is the only
+    // reassuring answer this console gives, so the whole space is walked rather
+    // than the three cases somebody thought of.
+    for (const feedError of [null, 'boom']) {
       for (const loaded of [0, 1, 500]) {
         for (const visible of [0, 1]) {
-          if (visible > loaded) continue;
-          const meaning = emptyBoardMeaning({ feedError, loaded, visible });
-          if (meaning === 'ALL_CLEAR') {
-            expect(feedError).toBeNull();
-            expect(loaded).toBe(0);
-            expect(visible).toBe(0);
+          for (const identityConfirmed of [undefined, null, true, false] as const) {
+            if (visible > loaded) continue;
+            const meaning = emptyBoardMeaning({
+              feedError, loaded, visible, identityConfirmed,
+            });
+            if (meaning === 'ALL_CLEAR') {
+              expect(feedError).toBeNull();
+              expect(loaded).toBe(0);
+              expect(visible).toBe(0);
+              expect(identityConfirmed).not.toBe(false);
+            }
           }
         }
       }
