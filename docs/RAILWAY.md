@@ -102,6 +102,35 @@ RAINBOW_WEBHOOK_SECRET  outbound agency webhooks
 NOTIFY_DRAIN_SECRET     the escalation notification worker (see below)
 ```
 
+### The citizen OTP hook (Supabase, not Railway)
+
+Citizens have no email and no password — the phone number IS the identity, and
+`signInWithOtp(phone:)` needs Supabase to actually send an SMS. Supabase's
+built-in providers are Twilio, MessageBird, Vonage and Textlocal. **Termii is
+not one of them**, so the only way Supabase can send through Termii is a Send
+SMS auth hook: `supabase/functions/send-sms`.
+
+Until that function is deployed AND selected in the dashboard, no citizen can
+sign in at all — the code is never sent, so there is nothing to type.
+
+```
+supabase functions deploy send-sms
+supabase secrets set TERMII_API_KEY=... TERMII_SENDER_ID=RainbowHQ HOOK_SECRET=...
+```
+
+Then **Authentication → Hooks → Send SMS hook → Edge Function → send-sms**, with
+the same `HOOK_SECRET`.
+
+`HOOK_SECRET` is not optional. The function refuses to run without it, because
+an unauthenticated hook URL is an SMS relay: anyone who finds it can post a
+phone number and have Termii send to it, billed to this account.
+
+`ALLOW_UNSENT_OTP=true` is a staging-only escape hatch. With it set, a failure
+to send answers 200 and auth proceeds; without it, a failure answers 500 so the
+app can tell the person the code could not be sent. Do not set it in
+production: answering 200 when no SMS went out tells the app the code is on its
+way, and the citizen waits on a timer for a code that does not exist.
+
 ### The escalation notification worker
 
 `escalate_overdue_alerts()` runs inside PostgreSQL every minute and climbs any
