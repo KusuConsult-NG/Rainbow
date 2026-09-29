@@ -1477,7 +1477,21 @@ export default function DashboardPage() {
                 }
                 theme={theme}
               />
-              <div className="glass fade-in" style={{ position: 'absolute', top: 24, right: 24, width: 320, maxHeight: 'calc(100% - 48px)', display: isNarrow ? 'none' : 'flex', borderRadius: 20, flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }}>
+              {/*
+                zIndex, or Leaflet paints over this.
+
+                The feed is absolutely positioned as a SIBLING of the map, and
+                had no z-index at all — so it sat at `auto`, which is 0. Leaflet
+                gives its own children positive ones: panes 200-700, controls
+                800. `.leaflet-container` sets no z-index of its own, so it
+                creates no stacking context and those values compete directly
+                with this panel's 0. The map won, and the situational feed was
+                rendered underneath it.
+
+                1000 is what the map's own legend in LiveMap.tsx already uses to
+                sit above the same panes.
+              */}
+              <div className="glass fade-in" style={{ position: 'absolute', top: 24, right: 24, width: 320, maxHeight: 'calc(100% - 48px)', display: isNarrow ? 'none' : 'flex', borderRadius: 20, flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', zIndex: 1000 }}>
                 <div style={{ padding: '20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h3 style={{ fontSize: 12, fontWeight: 900, color: 'var(--accent)', letterSpacing: 1.5 }}>SITUATIONAL FEED</h3>

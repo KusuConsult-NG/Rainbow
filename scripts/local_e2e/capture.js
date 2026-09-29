@@ -353,6 +353,44 @@ async function chooseTactical(page, triggerText, optionText) {
     return '';
   })();
 
+  // THE MAP PAINTED OVER THE SITUATIONAL FEED.
+  //
+  // The feed is absolutely positioned as a sibling of the map and carried no
+  // z-index, so it sat at `auto` — 0 — while Leaflet gives its own panes
+  // 200-700 and its controls 800. `.leaflet-container` sets none itself, so it
+  // opens no stacking context and those numbers competed directly with the
+  // panel's. The map won.
+  //
+  // Screenshots did not catch it: the panel is still in the DOM, still the
+  // right size, and a screenshot of a map with a panel behind it looks like a
+  // map. Asking the browser WHAT IS ACTUALLY ON TOP at the panel's own
+  // coordinates is the question that has an answer.
+  const feedOnTop = await page.evaluate(() => {
+    const panel = [...document.querySelectorAll('div')].find(
+      (d) => /SITUATIONAL FEED/.test(d.textContent || '')
+        && getComputedStyle(d).position === 'absolute',
+    );
+    if (!panel) return { found: false };
+    const r = panel.getBoundingClientRect();
+    if (r.width < 10 || r.height < 10) return { found: false };
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + 12);
+    return {
+      found: true,
+      covered: !!hit && !panel.contains(hit),
+      by: hit ? (hit.className || hit.tagName).toString().slice(0, 60) : '(nothing)',
+    };
+  });
+
+  check(
+    'the situational feed is on top of the map, not behind it',
+    feedOnTop.found && !feedOnTop.covered,
+    !feedOnTop.found
+      ? '(the feed panel was not on screen)'
+      : feedOnTop.covered
+        ? `covered by ${feedOnTop.by}`
+        : 'the feed answers to a click at its own coordinates',
+  );
+
   check(
     'clicking an incident marker opens a card',
     popupText.length > 0,
