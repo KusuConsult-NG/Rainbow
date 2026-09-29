@@ -18,11 +18,22 @@ class MockGeolocatorPlatform extends Mock
     with MockPlatformInterfaceMixin
     implements GeolocatorPlatform {}
 
-Position _position({double lat = 9.8965, double lng = 8.8583}) {
+/// A fix, fresh by default.
+///
+/// The timestamp used to be a fixed `DateTime.utc(2026, 8, 13, 14)`. A cached
+/// position is now refused once it is more than thirty minutes old, so that
+/// fixture passed on the day it was written and failed every day afterwards —
+/// by the time this was noticed it was forty-six days stale. Age is the thing
+/// under test in one case below, so it is a parameter rather than a constant.
+Position _position({
+  double lat = 9.8965,
+  double lng = 8.8583,
+  Duration age = const Duration(minutes: 1),
+}) {
   return Position(
     latitude: lat,
     longitude: lng,
-    timestamp: DateTime.utc(2026, 8, 13, 14),
+    timestamp: DateTime.now().toUtc().subtract(age),
     accuracy: 5,
     altitude: 1200,
     altitudeAccuracy: 3,
@@ -160,6 +171,24 @@ void main() {
 
       expect(pos, isNotNull);
       expect(pos!.latitude, closeTo(9.5, 0.000001));
+    });
+
+    test('refuses a cached position that is too old to act on', () async {
+      // The rule this fixture used to violate by accident, asserted on
+      // purpose. Sending a unit to where somebody was an hour ago is worse
+      // than admitting there is no fix: the dispatcher can see "unlocated" and
+      // ring them, and cannot see that a confident pin is an hour stale.
+      when(() => geo.isLocationServiceEnabled()).thenAnswer((_) async => true);
+      when(() => geo.checkPermission())
+          .thenAnswer((_) async => LocationPermission.always);
+      when(() => geo.getCurrentPosition(
+            locationSettings: any(named: 'locationSettings'),
+          ),).thenThrow(const LocationServiceDisabledException());
+      when(() => geo.getLastKnownPosition()).thenAnswer(
+        (_) async => _position(lat: 9.5, lng: 8.5, age: const Duration(hours: 1)),
+      );
+
+      expect(await service.getCurrentPosition(force: true), isNull);
     });
 
     test('returns null when both the live and cached fixes fail', () async {

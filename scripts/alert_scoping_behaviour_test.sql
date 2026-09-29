@@ -26,7 +26,8 @@ INSERT INTO auth.users (id, email) VALUES
   ('aaaa0000-0000-4000-8000-00000000aa04', 'scope-hq@staging.test'),
   ('aaaa0000-0000-4000-8000-00000000aa05', 'scope-unit-jos@staging.test'),
   ('aaaa0000-0000-4000-8000-00000000aa06', 'scope-responder-jos@staging.test'),
-  ('aaaa0000-0000-4000-8000-00000000aa07', 'scope-unposted@staging.test')
+  ('aaaa0000-0000-4000-8000-00000000aa07', 'scope-unposted@staging.test'),
+  ('aaaa0000-0000-4000-8000-00000000aa08', 'scope-wardofficer@staging.test')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.profiles (id, email, full_name, role, geo_lga, geo_ward, geo_pu) VALUES
@@ -43,7 +44,12 @@ INSERT INTO public.profiles (id, email, full_name, role, geo_lga, geo_ward, geo_
   ('aaaa0000-0000-4000-8000-00000000aa06', 'scope-responder@staging.test',
    'Responder Jos',   'RESPONDER',    'JOS NORTH', 'NARAGUTA', 'PU-02'),
   ('aaaa0000-0000-4000-8000-00000000aa07', 'scope-unposted@staging.test',
-   'Unposted Officer','WARD_COMMAND', NULL,        NULL,       NULL)
+   'Unposted Officer','WARD_COMMAND', NULL,        NULL,       NULL),
+  -- A ward OFFICER, not a command. v6_geo_lga_scoping_staging.sql grants this
+  -- role the whole LGA through a separate permissive policy, so it is the role
+  -- that proves the two policies do not OR into LGA-wide access.
+  ('aaaa0000-0000-4000-8000-00000000aa08', 'scope-wardofficer@staging.test',
+   'Ward Officer Jos','WARD_OFFICER', 'JOS NORTH', 'NARAGUTA', 'PU-01')
 ON CONFLICT (id) DO UPDATE
   SET role = EXCLUDED.role, geo_lga = EXCLUDED.geo_lga,
       geo_ward = EXCLUDED.geo_ward, geo_pu = EXCLUDED.geo_pu;
@@ -138,6 +144,32 @@ BEGIN
       'FAIL: a ward commander resolved an incident 80km outside their command';
   END IF;
   RAISE NOTICE 'PASS: a ward commander cannot resolve another LGA''s incident';
+END $$;
+
+-- ── A WARD_OFFICER is scoped like a ward, not like an LGA ──────────────────
+--
+-- v6_geo_lga_scoping_staging.sql adds a SEPARATE permissive policy granting
+-- FIELD_OFFICER / WARD_OFFICER / LGA_OFFICER every alert in their LGA. Policies
+-- are ORed, so if that one survives, this file's ward scoping never binds for
+-- those roles. The earlier version of this test used WARD_COMMAND only and
+-- would not have noticed.
+
+DO $$
+BEGIN
+  -- A dedicated account rather than a role change: profiles.role is guarded by
+  -- the privilege-escalation trigger, which refuses to let anything rewrite it
+  -- — including this test, correctly.
+  IF pg_temp.visible_to('aaaa0000-0000-4000-8000-00000000aa08',
+                        'bbbb0000-0000-4000-8000-00000000bb02') <> 1 THEN
+    RAISE EXCEPTION 'FAIL: a WARD_OFFICER cannot see their own ward';
+  END IF;
+
+  IF pg_temp.visible_to('aaaa0000-0000-4000-8000-00000000aa08',
+                        'bbbb0000-0000-4000-8000-00000000bb03') <> 0 THEN
+    RAISE EXCEPTION
+      'FAIL: a WARD_OFFICER reads another ward in their LGA — an LGA-wide policy is still in force';
+  END IF;
+  RAISE NOTICE 'PASS: a ward OFFICER is scoped to their ward, like a ward commander';
 END $$;
 
 -- ── An LGA commander, and HQ ───────────────────────────────────────────────

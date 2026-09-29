@@ -66,26 +66,22 @@ export async function POST(req: NextRequest) {
 
     const supabase = getSupabaseAdmin();
 
-    // Verify caller is authenticated with a valid Supabase session
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const token = authHeader.replace('Bearer ', '');
-    const authClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-    const { data: { user }, error: authErr } = await authClient.auth.getUser(token);
-    if (authErr || !user) {
-      return NextResponse.json({ error: 'Unauthorized: Invalid session' }, { status: 401 });
-    }
-
-    const { data: callerProfile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
-    const allowedRoles = ['HQ_COMMAND', 'HQ_OFFICER', 'ADMIN'];
-    if (!callerProfile || !allowedRoles.includes(callerProfile.role)) {
-      return NextResponse.json({ error: 'Forbidden: Insufficient role' }, { status: 403 });
-    }
+    // A SECOND authorisation check used to sit here, and it was broken twice
+    // over. It called `createClient` without importing it, so the deployment
+    // failed to type check and nothing shipped at all. And it read the caller
+    // from an `Authorization: Bearer` header, while the only caller —
+    // alert-actions.ts escalateAlert — sends no such header, so once it
+    // compiled it would have refused every agency notification with a 401.
+    //
+    // The route is already authorised: `requireRole(COMMAND_ROLES)` runs above
+    // before any work, reads the session from cookies (which is what a browser
+    // actually has), and looks the role up with admin privileges so a
+    // permissive policy cannot spoof it.
+    //
+    // NOTE: that block also listed a NARROWER set — HQ_COMMAND, HQ_OFFICER,
+    // ADMIN — where COMMAND_ROLES also includes LGA_COMMAND. Excluding LGA
+    // command from agency escalation may well be intended, but it is a change
+    // to who can do this, not a bug fix, so it is not being made silently here.
 
     const results: { method: string; status: string; detail?: string }[] = [];
 

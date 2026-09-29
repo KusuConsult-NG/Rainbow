@@ -99,6 +99,58 @@ GEMINI_API_KEY          AI triage (falls back to the rule engine)
 ONESIGNAL_APP_ID        push
 ONESIGNAL_REST_API_KEY  push
 RAINBOW_WEBHOOK_SECRET  outbound agency webhooks
+NOTIFY_DRAIN_SECRET     the escalation notification worker (see below)
+```
+
+### The escalation notification worker
+
+`escalate_overdue_alerts()` runs inside PostgreSQL every minute and climbs any
+incident whose tier has held it longer than `app_config` allows. It writes the
+move and a row in `notification_outbox` in ONE statement, so an escalation
+cannot happen without a notice being owed.
+
+Nothing in the database can make an HTTP call, and it should not try: a call
+inside a transaction cannot be rolled back, and a failure inside one has
+nowhere to live. So the queue is drained from outside, by
+`POST /api/notify/drain`.
+
+**Without a scheduler calling it, escalations still happen and nobody is
+notified.** The rows accumulate; nothing is lost; but the phone does not ring,
+which is the whole point of a timeout that fires at 02:00.
+
+Add a Railway **cron service** in the same project, scheduled `* * * * *`:
+
+```
+curl -fsS -X POST https://<your-console-host>/api/notify/drain \
+  -H "x-drain-secret: $NOTIFY_DRAIN_SECRET"
+```
+
+`NOTIFY_DRAIN_SECRET` is a shared secret you generate — `openssl rand -hex 32`
+— set on BOTH the console service and the cron service. The endpoint refuses to
+run at all when it is unset, rather than running unauthenticated: an open drain
+endpoint lets anyone empty the queue, marking every row delivered with nobody
+notified.
+
+Running more than one worker is safe. `claim_notifications` uses
+`FOR UPDATE SKIP LOCKED`, so two workers take different rows rather than both
+sending everything.
+
+To check it is working:
+
+```sql
+-- Should be small and falling. A growing number means nothing is draining.
+select count(*) from notification_outbox where delivered_at is null;
+
+-- Why anything failed.
+select id, kind, attempts, last_error, next_attempt_at
+  from notification_outbox
+ where delivered_at is null and last_error is not null
+ order by next_attempt_at;
+
+-- And that the job feeding it is actually scheduled. The pg_cron block is
+-- conditional, so the automation can be absent while every migration reports
+-- success.
+select * from escalation_automation_status();
 ```
 
 ### What Railway does not give us, that App Hosting did
