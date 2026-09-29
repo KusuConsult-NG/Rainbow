@@ -164,6 +164,14 @@ jobs:
       - name: Assert the app and the console agree about Plateau
         run: python3 scripts/sync_tactical_map.py --check
 
+      # A USSD report has no GPS and cannot have one, so it is drawn from its
+      # ward's centroid — as an AREA, never a pin. The console's copy of those
+      # centroids is generated from the app's asset, which is the only geography
+      # this system has; drift means an incident drawn in the wrong place, or a
+      # ward whose incidents stop appearing on the map at all.
+      - name: Assert the console's ward centroids match the app's
+        run: python3 scripts/sync_ward_centroids.py --check
+
       # The mesh sealer shipped with DateTime.now().microsecondsSinceEpoch as the
       # seed for the generator that produces every AES-GCM nonce AND HQ's own
       # keypair. Two seals in one microsecond would then repeat a nonce, which

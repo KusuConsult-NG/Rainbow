@@ -24,6 +24,11 @@ import {
   resolveReporterDetails,
   statusColour,
 } from '@/lib/incident-dossier';
+import {
+  approxRadiusLabel,
+  locateIncident,
+  type IncidentLocation,
+} from '@/lib/incident-locate';
 
 /**
  * A one-bit store for "the Leaflet map exists".
@@ -461,7 +466,91 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
   // that still owned the cleanup. One effect, installed once, cleaned up once.
   // See the block below `alertMarkersRef`.
 
+  /**
+ * The dossier for an approximate location, with the warning first.
+ *
+ * Prepended rather than appended: a dispatcher reads the top of a popup and acts.
+ * "No GPS" discovered three rows down, after a coordinate-shaped circle has
+ * already been believed, is not a warning.
+ */
+function approximateDossier(html: string, where: IncidentLocation): string {
+  const note = where.precision === 'WARD'
+    ? `NO GPS — approximate area only, about ${approxRadiusLabel(where.radiusM)} across.`
+    : `NO GPS — only the LGA is known, about ${approxRadiusLabel(where.radiusM)} across.`;
+  return (
+    '<div style="background:rgba(245,158,11,0.18);border:1px solid rgba(245,158,11,0.5);'
+    + 'padding:6px 8px;border-radius:6px;margin-bottom:8px;font-size:10px;font-weight:800;'
+    + 'color:#b45309;line-height:1.35">'
+    + note
+    + '<br>Do not dispatch to this circle as an address.'
+    + '</div>'
+    + html
+  );
+}
+
+/**
+ * Draw an incident whose position is only approximately known.
+ *
+ * A CIRCLE, never a pin, and the difference is deliberately impossible to miss:
+ * a dashed edge, a translucent fill, and nothing at the centre. A dispatcher must
+ * not be able to mistake this for a fix, because the difference is whether a
+ * vehicle can be sent to it — an area tells a commander which unit owns the
+ * incident, which is a different question from where to drive.
+ *
+ * Reuses the circle across refetches for the same reason the markers do: every
+ * realtime event hands down a new array, and rebuilding an open popup makes the
+ * card the operator is reading blink.
+ */
+function drawApproximateArea(
+  alert: Alert,
+  where: IncidentLocation,
+  L: any,
+  group: any,
+  existing: Map<string, any>,
+  drawnFrom: Map<string, string>,
+  popupHtml: string,
+) {
+  const colour = statusColour(alert.status);
+  const signature = `${where.lat},${where.lng},${where.radiusM},${colour}`;
+  const already = existing.get(alert.id);
+
+  if (already) {
+    if (drawnFrom.get(alert.id) !== signature) {
+      already.setLatLng([where.lat!, where.lng!]);
+      already.setRadius(where.radiusM);
+      already.setStyle({ color: colour, fillColor: colour });
+    }
+    const popup = already.getPopup();
+    if (popup && popup.getContent() !== popupHtml) popup.setContent(popupHtml);
+    drawnFrom.set(alert.id, signature);
+    return;
+  }
+
+  const circle = L.circle([where.lat!, where.lng!], {
+    radius: where.radiusM,
+    color: colour,
+    fillColor: colour,
+    fillOpacity: 0.12,
+    weight: 2,
+    // The dashed edge IS the message: this boundary is not a boundary.
+    dashArray: '6 6',
+  });
+  circle.bindPopup(popupHtml, {
+    closeButton: true,
+    autoClose: false,
+    closeOnClick: false,
+    maxWidth: 340,
+    minWidth: 272,
+  });
+  group.addLayer(circle);
+  existing.set(alert.id, circle);
+  drawnFrom.set(alert.id, signature);
+}
+
   const alertMarkersRef = useRef<Map<string, any>>(new Map());
+  /** What each approximate AREA was last drawn from. Same purpose as
+   *  markerDrawnFromRef: a redraw on unchanged inputs makes an open card blink. */
+  const areaDrawnFromRef = useRef<Map<string, string>>(new Map());
   const clusterGroupRef = useRef<any>(null);
 
   /**
@@ -524,11 +613,21 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
     const currentIds = new Set<string>();
 
     alerts.forEach(alert => {
-      // `!alert.lat` also rejects 0. That is a coordinate — in the Gulf of
-      // Guinea, so never a real Plateau fix — but a falsy check on a number is
-      // the habit that produces C-5-shaped bugs, so this asks the question it
-      // means: is there a usable fix?
-      if (!Number.isFinite(alert.lat) || !Number.isFinite(alert.lng)) return;
+      // Where this incident actually is, and how certain to look about it.
+      //
+      // This used to be `if (!Number.isFinite(alert.lat)) return;` — correct as
+      // far as it went, because inventing coordinates is the C-5 defect this
+      // codebase already fixed once. But it meant an incident with a WARD and no
+      // GPS was drawn nowhere at all, and USSD reports never have GPS: USSD
+      // rides the signalling channel and cannot read the handset's location. A
+      // USSD emergency appeared in the incident list and nowhere on the map the
+      // operator is watching.
+      //
+      // So an approximate position is now drawn AS approximate — a circle the
+      // size of the ward, with a dashed edge and NO PIN at its centre — and
+      // only a real fix gets a marker. See lib/incident-locate.ts.
+      const where = locateIncident(alert as never);
+      if (where.precision === 'NONE') return;
       currentIds.add(alert.id);
 
       const isDuress = alert.status === 'DURESS';
@@ -563,6 +662,20 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
         reporter: resolveReporterDetails(alert, usersMap),
         usersMap,
       });
+
+      // Only a real fix gets a pin. Everything else is an area, and the branch
+      // sits here rather than earlier so both paths carry the SAME dossier —
+      // an operator clicking a circle must get the same detail as one clicking a
+      // marker, or the approximate incidents become second-class on the screen
+      // that decides who gets help.
+      if (where.precision !== 'GPS') {
+        drawApproximateArea(
+          alert, where, L, clusterGroup,
+          alertMarkersRef.current, areaDrawnFromRef.current,
+          approximateDossier(popupContent, where),
+        );
+        return;
+      }
 
       const existingMarker = alertMarkersRef.current.get(alert.id);
       // The three things this marker is drawn from. Compared as strings rather
@@ -603,6 +716,7 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
         clusterGroup.removeLayer(marker);
         alertMarkersRef.current.delete(id);
         markerDrawnFromRef.current.delete(id);
+        areaDrawnFromRef.current.delete(id);
       }
     });
     // `usersMap` belongs here. Profiles load in their OWN effect, which
