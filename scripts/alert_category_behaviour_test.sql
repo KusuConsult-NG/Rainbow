@@ -109,6 +109,8 @@ END $$;
 DO $$
 BEGIN
   BEGIN
+    -- generated-column-insert: deliberate — this statement MUST be refused;
+    -- scripts/check_generated_column_inserts.py skips it for that reason.
     INSERT INTO public.alerts (id, type, description, status, severity,
                                reported_by, category)
     VALUES ('dddd4444-0000-4000-8000-0000000000d9',
