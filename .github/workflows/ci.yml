@@ -153,6 +153,17 @@ jobs:
       - name: Assert the console and the app state the same palette
         run: python3 scripts/check_palette_parity.py
 
+      # The two Plateau maps were written separately and shared not one ward
+      # name. The app resolves an incident's ward from the GPS centroids —
+      # BARAKIN LADI, GASSA/SHO — and the console offered 142 invented ones in
+      # another case: "Barkin Ladi Central", "Fan". So the console's ward and
+      # beat filters selected nothing, and — once alerts were scoped by
+      # posting — an officer provisioned from the console's list could not be
+      # matched to an incident at all. The console's copy is generated from the
+      # app's now; this fails the build if they drift apart again.
+      - name: Assert the app and the console agree about Plateau
+        run: python3 scripts/sync_tactical_map.py --check
+
       # The mesh sealer shipped with DateTime.now().microsecondsSinceEpoch as the
       # seed for the generator that produces every AES-GCM nonce AND HQ's own
       # keypair. Two seals in one microsecond would then repeat a nonce, which
