@@ -20,6 +20,8 @@ import { standDownList } from '@/lib/dispatch-changes';
  * act on all of them — resolving only the first report used to leave the rest
  * open and invisible, since the board no longer showed them.
  */
+import type { UssdCredibility } from './ussd-provenance';
+
 export type AlertIds = string | string[];
 
 export function idsOf(ids: AlertIds): string[] {
@@ -237,6 +239,109 @@ export async function hqOverride(alertIds: AlertIds, actor: Actor): Promise<Acti
   } catch (e) {
     console.error('[HQ_OVERRIDE_ERR]', e);
     return failed(e, 'Override failed');
+  }
+}
+
+/**
+ * A named officer stands behind a report that arrived from a keypad.
+ *
+ * A USSD report is held out of the escalation ladder until this happens — no
+ * timer may turn a stranger's keypresses into a deployment (migration
+ * 20261011000000). This is the officer's decision, and the database records
+ * whose it was.
+ *
+ * `confirm_ussd_report()` is SECURITY INVOKER, so
+ * `alerts_update_own_or_ours` decides whether this account may act on the
+ * incident at all. It returns NO ROW when refused, when the incident is not a
+ * USSD one, or when it was already confirmed — and an empty result must never
+ * read as success, because an officer told "confirmed" on a report still held
+ * back would believe the ladder was running when it was not.
+ */
+export async function confirmUssdReport(
+  alertIds: AlertIds,
+): Promise<ActionResult<{ confirmed: number; refused: number }>> {
+  const ids = idsOf(alertIds);
+  let confirmed = 0;
+  let refused = 0;
+  try {
+    for (const id of ids) {
+      const { data, error } = await supabase.rpc('confirm_ussd_report', { p_alert_id: id });
+      if (error) throw error;
+      const rows = Array.isArray(data) ? data : data ? [data] : [];
+      if (rows.length > 0) confirmed += 1;
+      else refused += 1;
+    }
+    if (confirmed === 0) {
+      // Every one refused. Reported as a FAILURE rather than a quiet zero: the
+      // operator needs to know their confirmation did not take, because the
+      // report is still out of the ladder and nothing will chase it.
+      return {
+        ok: false,
+        error: refused === 1
+          ? 'Not confirmed — either it is not yours to confirm, or somebody already did.'
+          : `None of the ${refused} were confirmed — not yours, or already confirmed.`,
+      };
+    }
+    return { ok: true, value: { confirmed, refused } };
+  } catch (e) {
+    console.error('[USSD_CONFIRM_ERR]', e);
+    return failed(e, 'Confirmation failed');
+  }
+}
+
+/**
+ * An officer records that a report was untrue.
+ *
+ * FALSE_REPORT, deliberately distinct from CANCELLED — which is a reporter
+ * standing themselves down and carries no accusation. This is the only source of
+ * the history that makes a number's credibility a fact rather than a guess, so
+ * the note matters: it is what the next dispatcher reads when the same number
+ * calls again.
+ */
+export async function markFalseReport(
+  alertIds: AlertIds,
+  note: string,
+): Promise<ActionResult<{ marked: number }>> {
+  const ids = idsOf(alertIds);
+  try {
+    let marked = 0;
+    for (const id of ids) {
+      const { data, error } = await supabase.rpc('mark_false_report', {
+        p_alert_id: id,
+        p_note: note,
+      });
+      if (error) throw error;
+      if (data === true) marked += 1;
+    }
+    if (marked === 0) {
+      return { ok: false, error: 'Not marked — this incident is not yours to close.' };
+    }
+    return { ok: true, value: { marked } };
+  } catch (e) {
+    console.error('[MARK_FALSE_ERR]', e);
+    return failed(e, 'Could not mark it false');
+  }
+}
+
+/**
+ * What a dispatcher should know before committing officers on the word of a
+ * phone number.
+ *
+ * Returns null rather than throwing when it cannot be read: a card that cannot
+ * show the credibility panel is worse than no panel only if it also HIDES the
+ * incident, so the caller falls back to showing the report without it.
+ */
+export async function ussdCredibility(alertId: string): Promise<UssdCredibility | null> {
+  try {
+    const { data, error } = await supabase.rpc('ussd_report_credibility', {
+      p_alert_id: alertId,
+    });
+    if (error) throw error;
+    const rows = Array.isArray(data) ? data : data ? [data] : [];
+    return rows.length > 0 ? (rows[0] as UssdCredibility) : null;
+  } catch (e) {
+    console.error('[USSD_CREDIBILITY_ERR]', e);
+    return null;
   }
 }
 

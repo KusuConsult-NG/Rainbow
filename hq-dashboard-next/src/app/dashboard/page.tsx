@@ -31,6 +31,7 @@ import type { Alert } from './types';
 import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
 import { emptyBoardMeaning, emptyBoardWording } from '@/lib/empty-board';
 import { geoKey, geoMatchesKeyed } from '@/lib/geo-key';
+import UssdProvenancePanel from '@/components/UssdProvenancePanel';
 import { consoleAccess } from '@/lib/console-access';
 import { describeTrack, summariseTrack, thinTrack, type TrackPoint } from '@/lib/incident-track';
 import { resolveReporterDetails } from '@/lib/incident-dossier';
@@ -2593,7 +2594,13 @@ Respond ONLY with a JSON object with this exact shape:
   return (
     <div className="tactical-panel glass tactical-panel-hover fade-in" style={{ padding: 24, borderTop: `4px solid ${color}`, position: 'relative', overflow: 'hidden' }}>
       {isDuress && <div className="duress-pulse" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 40, opacity: 0.1, pointerEvents: 'none' }}></div>}
-      
+
+      {/* A report that arrived from a keypad. Renders nothing for anything else.
+          An unconfirmed one is held out of the escalation ladder, so this panel
+          is where a named officer stands behind it — see
+          components/UssdProvenancePanel.tsx and migration 20261011000000. */}
+      <UssdProvenancePanel alert={alert as never} />
+
       {((alert as any).via === 'SMS_GATEWAY' || (alert as any).source === 'SMS' || (alert.description || '').includes('[OFFLINE_SMS]') || (alert.description || '').includes('[SMS]')) && (
         <div style={{
           background: 'rgba(245, 158, 11, 0.15)',
