@@ -31,11 +31,43 @@
  * stays for those that do not.
  */
 
-/** Origins the console legitimately talks to, enumerated from the source. */
-const TILE_HOSTS = [
-  'https://*.basemaps.cartocdn.com',
-  'https://*.tile.openstreetmap.org',
-];
+/**
+ * Where map tiles may be fetched from.
+ *
+ * This listed `https://*.basemaps.cartocdn.com` and
+ * `https://*.tile.openstreetmap.org` and nothing else, and when the map moved
+ * off CARTO it started requesting `https://tile.openstreetmap.org/...` — no
+ * subdomain. A CSP wildcard matches a SUBDOMAIN of a host, never the host
+ * itself, so every single tile was refused: `img-src` violation, blank grey
+ * map, markers floating on nothing. Worse than the watermark it replaced, and
+ * invisible from the map code, which was correct.
+ *
+ * Both spellings are listed now, and the configured provider's own origin is
+ * derived from `NEXT_PUBLIC_MAP_TILE_URL` — otherwise moving to a keyed or
+ * self-hosted tile server would silently produce the same blank map, with the
+ * reason in a console message nobody is reading during an incident.
+ *
+ * CARTO is gone. Nothing requests it any more, and it answers unauthenticated
+ * callers with a placeholder tile reading "API key required". A deployment that
+ * does buy CARTO tiles sets NEXT_PUBLIC_MAP_TILE_URL and is covered below.
+ */
+function tileHosts(): string[] {
+  const hosts = new Set<string>([
+    'https://tile.openstreetmap.org',
+    'https://*.tile.openstreetmap.org',
+  ]);
+
+  const configured = process.env.NEXT_PUBLIC_MAP_TILE_URL?.trim();
+  if (configured) {
+    // `{s}` is Leaflet's subdomain placeholder and `new URL()` rejects it, so
+    // the origin is taken by hand — and only from an https URL, because a
+    // policy is not the place to discover that somebody configured http.
+    const host = /^https:\/\/([^/{}]*(?:\{s\})?[^/{}]*)/.exec(configured)?.[1];
+    if (host) hosts.add(`https://${host.replace(/\{s\}/g, '*')}`);
+  }
+
+  return [...hosts];
+}
 
 /** The Supabase project origin, or null when it is not configured. */
 function supabaseOrigin(): string | null {
@@ -89,7 +121,7 @@ export function contentSecurityPolicy(nonce: string, isDev: boolean): string {
     // report has no way to tell a missing photo from one that was never taken.
     // That was the state shipped with the first nonce-based policy, and it was
     // caught by a browser check rather than by reading the header.
-    `img-src 'self' data: blob: ${[...mediaOrigins, ...TILE_HOSTS].join(' ')}`,
+    `img-src 'self' data: blob: ${[...mediaOrigins, ...tileHosts()].join(' ')}`,
     // Voice recordings and scene video ride the SAME Supabase Storage origin as
     // the photos, and `<audio src>` / `<video src>` are governed by media-src —
     // NOT img-src, and not connect-src. With no media-src at all they fell back

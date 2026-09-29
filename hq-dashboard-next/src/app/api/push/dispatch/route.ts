@@ -12,14 +12,24 @@ export async function POST(request: Request) {
     }
 
     // Parse separately so malformed JSON is a 400, not a 500 echoing the parser message.
-    let body: { alertId?: unknown; responderUids?: unknown };
+    let body: { alertId?: unknown; responderUids?: unknown; kind?: unknown };
     try {
       body = await request.json();
     } catch {
       return NextResponse.json({ error: 'Malformed JSON body' }, { status: 400 });
     }
 
-    const { alertId, responderUids } = body as { alertId?: string; responderUids?: string[] };
+    const { alertId, responderUids, kind } = body as {
+      alertId?: string; responderUids?: string[]; kind?: string;
+    };
+
+    // A stand-down and a dispatch carry OPPOSITE instructions, so they must not
+    // share a message. An officer taken off an incident used to be told
+    // nothing at all; telling them "report immediately" would be worse than
+    // that. Anything other than the exact token is treated as a dispatch —
+    // defaulting an unrecognised value to "stand down" could silently cancel a
+    // real deployment.
+    const isStandDown = kind === 'STAND_DOWN';
 
     if (!alertId || !responderUids || !Array.isArray(responderUids) || responderUids.length === 0) {
       return NextResponse.json({ error: 'Invalid payload: alertId and responderUids array required' }, { status: 400 });
@@ -73,9 +83,13 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         app_id: oneSignalAppId,
         include_player_ids: playerIds,
-        headings: { en: '⚡ TACTICAL MISSION DISPATCH' },
-        contents: { en: `You have been dispatched to Emergency Incident #${alertId.substring(0, 8)}. Report immediately.` },
-        data: { alertId, type: 'DISPATCH' }
+        headings: { en: isStandDown ? '🛑 STAND DOWN' : '⚡ TACTICAL MISSION DISPATCH' },
+        contents: {
+          en: isStandDown
+            ? `You have been STOOD DOWN from Emergency Incident #${alertId.substring(0, 8)}. Do not proceed. Await further orders.`
+            : `You have been dispatched to Emergency Incident #${alertId.substring(0, 8)}. Report immediately.`,
+        },
+        data: { alertId, type: isStandDown ? 'STAND_DOWN' : 'DISPATCH' }
       })
     });
 

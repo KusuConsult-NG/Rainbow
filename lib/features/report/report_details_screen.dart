@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:collection/collection.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -24,6 +25,25 @@ import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 import 'package:record/record.dart';
 
 /// Documentation for this public member.
+
+/// What to tell somebody whose attachment did not work.
+///
+/// Split out from the screen because the CHOICE is the part worth pinning: a
+/// refused permission is the one cause the person can act on, so it is named,
+/// and everything else says plainly that it did not work here. Both endings
+/// say what they can still do, because the report matters more than the photo
+/// and a dead end mid-emergency is how a report gets abandoned.
+String attachmentErrorMessage(Object error) {
+  final text = error.toString().toLowerCase();
+  final denied = text.contains('permission') ||
+      text.contains('denied') ||
+      text.contains('access');
+  return denied
+      ? 'This phone has not given Operation Rainbow access to the camera. '
+          'You can still send the report without a photo.'
+      : 'That did not work on this phone. You can still send the report '
+          'without an attachment.';
+}
 
 class ReportDetailsScreen extends ConsumerStatefulWidget {
   /// Documentation for this public member.
@@ -57,41 +77,69 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   String? _selectedPu;
 
   final List<File> _attachedFiles = [];
-  final ImagePicker _picker = ImagePicker();
+  /// Test seam: a real camera and gallery cannot be opened under test, and the
+  /// failure path — a refused permission, an unavailable camera — is the one
+  /// that was broken. Overriding the picker is how that path gets exercised.
+  @visibleForTesting
+  static ImagePicker Function()? pickerOverride;
+
+  late final ImagePicker _picker = pickerOverride?.call() ?? ImagePicker();
 
   final _audioRecorder = AudioRecorder();
   bool _isRecording = false;
   String? _recordedAudioPath;
 
-  Future<void> _pickImage() async {
-    final image =
-        await _picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
-    if (image != null) {
-      setState(() => _attachedFiles.add(File(image.path)));
+  /// Tells the person something went wrong, rather than the console.
+  ///
+  /// Every one of the four attachment buttons called into image_picker with no
+  /// error handling at all. `pickImage` and `pickVideo` THROW when the camera
+  /// is unavailable or the permission has been refused — which on a real
+  /// handset is the ordinary case, not an exotic one — and the exception went
+  /// nowhere. Someone reporting an emergency pressed SCAN PHOTO, nothing
+  /// happened, and there was nothing on the screen to say why or what to do.
+  /// They would press it again.
+  ///
+  /// The browser sweep found all four dead and caught the thrown error.
+  void _attachmentFailed(Object error) {
+    debugPrint('[ATTACH_ERR] $error');
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(attachmentErrorMessage(error)),
+        backgroundColor: AppColors.emergency,
+      ),
+    );
+  }
+
+  /// Runs an attachment pick and keeps the file if one came back.
+  ///
+  /// Cancelling is NOT an error and says nothing: a person who changes their
+  /// mind does not need to be told they changed their mind, and an emergency
+  /// report is the wrong place to nag.
+  Future<void> _attach(Future<XFile?> Function() pick) async {
+    try {
+      final file = await pick();
+      if (file != null && mounted) {
+        setState(() => _attachedFiles.add(File(file.path)));
+      }
+    } catch (e) {
+      _attachmentFailed(e);
     }
   }
 
-  Future<void> _takePhoto() async {
-    final photo =
-        await _picker.pickImage(source: ImageSource.camera, imageQuality: 70);
-    if (photo != null) {
-      setState(() => _attachedFiles.add(File(photo.path)));
-    }
-  }
+  Future<void> _pickImage() => _attach(
+        () => _picker.pickImage(source: ImageSource.gallery, imageQuality: 70),
+      );
 
-  Future<void> _pickVideo() async {
-    final video = await _picker.pickVideo(source: ImageSource.gallery);
-    if (video != null) {
-      setState(() => _attachedFiles.add(File(video.path)));
-    }
-  }
+  Future<void> _takePhoto() => _attach(
+        () => _picker.pickImage(source: ImageSource.camera, imageQuality: 70),
+      );
 
-  Future<void> _takeVideo() async {
-    final video = await _picker.pickVideo(source: ImageSource.camera);
-    if (video != null) {
-      setState(() => _attachedFiles.add(File(video.path)));
-    }
-  }
+  Future<void> _pickVideo() =>
+      _attach(() => _picker.pickVideo(source: ImageSource.gallery));
+
+  Future<void> _takeVideo() =>
+      _attach(() => _picker.pickVideo(source: ImageSource.camera));
 
   Future<void> _startRecording() async {
     try {
@@ -119,9 +167,35 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           _isRecording = true;
           _recordedAudioPath = null;
         });
+      } else {
+        // hasPermission() returning false skipped the whole body and said
+        // nothing, so RECORD VOICE REPORT was a button that did nothing on any
+        // handset where the microphone had been refused.
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'This phone has not given Operation Rainbow access to the '
+              'microphone. You can still type your report.',
+            ),
+            backgroundColor: AppColors.emergency,
+          ),
+        );
       }
     } catch (e) {
+      // Was a debugPrint and nothing else: the failure reached the developer
+      // console and never the person holding the phone.
       debugPrint('[AUDIO_REC] Start failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            'The voice recorder did not start on this phone. You can still '
+            'type your report.',
+          ),
+          backgroundColor: AppColors.emergency,
+        ),
+      );
     }
   }
 

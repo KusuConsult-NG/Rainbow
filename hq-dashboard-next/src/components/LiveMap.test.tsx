@@ -14,22 +14,31 @@
 import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Alert } from '@/app/dashboard/types';
+
 vi.mock('@/lib/supabase', () => ({ supabase: {} }));
 
 // LiveMap reads `lat`/`lng`, not `latitude`/`longitude` — the dashboard maps
 // the DB columns across before passing them down (see dashboard/page.tsx,
 // `lat: d.latitude ?? d.lat`). Getting this wrong in a fixture produces a map
 // with no markers, which is exactly the failure these tests exist to catch.
-const alert = (id: string, lat: number, lng: number) => ({
-  id,
-  type: 'FIRE',
-  status: 'ACTIVE',
-  severity: 'HIGH',
-  lat,
-  lng,
-  geo_lga: 'JOS NORTH',
-  created_at: '2026-09-01T12:00:00Z',
-});
+//
+// The status is PENDING, which is what the database actually produces. These
+// fixtures said 'ACTIVE' — a Firebase-era value no migration has ever written —
+// and that happened to be the ONLY status the popup's DISPATCH button was
+// gated on, so the fixtures agreed with the bug.
+const alert = (id: string, lat: number, lng: number, over: Partial<Alert> = {}): Alert =>
+  ({
+    id,
+    type: 'FIRE',
+    status: 'PENDING',
+    severity: 'HIGH',
+    lat,
+    lng,
+    geo_lga: 'JOS NORTH',
+    created_at: '2026-09-01T12:00:00Z',
+    ...over,
+  }) as Alert;
 
 const noop = () => {};
 
@@ -102,6 +111,287 @@ describe('LiveMap', () => {
     rerender(<LiveMap alerts={[]} {...props} />);
 
     await waitFor(() => expect(markerCount(container)).toBe(0), { timeout: 5000 });
+  });
+
+  // ── What the operator sees when they click the marker ─────────────────────
+  //
+  // These drive the real Leaflet popup rather than the string builder (that has
+  // its own tests in src/lib/incident-dossier.test.ts): the point here is that
+  // the component WIRES it — the profiles reach the popup, the theme reaches it,
+  // and the buttons reach the callbacks.
+  // A uuid, because that is what `reported_by` holds. A short label like
+  // 'rep-1' takes a different branch in the resolver — one that treats the
+  // value as already human-readable — and would not exercise the lookup.
+  const REPORTER_ID = 'b71c4d2e-8f10-4a33-9c55-0e6d21aa7741';
+  const REPORTER = {
+    id: REPORTER_ID,
+    full_name: 'Amina Dung',
+    phone: '+2348030001111',
+    role: 'CITIZEN',
+  };
+
+  async function openPopup(
+    container: HTMLElement,
+    _user: unknown = null,
+  ): Promise<HTMLElement> {
+    const marker = container.querySelector('.leaflet-marker-icon') as HTMLElement;
+    marker.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await waitFor(() => {
+      expect(container.querySelector('.leaflet-popup-content')).not.toBeNull();
+    }, { timeout: 5000 });
+    return container.querySelector('.leaflet-popup-content') as HTMLElement;
+  }
+
+  it('names the reporter and shows the number to ring them on', async () => {
+    // The defect: LiveMap declared `reportedBy`/`reportedAt` — Firebase names
+    // PostgREST never returns — and was given no profiles at all, so a marker
+    // could not identify the person who raised the emergency.
+    const LiveMap = await load();
+    const { container } = render(
+      <LiveMap
+        alerts={[alert('a-1', 9.9167, 8.8917, { reported_by: REPORTER_ID })]}
+        agents={[]}
+        usersMap={{ [REPORTER_ID]: REPORTER }}
+        onResolve={noop}
+        onEscalate={noop}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+
+    const popup = await openPopup(container);
+    expect(popup.textContent).toContain('Amina Dung');
+    expect(popup.textContent).toContain('+2348030001111');
+    expect(popup.querySelector('a[href^="tel:"]')).not.toBeNull();
+  });
+
+  it('shows the status, the age and whether anybody has taken it', async () => {
+    const LiveMap = await load();
+    const { container } = render(
+      <LiveMap
+        alerts={[alert('a-1', 9.9167, 8.8917, { acknowledged_at: null })]}
+        agents={[]}
+        onResolve={noop}
+        onEscalate={noop}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+
+    const popup = await openPopup(container);
+    expect(popup.textContent).toContain('AWAITING DISPATCH');
+    expect(popup.textContent).toContain('ACKNOWLEDGED');
+    expect(popup.textContent).toContain('NO');
+    expect(popup.textContent).toContain('JOS NORTH');
+    expect(popup.textContent).toContain('9.91670');
+  });
+
+  it('offers DISPATCH on a PENDING incident', async () => {
+    // It did not. The button was gated on `status === 'OPEN' || 'ACTIVE'`,
+    // neither of which this database produces, so a newly reported emergency
+    // could be resolved from the map but never dispatched from it.
+    const LiveMap = await load();
+    const dispatched: string[] = [];
+    const { container } = render(
+      <LiveMap
+        alerts={[alert('a-1', 9.9167, 8.8917)]}
+        agents={[]}
+        onResolve={noop}
+        onEscalate={(ids) => dispatched.push(String(ids))}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+
+    const popup = await openPopup(container);
+    const button = Array.from(popup.querySelectorAll('button')).find(
+      (b) => b.textContent === 'DISPATCH',
+    );
+    expect(button, 'a PENDING incident must be dispatchable from the map').not.toBeUndefined();
+  });
+
+  it('opens the full dossier for the incident clicked', async () => {
+    const LiveMap = await load();
+    const opened: string[] = [];
+    const { container } = render(
+      <LiveMap
+        alerts={[alert('a-1', 9.9167, 8.8917)]}
+        agents={[]}
+        onResolve={noop}
+        onEscalate={noop}
+        onOpenDossier={(id) => opened.push(id)}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+
+    const popup = await openPopup(container);
+    const button = Array.from(popup.querySelectorAll('button')).find(
+      (b) => b.textContent === 'DOSSIER',
+    ) as HTMLButtonElement;
+    expect(button).not.toBeUndefined();
+    // The button carries the call, and the handler it names does the work. The
+    // two halves are asserted separately because jsdom evaluates an inline
+    // `onclick` in its own global scope, which is not the one vitest gives the
+    // test — a real click is covered by the browser harness
+    // (scripts/local_e2e), where there is a real window.
+    expect(button.getAttribute('onclick')).toBe("window._hqDossier('a-1')");
+    (window as unknown as { _hqDossier: (id: string) => void })._hqDossier('a-1');
+    expect(opened).toEqual(['a-1']);
+  });
+
+  it('does not execute markup a reporter typed into a description', async () => {
+    const LiveMap = await load();
+    const { container } = render(
+      <LiveMap
+        alerts={[
+          alert('a-1', 9.9167, 8.8917, {
+            description: '<img src=x onerror="window.__pwned=true">',
+          }),
+        ]}
+        agents={[]}
+        onResolve={noop}
+        onEscalate={noop}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+
+    const popup = await openPopup(container);
+    expect(popup.querySelector('img')).toBeNull();
+    expect((window as unknown as { __pwned?: boolean }).__pwned).toBeUndefined();
+    expect(popup.textContent).toContain('<img');
+  });
+
+  it('a theme toggle does not throw, and re-filters the tiles', async () => {
+    // `mapInstanceRef.current.getPane(...)` — the ref holds `{ map, L }`, so
+    // this threw "not a function" inside an effect on every theme toggle, and
+    // took the whole board down with it: the harness caught the console
+    // rendering its CONSOLE FAILED boundary for all six roles.
+    //
+    // The popup no longer has a per-theme class to check, which is the point:
+    // its colours come from CSS variables that `.dark-theme` on <body>
+    // redefines. The tile filter is the one thing that still has to change
+    // here, because a filter is not a colour.
+    const LiveMap = await load();
+    const props = {
+      alerts: [alert('a-1', 9.9167, 8.8917)],
+      agents: [],
+      onResolve: noop,
+      onEscalate: noop,
+    };
+    const { container, rerender } = render(<LiveMap {...props} theme="dark" />);
+    await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+
+    const tilePane = () => container.querySelector('.leaflet-tile-pane') as HTMLElement;
+    expect(tilePane().style.filter).toContain('invert');
+
+    expect(() => rerender(<LiveMap {...props} theme="light" />)).not.toThrow();
+    await waitFor(() => expect(tilePane().style.filter).toBe('none'));
+  });
+
+  it('rebuilds the popup when the profiles arrive after the alerts', async () => {
+    // Profiles load in their own effect, which resolves after the first alerts.
+    // With `usersMap` missing from the marker effect's dependencies the popup
+    // was built once, before any profile existed, and the reporter stayed
+    // unnamed for the whole session.
+    const LiveMap = await load();
+    const props = {
+      alerts: [alert('a-1', 9.9167, 8.8917, { reported_by: REPORTER_ID })],
+      agents: [],
+      onResolve: noop,
+      onEscalate: noop,
+      theme: 'dark' as const,
+    };
+    const { container, rerender } = render(<LiveMap {...props} usersMap={{}} />);
+    await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+    let popup = await openPopup(container);
+    expect(popup.textContent).toContain('UNIDENTIFIED');
+
+    rerender(<LiveMap {...props} usersMap={{ [REPORTER_ID]: REPORTER }} />);
+    await waitFor(() => {
+      popup = container.querySelector('.leaflet-popup-content') as HTMLElement;
+      expect(popup.textContent).toContain('Amina Dung');
+    }, { timeout: 5000 });
+  });
+
+  it('unmounting with a popup open does not throw a frame later', async () => {
+    // Opening a popup near an edge starts Leaflet's autoPan, which runs on
+    // requestAnimationFrame. Switching tab inside that window unmounts the map
+    // mid-animation, and the next frame called `map._mapPane.classList` on a
+    // map with no panes: an uncaught TypeError in the console HQ watches,
+    // twice per visit. The browser harness caught it first; this suite
+    // reproduced it five times over once the popup tests existed.
+    const LiveMap = await load();
+    const thrown: unknown[] = [];
+    const onUncaught = (e: unknown) => thrown.push(e);
+    process.on('uncaughtException', onUncaught);
+    try {
+      const { container, unmount } = render(
+        <LiveMap
+          alerts={[alert('a-1', 9.9167, 8.8917)]}
+          agents={[]}
+          onResolve={noop}
+          onEscalate={noop}
+          theme="dark"
+        />,
+      );
+      await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+      await openPopup(container);
+      unmount();
+      // Let several animation frames run against the dead map.
+      await new Promise((r) => setTimeout(r, 400));
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
+    expect(thrown.map(String)).toEqual([]);
+  });
+
+  it('cancels the boundary fetch and the resize timer when it unmounts', async () => {
+    // Signing out unmounts the map. Two things were still in flight and both
+    // touched it afterwards: the 250ms `invalidateSize` timer, which read
+    // `_leaflet_pos` off a pane that had been removed, and the boundary fetch,
+    // which added a GeoJSON layer to a map with no panes to append it to. The
+    // browser harness caught both on a role switch.
+    //
+    // Asserted on the MECHANISM — the signal is aborted, the timer never fires
+    // — rather than on "nothing threw". jsdom tolerates both calls against a
+    // dead map without raising, so an assertion about throwing would pass with
+    // the fix removed, which is worse than no test. Chromium does raise, and
+    // the harness fails the run on it.
+    const LiveMap = await load();
+    const signals: (AbortSignal | null | undefined)[] = [];
+    (globalThis.fetch as unknown) = vi.fn((_url: string, init?: RequestInit) => {
+      signals.push(init?.signal);
+      // Never resolves: the unmount must be what ends this, not the response.
+      return new Promise(() => {});
+    });
+
+    const { container, unmount } = render(
+      <LiveMap
+        alerts={[alert('a-1', 9.9167, 8.8917)]}
+        agents={[]}
+        onResolve={noop}
+        onEscalate={noop}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('.leaflet-container')).not.toBeNull());
+
+    const Leaflet = (window as unknown as { L: { Map: { prototype: Record<string, unknown> } } }).L;
+    const invalidateSize = vi.spyOn(Leaflet.Map.prototype as never, 'invalidateSize');
+
+    unmount();
+    // Well past the 250ms resize timer.
+    await new Promise((r) => setTimeout(r, 500));
+
+    expect(signals.length, 'the boundary overlay is fetched').toBeGreaterThan(0);
+    expect(signals[0]?.aborted, 'the fetch is aborted by the unmount').toBe(true);
+    expect(
+      invalidateSize,
+      'the resize timer must not fire on a map that has been removed',
+    ).not.toHaveBeenCalled();
+    invalidateSize.mockRestore();
   });
 
   it('unmounts without throwing', async () => {

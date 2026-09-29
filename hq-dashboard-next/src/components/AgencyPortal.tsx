@@ -72,26 +72,30 @@ const AGENCIES = [
   { code: 'DSS',      label: 'Dept. of State Services',     color: '#8b5cf6', icon: '🕵️' },
   { code: 'NSCDC',    label: 'NSCDC',                       color: '#f59e0b', icon: '🛡️' },
   { code: 'FRSC',     label: 'Federal Road Safety Corps',   color: '#ef4444', icon: '🚨' },
-  { code: 'AMOTEKUN', label: 'Operation Amotekun',          color: '#14b8a6', icon: '🦁' },
+  // Operation Safe Haven, not Amotekun. Amotekun is a SOUTH-WEST outfit —
+  // Ondo, Ekiti, Oyo, Ogun, Osun — with no presence in Plateau. OPSH is the
+  // military joint task force that actually covers Plateau, Bauchi and
+  // Kaduna, and is who an incident here would be handed to.
+  { code: 'OPSH',     label: 'Operation Safe Haven',        color: '#14b8a6', icon: '🛰️' },
 ];
 
 const STATUS_COLORS: Record<string, string> = {
-  AVAILABLE:   '#22c55e',
-  DEPLOYED:    '#f59e0b',
-  UNAVAILABLE: '#ef4444',
-  OFF_DUTY:    '#6b7280',
-  EN_ROUTE:    '#3b82f6',
-  ON_SITE:     '#22c55e',
-  WITHDRAWN:   '#6b7280',
-  RESOLVED:    '#22c55e',
+  AVAILABLE:   '#1B5E20',
+  DEPLOYED:    '#FF9800',
+  UNAVAILABLE: '#E31E24',
+  OFF_DUTY:    '#757575',
+  EN_ROUTE:    '#0277BD',
+  ON_SITE:     '#1B5E20',
+  WITHDRAWN:   '#757575',
+  RESOLVED:    '#1B5E20',
 };
 
 const OUTCOME_COLORS: Record<string, string> = {
-  CONTAINED:    '#22c55e',
-  RESOLVED:     '#22c55e',
-  ONGOING:      '#f59e0b',
-  REQUIRES_HQ:  '#ef4444',
-  INCONCLUSIVE: '#6b7280',
+  CONTAINED:    '#1B5E20',
+  RESOLVED:     '#1B5E20',
+  ONGOING:      '#FF9800',
+  REQUIRES_HQ:  '#E31E24',
+  INCONCLUSIVE: '#757575',
 };
 
 // ─── Props ───────────────────────────────────────────────────────────────
@@ -297,12 +301,29 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
           </div>
         </div>
 
-        {/* Agency switcher — HQ only */}
+        {/* Agency switcher — HQ only.
+            A single-select group, so it carries the same ARIA as the section
+            tabs below: `role="tablist"`, `role="tab"` and `aria-selected`.
+            Without them these were six identical buttons to a screen reader,
+            with nothing saying which agency the portal is currently showing —
+            on a screen whose entire purpose is that the answer to "whose
+            incidents am I looking at" is unambiguous.
+            The browser sweep found it: clicking the already-selected agency
+            correctly does nothing, and nothing on the page distinguished that
+            from a button wired to nothing. The fix belongs here rather than in
+            a suppression list in the harness, which is the same conclusion the
+            section tabs reached. */}
         {isHq && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 'auto' }}>
+          <div
+            role="tablist"
+            aria-label="Agency"
+            style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 'auto' }}
+          >
             {AGENCIES.map(a => (
               <button
                 key={a.code}
+                role="tab"
+                aria-selected={selectedAgency === a.code}
                 onClick={() => setSelectedAgency(a.code)}
                 style={{
                   padding: '5px 12px',
@@ -334,9 +355,9 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
         gap: 1, background: 'var(--border)',
       }}>
         {[
-          { label: 'ACTIVE INCIDENTS', value: incidents.length, color: '#ef4444' },
-          { label: 'PERSONNEL', value: personnel.filter(p => p.status === 'AVAILABLE').length + '/' + personnel.length, color: '#22c55e' },
-          { label: 'DEPLOYED', value: deployments.length, color: '#f59e0b' },
+          { label: 'ACTIVE INCIDENTS', value: incidents.length, color: '#E31E24' },
+          { label: 'PERSONNEL', value: personnel.filter(p => p.status === 'AVAILABLE').length + '/' + personnel.length, color: '#1B5E20' },
+          { label: 'DEPLOYED', value: deployments.length, color: '#FF9800' },
           { label: 'UNREAD REPORTS', value: isHq ? unreadReports : reports.length, color: '#8b5cf6' },
         ].map(stat => (
           <div key={stat.label} style={{ padding: '12px 16px', background: 'var(--surface)', textAlign: 'center' }}>
@@ -377,7 +398,7 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
             {tab.icon} {tab.label}
             {tab.badge !== undefined && tab.badge > 0 && (
               <span style={{
-                background: '#ef4444', color: 'white', borderRadius: 10,
+                background: '#E31E24', color: 'white', borderRadius: 10,
                 fontSize: 9, fontWeight: 900, padding: '1px 5px', minWidth: 16,
               }}>{tab.badge}</span>
             )}
@@ -491,7 +512,7 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
   isHq: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const sevColor = incident.severity === 'CRITICAL' ? '#ef4444' : incident.severity === 'HIGH' ? '#f59e0b' : '#22c55e';
+  const sevColor = incident.severity === 'CRITICAL' ? '#E31E24' : incident.severity === 'HIGH' ? '#FF9800' : '#1B5E20';
   const activeDeployment = deployments.find(d => d.status === 'EN_ROUTE' || d.status === 'ON_SITE');
 
   return (
@@ -660,8 +681,8 @@ function PersonnelPanel({ personnel, agencyColor, agency, onRefresh }: {
               </div>
               <span style={{
                 fontSize: 9, fontWeight: 900, padding: '3px 8px', borderRadius: 4,
-                background: (STATUS_COLORS[p.status] || '#6b7280') + '22',
-                color: STATUS_COLORS[p.status] || '#6b7280',
+                background: (STATUS_COLORS[p.status] || '#757575') + '22',
+                color: STATUS_COLORS[p.status] || '#757575',
               }}>{p.status}</span>
             </div>
             <div style={{ display: 'flex', gap: 4, marginTop: 10 }}>
@@ -720,12 +741,12 @@ function ReportsPanel({ reports, agencyColor, isHq, onAcknowledge }: {
               {report.outcome && (
                 <span style={{
                   fontSize: 9, fontWeight: 900, padding: '3px 8px', borderRadius: 4,
-                  background: (OUTCOME_COLORS[report.outcome] || '#6b7280') + '22',
-                  color: OUTCOME_COLORS[report.outcome] || '#6b7280',
+                  background: (OUTCOME_COLORS[report.outcome] || '#757575') + '22',
+                  color: OUTCOME_COLORS[report.outcome] || '#757575',
                 }}>{report.outcome}</span>
               )}
               {!report.read_by_hq && isHq && (
-                <span style={{ fontSize: 9, fontWeight: 900, padding: '3px 8px', borderRadius: 4, background: '#ef444422', color: '#ef4444' }}>UNREAD</span>
+                <span style={{ fontSize: 9, fontWeight: 900, padding: '3px 8px', borderRadius: 4, background: '#E31E2422', color: '#E31E24' }}>UNREAD</span>
               )}
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -740,14 +761,14 @@ function ReportsPanel({ reports, agencyColor, isHq, onAcknowledge }: {
           {(report.personnel_count > 0 || report.casualties > 0) && (
             <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-muted)' }}>
               {report.personnel_count > 0 && <span>👮 {report.personnel_count} personnel</span>}
-              {report.casualties > 0 && <span style={{ color: '#ef4444' }}>⚠️ {report.casualties} casualties</span>}
+              {report.casualties > 0 && <span style={{ color: '#E31E24' }}>⚠️ {report.casualties} casualties</span>}
             </div>
           )}
 
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
             Filed by: {report.submitted_by_name || '—'}
             {report.read_by_hq && report.hq_acknowledged_by && (
-              <span style={{ marginLeft: 12, color: '#22c55e' }}>
+              <span style={{ marginLeft: 12, color: '#1B5E20' }}>
                 ✓ Acknowledged by {report.hq_acknowledged_by}
               </span>
             )}
@@ -815,7 +836,7 @@ function AddPersonnelForm({ agency, agencyColor, userId, onSuccess }: {
         Register New Officer
       </h3>
       {error && (
-        <div style={{ padding: 10, background: '#ef444422', border: '1px solid #ef4444', borderRadius: 8, color: '#ef4444', fontSize: 12, marginBottom: 16 }}>
+        <div style={{ padding: 10, background: '#E31E2422', border: '1px solid #E31E24', borderRadius: 8, color: '#E31E24', fontSize: 12, marginBottom: 16 }}>
           {error}
         </div>
       )}
@@ -941,7 +962,7 @@ function DeployModal({ incident, personnel, agency, userId, userEmail, agencyCol
           <span style={{ marginLeft: 8 }}>· {[incident.geo_lga, incident.geo_ward].filter(Boolean).join(' › ')}</span>
         </div>
 
-        {error && <div style={{ padding: 10, background: '#ef444422', border: '1px solid #ef4444', borderRadius: 8, color: '#ef4444', fontSize: 12, marginBottom: 14 }}>{error}</div>}
+        {error && <div style={{ padding: 10, background: '#E31E2422', border: '1px solid #E31E24', borderRadius: 8, color: '#E31E24', fontSize: 12, marginBottom: 14 }}>{error}</div>}
 
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8 }}>SELECT OFFICERS ({selected.length} selected)</div>
@@ -1060,7 +1081,7 @@ function ReportModal({ incident, agency, userId, userEmail, agencyColor, onClose
           Reporting on: <strong style={{ color: 'var(--text-primary)' }}>{incident.type}</strong>
         </div>
 
-        {error && <div style={{ padding: 10, background: '#ef444422', border: '1px solid #ef4444', borderRadius: 8, color: '#ef4444', fontSize: 12, marginBottom: 14 }}>{error}</div>}
+        {error && <div style={{ padding: 10, background: '#E31E2422', border: '1px solid #E31E24', borderRadius: 8, color: '#E31E24', fontSize: 12, marginBottom: 14 }}>{error}</div>}
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>

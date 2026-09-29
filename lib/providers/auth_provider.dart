@@ -57,6 +57,7 @@ class AuthState {
     this.hasOnboarded = false,
     this.isLoading = true,
     this.resolutionError,
+    this.sessionEpoch = 0,
   });
 
   /// Documentation for this public member.
@@ -84,6 +85,20 @@ class AuthState {
   /// "authenticated but role unknown" rather than silently downgrading the user.
   final String? resolutionError;
 
+  /// How many times someone has signed in on this launch.
+  ///
+  /// The re-entry lock is scoped to one sign-in, and a user id alone cannot
+  /// express that: signing out and straight back in as the same person gives
+  /// the same id. `last_sign_in_at` looks like the answer and is not a safe
+  /// one — it is a value the backend controls, and the local stand-in stamps
+  /// it once at start-up, so two sign-ins carried the identical timestamp and
+  /// a lock survived across them. Counting the sign-in events this app has
+  /// actually observed depends on nothing but this app.
+  ///
+  /// It resets on relaunch, which is correct: the lock does not survive one
+  /// either.
+  final int sessionEpoch;
+
   /// Documentation for this public member.
 
   AuthState copyWith({
@@ -95,8 +110,10 @@ class AuthState {
     bool? hasOnboarded,
     bool? isLoading,
     String? resolutionError,
+    int? sessionEpoch,
   }) {
     return AuthState(
+      sessionEpoch: sessionEpoch ?? this.sessionEpoch,
       user: user ?? this.user,
       role: role ?? this.role,
       tier: tier ?? this.tier,
@@ -154,8 +171,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final session = data.session;
       final user = session?.user;
       if (user == null) {
-        state = AuthState(isLoading: false);
+        state = AuthState(isLoading: false, sessionEpoch: state.sessionEpoch);
       } else {
+        // Only a real sign-in advances the epoch. A token refresh also arrives
+        // here carrying a session, and treating that as a new sign-in would
+        // lift the re-entry lock roughly once an hour without anybody proving
+        // anything.
+        if (data.event == AuthChangeEvent.signedIn) {
+          state = state.copyWith(sessionEpoch: state.sessionEpoch + 1);
+        }
         await resolveRole(user);
       }
       return state;

@@ -27,7 +27,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
-const { DOMAIN } = require('./fixtures');
+const { DOMAIN, byKey } = require('./fixtures');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -239,7 +239,8 @@ async function logMark() {
   await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
   await sleep(2000);
 
-  await typeInto('08000000000');
+  // The real citizen sign-in — see the note in mobile_capture.js.
+  await typeInto(byKey('citizen').phone.replace('+234', '0'));
   await tap('authorize access', { role: 'button' });
   await sleep(2500);
   await typeInto('123456');
@@ -481,6 +482,204 @@ async function logMark() {
   await go('/settings', 3000);
   await shot('93-mobile-settings');
 
+  // ---- the re-entry lock ---------------------------------------------------
+  //
+  // The lock engages by itself once the app has been away from the foreground
+  // for a couple of minutes, which a browser harness cannot produce. Settings
+  // → "Lock This Phone" is the deliberate version of the same thing, and it is
+  // how this screen is reached on purpose.
+  //
+  // The assertion that matters is not that the lock appears. It is that the
+  // EMERGENCY BUTTON is on it. A lock screen in front of a panic button is a
+  // liability, and the whole design of this feature is the list of things it
+  // must not do.
+  state.screen = 'mobile:lock';
+  const lockOpened = await tap('lock this phone', { role: 'button', settle: 3000 });
+  check('Settings offers a way to lock the phone deliberately', lockOpened);
+  if (lockOpened) {
+    await shot('93b-mobile-lock-screen');
+    const lockText = await screenText();
+    const hash = await page.evaluate(() => window.location.hash);
+    check(
+      'locking the phone reaches the lock screen',
+      /#\/lock/.test(hash),
+      hash || '(no hash)',
+    );
+    check(
+      'the emergency button is on the lock screen',
+      /EMERGENCY|SEND SOS/i.test(lockText),
+      /EMERGENCY|SEND SOS/i.test(lockText) ? '' : 'the panic button is behind the lock',
+    );
+    check(
+      'the lock screen says it will send a code, and to which number',
+      /code/i.test(lockText),
+      lockText.split('\n').map((l) => l.trim()).find((l) => /code/i.test(l)) || '',
+    );
+    check(
+      'a locked phone can still be signed out of',
+      /SIGN OUT/i.test(lockText),
+      '',
+    );
+
+    // A locked app must not be reachable around the lock. The router is where
+    // that is decided — a gate a route can be got around is not a gate, and
+    // this app has thirty-odd routes including deep links into a report in
+    // progress.
+    for (const forbidden of ['/home', '/report-initial', '/incident-history', '/settings']) {
+      await page.evaluate((r) => { window.location.hash = `#${r}`; }, forbidden);
+      await sleep(1800);
+      const landed = await page.evaluate(() => window.location.hash);
+      check(
+        `a locked phone cannot be walked into ${forbidden}`,
+        /#\/lock/.test(landed),
+        landed,
+      );
+    }
+    // And the emergency screen is the ONE exception, deliberately.
+    await page.evaluate(() => { window.location.hash = '#/emergency-active'; });
+    await sleep(1800);
+    const emergency = await page.evaluate(() => window.location.hash);
+    check(
+      'a locked phone still reaches a running emergency',
+      /#\/emergency-active/.test(emergency),
+      emergency,
+    );
+  }
+
+  // Back to a usable app for the sweep below. Signing out of the lock screen
+  // is the only way out of it that does not need a code, which is itself the
+  // thing being relied on here.
+  //
+  // The check above left the app on /emergency-active — that IS the assertion.
+  // Going straight for the sign-out button from there found nothing to press,
+  // because the button is on the lock screen; the tap silently returned false,
+  // the phone number was typed into no field, and the entire sweep below then
+  // ran against the lock screen. Nothing reported it, because none of these
+  // recovery steps was ever checked. So: come back to the lock screen first,
+  // and assert every step of the way back.
+  await page.evaluate(() => { window.location.hash = '#/lock'; });
+  await sleep(2000);
+
+  const signedOut = await tap('sign out', { role: 'button', settle: 3500 });
+  check('the lock screen offers a way out that needs no code', signedOut);
+  const afterSignOut = await page.evaluate(() => window.location.hash);
+  check(
+    'signing out of the lock screen actually leaves it',
+    !/#\/lock/.test(afterSignOut),
+    afterSignOut || '(no hash)',
+  );
+
+  await typeInto(byKey('citizen').phone.replace('+234', '0'));
+  await tap('authorize access', { role: 'button', settle: 2800 });
+  await typeInto('123456');
+  await tap('verify otp', { role: 'button', settle: 6000 });
+  await sleep(3000);
+
+  // A completed phone+OTP sign-in is more proof than the lock screen asks for,
+  // so it must land in the app and not back behind the lock. This is also what
+  // makes the sweep below meaningful: without it, a sweep of thirteen lock
+  // screens passes for a sweep of the app.
+  const backIn = await page.evaluate(() => window.location.hash);
+  check(
+    'signing in again after a lock lands in the app, not back on the lock',
+    /#\/home/.test(backIn),
+    backIn || '(no hash)',
+  );
+
+  // ---- attaching evidence to a report --------------------------------------
+  //
+  // The four attachment buttons call image_picker, which on web creates a real
+  // `<input type="file">` and clicks it. A browser CAN complete that: Puppeteer
+  // intercepts the file chooser and hands it a file, so the whole path — the
+  // control, the picker, the attachment list, and the row that reaches the
+  // database — is exercised against the real UI and the real backend.
+  //
+  // What this does NOT prove is the camera. `ImageSource.camera` resolves to
+  // the same file input on web, so SCAN PHOTO and RECORD VIDEO are exercised as
+  // file pickers here; a device test is still the only thing that covers a real
+  // camera and a refused camera permission.
+  // The flow is FOUR screens, and /report-initial is the first of them — it
+  // offers groups ("THREAT TO LIFE", "CIVIL HAZARD"), not categories. Going
+  // there and looking for "Fire" found nothing, so this test sat on the group
+  // screen and reported the picker dead. /report-category is where the
+  // categories themselves are, which is the route the category loop above uses.
+  state.screen = 'mobile:attachment';
+  await go('/report-category', 2800);
+
+  for (let attempt = 0; attempt < 16; attempt++) {
+    if (await findNode('Fire', { role: 'button' })) break;
+    await page.mouse.wheel({ deltaY: 300 });
+    await sleep(500);
+  }
+  const attachCat = await tap('Fire', { role: 'button', settle: 2400 });
+
+  // Subtype: the same selector the category loop uses, because the rows carry
+  // no stable name of their own.
+  await page.evaluate(() => {
+    const n = [...document.querySelectorAll('flt-semantics[role="button"]')].find((b) => {
+      const r = b.getBoundingClientRect();
+      const label = (b.textContent || '').trim();
+      return r.y > 120 && r.y < 640 && r.width > 180 && label.length > 3
+        && !/change|initiate|dashboard|movement|new report|home/i.test(label);
+    });
+    if (n) n.click();
+  });
+  await sleep(1200);
+  const attachAdvanced = await tap('initiate tactical report', { role: 'button', settle: 2600 });
+  check(
+    'the attachment test reached the details screen',
+    attachCat && attachAdvanced,
+    attachCat ? (attachAdvanced ? '' : 'stopped at the subtype screen') : 'never found the Fire category',
+  );
+
+  const FIXTURE = path.join(__dirname, 'fixtures', 'evidence.png');
+  let attached = false;
+  let chooserOpened = false;
+  try {
+    const [chooser] = await Promise.all([
+      page.waitForFileChooser({ timeout: 8000 }),
+      tap('photo intel', { role: 'button', settle: 400 }),
+    ]);
+    chooserOpened = true;
+    await chooser.accept([FIXTURE]);
+    await sleep(2500);
+    attached = await page.evaluate(
+      () => /evidence\.png|1 file|attach/i.test(document.body.innerText || ''),
+    );
+  } catch (e) {
+    chooserOpened = false;
+  }
+  await shot('93c-mobile-attachment');
+
+  check(
+    'an attachment button opens a real file picker',
+    chooserOpened,
+    chooserOpened ? '' : 'no file chooser appeared — the control did nothing',
+  );
+  check(
+    'the chosen file is attached to the report',
+    attached,
+    attached ? 'the report lists the attached file' : 'the file was chosen and never appeared',
+  );
+
+  // And the attachment must survive submission: an attachment the person can
+  // see but the database never receives is the worst of both.
+  await tap('enter mission details|mission narrative', { settle: 900 });
+  await typeInto('Local end-to-end attachment report.');
+  for (let sc = 0; sc < 8; sc++) {
+    if (await findNode('initiate transmission', { role: 'button' })) break;
+    await page.mouse.wheel({ deltaY: 320 });
+    await sleep(400);
+  }
+  const attachMark = await writeMark();
+  await tap('initiate transmission', { role: 'button', settle: 4000 });
+  const attachWrites = (await writesSince(attachMark, 'alerts')).filter((x) => x.method === 'POST');
+  check(
+    'a report carrying an attachment still reaches the database',
+    attachWrites.length > 0,
+    attachWrites.length ? JSON.stringify(attachWrites[0].rows[0]).slice(0, 120) : 'nothing inserted',
+  );
+
   // ---- sweep: every button on every screen ---------------------------------
   const SCREENS = [
     '/home', '/report-initial', '/incident-history', '/safe-zone',
@@ -489,50 +688,213 @@ async function logMark() {
     '/onboarding-permissions', '/onboarding-contacts',
   ];
 
+  // How many of the swept screens were actually the screen asked for. A locked
+  // app answers every route with the lock screen, and a sweep that does not
+  // notice reports "34 controls exercised" over thirteen copies of one screen.
+  let sweptElsewhere = 0;
+
+  // Controls deliberately not pressed. Reported alongside the count that WAS
+  // pressed, so a sweep that skipped most of the app cannot read as a clean
+  // one — which is exactly how the over-wide pattern above went unnoticed.
+  let skipped = 0;
+
+  /** Per screen: how much of the accessibility tree the sweep can reach. */
+  const coverage = [];
+
+  /** Controls that were found but had gone from the DOM by the time we pressed. */
+  let unreachable = 0;
+
+  // The control list, rebuilt in the page every time it is needed.
+  //
+  // It used to be captured once into `window.__mb` and then indexed across
+  // several page.evaluate round-trips. Flutter rebuilds its semantics tree on
+  // every change — and it changes constantly — so those nodes were detached
+  // long before they were clicked: 87 of them in one run, silently skipped.
+  //
+  // Holding no reference at all removes the whole class of problem. The list is
+  // rebuilt at the moment of the click, so index i always refers to something
+  // that exists now.
+  const CONTROL_QUERY = `
+    const all = [...document.querySelectorAll(
+      'flt-semantics[role="button"], flt-semantics[flt-tappable],'
+      + ' flt-semantics[role="link"], flt-semantics[role="checkbox"]',
+    )].filter((b) => {
+      const r = b.getBoundingClientRect();
+      return r.width > 4 && r.height > 4;
+    });
+    // Innermost only: Flutter nests semantics, so a tappable card containing a
+    // tappable button would otherwise be counted and pressed twice.
+    const mb = all.filter((n) => !all.some((o) => o !== n && n.contains(o)));
+  `;
+
+  const listControls = () => page.evaluate(new Function(`
+    ${CONTROL_QUERY}
+    window.__coverage = {
+      nodes: document.querySelectorAll('flt-semantics').length,
+      matched: all.length,
+      innermost: mb.length,
+    };
+    return mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
+  `));
+
+  // Click by IDENTITY, not position.
+  //
+  // Indexing failed even with the list rebuilt at click time: pressing a
+  // control changes the screen, the rebuilt list is a different length, and
+  // every later index refers to something else or to nothing — 44 of them in
+  // one run. The label and its occurrence among identical labels survive a
+  // rebuild; a position does not.
+  const clickControl = (key) => page.evaluate(new Function('key', `
+    ${CONTROL_QUERY}
+    const seen = {};
+    for (const b of mb) {
+      const label = (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40);
+      seen[label] = (seen[label] || 0) + 1;
+      if (label + '#' + (seen[label] - 1) === key) { b.click(); return true; }
+    }
+    return false;
+  `), key);
+
+  /** The same key the page builds, so the two agree. */
+  const keysFor = (labels) => {
+    const seen = {};
+    return labels.map((l) => {
+      seen[l] = (seen[l] || 0) + 1;
+      return `${l}#${seen[l] - 1}`;
+    });
+  };
+
+
+  // WHAT COUNTS AS "IT DID SOMETHING".
+  //
+  // URL, innerHTML length and network traffic miss a whole class of real effect
+  // in a CanvasKit app: the pixels live on a canvas, so choosing an option
+  // repaints without changing the DOM at all. The report subtype rows are
+  // exactly this — tapping one calls setState to move the selection and nothing
+  // else; CONTINUE is what navigates. The sweep reported "VEHICLE FIRE did
+  // nothing" when it had done precisely what it is supposed to do.
+  //
+  // The accessibility tree DOES carry selection: aria-checked, aria-selected,
+  // aria-pressed, aria-expanded and aria-disabled. Snapshotting those catches a
+  // selection change without pretending a dead control is alive.
+  //
+  // Defined here rather than installed on `window`: the responder sign-in below
+  // calls page.goto(), which wipes page globals, so a helper living in the page
+  // would be gone by the time the staff sweep used it.
+  const snapshot = () => page.evaluate(() => {
+    const flags = [...document.querySelectorAll('flt-semantics')]
+      .map((n) => [
+        n.getAttribute('aria-checked'), n.getAttribute('aria-selected'),
+        n.getAttribute('aria-pressed'), n.getAttribute('aria-expanded'),
+        n.getAttribute('aria-disabled'),
+        // aria-current, and not as an afterthought. Flutter's own source says
+        // why, in material/chip.dart:
+        //
+        //   "On web, aria-selected only works for certain roles: gridcell,
+        //    option, row and tab. If the role doesn't support aria-selected,
+        //    aria-current will be set instead in flutter engine."
+        //
+        // The report subtype rows are Semantics(button: true, selected: ...),
+        // so their selection lands in aria-current. Reading only
+        // aria-selected, this sweep watched an attribute the engine was never
+        // going to write and reported four working controls as dead.
+        n.getAttribute('aria-current'),
+      ].join(''))
+      .join('|');
+    return {
+      url: location.hash,
+      len: document.body.innerHTML.length,
+      state: flags,
+    };
+  });
+
   for (const route of SCREENS) {
     state.screen = `sweep:${route}`;
     await go(route, 2600);
 
-    const buttons = await page.evaluate(() => {
-      window.__mb = [...document.querySelectorAll('flt-semantics[role="button"]')].filter((b) => {
-        const r = b.getBoundingClientRect();
-        return r.width > 4 && r.height > 4;
-      });
-      return window.__mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
-    });
+    const landed = await page.evaluate(() => window.location.hash);
+    if (!landed.includes(route)) sweptElsewhere += 1;
 
-    for (let i = 0; i < buttons.length; i++) {
-      const label = buttons[i];
+    let labels = await listControls();
+
+    const cov = await page.evaluate(() => window.__coverage);
+    coverage.push({ route, ...cov });
+    console.log(`      semantics ${route}: ${cov.nodes} nodes, ${cov.matched} tappable, ${cov.innermost} pressable`);
+
+    // Work through the screen by identity: re-list each time, take the first
+    // control not yet pressed. A press that changes the screen no longer
+    // invalidates everything after it.
+    const done = new Set();
+    for (let guard = 0; guard < 60; guard += 1) {
+      const keys = keysFor(labels);
+      const at = keys.findIndex((k) => !done.has(k));
+      if (at === -1) break;
+      const key = keys[at];
+      const label = labels[at];
+      done.add(key);
       // Signing out would end the sweep; SOS is asserted separately and files a
       // real alert every time it is pressed.
-      if (/sign ?out|log ?out|terminate|^sos|silent sos/i.test(label)) continue;
+      //
+      // The pattern used to anchor SOS at the start of the label (`^sos`), which
+      // matched nothing the app actually renders — the panic button is labelled
+      // "EMERGENCY — SEND SOS NOW". So the sweep pressed the panic button on
+      // every screen that carries one, and the only reason this did not file a
+      // dozen false CRITICAL alerts is that it reported them as doing nothing.
+      //
+      // Widening it to the bare word `emergency` then went too far the other
+      // way: "Add Emergency Contact", "Emergency Contacts" and the
+      // emergency-alerts toggle are ordinary controls, and skipping them
+      // dropped the sweep to 22 controls over nineteen screens — a pass earned
+      // by pressing almost nothing. Match the panic button's own wording.
+      // "Lock This Phone" belongs with SIGN OUT: it ends the sweep. Pressing
+      // it locks the app, and every screen after that is the lock screen —
+      // which is exactly what happened once the sweep started reaching enough
+      // controls to find it. The lock is asserted in full in its own section
+      // above, including that a locked phone cannot be walked into any screen.
+      if (/sign ?out|log ?out|terminate|send sos|silent sos|\bsos\b|panic|lock this phone/i.test(label)) {
+        skipped += 1;
+        continue;
+      }
 
-      const before = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
+      const before = await snapshot();
       const reqBefore = await logMark();
 
-      const clicked = await page.evaluate((idx) => {
-        const b = window.__mb?.[idx];
-        if (!b || !b.isConnected) return false;
-        const r = b.getBoundingClientRect();
-        if (r.width < 4) return false;
-        b.click();
-        return true;
-      }, i);
-      if (!clicked) continue;
+      const clicked = await clickControl(key);
+      if (!clicked) {
+        unreachable += 1;
+        labels = await listControls();
+        continue;
+      }
       await sleep(700);
 
-      const after = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
+      const after = await snapshot();
       const reqAfter = await logMark();
 
       const effect = [];
       if (after.url !== before.url) effect.push(`navigated to ${after.url}`);
       if (after.len !== before.len) effect.push('changed the screen');
+      if (after.state !== before.state) effect.push('changed a selection');
       if (reqAfter > reqBefore) effect.push(`made ${reqAfter - reqBefore} request(s)`);
 
       sweepLog.push({ route, label, effect: effect.join(', ') || 'nothing' });
       if (!effect.length) deadControls.push({ route, label });
 
-      if (after.url !== before.url) await go(route, 2000);
+      // BACK TO THE SCREEN, AND RE-READ IT.
+      //
+      // The list was captured once and then indexed for the rest of the loop.
+      // Flutter rebuilds its semantics tree on any change, so the FIRST control
+      // that navigated — or opened a sheet, or expanded a card — detached every
+      // node after it: `isConnected` went false, `clicked` came back false, and
+      // the rest of that screen's controls were skipped in silence.
+      //
+      // That is why the sweep pressed 26 of the 75 controls it could see. It
+      // was not the selector; it was this. Returning to the route and
+      // re-reading the tree costs a navigation per press and reaches the whole
+      // screen.
+      if (effect.length) {
+        await go(route, 1800);
+      }
+      labels = await listControls();
     }
     await shot(`94-mobile-sweep${route.replace(/\//g, '-')}`);
   }
@@ -573,52 +935,87 @@ async function logMark() {
       state.screen = `sweep:responder:${route}`;
       await go(route, 2800);
 
-      const buttons = await page.evaluate(() => {
-        window.__mb = [...document.querySelectorAll('flt-semantics[role="button"]')].filter((b) => {
-          const r = b.getBoundingClientRect();
-          return r.width > 4 && r.height > 4;
-        });
-        return window.__mb.map((b) => (b.textContent || b.getAttribute('aria-label') || '(icon)').trim().slice(0, 40));
-      });
+      let labels = await listControls();
+      const done = new Set();
+      for (let guard = 0; guard < 60; guard += 1) {
+        const keys = keysFor(labels);
+        const at = keys.findIndex((k) => !done.has(k));
+        if (at === -1) break;
+        const key = keys[at];
+        const label = labels[at];
+        done.add(key);
 
-      for (let i = 0; i < buttons.length; i++) {
-        const label = buttons[i];
-        if (/sign ?out|log ?out|terminate|power/i.test(label)) continue;
+        if (/sign ?out|log ?out|terminate|power/i.test(label)) {
+          skipped += 1;
+          continue;
+        }
 
-        const before = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
+        const before = await snapshot();
         const reqBefore = await logMark();
-        const clicked = await page.evaluate((idx) => {
-          const b = window.__mb?.[idx];
-          if (!b || !b.isConnected) return false;
-          if (b.getBoundingClientRect().width < 4) return false;
-          b.click();
-          return true;
-        }, i);
-        if (!clicked) continue;
+        const clicked = await clickControl(key);
+        if (!clicked) {
+          unreachable += 1;
+          labels = await listControls();
+          continue;
+        }
         await sleep(700);
-        const after = await page.evaluate(() => ({ url: location.hash, len: document.body.innerHTML.length }));
+        const after = await snapshot();
         const reqAfter = await logMark();
 
         const effect = [];
         if (after.url !== before.url) effect.push(`navigated to ${after.url}`);
         if (after.len !== before.len) effect.push('changed the screen');
+        if (after.state !== before.state) effect.push('changed a selection');
         if (reqAfter > reqBefore) effect.push(`made ${reqAfter - reqBefore} request(s)`);
 
         sweepLog.push({ route: `responder${route}`, label, effect: effect.join(', ') || 'nothing' });
         if (!effect.length) deadControls.push({ route: `responder${route}`, label });
 
-        if (after.url !== before.url) await go(route, 2000);
+        // Same as the citizen sweep: Flutter rebuilds its semantics tree on any
+        // change, so without going back and re-reading it, the first control
+        // that did anything detached every node after it.
+        if (effect.length) {
+          await go(route, 1800);
+        }
+        labels = await listControls();
       }
       await shot(`95-mobile-responder-sweep${route.replace(/\//g, '-')}`);
     }
   }
+
+  const totalNodes = coverage.reduce((n, c) => n + c.nodes, 0);
+  const totalPressable = coverage.reduce((n, c) => n + c.innermost, 0);
+  // A sweep that presses a fraction of what it found is not a sweep, and the
+  // shortfall must be visible rather than implied by a small tally.
+  check(
+    'the sweep pressed the controls it found',
+    unreachable === 0,
+    unreachable
+      ? `${unreachable} control(s) had gone from the DOM before they could be pressed`
+      : `${sweepLog.length} pressed, ${skipped} skipped, of ${totalPressable} found`,
+  );
+
+  check(
+    'the app exposes its controls to the accessibility tree',
+    totalPressable > 0,
+    `${totalPressable} pressable of ${totalNodes} semantics nodes across ${coverage.length} screens`
+    + ` — ${coverage.map((c) => `${c.route}:${c.innermost}/${c.nodes}`).join(' ')}`,
+  );
+
+  check(
+    'the sweep actually reached the screens it swept',
+    sweptElsewhere === 0,
+    sweptElsewhere
+      ? `${sweptElsewhere}/${SCREENS.length} routes answered with a different screen`
+      : `all ${SCREENS.length} citizen screens reached`,
+  );
 
   check(
     'every mobile control that was pressed did something',
     deadControls.length === 0,
     deadControls.length
       ? `${deadControls.length} did nothing: ${deadControls.slice(0, 8).map((d) => `${d.route}/"${d.label}"`).join(', ')}`
-      : `${sweepLog.length} controls exercised`,
+      : `${sweepLog.length} controls exercised, ${skipped} deliberately skipped`,
   );
 
   /**

@@ -51,7 +51,11 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/command_chain_behaviour_test.sql \
    "$REPO"/scripts/privacy_behaviour_test.sql \
    "$REPO"/scripts/sms_device_keys_behaviour_test.sql \
-   "$REPO"/scripts/mesh_ingest_behaviour_test.sql "$PGROOT/"
+   "$REPO"/scripts/mesh_ingest_behaviour_test.sql \
+   "$REPO"/scripts/alert_category_behaviour_test.sql \
+   "$REPO"/scripts/alert_scoping_behaviour_test.sql \
+   "$REPO"/scripts/notification_outbox_behaviour_test.sql \
+   "$REPO"/scripts/seed_demo_incidents.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
 psql_run() {
@@ -193,6 +197,77 @@ psql_run "-f $PGROOT/20261001000000_mesh_ingest.sql" >/dev/null
 echo "▶ Re-applying it (must be idempotent)"
 psql_run "-f $PGROOT/20261001000000_mesh_ingest.sql" >/dev/null
 
+echo "▶ Applying 20261002000000_sim_channel_events.sql"
+psql_run "-f $PGROOT/20261002000000_sim_channel_events.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261002000000_sim_channel_events.sql" >/dev/null
+
+# An agency liaison is an officer of ANOTHER organisation, and is_staff() is
+# "role is not CITIZEN" — so every alerts policy that said `OR is_staff()` gave
+# them the whole state, to read AND to write. This narrows it; the production
+# readiness test below is what proves it.
+echo "▶ Applying 20261003000000_liaisons_are_not_staff.sql"
+psql_run "-f $PGROOT/20261003000000_liaisons_are_not_staff.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261003000000_liaisons_are_not_staff.sql" >/dev/null
+
+# An SOS starts a track and the database kept only the latest point, so the
+# trail existed in one browser tab's memory and nowhere else.
+echo "▶ Applying 20261004000000_incident_tracks.sql"
+psql_run "-f $PGROOT/20261004000000_incident_tracks.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261004000000_incident_tracks.sql" >/dev/null
+
+# The category a citizen picked was only ever a prefix inside the free-text
+# `type` column, so a dispatcher could not sort by it. This adds it as a STORED
+# GENERATED column, which also backfills every historical row.
+echo "▶ Applying 20261005000000_alert_category.sql"
+psql_run "-f $PGROOT/20261005000000_alert_category.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261005000000_alert_category.sql" >/dev/null
+
+echo "▶ Asserting the incident category is derived, backfilled and unwritable"
+CAT_OUT=$(psql_run "-f $PGROOT/alert_category_behaviour_test.sql" 2>&1) && CAT_RC=0 || CAT_RC=$?
+echo "$CAT_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$CAT_RC" -ne 0 ]; then
+  echo "$CAT_OUT"
+  echo "✗ alert category assertions failed"
+  exit 1
+fi
+
+# The command chain had structure for ROUTING and none for AUTHORITY: is_staff()
+# means "not a citizen", so every officer at every tier could read AND write
+# every incident in the state.
+echo "▶ Applying 20261006000000_alerts_scoped_to_posting.sql"
+psql_run "-f $PGROOT/20261006000000_alerts_scoped_to_posting.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261006000000_alerts_scoped_to_posting.sql" >/dev/null
+
+echo "▶ Asserting an officer's authority ends at their command"
+SCOPE_OUT=$(psql_run "-f $PGROOT/alert_scoping_behaviour_test.sql" 2>&1) && SCOPE_RC=0 || SCOPE_RC=$?
+echo "$SCOPE_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$SCOPE_RC" -ne 0 ]; then
+  echo "$SCOPE_OUT"
+  echo "✗ alert scoping assertions failed"
+  exit 1
+fi
+
+# The timeout escalation moved the incident and told nobody: every notification
+# in this system is sent by a human pressing a button in the console.
+echo "▶ Applying 20261007000000_notification_outbox.sql"
+psql_run "-f $PGROOT/20261007000000_notification_outbox.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261007000000_notification_outbox.sql" >/dev/null
+
+echo "▶ Asserting an automatic escalation owes somebody a notification"
+OUTBOX_OUT=$(psql_run "-f $PGROOT/notification_outbox_behaviour_test.sql" 2>&1) && OUTBOX_RC=0 || OUTBOX_RC=$?
+echo "$OUTBOX_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$OUTBOX_RC" -ne 0 ]; then
+  echo "$OUTBOX_OUT"
+  echo "✗ notification outbox assertions failed"
+  exit 1
+fi
+
 echo "▶ Asserting the mesh recognises a duplicate, and forgets in time"
 MESH_OUT=$(psql_run "-f $PGROOT/mesh_ingest_behaviour_test.sql" 2>&1) && MESH_RC=0 || MESH_RC=$?
 echo "$MESH_OUT" | grep -E "PASS|FAIL|ERROR" || true
@@ -225,6 +300,23 @@ printf '%s\n' "$PR_OUT" | grep -E "PASS|FAIL|ALL PRODUCTION" || true
 if [ "$PR_RC" -ne 0 ]; then
   printf '%s\n' "$PR_OUT" | grep -vE "PASS" | tail -20
   echo "::error::production readiness behaviour test FAILED"; exit 1
+fi
+
+# The demonstration seed is handed to people to run against staging, so it is
+# applied here to prove it actually applies: a seed that fails halfway leaves a
+# half-populated console, which is worse than an empty one.
+#
+# LAST, after every behaviour test, and deliberately so. It COMMITs thirteen
+# incidents; several of those tests count rows across a whole table rather than
+# the rows they created, so seeding before them turns a passing assertion about
+# row-level security into a failure about data it never wrote.
+echo "▶ Applying the demonstration seed"
+SEED_OUT=$(psql_run "-f $PGROOT/seed_demo_incidents.sql" 2>&1) && SEED_RC=0 || SEED_RC=$?
+echo "$SEED_OUT" | grep -E "seeded|ERROR" || true
+if [ "$SEED_RC" -ne 0 ]; then
+  echo "$SEED_OUT"
+  echo "✗ the demonstration seed does not apply"
+  exit 1
 fi
 
 cat <<'EOF'

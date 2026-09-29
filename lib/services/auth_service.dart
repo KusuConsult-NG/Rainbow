@@ -4,10 +4,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:rainbow_app/core/supabase/supabase_config.dart';
+import 'package:rainbow_app/core/auth/phone_number.dart';
 import 'package:rainbow_app/core/offline/sms_device_key.dart';
+import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/services/secure_storage_service.dart';
+import 'package:rainbow_app/services/sim_watch_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Provider for AuthService
@@ -35,48 +37,13 @@ class AuthService {
     }
   }
 
-  // ── CITIZEN PATH: Phone Auth with Demo Bypass ───────────────────────────────
-
-  /// Legacy combined method (phone + otp in one call) — kept for backward compat
-  Future<bool> signInWithPhone(String phoneNumber, String otpCode) async {
-    _lastAuthError = null;
-
-    final cleanPhone = phoneNumber.replaceAll(RegExp('[^0-9+]'), '');
-
-    // Demo Citizen Bypass
-    if (cleanPhone == '08000000000' ||
-        cleanPhone == '2348000000000' ||
-        cleanPhone == '+2348000000000') {
-      try {
-        final demoEmail = dotenv.env['DEMO_CITIZEN_EMAIL'];
-        final demoPass  = dotenv.env['DEMO_CITIZEN_PASS'];
-        if (demoEmail == null || demoPass == null) {
-          _lastAuthError = 'DEMO_CITIZEN_EMAIL / DEMO_CITIZEN_PASS not configured in .env';
-          return false;
-        }
-        final res = await SupabaseConfig.client.auth.signInWithPassword(
-          email: demoEmail,
-          password: demoPass,
-        );
-        return await _sessionEstablished(res.session);
-      } catch (e) {
-        _lastAuthError = e.toString();
-        return false;
-      }
-    }
-
-    try {
-      final res = await SupabaseConfig.client.auth.verifyOTP(
-        type: OtpType.sms,
-        token: otpCode,
-        phone: cleanPhone,
-      );
-      return await _sessionEstablished(res.session);
-    } catch (e) {
-      _lastAuthError = e.toString();
-      return false;
-    }
-  }
+  // ── CITIZEN PATH: phone number, then a code sent to it ─────────────────────
+  //
+  // `signInWithPhone(phone, otp)` used to live here — a second, combined
+  // version of the two steps below, carrying its own copy of the demo bypass.
+  // Nothing called it. Two implementations of a sign-in path is two places for
+  // the demo bypass to be forgotten, and it was already the one with no
+  // release-build guard.
 
   // ── AGENT PATH: Badge / Email Login ───────────────────────────────────────
 
@@ -113,7 +80,27 @@ class AuthService {
     return signInWithBadge('$cleanCode@operationrainbow.plateau.gov.ng', agentPass);
   }
 
+  /// The demo number that skips the SMS, and which does NOT exist in a
+  /// released build.
+  ///
+  /// This returned true in every build. So in a shipped APK, typing
+  /// `08000000000` and the code `123456` signed you in as whoever
+  /// `DEMO_CITIZEN_EMAIL` is — a real account, with a real session, on the real
+  /// database. The number is in this source file and the password is in the
+  /// bundled `.env`, which extracts with `unzip`. That is not a demo bypass, it
+  /// is a published credential.
+  ///
+  /// `kReleaseMode` is the single choke point: both call sites below ask this
+  /// question, so the path simply does not exist in a release build and the
+  /// number is treated like any other — which means it fails validation, since
+  /// `0800…` is not a Nigerian mobile prefix.
+  ///
+  /// The `.env` values are a separate problem this cannot fix: a release build
+  /// must not carry DEMO_CITIZEN_EMAIL/DEMO_CITIZEN_PASS at all, because they
+  /// are readable in the APK whether or not any code reads them. See
+  /// docs/PRODUCTION_DEPLOYMENT.md.
   static bool isDemoNumber(String phone) {
+    if (kReleaseMode) return false;
     final clean = phone.trim().replaceAll(RegExp('[^0-9+]'), '');
     return clean == '08000000000' ||
         clean == '2348000000000' ||
@@ -122,27 +109,81 @@ class AuthService {
 
   // ── TWO-STEP CITIZEN FLOW ──────────────────────────────────────────────────
 
-  /// Step 1: Store phone number and trigger OTP send (or flag demo bypass).
-  Future<void> verifyPhoneNumber(String phone) async {
+  /// Step 1: ask for a code to be sent to this number.
+  ///
+  /// Returns whether the caller should now show the code screen. It used to
+  /// return `void`, and the screen decided by reading `lastAuthError` — which
+  /// worked, but put the decision in the caller and made it easy to advance on
+  /// a send that had failed. There is nothing worse to show a person in an
+  /// emergency than a box waiting for a code that was never sent.
+  ///
+  /// The number is normalised FIRST, and refused here if it cannot receive an
+  /// SMS. See `lib/core/auth/phone_number.dart`: this is the identity, and it
+  /// used to be whatever the person typed with the punctuation removed, so one
+  /// person had four of them.
+  Future<bool> verifyPhoneNumber(String phone) async {
     _lastAuthError = null;
-    final cleanPhone = phone.trim().replaceAll(RegExp('[^0-9+]'), '');
-    _pendingPhone = cleanPhone;
 
-    debugPrint('[AUTH] verifyPhoneNumber: $cleanPhone');
-
-    if (isDemoNumber(cleanPhone)) {
-      debugPrint('[AUTH] Demo phone detected — use OTP 123456');
-      return;
+    // The demo number is checked BEFORE normalisation, because `0800…` is not
+    // a mobile prefix and would otherwise be refused — and it does not exist
+    // in a release build at all. See [isDemoNumber].
+    if (isDemoNumber(phone)) {
+      _pendingPhone = phone.trim().replaceAll(RegExp('[^0-9+]'), '');
+      debugPrint('[AUTH] demo number (debug build only) — the code is 123456');
+      return true;
     }
 
-    // Real phones: send OTP via Supabase
+    final read = readNigerianPhone(phone);
+    if (!read.isValid) {
+      _lastAuthError = read.problem;
+      return false;
+    }
+    final e164 = read.e164!;
+    _pendingPhone = e164;
+
     try {
-      await SupabaseConfig.client.auth.signInWithOtp(phone: cleanPhone);
-      debugPrint('[AUTH] OTP sent to $cleanPhone');
+      await SupabaseConfig.client.auth.signInWithOtp(phone: e164);
+      // The number is not logged. It identifies a person who may be reporting
+      // something they would be harmed for reporting, and debug logs are read
+      // off handsets.
+      debugPrint('[AUTH] a code was sent');
+      return true;
     } catch (e) {
-      _lastAuthError = e.toString();
-      debugPrint('[AUTH] OTP send failed: $e');
+      _lastAuthError = _describeOtpSendFailure(e);
+      debugPrint('[AUTH] the code could not be sent: $e');
+      return false;
     }
+  }
+
+  /// Turns a send failure into something a person can act on.
+  ///
+  /// The commonest one by far is not the person's fault and not transient:
+  /// Supabase refuses `signInWithOtp` outright when the project has no SMS
+  /// provider configured. Termii — which this deployment uses everywhere else —
+  /// is not one of Supabase's built-in providers, so it has to be wired up as a
+  /// Send SMS auth hook. Until that is done, EVERY citizen sign-in fails here.
+  /// Saying "try again" to that is telling someone to keep pulling a lever that
+  /// is not connected to anything. See docs/PRODUCTION_DEPLOYMENT.md.
+  String _describeOtpSendFailure(Object e) {
+    final text = e.toString().toLowerCase();
+    if (text.contains('sms provider') ||
+        text.contains('phone provider') ||
+        text.contains('unsupported phone provider') ||
+        text.contains('signups not allowed') ||
+        text.contains('phone_provider_disabled')) {
+      return 'SMS SIGN-IN IS NOT SWITCHED ON FOR THIS SERVICE YET. '
+          'REPORT THIS TO HQ — IT IS NOT YOUR PHONE.';
+    }
+    if (text.contains('rate') || text.contains('too many')) {
+      return 'TOO MANY CODES REQUESTED. WAIT A MINUTE AND TRY AGAIN.';
+    }
+    if (text.contains('socket') ||
+        text.contains('timeout') ||
+        text.contains('failed host lookup') ||
+        text.contains('network')) {
+      return 'NO CONNECTION. THE CODE CANNOT BE SENT WITHOUT ONE.';
+    }
+    return 'THE CODE COULD NOT BE SENT. TRY AGAIN.';
   }
 
   /// Step 2: Verify OTP and create Supabase session.
@@ -155,7 +196,11 @@ class AuthService {
       return false;
     }
 
-    debugPrint('[AUTH] verifyOTP: phone=$phone otp=$otp');
+    // The number and the code were both printed here. A debug log is read off
+    // a handset by anyone holding it, and together those two lines are enough
+    // to sign in as the person — the code is single-use, but the window is the
+    // whole time it sits unverified.
+    debugPrint('[AUTH] checking a code');
 
     if (isDemoNumber(phone)) {
       // Demo citizen: only accept OTP 123456
@@ -182,7 +227,7 @@ class AuthService {
           return false;
         }
       } else {
-        _lastAuthError = 'INVALID OTP — USE 123456 FOR DEMO';
+        _lastAuthError = 'THE DEMO CODE IS 123456 (DEBUG BUILDS ONLY)';
         return false;
       }
     }
@@ -198,12 +243,42 @@ class AuthService {
         _pendingPhone = null;
         return await _sessionEstablished(res.session);
       }
-      _lastAuthError = 'OTP VERIFICATION FAILED';
+      _lastAuthError = 'THAT CODE WAS NOT ACCEPTED.';
       return false;
     } catch (e) {
-      _lastAuthError = e.toString();
+      _lastAuthError = _describeOtpCheckFailure(e);
+      debugPrint('[AUTH] the code was not accepted: $e');
       return false;
     }
+  }
+
+  /// The number the code was sent to, for showing back to the person.
+  ///
+  /// In the form they wrote it — `0803 000 1111`, not `+2348030001111`, which
+  /// invites a "…is that mine?" pause on the one screen where hesitating is
+  /// worst. Null when no code is outstanding.
+  String? get pendingPhoneForDisplay {
+    final phone = _pendingPhone;
+    if (phone == null) return null;
+    return displayNigerianPhone(phone);
+  }
+
+  /// Turns a verification failure into something a person can act on.
+  String _describeOtpCheckFailure(Object e) {
+    final text = e.toString().toLowerCase();
+    if (text.contains('expired')) {
+      return 'THAT CODE HAS EXPIRED. ASK FOR A NEW ONE.';
+    }
+    if (text.contains('invalid') || text.contains('token')) {
+      return 'THAT CODE IS NOT RIGHT. CHECK THE MESSAGE AND TRY AGAIN.';
+    }
+    if (text.contains('socket') ||
+        text.contains('timeout') ||
+        text.contains('failed host lookup') ||
+        text.contains('network')) {
+      return 'NO CONNECTION. THE CODE CANNOT BE CHECKED WITHOUT ONE.';
+    }
+    return 'THAT CODE WAS NOT ACCEPTED.';
   }
 
   /// Test seam: obtaining the SMS device key, which reaches secure storage and
@@ -245,8 +320,20 @@ class AuthService {
     } catch (e) {
       debugPrint('[SIGNIN_SMSKEY_ERR] could not obtain a device key: $e');
     }
+    // Record which SIM this handset has, so a later removal is visible. The
+    // first check never reports anything — it is the baseline — and a failure
+    // here is not a reason to fail a sign-in.
+    try {
+      await (simBaselineOverride ?? () async => SimWatchService().check())();
+    } catch (e) {
+      debugPrint('[SIGNIN_SIM_ERR] could not record the SIM baseline: $e');
+    }
     return true;
   }
+
+  /// Test seam: the SIM check reaches a platform channel and Supabase.
+  @visibleForTesting
+  static Future<void> Function()? simBaselineOverride;
 
   /// Test seam: BackgroundTrackingService talks to platform channels, which do
   /// not exist under `flutter test`.
@@ -256,6 +343,10 @@ class AuthService {
   /// Test seam: the SMS key service reaches secure storage and Supabase.
   @visibleForTesting
   static Future<void> Function()? forgetSmsKeyOverride;
+
+  /// Test seam: the SIM baseline reaches secure storage.
+  @visibleForTesting
+  static Future<void> Function()? forgetSimBaselineOverride;
 
   /// Sign out user session.
   ///
@@ -283,6 +374,16 @@ class AuthService {
       await (forgetSmsKeyOverride ?? SmsDeviceKeyService().forget)();
     } catch (e) {
       debugPrint('[SIGNOUT_SMSKEY_ERR] could not retire the SMS key: $e');
+    }
+    // And forget which SIM was in this handset. Without this the next person
+    // to sign in on the same phone is compared against the previous owner's
+    // SIM, and gets a "SIM REPLACED" alert for what is really a change of
+    // owner. `deleteAll()` below would cover it, but saying it explicitly
+    // keeps the reason attached to the line.
+    try {
+      await (forgetSimBaselineOverride ?? SimWatchService().forget)();
+    } catch (e) {
+      debugPrint('[SIGNOUT_SIM_ERR] could not clear the SIM baseline: $e');
     }
     await SupabaseConfig.client.auth.signOut();
     await _secureStorage.deleteAll();

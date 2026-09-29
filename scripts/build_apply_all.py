@@ -217,10 +217,18 @@ WITH checks(ord, name, ok) AS (
     -- readable by staff once their emergency closes, nothing may be kept
     -- forever, and a message must not be injectable into somebody else's
     -- channel.
+    -- Asserted on the POLICY'S CONDITION, not on its name. This check used to
+    -- name `telemetry_select_self_or_responding_staff`, and a later migration
+    -- that renamed the policy while keeping the behaviour broke the check and
+    -- proved nothing about the database. What has to stay true is that a
+    -- position is tied to an OPEN incident — so the clause has to mention the
+    -- alerts table and exclude a resolved one.
     (19, 'a citizen''s position is not a standing staff feed',
-        EXISTS (SELECT 1 FROM pg_policies
-                 WHERE schemaname = 'public' AND tablename = 'telemetry'
-                   AND policyname = 'telemetry_select_self_or_responding_staff')),
+        (SELECT count(*) = 1 FROM pg_policies
+          WHERE schemaname = 'public' AND tablename = 'telemetry'
+            AND cmd = 'SELECT'
+            AND qual LIKE '%alerts%'
+            AND qual LIKE '%RESOLVED%')),
     (20, 'stale positions are purged, and only by the service role',
         (SELECT NOT has_function_privilege('authenticated',
                   'public.purge_stale_telemetry()', 'EXECUTE')
@@ -259,7 +267,68 @@ WITH checks(ord, name, ok) AS (
                              WHERE schemaname = 'public'
                                AND tablename = 'mesh_envelopes_seen')
            FROM pg_class
-          WHERE oid = 'public.mesh_envelopes_seen'::regclass))
+          WHERE oid = 'public.mesh_envelopes_seen'::regclass)),
+    -- A handset whose SIM has gone can no longer be reached by SMS, and the
+    -- alert queue keeps queueing with nowhere to go. HQ is told.
+    (26, 'a handset can report that its SMS channel changed',
+        (SELECT to_regclass('public.sim_channel_events') IS NOT NULL)),
+    -- And that report must not be readable by every staff account. A
+    -- polling-unit officer, and every agency liaison, are staff; neither has a
+    -- reason to see which citizens changed SIM. This is the same mistake the
+    -- telemetry work was written to undo.
+    (27, 'SIM reports are limited to command, not all staff',
+        (SELECT relrowsecurity
+            AND EXISTS (SELECT 1 FROM pg_policies
+                         WHERE schemaname = 'public'
+                           AND tablename = 'sim_channel_events'
+                           AND policyname = 'sim_events_select_self_or_command')
+           FROM pg_class
+          WHERE oid = 'public.sim_channel_events'::regclass)),
+    -- There is no column for a position on that table, and there must not be:
+    -- with one it stops being a channel board and becomes a movement log on
+    -- private citizens.
+    (28, 'SIM reports carry no position',
+        (SELECT count(*) = 0 FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'sim_channel_events'
+            AND column_name IN ('latitude','longitude','lat','lng','location'))),
+    -- An agency liaison is an officer of ANOTHER organisation. is_staff() is
+    -- "role is not CITIZEN", so they were staff — and the alerts policies were
+    -- "... OR is_staff()". Every liaison could read AND WRITE every incident
+    -- in Plateau.
+    (29, 'a liaison is recognised as an outside agency',
+        (SELECT EXISTS (SELECT 1 FROM pg_proc p
+                          JOIN pg_namespace n ON n.oid = p.pronamespace
+                         WHERE n.nspname = 'public' AND p.proname = 'is_liaison'))),
+    (30, 'the statewide alert policies no longer rest on is_staff alone',
+        (SELECT NOT EXISTS (SELECT 1 FROM pg_policies
+                             WHERE schemaname = 'public'
+                               AND tablename = 'alerts'
+                               AND policyname IN ('alerts_select_own_or_staff',
+                                                  'alerts_update_own_or_staff'))
+            AND EXISTS (SELECT 1 FROM pg_policies
+                         WHERE schemaname = 'public'
+                           AND tablename = 'alerts'
+                           AND policyname = 'alerts_select_own_or_ours'))),
+    -- An SOS started a track and the database kept only the latest point, so
+    -- the trail lived in one browser tab's memory: a refresh lost it, and
+    -- anybody reviewing the incident afterwards saw no movement at all.
+    (31, 'the route taken during an incident is kept',
+        (SELECT to_regclass('public.incident_tracks') IS NOT NULL)),
+    -- And it expires, which is the whole reason keeping it does not undo the
+    -- work that made location borrowed rather than kept.
+    (32, 'routes expire, and only the service role can expire them',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.purge_stale_incident_tracks()', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'purge_stale_incident_tracks')),
+    -- A route is a record. One that can be rewritten is worth less than none,
+    -- because it can be made to say something else.
+    (33, 'a route cannot be rewritten or deleted through the API',
+        (SELECT NOT EXISTS (SELECT 1 FROM pg_policies
+                             WHERE schemaname = 'public'
+                               AND tablename = 'incident_tracks'
+                               AND cmd IN ('UPDATE', 'DELETE'))))
 )
 SELECT
   CASE WHEN ok THEN 'PASS' ELSE '*** FAIL ***' END AS result,

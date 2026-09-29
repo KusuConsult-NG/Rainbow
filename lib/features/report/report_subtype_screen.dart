@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rainbow_app/core/router/safe_pop.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/constants/alert_categories.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
@@ -82,7 +83,7 @@ class _ReportSubtypeScreenState extends State<ReportSubtypeScreen> {
                   ),
                 ),
                 GestureDetector(
-                  onTap: () => context.pop(),
+                  onTap: () => context.popOrGo(AppRoutes.reportInitial),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 14,
@@ -205,60 +206,76 @@ class _TacticalSubTypeRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-        decoration: BoxDecoration(
-          color: selected
-              ? color.withValues(alpha: 0.1)
-              : Colors.black.withValues(alpha: 0.02),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: selected ? color.withValues(alpha: 0.5) : AppColors.outline,
-            width: selected ? 2 : 1,
+    // WHICH ONE IS CHOSEN, SAID OUT LOUD.
+    //
+    // Selection was carried by colour alone — a border width and a fill. Colour
+    // is not available to someone using a screen reader, and it is the weakest
+    // signal there is for someone reading a bright phone outdoors, which is the
+    // ordinary condition for this app.
+    //
+    // `selected` also puts the state in the accessibility tree, which is how
+    // the browser sweep found this: tapping a subtype registered as doing
+    // nothing at all, because nothing outside the painted pixels changed.
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          decoration: BoxDecoration(
+            color: selected
+                ? color.withValues(alpha: 0.1)
+                : Colors.black.withValues(alpha: 0.02),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color:
+                  selected ? color.withValues(alpha: 0.5) : AppColors.outline,
+              width: selected ? 2 : 1,
+            ),
           ),
-        ),
-        child: Row(
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: selected ? color : Colors.transparent,
-                border: Border.all(
-                  color: selected ? color : AppColors.outline,
-                  width: 2,
+          child: Row(
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: selected ? color : Colors.transparent,
+                  border: Border.all(
+                    color: selected ? color : AppColors.outline,
+                    width: 2,
+                  ),
+                ),
+                child: selected
+                    ? const Icon(
+                        Icons.check_rounded,
+                        color: Colors.white,
+                        size: 14,
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Text(
+                  label.toUpperCase(),
+                  style: GoogleFonts.outfit(
+                    fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                    fontSize: 15,
+                    color: selected
+                        ? AppColors.onBackground
+                        : AppColors.textSecondary,
+                    letterSpacing: 0.5,
+                  ),
                 ),
               ),
-              child: selected
-                  ? const Icon(
-                      Icons.check_rounded,
-                      color: Colors.white,
-                      size: 14,
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 20),
-            Expanded(
-              child: Text(
-                label.toUpperCase(),
-                style: GoogleFonts.outfit(
-                  fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
-                  fontSize: 15,
-                  color: selected
-                      ? AppColors.onBackground
-                      : AppColors.textSecondary,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-            if (selected) Icon(Icons.radar_rounded, color: color, size: 18),
-          ],
+              if (selected) Icon(Icons.radar_rounded, color: color, size: 18),
+            ],
+          ),
         ),
       ),
     );

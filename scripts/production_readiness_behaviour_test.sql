@@ -38,6 +38,14 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   public.agency_action_reports, public.agency_notifications
 TO authenticated;
 
+-- Same for the newer tables. Granted DELETE and UPDATE deliberately, even
+-- though `incident_tracks` has no policy for either: the point of the
+-- assertions below is that the POLICY refuses them, and a grant-level refusal
+-- would pass the test while proving nothing about the policy.
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  public.incident_tracks, public.sim_channel_events
+TO authenticated;
+
 -- Seed one officer per agency with full privileges.
 INSERT INTO public.agency_personnel (id, agency, name) VALUES
   ('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1', 'POLICE', 'Insp. Police'),
@@ -130,6 +138,190 @@ BEGIN
   SELECT count(*) INTO n FROM public.agency_action_reports;
   IF n <> 0 THEN RAISE EXCEPTION 'FAIL: army liaison read % police report(s)', n; END IF;
   RAISE NOTICE 'PASS: reports are invisible across agencies';
+
+  -- ═══ 2b. A liaison is not Operation Rainbow staff ════════════════════════
+  --
+  -- `is_staff()` is "role is not CITIZEN", so a POLICE_LIAISON was staff — and
+  -- the alerts policies were `... OR is_staff()`. Every liaison could READ and
+  -- WRITE every incident in Plateau: resolve one in an LGA their agency was
+  -- never called to, reassign it, clear a duress alarm. Nobody decided that;
+  -- the agency roles simply arrived after is_staff() was written.
+  --
+  -- Two incidents: one escalated to the POLICE, one to the ARMY.
+  PERFORM pg_temp.become(hq, 'authenticated');
+  INSERT INTO public.alerts (id, reported_by, status, type, severity, escalated_to_agency)
+  VALUES ('cccccccc-cccc-4ccc-8ccc-ccccccccca01', cit, 'PENDING', 'SOS', 'HIGH', 'POLICE'),
+         ('cccccccc-cccc-4ccc-8ccc-ccccccccca02', cit, 'PENDING', 'SOS', 'HIGH', 'ARMY'),
+         ('cccccccc-cccc-4ccc-8ccc-ccccccccca03', cit, 'PENDING', 'SOS', 'HIGH', NULL),
+         -- OPEN, and nothing to do with the citizen: reported by a responder.
+         -- The route assertions below need an incident that is open, so that
+         -- an attempt to attach a route to it is refused for the right
+         -- reason — the first version used a RESOLVED incident and passed
+         -- whatever the ownership clause said.
+         ('cccccccc-cccc-4ccc-8ccc-ccccccccca04', resp, 'PENDING', 'SOS', 'HIGH', NULL)
+  ON CONFLICT (id) DO NOTHING;
+
+  PERFORM pg_temp.become(police, 'authenticated');
+
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca01';
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL: police liaison cannot see the incident escalated to them';
+  END IF;
+
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca02';
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL: police liaison reads an incident escalated to the ARMY';
+  END IF;
+
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca03';
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL: police liaison reads an incident escalated to nobody';
+  END IF;
+  RAISE NOTICE 'PASS: a liaison reads only the incidents handed to their agency';
+
+  -- ...and cannot WRITE to one that was not. This is the half that mattered
+  -- most: reading the board is a confidentiality problem, but resolving
+  -- somebody else's live emergency is an operational one.
+  UPDATE public.alerts SET status = 'RESOLVED'
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca02';
+  IF FOUND THEN
+    RAISE EXCEPTION 'FAIL: police liaison resolved an ARMY incident';
+  END IF;
+  UPDATE public.alerts SET status = 'RESOLVED'
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca03';
+  IF FOUND THEN
+    RAISE EXCEPTION 'FAIL: police liaison resolved an unescalated incident';
+  END IF;
+  RAISE NOTICE 'PASS: a liaison cannot act on another agency''s incident';
+
+  -- But CAN act on their own, or the handover is ceremonial.
+  UPDATE public.alerts SET status = 'DISPATCHED'
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca01';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'FAIL: police liaison cannot act on their own incident';
+  END IF;
+  RAISE NOTICE 'PASS: a liaison can act on the incident handed to them';
+
+  -- Operation Rainbow's own staff keep the statewide board.
+  PERFORM pg_temp.become(hq, 'authenticated');
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE id IN ('cccccccc-cccc-4ccc-8ccc-ccccccccca01',
+                'cccccccc-cccc-4ccc-8ccc-ccccccccca02',
+                'cccccccc-cccc-4ccc-8ccc-ccccccccca03');
+  IF n <> 3 THEN
+    RAISE EXCEPTION 'FAIL: this narrowed the board for HQ too (sees %, expected 3)', n;
+  END IF;
+  RAISE NOTICE 'PASS: command still sees the whole state';
+
+  -- ═══ 2c. The route is kept, and only for the incident it belongs to ══════
+  --
+  -- `telemetry` holds one row per person, upserted, so the trail the console
+  -- drew lived only in a browser tab's memory: a refresh lost it, and anybody
+  -- reviewing the incident afterwards saw no movement at all. `incident_tracks`
+  -- keeps the points — and the whole reason that does not undo the "location is
+  -- borrowed, not kept" work is the scoping asserted here.
+  PERFORM pg_temp.become(cit, 'authenticated');
+  INSERT INTO public.incident_tracks (alert_id, user_id, latitude, longitude, accuracy)
+  VALUES ('cccccccc-cccc-4ccc-8ccc-ccccccccca01', cit, 9.8965, 8.8583, 8),
+         ('cccccccc-cccc-4ccc-8ccc-ccccccccca01', cit, 9.8991, 8.8620, 8);
+  RAISE NOTICE 'PASS: a reporter records their own route on their own incident';
+
+  -- Not somebody else's route.
+  BEGIN
+    INSERT INTO public.incident_tracks (alert_id, user_id, latitude, longitude)
+    VALUES ('cccccccc-cccc-4ccc-8ccc-ccccccccca01', hq, 9.9, 8.9);
+    RAISE EXCEPTION 'FAIL: a citizen wrote a route for somebody else';
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'PASS: a route cannot be written for another person';
+  END;
+
+  -- And not onto an incident they have no part in. ...ca04 is OPEN and
+  -- reported by somebody else.
+  --
+  -- Refused TWICE over, and the distinction is worth writing down because the
+  -- first version of this test did not make it: the policy's own ownership
+  -- clause refuses it, and so does the EXISTS subquery, which runs as the
+  -- calling user and therefore cannot see an alert that user has no part in.
+  -- For a CITIZEN the second mechanism alone is enough — mutating the
+  -- ownership clause away leaves this assertion passing. The assertion that
+  -- actually pins the clause is the staff one below.
+  BEGIN
+    INSERT INTO public.incident_tracks (alert_id, user_id, latitude, longitude)
+    VALUES ('cccccccc-cccc-4ccc-8ccc-ccccccccca04', cit, 9.9, 8.9);
+    RAISE EXCEPTION 'FAIL: a citizen attached a route to an unrelated incident';
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'PASS: a route cannot be attached to an unrelated incident';
+  END;
+
+  -- THE ONE THAT PINS THE OWNERSHIP CLAUSE.
+  --
+  -- A responder is staff, so `alert_is_ours()` lets them SEE every incident in
+  -- the state — which means the EXISTS subquery succeeds for all of them and
+  -- the only thing standing between a staff account and writing a route onto
+  -- somebody else's incident is the ownership clause itself. Mutate that
+  -- clause to `true` and this assertion is what fails.
+  PERFORM pg_temp.become(resp, 'authenticated');
+  BEGIN
+    INSERT INTO public.incident_tracks (alert_id, user_id, latitude, longitude)
+    VALUES ('cccccccc-cccc-4ccc-8ccc-ccccccccca01', resp, 9.9, 8.9);
+    RAISE EXCEPTION 'FAIL: a responder wrote a route onto an incident they are not on';
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'PASS: being staff does not let you write a route onto any incident';
+  END;
+  PERFORM pg_temp.become(cit, 'authenticated');
+
+  -- Nor onto a CLOSED incident of their own: a route that can be added days
+  -- later is a story, not a record.
+  PERFORM pg_temp.become(hq, 'authenticated');
+  UPDATE public.alerts SET status = 'RESOLVED'
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca03';
+  PERFORM pg_temp.become(cit, 'authenticated');
+  BEGIN
+    INSERT INTO public.incident_tracks (alert_id, user_id, latitude, longitude)
+    VALUES ('cccccccc-cccc-4ccc-8ccc-ccccccccca03', cit, 9.9, 8.9);
+    RAISE EXCEPTION 'FAIL: a route was added to a closed incident';
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'PASS: a closed incident cannot gain a route afterwards';
+  END;
+
+  -- A route is a record. An editable one is worth less than none, because it
+  -- can be made to say something else.
+  UPDATE public.incident_tracks SET latitude = 0 WHERE user_id = cit;
+  IF FOUND THEN RAISE EXCEPTION 'FAIL: a route point was rewritten'; END IF;
+  DELETE FROM public.incident_tracks WHERE user_id = cit;
+  IF FOUND THEN RAISE EXCEPTION 'FAIL: a route point was deleted by hand'; END IF;
+  RAISE NOTICE 'PASS: a route cannot be rewritten or deleted through the API';
+
+  -- Read follows the incident. The POLICE liaison holds ...ca01; the ARMY one
+  -- does not, and must not see the route on it either.
+  -- Counted on THIS incident, not across the table. These read
+  -- `FROM public.incident_tracks` with no WHERE, so any row anyone else added
+  -- — a later fixture, a demonstration seed — broke an assertion about
+  -- row-level security, which is a confusing way to be told about a defect
+  -- that is not there.
+  PERFORM pg_temp.become(police, 'authenticated');
+  SELECT count(*) INTO n FROM public.incident_tracks
+   WHERE alert_id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca01';
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'FAIL: police liaison sees % route points on their own incident, expected 2', n;
+  END IF;
+
+  PERFORM pg_temp.become(army, 'authenticated');
+  SELECT count(*) INTO n FROM public.incident_tracks
+   WHERE alert_id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca01';
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL: army liaison reads % route point(s) from a POLICE incident', n;
+  END IF;
+  RAISE NOTICE 'PASS: a route is readable only by people with a part in that incident';
+
+  PERFORM pg_temp.become(hq, 'authenticated');
+  SELECT count(*) INTO n FROM public.incident_tracks
+   WHERE alert_id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca01';
+  IF n <> 2 THEN RAISE EXCEPTION 'FAIL: HQ cannot read the route'; END IF;
+  RAISE NOTICE 'PASS: command can review the route';
 
   -- A field responder is staff but has no business here.
   PERFORM pg_temp.become(resp, 'authenticated');
@@ -279,8 +471,19 @@ BEGIN
   RAISE NOTICE 'PASS: escalation_log appends rather than replaces';
 
   -- The agency portal's entire feed is this filter.
-  SELECT count(*) INTO n FROM public.alerts WHERE escalated_to_agency = 'POLICE';
-  IF n <> 1 THEN RAISE EXCEPTION 'FAIL: the agency portal filter returns % rows', n; END IF;
+  --
+  -- Asserted on THE ROW, not on a count of the whole table. It used to say
+  -- `count(*) = 1`, which made it a test of how many fixtures the file happens
+  -- to contain: adding one more escalated incident anywhere above broke it
+  -- while saying nothing about the filter.
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE escalated_to_agency = 'POLICE'
+     AND id = 'cccccccc-cccc-4ccc-8ccc-cccccccccce1';
+  IF n <> 1 THEN RAISE EXCEPTION 'FAIL: the agency portal filter misses the escalated incident (% rows)', n; END IF;
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE escalated_to_agency = 'POLICE'
+     AND id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca02';
+  IF n <> 0 THEN RAISE EXCEPTION 'FAIL: the agency portal filter picks up an ARMY incident'; END IF;
   RAISE NOTICE 'PASS: escalated incidents are visible to the agency they went to';
 
   -- ═══ 7. The board's profile lookup must actually return rows ═════════════

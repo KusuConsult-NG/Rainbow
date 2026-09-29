@@ -1,6 +1,29 @@
 'use client';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+
+/**
+ * The alert shape comes from the ONE place that defines it.
+ *
+ * This file used to declare its own interface: `id`, `status`, `lat`, `lng`,
+ * `type`, `priority`, `description`, `assigned_to`, `reportedBy` and
+ * `reportedAt?: { seconds: number }`. The last two are Firebase names —
+ * PostgREST returns `reported_by` and `created_at` and never a camelCase key —
+ * so the map could not have shown the reporter or the time even if it had tried.
+ * Everything else in the row was invisible here simply because the interface
+ * did not mention it.
+ *
+ * Importing the canonical type means a column the schema gains is available the
+ * day the type learns about it, and a field that does not exist is a type error
+ * rather than a silent `undefined`.
+ */
+import type { Alert } from '@/app/dashboard/types';
+import {
+  incidentPopupHtml,
+  isUnacknowledged,
+  resolveReporterDetails,
+  statusColour,
+} from '@/lib/incident-dossier';
 
 /**
  * A one-bit store for "the Leaflet map exists".
@@ -36,22 +59,6 @@ function createReadySignal() {
   };
 }
 
-interface Alert {
-  id: string;
-  /** Every report folded into this card, when it is a cluster. */
-  member_ids?: string[];
-  type?: string;
-  status: string;
-  priority?: string;
-  lat?: number;
-  lng?: number;
-  assigned_to?: string;
-  reportedBy?: string;
-  description?: string;
-  isCritical?: boolean;
-  reportedAt?: { seconds: number };
-}
-
 export interface AgentLocation {
   id: string;
   user_id: string;
@@ -75,10 +82,36 @@ interface Props {
   agents?: AgentLocation[];
   onResolve: (ids: string | string[]) => void;
   onEscalate: (ids: string | string[], tier: string) => void;
+  /**
+   * Profiles by id, so a marker can name the person who reported the incident
+   * and the officer it is assigned to. Without it the popup can still render —
+   * it says the profile was not loaded rather than inventing a citizen.
+   */
+  usersMap?: Record<string, any>;
+  /** Opens the full incident dossier for one alert. */
+  onOpenDossier?: (id: string) => void;
+  /**
+   * The stored route of the incident currently being looked at.
+   *
+   * Separate from `agents[].path`, which is accumulated in the browser from
+   * live telemetry and therefore only exists for as long as the tab does. This
+   * one comes from `incident_tracks` and survives a refresh — it is the answer
+   * to "which way did they go" for an incident that has already happened.
+   */
+  incidentTrack?: { lat: number; lng: number }[];
   theme?: 'light' | 'dark';
 }
 
-export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, theme = 'light' }: Props) {
+export default function LiveMap({
+  alerts,
+  agents = [],
+  onResolve,
+  onEscalate,
+  usersMap = {},
+  onOpenDossier,
+  incidentTrack,
+  theme = 'light',
+}: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
@@ -103,7 +136,46 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   const isNarrow = useMediaQuery('(max-width: 1024px)');
 
   // Plateau State Tactical Bounds
-  const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.50, 10.80]];
+  /**
+ * Where tiles come from. ONE definition — there were two, and they disagreed.
+ *
+ * CARTO's basemaps were used for the dark theme. CARTO now requires an account
+ * and answers unauthenticated requests with a placeholder tile reading
+ * "API key required", so the command map rendered as a grid of watermarks with
+ * the incident markers floating on top. That is worse than a blank map: a blank
+ * map is obviously broken, whereas a map covered in text looks like somebody
+ * else's configuration problem while every street and landmark is gone.
+ *
+ * The second bug was the divergence. The initial layer used OpenStreetMap for
+ * the light theme; the theme-change effect used CARTO for BOTH. So a dark/light
+ * toggle moved even the light theme onto the watermarked provider, and which
+ * tiles you got depended on whether you had touched the theme since loading.
+ *
+ * OpenStreetMap needs no key. It is light, so dark is produced here with a CSS
+ * filter on the tile pane — markers and boundaries live in other panes and keep
+ * their own colours, which matters because a filter over the whole map would
+ * turn a red critical marker green.
+ *
+ * NEXT_PUBLIC_MAP_TILE_URL overrides it, so moving to a keyed or self-hosted
+ * provider is a config change rather than a code change. OSM's tile policy is
+ * aimed at modest use; a statewide service in daily operation should be on its
+ * own or a commercial provider, and this is the seam for that.
+ */
+const TILE_URL =
+  process.env.NEXT_PUBLIC_MAP_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+/** A provider's own dark tiles must not be darkened again. */
+const TILES_ALREADY_DARK = /dark|night/i.test(TILE_URL);
+
+/** Invert, then pull back towards neutral so inverted water is not orange. */
+const DARK_TILE_FILTER = 'invert(0.92) hue-rotate(180deg) saturate(0.75) brightness(0.95)';
+
+function tileFilterFor(theme: string): string {
+  if (TILES_ALREADY_DARK) return 'none';
+  return theme === 'dark' ? DARK_TILE_FILTER : 'none';
+}
+
+const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.50, 10.80]];
 
   // Leaflet is loaded from the LOCAL package, not a CDN.
   //
@@ -174,25 +246,41 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
 
     Leaflet.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    const tileUrl = theme === 'dark'
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-
-    const tileLayer = Leaflet.tileLayer(tileUrl, {
+    const tileLayer = Leaflet.tileLayer(TILE_URL, {
       attribution: '© OpenStreetMap contributors',
       maxZoom: 19,
     }).addTo(map);
     tileLayerRef.current = tileLayer;
 
+    // The tile pane only. Markers, boundaries and the risk grid are in their own
+    // panes and must keep their colours.
+    const pane = map.getPane('tilePane');
+    if (pane) pane.style.filter = tileFilterFor(theme);
+
+    // Both of the async steps below outlive the map if nobody stops them, and
+    // both then touch it. Signing out, or switching tab within a second of the
+    // map appearing, used to throw twice:
+    //
+    //   TypeError: Cannot read properties of undefined (reading '_leaflet_pos')
+    //   Failed to load boundaries: ... (reading 'appendChild')
+    //
+    // The first is this resize timer calling `invalidateSize()` on a map whose
+    // panes are gone; the second is the boundary fetch resolving afterwards and
+    // adding a layer to it. Neither was cancelled, because neither looks like
+    // something that needs cancelling.
+    let alive = true;
+    const boundaries = new AbortController();
+
     // Force map to adjust size to container after render
-    setTimeout(() => {
-      map.invalidateSize();
+    const resizeTimer = setTimeout(() => {
+      if (alive) map.invalidateSize();
     }, 250);
 
     // Fetch and draw Geo-Boundaries
-    fetch('/plateau_boundaries.json')
+    fetch('/plateau_boundaries.json', { signal: boundaries.signal })
       .then(res => res.json())
       .then(data => {
+        if (!alive) return;
         Leaflet.geoJSON(data, {
           style: {
             color: 'var(--duress)',
@@ -214,15 +302,56 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
           }
         }).addTo(map);
       })
-      .catch(err => console.error('Failed to load boundaries:', err));
+      .catch(err => {
+        // An abort is this component being unmounted, which is not a failure
+        // and must not be reported as one — the boundary overlay failing to
+        // load is a real condition worth logging, and burying it under noise
+        // from every tab change is how a real one gets ignored.
+        if (boundaries.signal.aborted) return;
+        console.error('Failed to load boundaries:', err);
+      });
 
     mapInstanceRef.current = { map, L: Leaflet };
     readySignal.set(true);
 
     return () => {
+      alive = false;
+      clearTimeout(resizeTimer);
+      boundaries.abort();
       readySignal.set(false);
       if (mapInstanceRef.current) {
-        mapInstanceRef.current.map.remove();
+        // Stop any animation FIRST.
+        //
+        // Opening a popup near an edge starts an autoPan, which runs on
+        // requestAnimationFrame. If the operator switches tab inside that
+        // window — click a pin, look at the feed — React unmounts this
+        // component while the pan is still stepping, and the next frame calls
+        // `_onPanTransitionEnd`, which reads `map._mapPane.classList` on a map
+        // that no longer has panes. An uncaught TypeError in the console HQ
+        // watches, twice, every time.
+        //
+        // `stop()` and `closePopup()` are Leaflet's public API for exactly
+        // this. The browser harness catches it; jsdom does not, because it
+        // runs no animation frames.
+        const dying = mapInstanceRef.current.map;
+        dying.closePopup();
+        // Detach the pan animation's listeners before the map goes.
+        //
+        // `_onPanTransitionEnd` does `removeClass(this._mapPane, …)` and
+        // `map.remove()` deletes `_mapPane`, so a pan that completes after the
+        // unmount throws `Cannot read properties of undefined (reading
+        // 'classList')` from a requestAnimationFrame callback — uncaught, in
+        // the console HQ watches, every time an operator clicks a pin near the
+        // edge (which starts an autoPan) and then switches tab.
+        //
+        // Neither `map.stop()` nor `setView(…, {animate: false})` fixes it and
+        // both make it worse: they end the animation by firing `moveend`,
+        // which the popup listens to, and its `_adjustPan` starts a FRESH pan
+        // on a map that is about to lose its panes. Dropping the listeners is
+        // the only thing that cannot restart anything. The animation object is
+        // discarded with the map a line later.
+        if (dying._panAnim) dying._panAnim.off();
+        dying.remove();
         mapInstanceRef.current = null;
       }
       markersRef.current = [];
@@ -303,11 +432,16 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   }, [alerts, showRiskGrid, mapReady]);
 
   useEffect(() => {
-    if (!mapInstanceRef.current || !tileLayerRef.current) return;
-    const tileUrl = theme === 'dark'
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
-    tileLayerRef.current.setUrl(tileUrl);
+    if (!mapInstanceRef.current) return;
+    // Filter the pane; do NOT swap the provider. Swapping is what made the two
+    // definitions diverge, and it also refetches every visible tile on a theme
+    // toggle for no reason.
+    //
+    // `mapInstanceRef.current` is `{ map, L }`, not the map. Reaching for
+    // `.getPane` on the wrapper threw "not a function" on every theme toggle —
+    // inside an effect, so it took the render with it.
+    const pane = mapInstanceRef.current.map.getPane('tilePane');
+    if (pane) pane.style.filter = tileFilterFor(theme);
   }, [theme]);
 
   // Global action handlers for popup buttons
@@ -315,27 +449,17 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
   // card stands for several reports, so the id is expanded to the whole
   // cluster before any action — otherwise resolving from the map closes one
   // report and hides the rest.
-  const clusterOf = (id: string): string | string[] =>
-    alerts.find(a => a.id === id)?.member_ids ?? id;
+  const clusterOf = useCallback(
+    (id: string): string | string[] => alerts.find(a => a.id === id)?.member_ids ?? id,
+    [alerts],
+  );
 
-  useEffect(() => {
-    (window as any)._hqResolve = (id: string) => {
-      if (typeof onResolve === 'function') {
-        onResolve(clusterOf(id));
-      }
-    };
-
-    (window as any)._hqShowDispatch = (id: string) => {
-      if (typeof onEscalate === 'function') {
-        onEscalate(clusterOf(id), 'DISPATCH');
-      }
-    };
-
-    return () => {
-      delete (window as any)._hqResolve;
-      delete (window as any)._hqShowDispatch;
-    };
-  }, [onResolve, onEscalate]);
+  // There were TWO effects installing these handlers, 200 lines apart, and they
+  // disagreed: the first called `onEscalate(id, 'DISPATCH')` directly, the
+  // second raised an `hq-show-dispatch` event for the page to catch. React runs
+  // effects in order, so the second silently won and the first was dead code
+  // that still owned the cleanup. One effect, installed once, cleaned up once.
+  // See the block below `alertMarkersRef`.
 
   const alertMarkersRef = useRef<Map<string, any>>(new Map());
   const clusterGroupRef = useRef<any>(null);
@@ -368,49 +492,64 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
     const currentIds = new Set<string>();
 
     alerts.forEach(alert => {
-      if (!alert.lat || !alert.lng) return;
+      // `!alert.lat` also rejects 0. That is a coordinate — in the Gulf of
+      // Guinea, so never a real Plateau fix — but a falsy check on a number is
+      // the habit that produces C-5-shaped bugs, so this asks the question it
+      // means: is there a usable fix?
+      if (!Number.isFinite(alert.lat) || !Number.isFinite(alert.lng)) return;
       currentIds.add(alert.id);
 
       const isDuress = alert.status === 'DURESS';
-      const statusColors: any = {
-        'OPEN': '#FF9800', 'ACTIVE': '#FF9800', 'DISPATCHED': '#2196F3', 'ACKNOWLEDGED': '#4CAF50',
-        'ON_ROUTE': '#E91E63', 'ON_SITE': '#00BCD4', 'RESOLVED': '#8BC34A', 'DURESS': 'var(--duress)'
-      };
+      // Status colours now come from the shared module, which — unlike the map
+      // table that used to live here — has an entry for PENDING, the status
+      // every report arrives with, and for CANCELLED. Both fell through to the
+      // same orange as an open incident.
+      const color = statusColour(alert.status);
 
-      const color = statusColors[alert.status] || '#FF9800';
-      const size = isDuress ? 44 : 30;
+      // An incident nobody has acknowledged pulses. That is the thing an
+      // operator scanning the map needs to see without clicking: the tier timer
+      // is running on it, and it will climb to WARD and then LGA on its own.
+      const unclaimed = isUnacknowledged(alert);
+      const size = isDuress ? 44 : unclaimed ? 34 : 30;
+      const pulse = isDuress
+        ? 'animation:pulse-ring 1.5s infinite;'
+        : unclaimed
+          ? 'animation:pulse-ring 2.4s infinite;'
+          : '';
 
       const icon = L.divIcon({
         className: '',
-        html: `<div style="width:${size}px;height:${size}px;background:${color}99;border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;${isDuress ? 'animation:pulse-ring 1.5s infinite;' : ''}"><div style="width:${size * 0.45}px;height:${size * 0.45}px;background:${color};border-radius:50%;"></div></div>`,
+        html: `<div style="width:${size}px;height:${size}px;background:${color}99;border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;${pulse}"><div style="width:${size * 0.45}px;height:${size * 0.45}px;background:${color};border-radius:50%;"></div></div>`,
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
       });
 
-      const popupContent = `
-        <div style="font-family:var(--font-outfit),var(--font-inter),sans-serif;min-width:210px;padding:6px 4px;color:#0f172a">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <strong style="color:${color};font-size:13px;font-weight:900;text-transform:uppercase">${alert.type || 'EMERGENCY'}</strong>
-            <span style="font-size:9px;font-weight:900;background:${color}22;color:${color};padding:2px 6px;border-radius:4px;border:1px solid ${color}44">${alert.status}</span>
-          </div>
-          <p style="font-size:11px;color:#475569;margin:6px 0;line-height:1.4">${alert.description || 'No additional details'}</p>
-          <div style="display:flex;gap:6px;margin-top:10px">
-            <button onclick="window._hqResolve('${alert.id}')" style="flex:1;padding:6px 10px;background:#059669;color:white;border:none;border-radius:6px;font-size:10px;font-weight:800;cursor:pointer">RESOLVE</button>
-            ${(alert.status === 'OPEN' || alert.status === 'ACTIVE') ? `<button onclick="window._hqShowDispatch('${alert.id}')" style="flex:1;padding:6px 10px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:10px;font-weight:800;cursor:pointer">DISPATCH</button>` : ''}
-          </div>
-        </div>
-      `;
+      // The whole dossier, built in one tested place. See
+      // src/lib/incident-dossier.ts for what is shown and why every value goes
+      // through escapeHtml on the way in.
+      const popupContent = incidentPopupHtml(alert, {
+        reporter: resolveReporterDetails(alert, usersMap),
+        usersMap,
+      });
 
       const existingMarker = alertMarkersRef.current.get(alert.id);
       if (existingMarker) {
-        existingMarker.setLatLng([alert.lat, alert.lng]);
+        existingMarker.setLatLng([alert.lat!, alert.lng!]);
         existingMarker.setIcon(icon);
         if (existingMarker.getPopup()) {
           existingMarker.getPopup().setContent(popupContent);
         }
       } else {
-        const marker = L.marker([alert.lat, alert.lng], { icon });
-        marker.bindPopup(popupContent, { closeButton: true, autoClose: false, closeOnClick: false });
+        const marker = L.marker([alert.lat!, alert.lng!], { icon });
+        marker.bindPopup(popupContent, {
+          closeButton: true,
+          autoClose: false,
+          closeOnClick: false,
+          // The card is a dossier now, not a label. Leaflet's 300px default
+          // clipped the detail rows.
+          maxWidth: 340,
+          minWidth: 272,
+        });
         clusterGroup.addLayer(marker);
         alertMarkersRef.current.set(alert.id, marker);
       }
@@ -423,7 +562,70 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
         alertMarkersRef.current.delete(id);
       }
     });
-  }, [alerts, mapReady]);
+    // `usersMap` belongs here. Profiles load in their OWN effect, which
+    // resolves AFTER the first alerts arrive, so a popup built without this
+    // dependency would be built once — before any profile existed — and every
+    // reporter would read "profile not loaded" for the life of the session
+    // even though the name was sitting in state.
+    //
+    // `theme` does NOT belong here any more: the card takes its surface
+    // colours from CSS variables, so a theme toggle restyles the popup that is
+    // already open without rebuilding anything.
+  }, [alerts, mapReady, usersMap]);
+
+  // The stored route of the incident under inspection.
+  //
+  // Drawn in its own pane-level layer rather than among the agent trails: an
+  // agent trail is where somebody IS GOING, redrawn as they move, and this is
+  // where somebody WENT. Giving them the same treatment would let an operator
+  // read a finished route as a live one.
+  const incidentTrackRef = useRef<any>(null);
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current) return;
+    const { map, L } = mapInstanceRef.current;
+
+    if (incidentTrackRef.current) {
+      incidentTrackRef.current.remove();
+      incidentTrackRef.current = null;
+    }
+    // Two points is the minimum for a line. One position is not a route, and
+    // drawing it as a dot on top of the incident marker says nothing.
+    if (!incidentTrack || incidentTrack.length < 2) return;
+
+    const latlngs = incidentTrack.map((p) => [p.lat, p.lng]);
+    const line = L.polyline(latlngs, {
+      color: '#4527A0',
+      weight: 4,
+      opacity: 0.9,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(map);
+
+    // Where it started and where it ended. Without these an operator has a
+    // line and no idea which end is which.
+    const start = L.circleMarker(latlngs[0], {
+      radius: 6,
+      color: '#ffffff',
+      weight: 2,
+      fillColor: '#4527A0',
+      fillOpacity: 1,
+    }).bindTooltip('Route start', { direction: 'top' });
+    const end = L.circleMarker(latlngs[latlngs.length - 1], {
+      radius: 7,
+      color: '#ffffff',
+      weight: 2,
+      fillColor: '#E31E24',
+      fillOpacity: 1,
+    }).bindTooltip('Last known position', { direction: 'top' });
+
+    const group = L.layerGroup([line, start, end]).addTo(map);
+    incidentTrackRef.current = group;
+
+    return () => {
+      group.remove();
+      if (incidentTrackRef.current === group) incidentTrackRef.current = null;
+    };
+  }, [incidentTrack, mapReady]);
 
   useEffect(() => {
     if (!mapInstanceRef.current) return;
@@ -484,7 +686,7 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
           existingPolyline.setLatLngs(latlngs);
         } else {
           const polyline = L.polyline(latlngs, {
-            color: isDuress ? '#EF4444' : '#3B82F6',
+            color: isDuress ? '#E31E24' : '#0277BD',
             weight: 3.5,
             opacity: 0.8,
             dashArray: '5, 8',
@@ -511,26 +713,52 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
     });
   }, [agents]);
 
+  // The popup is an HTML string, so its buttons can only reach code through
+  // globals. One effect installs all four and removes all four: the previous
+  // arrangement had two effects fighting over two of these names, and the
+  // cleanup belonged to the one that lost.
   useEffect(() => {
     (window as any)._hqResolve = async (id: string) => {
       try {
         await onResolve(clusterOf(id));
       } catch (e: any) {
-        window.alert("Resolution failed: " + e.message);
+        window.alert('Resolution failed: ' + e.message);
       }
     };
     (window as any)._hqEscalate = async (id: string, currentTier: string) => {
       try {
         await onEscalate(clusterOf(id), currentTier);
       } catch (e: any) {
-        window.alert("Escalation failed: " + e.message);
+        window.alert('Escalation failed: ' + e.message);
       }
     };
     (window as any)._hqShowDispatch = (id: string) => {
-       const event = new CustomEvent('hq-show-dispatch', { detail: { alertId: id } });
-       window.dispatchEvent(event);
+      const event = new CustomEvent('hq-show-dispatch', { detail: { alertId: id } });
+      window.dispatchEvent(event);
     };
-  }, [onResolve, onEscalate]);
+    // The popup holds the fields a dispatcher acts on; the dossier holds the
+    // rest — the escalation log, the media, the chat, the feedback. The button
+    // exists so nobody has to leave the map, find the same incident in the list
+    // and open it there, which is what the map's thin popup used to force.
+    //
+    // NOT expanded to the cluster: a dossier is about one report, and the
+    // popup's own id is the cluster master. The write paths expand; reading
+    // does not.
+    (window as any)._hqDossier = (id: string) => {
+      if (typeof onOpenDossier === 'function') {
+        onOpenDossier(id);
+        return;
+      }
+      window.dispatchEvent(new CustomEvent('hq-open-dossier', { detail: { alertId: id } }));
+    };
+
+    return () => {
+      delete (window as any)._hqResolve;
+      delete (window as any)._hqEscalate;
+      delete (window as any)._hqShowDispatch;
+      delete (window as any)._hqDossier;
+    };
+  }, [onResolve, onEscalate, onOpenDossier, clusterOf]);
 
   return (
     <div style={{ position: 'relative', height: '100%', width: '100%' }}>
@@ -545,6 +773,21 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
           to { transform: rotate(360deg); }
         }
         .leaflet-container { background: var(--bg-primary); }
+
+        /* The incident card's SURFACE is styled once, in globals.css, from the
+           shared tokens: the rule for .leaflet-popup-content-wrapper there
+           already takes --bg-secondary, --text-primary and --border, which are
+           the app's palette. Restyling it here with its own hexes is how the
+           console ended up with two greys for the same object. Only the
+           spacing the dossier layout needs belongs to this component.
+           (No backticks in this comment — it lives inside a template literal,
+           and one would end the stylesheet here.) */
+        .hq-map .leaflet-popup-content { margin: 12px 14px; line-height: 1.35; }
+        .hq-map .leaflet-popup-tip {
+          background: var(--bg-secondary);
+          border: 1px solid var(--border);
+        }
+        .hq-map .leaflet-popup-close-button { color: var(--text-dim) !important; }
         .tactical-tooltip {
           background: transparent !important;
           border: none !important;
@@ -556,7 +799,11 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
           pointer-events: none !important;
         }
       `}</style>
-      <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
+      <div
+        ref={mapRef}
+        className="hq-map"
+        style={{ height: '100%', width: '100%' }}
+      />
 
       {/* Strategic Forecasting Dashboard Overlay.
           Anchored bottom-LEFT, not top-right: the situational feed already
@@ -580,14 +827,14 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
         WebkitBackdropFilter: 'blur(8px)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '1.5px', color: theme === 'dark' ? '#f8fafc' : '#0f172a' }}>
+          <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '1.5px', color: theme === 'dark' ? '#F5F5F5' : '#1A1A1A' }}>
             FORECASTING HUD
           </span>
           <button
             onClick={() => setShowRiskGrid(!showRiskGrid)}
             style={{
               background: showRiskGrid ? 'var(--duress, #ff4d4d)' : (theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'),
-              color: showRiskGrid ? 'white' : (theme === 'dark' ? '#cbd5e1' : '#475569'),
+              color: showRiskGrid ? 'white' : (theme === 'dark' ? '#E0E0E0' : '#616161'),
               border: 'none',
               borderRadius: '8px',
               padding: '4px 8px',
@@ -603,20 +850,20 @@ export default function LiveMap({ alerts, agents = [], onResolve, onEscalate, th
 
         {showRiskGrid && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ fontSize: '9px', color: theme === 'dark' ? '#94a3b8' : '#64748b', marginBottom: '4px' }}>
+            <div style={{ fontSize: '9px', color: theme === 'dark' ? '#757575' : '#616161', marginBottom: '4px' }}>
               SPATIAL-TEMPORAL RISK DENSITY:
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '12px', height: '12px', background: '#F44336', borderRadius: '3px', opacity: 0.8 }} />
-              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#e2e8f0' : '#334155', fontWeight: 600 }}>Critical Hotspot (4+ alerts)</span>
+              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>Critical Hotspot (4+ alerts)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '12px', height: '12px', background: '#FF9800', borderRadius: '3px', opacity: 0.8 }} />
-              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#e2e8f0' : '#334155', fontWeight: 600 }}>Elevated Risk (2-3 alerts)</span>
+              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>Elevated Risk (2-3 alerts)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '12px', height: '12px', background: '#FFC107', borderRadius: '3px', opacity: 0.8 }} />
-              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#e2e8f0' : '#334155', fontWeight: 600 }}>Moderate Risk (1 alert)</span>
+              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>Moderate Risk (1 alert)</span>
             </div>
           </div>
         )}

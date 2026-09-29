@@ -207,15 +207,20 @@ async function chooseTactical(page, triggerText, optionText) {
   // -----------------------------------------------------------------------
   // 3. Every role, every screen it can reach.
   // -----------------------------------------------------------------------
+  // Every screen the console has. Which of them a given role is OFFERED is
+  // the role's business — an agency liaison gets two — so this list is a
+  // superset and `openTab` simply returns false for one that is not there.
   const ROLE_TABS = [
     ['Intelligence Map', 'map'],
     ['Incident Feed', 'feed'],
+    ['Incidents For Us', 'feed'],
     ['Mission History', 'history'],
     ['Communications & Broadcast', 'broadcast'],
     ['Agent Directory', 'directory'],
     ['Forensic Audit', 'audit'],
     ['System Logic', 'config'],
     ['Uninstall Requests', 'uninstall'],
+    ['Handset SMS Channel', 'sim'],
   ];
 
   const roleReport = {};
@@ -255,6 +260,9 @@ async function chooseTactical(page, triggerText, optionText) {
     currentScreen = `${role}:agency`;
     const agencyOpened =
       (await openTab(page, 'Inter-Agency Command')) ||
+      // What a liaison's own nav calls it now: their desk, not the state's
+      // inter-agency board.
+      (await openTab(page, 'Our Deployments')) ||
       (await openTab(page, 'Agency Portal')) ||
       (await openTab(page, 'ARMY Portal')) ||
       (await openTab(page, 'POLICE Portal'));
@@ -303,6 +311,114 @@ async function chooseTactical(page, triggerText, optionText) {
     '',
   );
   await shot(page, '30-hq-map-unlocated-callout');
+
+  // ---------------------------------------------------------------------------
+  // The incident card on the marker itself.
+  //
+  // This is what an operator does first: click the pin. The popup used to carry
+  // the type, the status and the description, and nothing else — no reporter, no
+  // contact, no age, no acknowledgement, no channel — because the component
+  // declared Firebase field names for the reporter and the time and was never
+  // given the profiles. Clicking a marker in a real browser is the only way to
+  // prove the card is wired, since the popup is an HTML string built outside
+  // React and inserted by Leaflet.
+  // ---------------------------------------------------------------------------
+  currentScreen = 'hq:map-marker-popup';
+  const popupText = await (async () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const opened = await page.evaluate(() => {
+        const pins = [...document.querySelectorAll('.leaflet-marker-icon')];
+        // Cluster icons carry a count; incident pins do not. Click the last one,
+        // which is the least likely to be under the filters toolbar.
+        const pin = pins[pins.length - 1];
+        if (!pin) return false;
+        pin.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        return true;
+      });
+      if (opened) {
+        await sleep(900);
+        const text = await page.evaluate(() => {
+          const el = document.querySelector('.leaflet-popup-content');
+          return el ? el.innerText : '';
+        });
+        if (text) return text;
+      }
+      // Markers are clustered; zoom in so individual pins are exposed.
+      await page.evaluate(() => {
+        const zoom = [...document.querySelectorAll('.leaflet-control-zoom-in')][0];
+        if (zoom) zoom.click();
+      });
+      await sleep(1200);
+    }
+    return '';
+  })();
+
+  check(
+    'clicking an incident marker opens a card',
+    popupText.length > 0,
+    popupText ? `${popupText.split('\n').length} lines` : '(no popup opened)',
+  );
+
+  if (popupText) {
+    check(
+      'the card names the reporter',
+      /amina bello/i.test(popupText),
+      popupText.split('\n').find((l) => /amina/i.test(l))?.trim() || '(reporter absent)',
+    );
+    check(
+      'the card gives HQ a number to ring the reporter on',
+      /\+234\d{7,}/.test(popupText),
+      popupText.split('\n').find((l) => /\+234/.test(l))?.trim() || '(no contact shown)',
+    );
+    check(
+      'the card states the status in words',
+      /awaiting dispatch|unit dispatched|acknowledged|en route|on site|resolved|escalated/i.test(popupText),
+      popupText.split('\n').find((l) => /awaiting|dispatch|escalated/i.test(l))?.trim() || '',
+    );
+    check(
+      'the card says how long the incident has been waiting',
+      /(just now|\d+m ago|\d+h \d+m ago|\d+d \d+h ago)/i.test(popupText),
+      popupText.match(/(just now|\d+[mhd][^\n]{0,12}ago)/i)?.[0] || '(no age shown)',
+    );
+    check(
+      'the card says whether anybody has acknowledged it',
+      /acknowledged/i.test(popupText),
+      '',
+    );
+    check(
+      'the card states which tier owns the incident',
+      /command tier/i.test(popupText),
+      popupText.split('\n').find((l) => /command tier/i.test(l))?.trim() || '',
+    );
+    check(
+      'the card names the channel the report arrived over',
+      /channel/i.test(popupText),
+      popupText.split('\n').find((l) => /channel/i.test(l))?.trim() || '',
+    );
+    check(
+      'the card carries the coordinates it is plotted at',
+      /\d\.\d{4,}/.test(popupText),
+      popupText.split('\n').find((l) => /coordinates/i.test(l))?.trim() || '',
+    );
+
+    // The regression that made the map read-only for new reports: DISPATCH was
+    // gated on statuses this database never writes.
+    const buttons = await page.evaluate(() =>
+      [...document.querySelectorAll('.leaflet-popup-content button, .leaflet-popup-content a')]
+        .map((b) => b.textContent.trim()),
+    );
+    check(
+      'a live incident can be dispatched from its marker',
+      buttons.includes('DISPATCH'),
+      buttons.join(', ') || '(no actions)',
+    );
+    check(
+      'the marker offers the full dossier',
+      buttons.includes('DOSSIER'),
+      buttons.join(', ') || '(no actions)',
+    );
+  }
+  await shot(page, '31-hq-map-incident-card');
 
   currentScreen = 'hq:feed-assertions';
   await openTab(page, 'Incident Feed');
@@ -461,6 +577,36 @@ async function chooseTactical(page, triggerText, optionText) {
     'no query named a column the migrations do not define',
     ctl.unknownColumns.length === 0,
     ctl.unknownColumns.join('; ') || 'none',
+  );
+
+  // A basemap refused by our OWN policy is invisible from the map code and
+  // from the header: the map simply renders grey with the markers floating on
+  // it, and the only evidence is a console message nobody reads during an
+  // incident. `img-src` listed `*.tile.openstreetmap.org` while the map
+  // requested `tile.openstreetmap.org` — a wildcard matches a subdomain of a
+  // host, never the host — so every tile in the command console was blocked.
+  const blockedImages = browserProblems.filter((p) =>
+    /violates the following Content Security Policy directive: "img-src/i.test(p.text),
+  );
+  check(
+    'the basemap is not blocked by our own content security policy',
+    blockedImages.length === 0,
+    blockedImages.length
+      ? `${blockedImages.length} image(s) refused, first: ${blockedImages[0].text.slice(0, 120)}`
+      : 'no img-src violations',
+  );
+
+  const otherCspRefusals = browserProblems.filter(
+    (p) =>
+      /violates the following Content Security Policy/i.test(p.text) &&
+      !/"img-src/i.test(p.text),
+  );
+  check(
+    'nothing else the console needs is refused by the policy either',
+    otherCspRefusals.length === 0,
+    otherCspRefusals.length
+      ? `${otherCspRefusals.length}: ${otherCspRefusals[0].text.slice(0, 140)}`
+      : 'clean',
   );
 
   const fatal = browserProblems.filter(

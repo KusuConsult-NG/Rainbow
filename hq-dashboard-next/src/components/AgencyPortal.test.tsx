@@ -99,7 +99,9 @@ describe('AgencyPortal', () => {
     expect(await screen.findByText(/Incident for POLICE/)).toBeInTheDocument();
 
     // The switcher is a row of pill buttons, one per agency.
-    await userEvent.click(screen.getByRole('button', { name: /ARMY/ }));
+    // `role="tab"`, not `button`: setting an explicit ARIA role REPLACES the
+    // implicit one, so these are no longer buttons in the accessibility tree.
+    await userEvent.click(screen.getByRole('tab', { name: /ARMY/ }));
 
     expect(await screen.findByText(/Incident for ARMY/)).toBeInTheDocument();
     expect(screen.queryByText(/Incident for POLICE/)).not.toBeInTheDocument();

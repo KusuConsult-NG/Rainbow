@@ -3,7 +3,7 @@
 --   Regenerate with: python3 scripts/build_apply_all.py
 --
 -- Paste the WHOLE of this file into the Supabase dashboard -> SQL Editor and
--- run it. It applies the 14 outstanding migrations in order and finishes by
+-- run it. It applies the 17 outstanding migrations in order and finishes by
 -- SELECTing a pass/fail table, so one paste in gives you one answer out.
 --
 -- ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS agency TEXT;
 -- Officers an agency liaison has registered for their agency.
 CREATE TABLE IF NOT EXISTS public.agency_personnel (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  agency        TEXT NOT NULL,                 -- POLICE, ARMY, DSS, NSCDC, FRSC, AMOTEKUN
+  agency        TEXT NOT NULL,                 -- POLICE, ARMY, DSS, NSCDC, FRSC, OPSH
   name          TEXT NOT NULL,
   rank          TEXT,
   badge_number  TEXT,
@@ -2218,13 +2218,560 @@ COMMENT ON COLUMN public.alerts.arrived_via IS
   'encrypted SMS fallback. ''MESH'' when it was relayed through nearby phones '
   'to one that had a network. Either way the reporter had no data connection.';
 
+-- ----------------------------------------------------------------------------
+-- 20261002000000_sim_channel_events.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20261002000000_sim_channel_events.sql'; END $apply$;
+
+-- ============================================================================
+-- OPERATION RAINBOW — WHEN A HANDSET'S SMS CHANNEL DIES
+--
+-- WHAT THIS IS ABOUT
+--
+-- In this system the phone number is the identity. It is what the account was
+-- created with, what `profiles.phone` holds, what HQ rings back, and what the
+-- encrypted SMS fallback rides on. When the SIM leaves a handset:
+--
+--   * the offline alert channel stops working and nothing else notices;
+--   * a sign-in or re-entry code cannot arrive, so the holder will be locked
+--     out the next time they come back to the app;
+--   * a stolen handset usually gets a new SIM within the hour.
+--
+-- So HQ is told. What HQ is told is that A CHANNEL IS DOWN.
+--
+-- WHAT THIS IS DELIBERATELY NOT
+--
+-- It is not a movement log and must never become one. There is no location
+-- column here and none may be added: this app is used in a conflict zone by
+-- people who report things they can be harmed for reporting, and a government
+-- console that quietly accumulated their SIM and location history would be a
+-- reason not to install it — which costs more lives than it saves.
+--
+-- The holder is told on the handset, in one line, each time a row is written
+-- here. Reporting to a state console without telling the person is
+-- surveillance; reporting it and saying so is operations.
+--
+-- WHAT IT CAN AND CANNOT SEE
+--
+-- Android reports SIM present/absent and the NETWORK (MCC+MNC) with no
+-- permission at all. The values that identify a particular CARD — the ICCID
+-- and the IMSI — have required READ_PRIVILEGED_PHONE_STATE since Android 10,
+-- which no ordinary app can hold. So one MTN SIM swapped for another MTN SIM
+-- is invisible. On iOS 16+ nothing is visible at all: the carrier API is
+-- deprecated and returns a placeholder. Both limits are stated in
+-- lib/core/device/sim_fingerprint.dart and asserted in its tests.
+--
+-- Idempotent: safe to re-run.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.sim_channel_events (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+
+  -- REMOVED, INSERTED, REPLACED. Never a free-text description from the
+  -- handset: the words HQ reads are composed by the console from this code, so
+  -- a compromised handset cannot write prose onto an operator's screen.
+  change        TEXT NOT NULL CHECK (change IN ('REMOVED', 'INSERTED', 'REPLACED')),
+
+  -- The NETWORK the handset is on now, for an operator deciding whether the
+  -- registered number still reaches this person. Null when it could not be
+  -- read. Not the card, not the number.
+  operator_name TEXT,
+  operator_code TEXT,
+
+  -- When the handset noticed. Set by the handset, so it survives a report that
+  -- is queued while offline and delivered later.
+  noticed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- Cleared by an operator who has dealt with it.
+  acknowledged_at TIMESTAMPTZ,
+  acknowledged_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS sim_channel_events_open_idx
+  ON public.sim_channel_events (created_at DESC)
+  WHERE acknowledged_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS sim_channel_events_user_idx
+  ON public.sim_channel_events (user_id, created_at DESC);
+
+COMMENT ON TABLE public.sim_channel_events IS
+  'A handset reporting that its SMS channel changed: SIM removed, inserted or '
+  'replaced. About the channel, never about a location. The holder is told on '
+  'the handset each time a row is written.';
+
+-- ── Row level security ──────────────────────────────────────────────────────
+
+ALTER TABLE public.sim_channel_events ENABLE ROW LEVEL SECURITY;
+
+-- A handset writes its OWN events and nobody else's. `user_id = auth.uid()` is
+-- the whole check: without it, any signed-in account could manufacture a "SIM
+-- REMOVED" for any other person, which is a cheap way to get somebody's
+-- account looked at by the state.
+DROP POLICY IF EXISTS "sim_events_insert_self" ON public.sim_channel_events;
+CREATE POLICY "sim_events_insert_self" ON public.sim_channel_events
+  FOR INSERT TO authenticated
+  WITH CHECK (user_id = auth.uid());
+
+-- The holder can see what was reported about their own handset. Somebody who
+-- cannot see what was said about them cannot challenge it.
+DROP POLICY IF EXISTS "sim_events_select_self_or_command" ON public.sim_channel_events;
+CREATE POLICY "sim_events_select_self_or_command" ON public.sim_channel_events
+  FOR SELECT TO authenticated
+  USING (user_id = auth.uid() OR public.is_command());
+
+-- Only command acknowledges, and only the acknowledgement fields move —
+-- nothing here may be rewritten after the fact.
+DROP POLICY IF EXISTS "sim_events_ack_command" ON public.sim_channel_events;
+CREATE POLICY "sim_events_ack_command" ON public.sim_channel_events
+  FOR UPDATE TO authenticated
+  USING (public.is_command())
+  WITH CHECK (public.is_command());
+
+-- NOT `is_staff()`. A polling-unit officer in Wase, and every agency liaison,
+-- are staff; neither has a reason to see which citizens changed SIM. This is
+-- the same mistake the telemetry migration was written to undo.
+
+-- ── Retention ───────────────────────────────────────────────────────────────
+--
+-- These rows answer "is this handset reachable by SMS today". A year-old one
+-- answers nothing and is only a history of somebody's phone. Ninety days, and
+-- acknowledged ones go sooner.
+
+CREATE OR REPLACE FUNCTION public.purge_stale_sim_events()
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  DELETE FROM public.sim_channel_events
+   WHERE created_at < NOW() - INTERVAL '90 days'
+      OR (acknowledged_at IS NOT NULL
+          AND acknowledged_at < NOW() - INTERVAL '30 days');
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.purge_stale_sim_events() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.purge_stale_sim_events() FROM authenticated;
+
+DO $cron$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    PERFORM cron.unschedule('purge-stale-sim-events')
+      WHERE EXISTS (
+        SELECT 1 FROM cron.job WHERE jobname = 'purge-stale-sim-events'
+      );
+    PERFORM cron.schedule(
+      'purge-stale-sim-events',
+      '30 3 * * *',
+      $job$SELECT public.purge_stale_sim_events();$job$
+    );
+  ELSE
+    RAISE NOTICE
+      'pg_cron is not installed; run public.purge_stale_sim_events() on a schedule yourself';
+  END IF;
+END $cron$;
+
+-- ── Realtime ────────────────────────────────────────────────────────────────
+--
+-- The console badges this live. A subscription to a table outside the
+-- publication does not error; it simply never fires, which is how the agency
+-- portal's badge came to refresh only on reload.
+
+DO $realtime$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    RAISE NOTICE 'no supabase_realtime publication in this database; nothing to do';
+    RETURN;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_publication_tables
+     WHERE pubname = 'supabase_realtime'
+       AND schemaname = 'public'
+       AND tablename = 'sim_channel_events'
+  ) THEN
+    RETURN;
+  END IF;
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.sim_channel_events;
+END $realtime$;
+
+-- ----------------------------------------------------------------------------
+-- 20261003000000_liaisons_are_not_staff.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20261003000000_liaisons_are_not_staff.sql'; END $apply$;
+
+-- ============================================================================
+-- OPERATION RAINBOW — AN AGENCY LIAISON IS NOT OPERATION RAINBOW STAFF
+--
+-- THE HOLE
+--
+-- Six agencies send liaison officers to this console: the Police, the Army,
+-- the DSS, the NSCDC, the FRSC and Operation Safe Haven. They are officers of
+-- OTHER organisations, given an account so that an incident handed to their
+-- agency reaches them.
+--
+-- `is_staff()` is:
+--
+--     (SELECT role FROM profiles WHERE id = auth.uid()) NOT IN ('CITIZEN', 'USER')
+--
+-- A `POLICE_LIAISON` is therefore staff. And the alerts policies are:
+--
+--     alerts_select_own_or_staff   USING (... OR is_staff())
+--     alerts_update_own_or_staff   USING (... OR is_staff())
+--
+-- So every liaison could READ every incident in Plateau State, and WRITE to
+-- every incident in Plateau State: resolve one in an LGA their agency was
+-- never called to, reassign it, change its severity, clear a duress alarm.
+-- Nothing scoped any of it to the agency, and nothing recorded that an outside
+-- officer had done it.
+--
+-- The same sentence applies to `telemetry`: a liaison could read the live
+-- position of every Operation Rainbow officer on duty in the state, and of
+-- every citizen with an open emergency — including emergencies their agency
+-- has no part in.
+--
+-- This was not a decision anyone made. `is_staff()` was written to mean "not a
+-- member of the public", and the agency roles arrived later and fell inside
+-- it.
+--
+-- WHAT THIS DOES
+--
+-- Scopes a liaison to their own agency's work:
+--
+--   * incidents escalated to their agency, or assigned to them personally;
+--   * the positions of people tied to one of those incidents;
+--   * the chat on one of those incidents.
+--
+-- And nothing else. Their own agency tables are unchanged — those were already
+-- scoped by `liaison_agency()`, which is where this migration takes its lead.
+--
+-- WHAT IT DELIBERATELY DOES NOT DO
+--
+-- It does not narrow anything for Operation Rainbow's own staff. A polling-unit
+-- officer still sees what they saw; this is about accounts belonging to another
+-- organisation.
+--
+-- It does not remove a liaison's ability to ACT on an incident handed to them.
+-- Handing an incident to an agency and then refusing them the ability to
+-- update it would make the handover ceremonial.
+--
+-- Idempotent: safe to re-run.
+-- ============================================================================
+
+-- ── Is this account an outside agency's? ────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.is_liaison()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE(
+    (SELECT role FROM public.profiles WHERE id = auth.uid()) LIKE '%\_LIAISON',
+    false
+  );
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.is_liaison() FROM anon;
+
+COMMENT ON FUNCTION public.is_liaison() IS
+  'True for an officer of an outside agency (POLICE_LIAISON, ARMY_LIAISON, …). '
+  'They are staff by is_staff(), which is why every alerts policy has to ask '
+  'this as well.';
+
+-- ── Which incidents belong to an outside agency ─────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.alert_is_ours(p_alert public.alerts)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT
+    -- Operation Rainbow's own staff: unchanged.
+    (public.is_staff() AND NOT public.is_liaison())
+    -- The reporter and the assignee, whoever they are.
+    OR p_alert.reported_by = auth.uid()
+    OR p_alert.assigned_to = auth.uid()
+    -- An outside agency: only what was handed to them.
+    OR (public.is_liaison()
+        AND upper(COALESCE(p_alert.escalated_to_agency, '')) = public.liaison_agency());
+$$;
+
+COMMENT ON FUNCTION public.alert_is_ours(public.alerts) IS
+  'Whether the calling account has a part in this incident. The whole point is '
+  'the last clause: an agency liaison sees what was escalated to their agency, '
+  'not the state.';
+
+-- ── Alerts ──────────────────────────────────────────────────────────────────
+--
+-- REPLACED, not added. PostgreSQL ORs permissive policies together, so adding
+-- a narrow one beside `... OR is_staff()` would change nothing at all.
+
+DROP POLICY IF EXISTS "alerts_select_own_or_staff" ON public.alerts;
+DROP POLICY IF EXISTS "alerts_select_own_or_ours" ON public.alerts;
+CREATE POLICY "alerts_select_own_or_ours" ON public.alerts
+  FOR SELECT TO authenticated
+  USING (public.alert_is_ours(alerts));
+
+DROP POLICY IF EXISTS "alerts_update_own_or_staff" ON public.alerts;
+DROP POLICY IF EXISTS "alerts_update_own_or_ours" ON public.alerts;
+CREATE POLICY "alerts_update_own_or_ours" ON public.alerts
+  FOR UPDATE TO authenticated
+  USING (public.alert_is_ours(alerts));
+
+-- INSERT is left alone. A liaison filing an incident is filing it as
+-- themselves, which `reported_by = auth.uid()` already covers.
+
+-- ── Telemetry ───────────────────────────────────────────────────────────────
+--
+-- The live position of an Operation Rainbow officer is operational information
+-- among colleagues. It is not information an outside agency is owed, except
+-- for people working an incident that agency has been handed.
+
+DROP POLICY IF EXISTS "telemetry_select_self_or_responding_staff" ON public.telemetry;
+DROP POLICY IF EXISTS "telemetry_select_self_or_staff" ON public.telemetry;
+DROP POLICY IF EXISTS "telemetry_select_scoped" ON public.telemetry;
+CREATE POLICY "telemetry_select_scoped" ON public.telemetry
+  FOR SELECT TO authenticated
+  USING (
+    -- Your own position, always.
+    user_id = auth.uid()
+
+    -- Operation Rainbow's own staff, exactly as before this migration: another
+    -- STAFF member's position freely, and a CITIZEN's only while they have an
+    -- emergency open.
+    OR (public.is_staff() AND NOT public.is_liaison() AND (
+          EXISTS (SELECT 1 FROM public.profiles p
+                   WHERE p.id = telemetry.user_id
+                     AND p.role NOT IN ('CITIZEN', 'USER'))
+          OR EXISTS (SELECT 1 FROM public.alerts a
+                      WHERE a.reported_by = telemetry.user_id
+                        AND a.status NOT IN ('RESOLVED', 'CANCELLED'))
+       ))
+
+    -- An outside agency: only people tied to an incident handed to them.
+    OR (public.is_liaison() AND EXISTS (
+          SELECT 1 FROM public.alerts a
+           WHERE upper(COALESCE(a.escalated_to_agency, '')) = public.liaison_agency()
+             AND a.status NOT IN ('RESOLVED', 'CANCELLED')
+             AND (a.reported_by = telemetry.user_id
+                  OR a.assigned_to = telemetry.user_id)
+       ))
+  );
+
+-- ── Chat ────────────────────────────────────────────────────────────────────
+
+DROP POLICY IF EXISTS "chat_select_participant_or_staff" ON public.chat_messages;
+DROP POLICY IF EXISTS "chat_select_participant_or_ours" ON public.chat_messages;
+CREATE POLICY "chat_select_participant_or_ours" ON public.chat_messages
+  FOR SELECT TO authenticated
+  USING (
+    sender_id = auth.uid()
+    OR (public.is_staff() AND NOT public.is_liaison())
+    OR EXISTS (
+         SELECT 1 FROM public.alerts a
+          WHERE a.id = chat_messages.alert_id
+            AND public.alert_is_ours(a)
+       )
+  );
+
+-- ── Say it out loud ─────────────────────────────────────────────────────────
+
+COMMENT ON POLICY "alerts_select_own_or_ours" ON public.alerts IS
+  'Replaces alerts_select_own_or_staff, under which every agency liaison could '
+  'read every incident in the state because is_staff() means "not a citizen".';
+
+COMMENT ON POLICY "alerts_update_own_or_ours" ON public.alerts IS
+  'Replaces alerts_update_own_or_staff, under which an officer of another '
+  'organisation could resolve or reassign any incident in Plateau.';
+
+-- ----------------------------------------------------------------------------
+-- 20261004000000_incident_tracks.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20261004000000_incident_tracks.sql'; END $apply$;
+
+-- ============================================================================
+-- OPERATION RAINBOW — WHERE SOMEBODY WENT DURING ONE EMERGENCY
+--
+-- THE GAP
+--
+-- An SOS starts a track. `background_tracking_service.dart` reports a position
+-- every few seconds, the console draws a trail, and an operator watching at the
+-- time can follow the person.
+--
+-- Except nothing was kept. `telemetry` has `user_id` as its PRIMARY KEY and is
+-- UPSERTED, so the database holds exactly one row per person: the CURRENT
+-- position, overwritten each time. The trail existed only in the browser tab's
+-- memory — `agentPathsRef`, capped at thirty points — so:
+--
+--   * refreshing the console lost the trail;
+--   * a second operator opening the console mid-incident saw a dot, not a path;
+--   * anybody reviewing the incident afterwards saw no movement at all, and
+--     the incident replay panel replayed the alert and the chat with no
+--     positions in it.
+--
+-- For a kidnapping — the case this system exists for — "which way did they go"
+-- is the question, and the answer was being thrown away several times a minute.
+--
+-- HOW THIS DOES NOT UNDO 20260929000000
+--
+-- That migration's thesis is that location is BORROWED, NOT KEPT, and it is
+-- right. What it removed was a standing feed: one row per person, no link to
+-- any incident, readable by every staff account in the state, kept forever,
+-- still being written after the emergency ended.
+--
+-- This table is the opposite of each of those:
+--
+--   * every row belongs to ONE incident (`alert_id` is NOT NULL). No incident,
+--     no track — an officer on ordinary patrol writes nothing here.
+--   * it stops when the incident does, because the app stops reporting.
+--   * it is readable only by people with a part in THAT incident, through the
+--     same `alert_is_ours()` the alerts policies use — so an agency liaison
+--     sees the route on an incident handed to their agency and on no other.
+--   * it expires. A track is deleted seven days after its incident closes.
+--
+-- SEVEN DAYS, AND WHY THAT NUMBER
+--
+-- Long enough for the after-action review that is the point of keeping it at
+-- all — reviews happen days later, not hours. Short enough that this never
+-- becomes a location history: at any moment the table holds the open
+-- incidents and one week of closed ones, and nothing else. If somebody wants
+-- longer, that is a decision to argue for explicitly, which is why it is one
+-- named interval and not a scatter of conditions.
+--
+-- Idempotent: safe to re-run.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.incident_tracks (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  alert_id    UUID NOT NULL REFERENCES public.alerts(id) ON DELETE CASCADE,
+  user_id     UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  latitude    DOUBLE PRECISION NOT NULL,
+  longitude   DOUBLE PRECISION NOT NULL,
+  accuracy    DOUBLE PRECISION,
+  speed       DOUBLE PRECISION,
+  -- The handset's clock, so a point queued offline and delivered later sits in
+  -- the right place on the route rather than at the moment it arrived.
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Drawing one incident's route is the only read this table has.
+CREATE INDEX IF NOT EXISTS incident_tracks_route_idx
+  ON public.incident_tracks (alert_id, recorded_at);
+
+COMMENT ON TABLE public.incident_tracks IS
+  'The route a person took during ONE incident. Written only while that '
+  'incident is open, readable only by people with a part in it, deleted seven '
+  'days after it closes. Not a standing location feed — see '
+  '20260929000000_telemetry_is_not_a_standing_feed.sql.';
+
+-- ── Row level security ──────────────────────────────────────────────────────
+
+ALTER TABLE public.incident_tracks ENABLE ROW LEVEL SECURITY;
+
+-- A handset writes its OWN points, for an OPEN incident it has a part in.
+--
+-- All three clauses matter. Without `user_id = auth.uid()` anyone could write a
+-- route for anybody. Without the incident check they could attach it to any
+-- incident in the state. Without the open check a closed incident could be
+-- re-written days later, which is the difference between a record and a story.
+DROP POLICY IF EXISTS "incident_tracks_insert_own_open" ON public.incident_tracks;
+CREATE POLICY "incident_tracks_insert_own_open" ON public.incident_tracks
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    user_id = auth.uid()
+    AND EXISTS (
+      SELECT 1 FROM public.alerts a
+       WHERE a.id = incident_tracks.alert_id
+         AND a.status NOT IN ('RESOLVED', 'CANCELLED')
+         AND (a.reported_by = auth.uid() OR a.assigned_to = auth.uid())
+    )
+  );
+
+-- Read follows the incident, through the same function the alerts policies
+-- use. So: command sees it, the person whose route it is sees it, the assignee
+-- sees it, and an agency liaison sees it only on an incident escalated to
+-- their agency.
+DROP POLICY IF EXISTS "incident_tracks_select_with_incident" ON public.incident_tracks;
+CREATE POLICY "incident_tracks_select_with_incident" ON public.incident_tracks
+  FOR SELECT TO authenticated
+  USING (
+    user_id = auth.uid()
+    OR EXISTS (
+      SELECT 1 FROM public.alerts a
+       WHERE a.id = incident_tracks.alert_id
+         AND public.alert_is_ours(a)
+    )
+  );
+
+-- No UPDATE and no DELETE for anybody signed in. A route is a record of what
+-- happened; an editable one is worth less than none, because it can be made to
+-- say something else. Deletion is the retention job's alone.
+
+-- ── Retention ───────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.purge_stale_incident_tracks()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  removed INTEGER;
+BEGIN
+  -- Seven days after the incident closed. An OPEN incident is never purged on
+  -- age, however old — an unresolved emergency is exactly the case where the
+  -- route still matters.
+  DELETE FROM public.incident_tracks t
+   USING public.alerts a
+   WHERE a.id = t.alert_id
+     AND a.status IN ('RESOLVED', 'CANCELLED')
+     AND COALESCE(a.updated_at, a.created_at) < NOW() - INTERVAL '7 days';
+  GET DIAGNOSTICS removed = ROW_COUNT;
+
+  -- And a point whose incident has vanished entirely. The foreign key cascades
+  -- on delete, so this only catches anything that slipped in before it.
+  DELETE FROM public.incident_tracks t
+   WHERE NOT EXISTS (SELECT 1 FROM public.alerts a WHERE a.id = t.alert_id);
+
+  RETURN removed;
+END;
+$$;
+
+COMMENT ON FUNCTION public.purge_stale_incident_tracks() IS
+  'Deletes the routes of incidents that closed more than seven days ago.';
+
+REVOKE ALL ON FUNCTION public.purge_stale_incident_tracks() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.purge_stale_incident_tracks() FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.purge_stale_incident_tracks() TO service_role;
+
+DO $cron$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    PERFORM cron.unschedule('purge-stale-incident-tracks')
+      WHERE EXISTS (
+        SELECT 1 FROM cron.job WHERE jobname = 'purge-stale-incident-tracks'
+      );
+    PERFORM cron.schedule(
+      'purge-stale-incident-tracks',
+      '45 3 * * *',
+      $job$SELECT public.purge_stale_incident_tracks();$job$
+    );
+  ELSE
+    RAISE NOTICE
+      'pg_cron is not installed; run public.purge_stale_incident_tracks() on a schedule yourself';
+  END IF;
+END $cron$;
+
 
 
 -- ============================================================================
 -- DID IT WORK?
 --
 -- One row per thing that had to be true. `result` is PASS or FAIL; nothing here
--- writes. If every row says PASS, the 14 migrations are applied.
+-- writes. If every row says PASS, the 17 migrations are applied.
 --
 -- These check BEHAVIOUR-ADJACENT FACTS, not just that statements ran: that anon
 -- holds no policy at all, that the escalation columns exist (their absence made
@@ -2317,10 +2864,18 @@ WITH checks(ord, name, ok) AS (
     -- readable by staff once their emergency closes, nothing may be kept
     -- forever, and a message must not be injectable into somebody else's
     -- channel.
+    -- Asserted on the POLICY'S CONDITION, not on its name. This check used to
+    -- name `telemetry_select_self_or_responding_staff`, and a later migration
+    -- that renamed the policy while keeping the behaviour broke the check and
+    -- proved nothing about the database. What has to stay true is that a
+    -- position is tied to an OPEN incident — so the clause has to mention the
+    -- alerts table and exclude a resolved one.
     (19, 'a citizen''s position is not a standing staff feed',
-        EXISTS (SELECT 1 FROM pg_policies
-                 WHERE schemaname = 'public' AND tablename = 'telemetry'
-                   AND policyname = 'telemetry_select_self_or_responding_staff')),
+        (SELECT count(*) = 1 FROM pg_policies
+          WHERE schemaname = 'public' AND tablename = 'telemetry'
+            AND cmd = 'SELECT'
+            AND qual LIKE '%alerts%'
+            AND qual LIKE '%RESOLVED%')),
     (20, 'stale positions are purged, and only by the service role',
         (SELECT NOT has_function_privilege('authenticated',
                   'public.purge_stale_telemetry()', 'EXECUTE')
@@ -2359,7 +2914,68 @@ WITH checks(ord, name, ok) AS (
                              WHERE schemaname = 'public'
                                AND tablename = 'mesh_envelopes_seen')
            FROM pg_class
-          WHERE oid = 'public.mesh_envelopes_seen'::regclass))
+          WHERE oid = 'public.mesh_envelopes_seen'::regclass)),
+    -- A handset whose SIM has gone can no longer be reached by SMS, and the
+    -- alert queue keeps queueing with nowhere to go. HQ is told.
+    (26, 'a handset can report that its SMS channel changed',
+        (SELECT to_regclass('public.sim_channel_events') IS NOT NULL)),
+    -- And that report must not be readable by every staff account. A
+    -- polling-unit officer, and every agency liaison, are staff; neither has a
+    -- reason to see which citizens changed SIM. This is the same mistake the
+    -- telemetry work was written to undo.
+    (27, 'SIM reports are limited to command, not all staff',
+        (SELECT relrowsecurity
+            AND EXISTS (SELECT 1 FROM pg_policies
+                         WHERE schemaname = 'public'
+                           AND tablename = 'sim_channel_events'
+                           AND policyname = 'sim_events_select_self_or_command')
+           FROM pg_class
+          WHERE oid = 'public.sim_channel_events'::regclass)),
+    -- There is no column for a position on that table, and there must not be:
+    -- with one it stops being a channel board and becomes a movement log on
+    -- private citizens.
+    (28, 'SIM reports carry no position',
+        (SELECT count(*) = 0 FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'sim_channel_events'
+            AND column_name IN ('latitude','longitude','lat','lng','location'))),
+    -- An agency liaison is an officer of ANOTHER organisation. is_staff() is
+    -- "role is not CITIZEN", so they were staff — and the alerts policies were
+    -- "... OR is_staff()". Every liaison could read AND WRITE every incident
+    -- in Plateau.
+    (29, 'a liaison is recognised as an outside agency',
+        (SELECT EXISTS (SELECT 1 FROM pg_proc p
+                          JOIN pg_namespace n ON n.oid = p.pronamespace
+                         WHERE n.nspname = 'public' AND p.proname = 'is_liaison'))),
+    (30, 'the statewide alert policies no longer rest on is_staff alone',
+        (SELECT NOT EXISTS (SELECT 1 FROM pg_policies
+                             WHERE schemaname = 'public'
+                               AND tablename = 'alerts'
+                               AND policyname IN ('alerts_select_own_or_staff',
+                                                  'alerts_update_own_or_staff'))
+            AND EXISTS (SELECT 1 FROM pg_policies
+                         WHERE schemaname = 'public'
+                           AND tablename = 'alerts'
+                           AND policyname = 'alerts_select_own_or_ours'))),
+    -- An SOS started a track and the database kept only the latest point, so
+    -- the trail lived in one browser tab's memory: a refresh lost it, and
+    -- anybody reviewing the incident afterwards saw no movement at all.
+    (31, 'the route taken during an incident is kept',
+        (SELECT to_regclass('public.incident_tracks') IS NOT NULL)),
+    -- And it expires, which is the whole reason keeping it does not undo the
+    -- work that made location borrowed rather than kept.
+    (32, 'routes expire, and only the service role can expire them',
+        (SELECT NOT has_function_privilege('authenticated',
+                  'public.purge_stale_incident_tracks()', 'EXECUTE')
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = 'purge_stale_incident_tracks')),
+    -- A route is a record. One that can be rewritten is worth less than none,
+    -- because it can be made to say something else.
+    (33, 'a route cannot be rewritten or deleted through the API',
+        (SELECT NOT EXISTS (SELECT 1 FROM pg_policies
+                             WHERE schemaname = 'public'
+                               AND tablename = 'incident_tracks'
+                               AND cmd IN ('UPDATE', 'DELETE'))))
 )
 SELECT
   CASE WHEN ok THEN 'PASS' ELSE '*** FAIL ***' END AS result,

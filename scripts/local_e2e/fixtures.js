@@ -22,18 +22,25 @@
 const DOMAIN = 'staging.operationrainbow.test';
 const PASSWORD = 'staging-only-password';
 
-/** One account per role the console and the app actually branch on. */
+/**
+ * One account per role the console and the app actually branch on.
+ *
+ * Each carries its own phone number. A citizen has no email and no password in
+ * production — the number IS the identity, and it is what `profiles.phone`
+ * holds under a UNIQUE constraint — so sharing one number across the fixtures
+ * was both unseedable against a real database and untestable as a sign-in.
+ */
 const PEOPLE = [
-  { key: 'citizen',   id: 'bbbb2222-0000-4000-8000-00000000b001', role: 'CITIZEN',        full_name: 'Amina Bello',        geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: null,         agency: null, tier: null },
-  { key: 'responder', id: 'bbbb2222-0000-4000-8000-00000000b002', role: 'RESPONDER',      full_name: 'Sgt. Danjuma Yusuf', geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'RSP-014',    agency: null, tier: 'POLLING_UNIT' },
+  { key: 'citizen',   id: 'bbbb2222-0000-4000-8000-00000000b001', phone: '+2348030001111', role: 'CITIZEN',        full_name: 'Amina Bello',        geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: null,         agency: null, tier: null },
+  { key: 'responder', id: 'bbbb2222-0000-4000-8000-00000000b002', phone: '+2348030002222', role: 'RESPONDER',      full_name: 'Sgt. Danjuma Yusuf', geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'RSP-014',    agency: null, tier: 'POLLING_UNIT' },
   // The command chain has four rungs and only three were ever seeded, so the
   // polling-unit and ward tiers had never been rendered or exercised.
-  { key: 'unit',      id: 'bbbb2222-0000-4000-8000-00000000b007', role: 'UNIT_COMMAND',    full_name: 'Sgt. Bitrus Gyang',   geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'PU-014',     agency: null, tier: 'POLLING_UNIT' },
-  { key: 'ward',      id: 'bbbb2222-0000-4000-8000-00000000b008', role: 'WARD_COMMAND',    full_name: 'Insp. Ladi Dung',     geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'WRD-007',    agency: null, tier: 'WARD' },
-  { key: 'lga',       id: 'bbbb2222-0000-4000-8000-00000000b003', role: 'LGA_COMMAND',    full_name: 'Insp. Grace Pam',    geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'LGA-002',    agency: null, tier: 'LGA' },
-  { key: 'hq',        id: 'bbbb2222-0000-4000-8000-00000000b004', role: 'HQ_COMMAND',     full_name: 'ACP Musa Ibrahim',   geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'HQ-001',     agency: null, tier: 'HQ' },
-  { key: 'police',    id: 'bbbb2222-0000-4000-8000-00000000b005', role: 'POLICE_LIAISON', full_name: 'DSP Audu Bala',      geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'NP/JOS/001', agency: 'POLICE', tier: null },
-  { key: 'army',      id: 'bbbb2222-0000-4000-8000-00000000b006', role: 'ARMY_LIAISON',   full_name: 'Capt. Ruth Achi',    geo_lga: 'MANGU',     geo_ward: 'PANYAM',   geo_pu: 'PU-11', badge_number: 'NA/PL/007',  agency: 'ARMY',   tier: null },
+  { key: 'unit',      id: 'bbbb2222-0000-4000-8000-00000000b007', phone: '+2348030003333', role: 'UNIT_COMMAND',    full_name: 'Sgt. Bitrus Gyang',   geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'PU-014',     agency: null, tier: 'POLLING_UNIT' },
+  { key: 'ward',      id: 'bbbb2222-0000-4000-8000-00000000b008', phone: '+2348030004444', role: 'WARD_COMMAND',    full_name: 'Insp. Ladi Dung',     geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'WRD-007',    agency: null, tier: 'WARD' },
+  { key: 'lga',       id: 'bbbb2222-0000-4000-8000-00000000b003', phone: '+2348030005555', role: 'LGA_COMMAND',    full_name: 'Insp. Grace Pam',    geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'LGA-002',    agency: null, tier: 'LGA' },
+  { key: 'hq',        id: 'bbbb2222-0000-4000-8000-00000000b004', phone: '+2348030006666', role: 'HQ_COMMAND',     full_name: 'ACP Musa Ibrahim',   geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'HQ-001',     agency: null, tier: 'HQ' },
+  { key: 'police',    id: 'bbbb2222-0000-4000-8000-00000000b005', phone: '+2348030007777', role: 'POLICE_LIAISON', full_name: 'DSP Audu Bala',      geo_lga: 'JOS NORTH', geo_ward: 'NARAGUTA', geo_pu: 'PU-01', badge_number: 'NP/JOS/001', agency: 'POLICE', tier: null },
+  { key: 'army',      id: 'bbbb2222-0000-4000-8000-00000000b006', phone: '+2348030008888', role: 'ARMY_LIAISON',   full_name: 'Capt. Ruth Achi',    geo_lga: 'MANGU',     geo_ward: 'PANYAM',   geo_pu: 'PU-11', badge_number: 'NA/PL/007',  agency: 'ARMY',   tier: null },
 ];
 
 const byKey = (k) => PEOPLE.find((p) => p.key === k);
@@ -51,7 +58,10 @@ const profiles = PEOPLE.map((p) => ({
   geo_lga: p.geo_lga,
   geo_ward: p.geo_ward,
   geo_pu: p.geo_pu,
-  phone: '+2348000000000',
+  // Each person's own number. They all shared +2348000000000, and
+  // `profiles.phone` is UNIQUE — a real database refuses that seed, and a
+  // citizen signing in by phone could not be told apart from anybody else.
+  phone: p.phone,
   fcm_token: null,
   push_enabled: true,
   profile_complete: true,

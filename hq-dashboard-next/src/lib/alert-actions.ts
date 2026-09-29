@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { standDownList } from '@/lib/dispatch-changes';
 
 /**
  * What HQ *does* — the four writes that change an incident.
@@ -271,7 +272,7 @@ export async function resolveAlert(alertIds: AlertIds, actor: Actor): Promise<Ac
 export async function dispatchAlert(
   alertIds: AlertIds,
   responderUids: string[] | string,
-): Promise<ActionResult<{ count: number }>> {
+): Promise<ActionResult<{ count: number; stoodDown: number }>> {
   const ids = idsOf(alertIds);
   const uids = Array.isArray(responderUids) ? responderUids : [responderUids];
   if (uids.length === 0) return { ok: false, error: 'No responders selected' };
@@ -279,6 +280,25 @@ export async function dispatchAlert(
   try {
     const leadId = uids[0];
     const nowIso = new Date().toISOString();
+
+    // WHO IS BEING TAKEN OFF THIS INCIDENT.
+    //
+    // `assigned_responders` is REPLACED, not merged, and only the new uids were
+    // ever notified — so reassigning an incident removed officers from it in
+    // silence. The responder app lists an officer's work by this column, so the
+    // incident simply vanished from their screen; if they were already driving
+    // to it, nothing said stand down.
+    //
+    // Read before the write, per incident, because each keeps its own team.
+    const previousTeams = new Map<string, string[]>();
+    const { data: before } = await supabase
+      .from('alerts')
+      .select('id, assigned_responders')
+      .in('id', ids);
+    for (const row of before ?? []) {
+      previousTeams.set(row.id as string, (row.assigned_responders as string[]) ?? []);
+    }
+
     const { error } = await supabase.from('alerts').update({
       status: 'DISPATCHED',
       assigned_to: leadId,
@@ -286,6 +306,10 @@ export async function dispatchAlert(
       updated_at: nowIso,
     }).in('id', ids);
     if (error) throw error;
+
+    const standDown = [...new Set(
+      ids.flatMap(id => standDownList(previousTeams.get(id) ?? [], uids)),
+    )];
 
     // Secure server-side push notification dispatch
     try {
@@ -298,7 +322,24 @@ export async function dispatchAlert(
       console.warn('[HQ_PUSH_WARN] Notification push API failed:', pushErr);
     }
 
-    return { ok: true, value: { count: uids.length } };
+    // A separate call, deliberately: a stand-down that failed must not be
+    // mistaken for a dispatch that failed, and the two carry opposite
+    // instructions. Failing to reach someone being stood down is logged and
+    // does not fail the dispatch — the officers being SENT have been told, and
+    // that is the more urgent half.
+    if (standDown.length > 0) {
+      try {
+        await fetch('/api/push/dispatch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ alertId: ids[0], alertIds: ids, responderUids: standDown, kind: 'STAND_DOWN' }),
+        });
+      } catch (pushErr) {
+        console.warn('[HQ_STANDDOWN_WARN] Stand-down notification failed:', pushErr);
+      }
+    }
+
+    return { ok: true, value: { count: uids.length, stoodDown: standDown.length } };
   } catch (e) {
     console.error('[HQ_DISPATCH_ERR]', e);
     return failed(e, 'Dispatch failed');

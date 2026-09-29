@@ -11,6 +11,7 @@ import SystemAlertListener from '@/components/SystemAlertListener';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import Analytics from '@/components/Analytics';
 import UninstallRequests from '@/components/UninstallRequests';
+import SimChannelEvents from '@/components/SimChannelEvents';
 import AgencyPortal from '@/components/AgencyPortal';
 import IncidentReplayPanel from '@/components/IncidentReplayPanel';
 import LiveFeedViewer from '@/components/LiveFeedViewer';
@@ -24,10 +25,15 @@ import {
   ShieldAlert, Shield, Map as MapIcon, Users, Radio, Settings,
   LogOut, AlertTriangle, CheckCircle, ChevronUp, Phone,
   Loader2, Filter, Bell, Activity, Clock, Target, Edit3, Send,
-  Sun, Moon, X, Sparkles, MapPin, Menu,
+  Sun, Moon, X, Sparkles, MapPin, Menu, SignalZero,
 } from 'lucide-react';
 import type { Alert } from './types';
 import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
+import { consoleAccess } from '@/lib/console-access';
+import { describeTrack, summariseTrack, thinTrack, type TrackPoint } from '@/lib/incident-track';
+import { resolveReporterDetails } from '@/lib/incident-dossier';
+import { categoriesPresent, categoryCounts, categoryLabel } from '@/lib/alert-category';
+import { assignableResponders, emptyRosterReason, type Posting } from '@/lib/assignable-responders';
 import * as alertActions from '@/lib/alert-actions';
 import type { AlertIds } from '@/lib/alert-actions';
 
@@ -36,6 +42,19 @@ export type { Alert };
 
 // Leaflet must be client-only (no SSR)
 const LiveMap = dynamic(() => import('@/components/LiveMap'), { ssr: false });
+
+/**
+ * How many alerts the console holds in memory at once.
+ *
+ * This was 500 with no indication anywhere that it was a cap, so past 500
+ * incidents the oldest simply stopped existing as far as the operator was
+ * concerned — and the board would have looked completely normal. The window is
+ * still bounded, because an unbounded fetch into a browser is its own failure
+ * during exactly the event that produces this many incidents; what changed is
+ * that the console now asks for the true count alongside it and SAYS when it
+ * is showing a window rather than the whole board.
+ */
+const ALERT_WINDOW = 2000;
 
 // Canonical Mission Alert Interface (Supabase Aligned)
 
@@ -57,13 +76,16 @@ const fSel: React.CSSProperties = {
   fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-inter),sans-serif',
 };
 
-type Tab = 'map' | 'alerts' | 'history' | 'analytics' | 'broadcast' | 'admin' | 'settings' | 'audit' | 'uninstall' | 'agency';
+type Tab = 'map' | 'alerts' | 'history' | 'analytics' | 'broadcast' | 'admin' | 'settings' | 'audit' | 'uninstall' | 'agency' | 'sim';
 
 const formatAlertTimestamp = (alert: Alert | null | undefined, type: 'reported' | 'resolved' = 'reported'): string => {
   if (!alert) return '—';
   let dateVal: any = null;
   if (type === 'reported') {
-    dateVal = alert.created_at || alert.reportedAt;
+    // `|| alert.reportedAt` used to be here. PostgREST does not return
+    // camelCase keys, so it was never reached; it only made `created_at` look
+    // like one of two possible sources when it is the only one.
+    dateVal = alert.created_at;
   } else {
     dateVal = alert.resolved_at || alert.created_at;
   }
@@ -193,47 +215,11 @@ const formatIncidentId = (id?: string): string => {
   return `#INC-${id.substring(0, 8).toUpperCase()}`;
 };
 
-const resolveReporterDetails = (alert: Alert, usersMap: Record<string, any>) => {
-  const reporterId = alert.reported_by || alert.reportedBy || '';
-  const alertPhone = (alert as any).phone_number || (alert as any).reporter_phone || (alert as any).phone || (alert as any).contact;
-  
-  const profile = reporterId ? usersMap[reporterId] : null;
-
-  let name = 'Registered Citizen';
-  let contact = 'No Phone Registered';
-  let type = 'Citizen Mobile SOS';
-
-  // 1. Resolve phone number from alert or profile
-  if (alertPhone) {
-    contact = alertPhone;
-  } else if (profile?.phone || profile?.phone_number || profile?.mobile) {
-    contact = profile.phone || profile.phone_number || profile.mobile;
-  } else if (profile?.email) {
-    contact = profile.email;
-  } else if (reporterId.startsWith('+') || /^\+?\d{7,}$/.test(reporterId)) {
-    contact = reporterId;
-  }
-
-  // 2. Resolve name
-  if (profile?.full_name || profile?.name || profile?.displayName) {
-    name = profile.full_name || profile.name || profile.displayName;
-  } else if (reporterId && reporterId.includes('@')) {
-    name = `Officer ${reporterId.split('@')[0].toUpperCase()}`;
-    if (!alertPhone && !profile?.phone) contact = reporterId;
-  } else if (reporterId && !/^[0-9a-fA-F-]{24,}$/.test(reporterId) && !reporterId.startsWith('+')) {
-    name = reporterId;
-  }
-
-  // 3. Resolve role / type
-  if (profile?.role) {
-    type = profile.role === 'ADMIN' || profile.role === 'HQ_OFFICER' ? 'HQ Command Center' :
-           profile.role === 'RESPONDER' ? 'Field Tactical Responder' : 'Citizen Mobile App';
-  } else if (reporterId.includes('operationrainbow')) {
-    type = 'Field Operator';
-  }
-
-  return { name, contact, type };
-};
+// resolveReporterDetails used to live here, 200 lines into a 3,000-line client
+// component, and the map had no way to reach it — so the marker popup showed no
+// reporter at all while the incident card 1,800 lines below showed one. It is
+// now src/lib/incident-dossier.ts: one implementation, tested, shared by the
+// card, the dossier and the map.
 
 const renderFormattedSummary = (text: string) => {
   if (!text) return null;
@@ -348,10 +334,14 @@ export default function DashboardPage() {
             .single();
           if (profile?.role) {
             setUserRole(profile.role as string);
-              // Auto-navigate agency liaisons to their portal
-              if ((profile.role as string).endsWith('_LIAISON')) {
-                setActiveTab('agency');
-              }
+              // Land where this role belongs. It used to send liaisons to
+              // the agency tab but leave every other tab reachable, so the
+              // statewide map was one click away for an officer of another
+              // organisation.
+              const resolved = consoleAccess(profile.role as string);
+              setActiveTab((current) =>
+                resolved.tabs.includes(current) ? current : resolved.landing,
+              );
           }
         }
       } catch (e) {
@@ -368,6 +358,33 @@ export default function DashboardPage() {
   const [agentLocations, setAgentLocations] = useState<any[]>([]);
   const agentPathsRef = useRef<Map<string, {lat: number; lng: number; timestamp: string}[]>>(new Map());
   const [unreadAgencyReports, setUnreadAgencyReports] = useState(0);
+  const [openSimEvents, setOpenSimEvents] = useState(0);
+
+  // Handsets whose SMS channel has gone. Badged because the consequence is
+  // invisible otherwise: the alert queue keeps queueing, the sign-in code has
+  // nowhere to arrive, and an operator finds out when they try to reach
+  // somebody. RLS restricts the table to command, so a liaison or a
+  // polling-unit officer simply gets nothing here rather than an error.
+  useEffect(() => {
+    const commandRoles = ['HQ_OFFICER', 'HQ_COMMAND', 'ADMIN', 'LGA_COMMAND'];
+    if (!commandRoles.includes(userRole)) return;
+    const loadOpen = async () => {
+      const { count, error } = await supabase
+        .from('sim_channel_events')
+        .select('id', { count: 'exact', head: true })
+        .is('acknowledged_at', null);
+      // A failed count must not read as zero: a badge that says "nothing" when
+      // it could not ask is the same lie as an empty board.
+      if (error) return;
+      setOpenSimEvents(count || 0);
+    };
+    loadOpen();
+    const channel = supabase
+      .channel('sim-events-badge')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sim_channel_events' }, loadOpen)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [userRole]);
 
   // Load unread agency report count for HQ notification badge
   // Note: uses userRole directly since isHqUser is declared later in the component
@@ -391,9 +408,52 @@ export default function DashboardPage() {
 
   const [filterTier, setFilterTier] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
+  const [filterCategory, setFilterCategory] = useState('ALL');
+  /** How many alerts exist, against the ALERT_WINDOW actually loaded. */
+  const [alertsTotal, setAlertsTotal] = useState<number | null>(null);
   const [theme, setTheme] = usePersistedTheme();
   const [timeString, setTimeString] = useState('');
   const [selectedReport, setSelectedReport] = useState<Alert | null>(null);
+  /**
+   * The route taken during the incident currently open in the dossier.
+   *
+   * `null` means "not asked yet or could not ask" and an empty array means
+   * "asked, and this incident has no positions". The dossier says those
+   * differently, because a dispatcher deciding whether somebody is still where
+   * they said they were needs to know which one it is.
+   */
+  /// Held WITH the incident it belongs to, and matched during render rather
+  /// than cleared in an effect. Storing the points alone meant the previous
+  /// incident's route was on screen for one frame after opening the next
+  /// dossier — a route attributed to the wrong person, which is the worst
+  /// possible frame to render even briefly.
+  const [trackFor, setTrackFor] =
+    useState<{ alertId: string; points: TrackPoint[] } | null>(null);
+  const selectedTrack =
+    trackFor && trackFor.alertId === selectedReport?.id ? trackFor.points : null;
+
+  useEffect(() => {
+    const alertId = selectedReport?.id;
+    if (!alertId) return;
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from('incident_tracks')
+        .select('latitude, longitude, accuracy, speed, recorded_at')
+        .eq('alert_id', alertId)
+        .order('recorded_at', { ascending: true })
+        .limit(5000);
+      if (cancelled) return;
+      // A failed read stays null rather than becoming an empty route, which
+      // would read as "this person did not move".
+      if (error) {
+        console.error('[TRACK] could not load the route:', error);
+        return;
+      }
+      setTrackFor({ alertId, points: (data || []) as TrackPoint[] });
+    })();
+    return () => { cancelled = true; };
+  }, [selectedReport?.id]);
   // The AI summary belongs to ONE report, so it is stored WITH that report's
   // id and read back only when it still matches. The old code kept two loose
   // pieces of state and wiped them from an effect on `selectedReport` — a
@@ -516,12 +576,34 @@ export default function DashboardPage() {
     let alertDebounceTimer: NodeJS.Timeout | null = null;
     let telemetryDebounceTimer: NodeJS.Timeout | null = null;
 
+    // Which refetch is the newest one asked for.
+    //
+    // Every realtime event triggers a full refetch, so during a burst several
+    // are in flight at once. Responses are not guaranteed to come back in the
+    // order they were sent, and each one ends in an unconditional setAlerts —
+    // so a slower earlier request could land last and put an older board on
+    // the screen. Nothing is lost from the database and the next event
+    // corrects it, but "the screen briefly showed fewer incidents than exist"
+    // is not a thing to leave in a dispatch console.
+    //
+    // Each request takes a number and only the newest one is allowed to write.
+    let latestAlertsRequest = 0;
+    let latestTelemetryRequest = 0;
+
     const fetchAlertsData = async () => {
-      const { data } = await supabase
+      const mine = ++latestAlertsRequest;
+
+      // `count: 'exact'` so the cap below can be reported rather than hidden.
+      const { data, count } = await supabase
         .from('alerts')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
-        .limit(500);
+        .limit(ALERT_WINDOW);
+
+      // A newer refetch has already answered; this one is stale.
+      if (mine !== latestAlertsRequest) return;
+
+      setAlertsTotal(count ?? null);
 
       if (data) {
         const mapped = data.map((d: any) => ({
@@ -546,6 +628,42 @@ export default function DashboardPage() {
         }));
         setAlerts(mapped as Alert[]);
         setHistory(mapped.filter((a: any) => a.status === 'RESOLVED') as Alert[]);
+
+        // Make sure the people named on these alerts are actually loadable.
+        //
+        // Reporter and officer names come from `usersMap`, which is filled by a
+        // separate effect with `profiles ... limit(1000)`. That is fine for the
+        // staff directory and wrong for reporters: this is a citizen app in a
+        // state of four million people, so the 1001st citizen to raise an alert
+        // would render as "profile not loaded" forever, on a query that
+        // succeeded. Fetching the profiles these alerts actually name is
+        // bounded by what is on screen — at most 500 rows — and merges into the
+        // same map. Same pattern the telemetry path already uses.
+        const named = Array.from(
+          new Set(
+            mapped
+              .flatMap((a: any) => [a.reported_by, a.assigned_to, a.acknowledged_by])
+              .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0),
+          ),
+        );
+        if (named.length > 0) {
+          const { data: reporters } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, phone, role, badge_number, geo_lga, geo_ward, geo_pu')
+            .in('id', named);
+          if (reporters && reporters.length > 0) {
+            setUsersMap(prev => {
+              // Return the SAME object when nothing is new. `usersMap` is a
+              // dependency of the map's marker effect, so a fresh object on
+              // every realtime refetch would rebuild every popup — including
+              // the one the operator has open — two or three times a minute.
+              if (reporters.every((p: any) => prev[p.id])) return prev;
+              const merged = { ...prev };
+              reporters.forEach((p: any) => { merged[p.id] = p; });
+              return merged;
+            });
+          }
+        }
       }
     };
 
@@ -557,7 +675,10 @@ export default function DashboardPage() {
     };
 
     const fetchTelemetryData = async () => {
-      const { data: telemetryData } = await supabase.from('telemetry').select('*').limit(500);
+      const mine = ++latestTelemetryRequest;
+      const { data: telemetryData } = await supabase
+        .from('telemetry').select('*').limit(ALERT_WINDOW);
+      if (mine !== latestTelemetryRequest) return;
       if (!telemetryData || telemetryData.length === 0) return;
 
       // Enrich with profile names in one batch query
@@ -566,6 +687,8 @@ export default function DashboardPage() {
         .from('profiles')
         .select('id, full_name, role')
         .in('id', userIds);
+
+      if (mine !== latestTelemetryRequest) return;
 
       const profileMap: Record<string, { full_name?: string; role?: string }> = {};
       (profiles || []).forEach((p: any) => { profileMap[p.id] = p; });
@@ -676,11 +799,15 @@ export default function DashboardPage() {
         .select('id, full_name, email, phone, role, badge_number, geo_lga, geo_ward, geo_pu')
         .limit(1000);
       if (data) {
-        const mapping: Record<string, any> = {};
-        data.forEach((p: any) => {
-          mapping[p.id] = p;
+        // Merge, do not replace. The alerts fetch also puts profiles in here —
+        // the ones the visible alerts name, which for a reporter beyond this
+        // query's 1000-row limit is the only place they come from — and these
+        // two effects race. Replacing would drop them on whichever order won.
+        setUsersMap(prev => {
+          const merged = { ...prev };
+          data.forEach((p: any) => { merged[p.id] = p; });
+          return merged;
         });
-        setUsersMap(mapping);
       }
     };
 
@@ -709,6 +836,19 @@ export default function DashboardPage() {
       toast.update(toastId, 'error', 'Escalation Failed', res.error);
     }
   }, [toast, user]);
+
+  /**
+   * Opens the full dossier for an incident clicked on the map.
+   *
+   * The marker popup carries what a dispatcher acts on; the dossier carries the
+   * rest. Looked up in `alerts` — the raw rows — because the map is handed
+   * `filtered`, whose cards may be cluster masters, and the dossier is about
+   * one report.
+   */
+  const openDossierById = useCallback((id: string) => {
+    const found = alerts.find(a => a.id === id);
+    if (found) setSelectedReport(found);
+  }, [alerts]);
 
   const hqOverride = useCallback(async (alertId: AlertIds) => {
     const toastId = toast.loading('HQ Override...', 'Taking command of incident');
@@ -752,9 +892,27 @@ export default function DashboardPage() {
   // buried in this component with no coverage at all.
   const displayAlerts = clusterAlerts(alerts, enableClustering);
 
+  // Derived during render rather than held in state: these are a pure function
+  // of the alerts already loaded, and a second copy in state would be one more
+  // thing that can be stale.
+  // The operator's own posting, which scopes the responder picker on every
+  // incident card. Derived rather than held in state: it is a view of the
+  // profile already loaded.
+  const dispatcherPosting = {
+    id: user?.id,
+    role: userRole,
+    geo_lga: userProfile?.geo_lga as string | undefined,
+    geo_ward: userProfile?.geo_ward as string | undefined,
+    geo_pu: userProfile?.geo_pu as string | undefined,
+  };
+
+  const categoriesOnBoard = categoriesPresent(alerts);
+  const categoryTallies = categoryCounts(alerts);
+
   const filtered = filterAlerts(displayAlerts, {
     status: filterStatus,
     tier: filterTier,
+    category: filterCategory,
     lga: filterLga,
     ward: filterWard,
     pu: filterPu,
@@ -819,9 +977,13 @@ export default function DashboardPage() {
     </div>
   );
   const isHqUser = userRole === 'HQ_OFFICER' || userRole === 'HQ_COMMAND' || userRole === 'ADMIN';
-  const isAgencyLiaison = userRole.endsWith('_LIAISON');
-  // Derive agency code from role: 'POLICE_LIAISON' -> 'POLICE'
-  const userAgencyCode = isAgencyLiaison ? userRole.replace('_LIAISON', '') : undefined;
+  // One tested answer to "what may this account reach", rather than the
+  // conditionals this had grown. See src/lib/console-access.ts.
+  const access = consoleAccess(userRole, {
+    sector: userProfile?.geo_lga || userProfile?.geo_ward || userProfile?.geo_pu,
+  });
+  const isAgencyLiaison = access.agency !== null;
+  const userAgencyCode = access.agency ?? undefined;
 
   const lgaSelectOptions: SelectOption[] = [
     { value: 'ALL', label: 'ALL LGAS (STATEWIDE)', badge: 'STATE' },
@@ -953,17 +1115,14 @@ export default function DashboardPage() {
             <ShieldAlert size={24} color="#fff" />
           </div>
           <div>
+            {/* Whose console this is. It said "COMMAND HQ — TACTICAL MONITOR"
+                to an officer of the Nigeria Police Force, which in a system
+                that hands incidents between organisations is not cosmetic. */}
             <h1 style={{ fontSize: 16, fontWeight: 900, letterSpacing: 1, textTransform: 'uppercase' }}>
-              {userRole === 'LGA_COMMAND' || userRole === 'LGA_OFFICER' ? 'LGA Command' :
-               userRole === 'WARD_COMMAND' || userRole === 'WARD_OFFICER' ? 'Ward Command' :
-               userRole === 'UNIT_COMMAND' || userRole === 'POLLING_UNIT_OFFICER' || userRole === 'POLLING_OFFICER' ? 'PU Command' :
-               'Command HQ'}
+              {access.title}
             </h1>
             <p style={{ fontSize: 9, color: 'var(--primary)', fontWeight: 800, letterSpacing: 2.5 }}>
-              {userRole === 'LGA_COMMAND' || userRole === 'LGA_OFFICER' ? (userProfile?.geo_lga || 'LGA').toUpperCase() + ' SECTOR' :
-               userRole === 'WARD_COMMAND' || userRole === 'WARD_OFFICER' ? (userProfile?.geo_ward || 'WARD').toUpperCase() + ' SECTOR' :
-               userRole === 'UNIT_COMMAND' || userRole === 'POLLING_UNIT_OFFICER' || userRole === 'POLLING_OFFICER' ? (userProfile?.geo_pu || 'PU').toUpperCase() + ' SECTOR' :
-               'TACTICAL MONITOR'}
+              {access.subtitle}
             </p>
           </div>
         </div>
@@ -971,20 +1130,45 @@ export default function DashboardPage() {
         {/* Scrollable Navigation & Metrics Container */}
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 24, paddingRight: 4, marginBottom: 16 }}>
           <nav style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-dim)', letterSpacing: 2, marginBottom: 8, paddingLeft: 12 }}>SYSTEM NAVIGATION</p>
-            <NavItem icon={<MapIcon size={18} />} label="Intelligence Map" active={activeTab === 'map'} onClick={() => setActiveTab('map')} />
-            <NavItem icon={<Activity size={18} />} label="Incident Feed" active={activeTab === 'alerts'} onClick={() => setActiveTab('alerts')} badge={alerts.length > 0 ? alerts.length : undefined} />
-            <NavItem icon={<Clock size={18} />} label="Mission History" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
-            <NavItem icon={<Radio size={18} />} label="Communications & Broadcast" active={activeTab === 'broadcast'} onClick={() => setActiveTab('broadcast')} />
-            <NavItem
-              icon={<Shield size={18} />}
-              label="Inter-Agency Command"
-              active={activeTab === 'agency'}
-              onClick={() => setActiveTab('agency')}
-              badge={unreadAgencyReports > 0 ? unreadAgencyReports : undefined}
-            />
+            <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-dim)', letterSpacing: 2, marginBottom: 8, paddingLeft: 12 }}>
+              {access.agency ? 'AGENCY NAVIGATION' : 'SYSTEM NAVIGATION'}
+            </p>
+            {/* What this account may reach, from one tested place
+                (src/lib/console-access.ts). Hiding a control is not access
+                control — the database decides — but OFFERING one that will be
+                refused is its own defect, and the two have to agree. An agency
+                liaison was being shown Communications & Broadcast, which
+                `system_alerts` INSERT refuses for any non-command role: they
+                could write a statewide advisory and only then be told no. */}
+            {access.tabs.includes('map') && (
+              <NavItem icon={<MapIcon size={18} />} label="Intelligence Map" active={activeTab === 'map'} onClick={() => setActiveTab('map')} />
+            )}
+            {access.tabs.includes('alerts') && (
+              <NavItem
+                icon={<Activity size={18} />}
+                label={access.agency ? 'Incidents For Us' : 'Incident Feed'}
+                active={activeTab === 'alerts'}
+                onClick={() => setActiveTab('alerts')}
+                badge={alerts.length > 0 ? alerts.length : undefined}
+              />
+            )}
+            {access.tabs.includes('history') && (
+              <NavItem icon={<Clock size={18} />} label="Mission History" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
+            )}
+            {access.tabs.includes('broadcast') && (
+              <NavItem icon={<Radio size={18} />} label="Communications & Broadcast" active={activeTab === 'broadcast'} onClick={() => setActiveTab('broadcast')} />
+            )}
+            {access.tabs.includes('agency') && (
+              <NavItem
+                icon={<Shield size={18} />}
+                label={access.agency ? 'Our Deployments' : 'Inter-Agency Command'}
+                active={activeTab === 'agency'}
+                onClick={() => setActiveTab('agency')}
+                badge={unreadAgencyReports > 0 ? unreadAgencyReports : undefined}
+              />
+            )}
             
-            {isHqUser && (
+            {access.administration && (
               <>
                 <div style={{ margin: '16px 0', height: 1, background: 'var(--border)' }}></div>
                 <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-dim)', letterSpacing: 2, marginBottom: 8, paddingLeft: 12 }}>ADMINISTRATION</p>
@@ -992,6 +1176,13 @@ export default function DashboardPage() {
                 <NavItem icon={<Activity size={18} />} label="Forensic Audit" active={activeTab === 'audit'} onClick={() => setActiveTab('audit')} />
                 <NavItem icon={<Settings size={18} />} label="System Logic" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
                 <NavItem icon={<ShieldAlert size={18} />} label="Uninstall Requests" active={activeTab === 'uninstall'} onClick={() => setActiveTab('uninstall')} />
+                <NavItem
+                  icon={<SignalZero size={18} />}
+                  label="Handset SMS Channel"
+                  active={activeTab === 'sim'}
+                  onClick={() => setActiveTab('sim')}
+                  badge={openSimEvents > 0 ? openSimEvents : undefined}
+                />
               </>
             )}
           </nav>
@@ -1052,6 +1243,7 @@ export default function DashboardPage() {
                 {activeTab === 'audit' && 'Accountability'}
                 {activeTab === 'settings' && 'Platform Core'}
                 {activeTab === 'agency' && 'Inter-Agency Command'}
+                {activeTab === 'sim' && 'Handset SMS Channel'}
               </h2>
             </div>
             {!isNarrow && <div style={{ height: 20, width: 1, background: 'var(--border)', flexShrink: 0 }}></div>}
@@ -1103,8 +1295,8 @@ export default function DashboardPage() {
                   boxShadow: '0 0 15px rgba(245, 158, 11, 0.2)'
                 }}
               >
-                <Radio size={13} color="#fbbf24" className="spin-slow" />
-                <span style={{ fontSize: 10, fontWeight: 900, color: '#fbbf24' }}>{smsFallbackCount} SMS</span>
+                <Radio size={13} color="#FF9800" className="spin-slow" />
+                <span style={{ fontSize: 10, fontWeight: 900, color: '#FF9800' }}>{smsFallbackCount} SMS</span>
               </div>
             )}
 
@@ -1113,19 +1305,19 @@ export default function DashboardPage() {
               title={enableClustering ? 'Spatial-Temporal Proximity Clustering Active' : 'Clustering Off'}
               style={{
                 background: enableClustering ? 'rgba(79, 70, 229, 0.15)' : 'var(--bg-secondary)',
-                border: enableClustering ? '1px solid #818cf8' : '1px solid var(--border)',
+                border: enableClustering ? '1px solid var(--accent)' : '1px solid var(--border)',
                 borderRadius: 8,
                 padding: '6px 12px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
                 cursor: 'pointer',
-                color: enableClustering ? '#818cf8' : 'var(--text-muted)',
+                color: enableClustering ? 'var(--accent)' : 'var(--text-muted)',
                 fontSize: 10,
                 fontWeight: 800
               }}
             >
-              <Sparkles size={13} color={enableClustering ? '#818cf8' : 'var(--text-muted)'} />
+              <Sparkles size={13} color={enableClustering ? 'var(--accent)' : 'var(--text-muted)'} />
               <span>{enableClustering ? 'CLUSTERING: ON' : 'RAW FEED'}</span>
             </button>
 
@@ -1175,7 +1367,7 @@ export default function DashboardPage() {
                 value={filterStatus}
                 options={statusSelectOptions}
                 onChange={v => setFilterStatus(v)}
-                accentColor="#f59e0b"
+                accentColor="#FF9800"
                 maxWidth={160}
               />
               
@@ -1190,7 +1382,7 @@ export default function DashboardPage() {
                   setFilterWard('ALL');
                   setFilterPu('ALL');
                 }}
-                accentColor="#34d399"
+                accentColor="#1B5E20"
                 maxWidth={180}
                 icon={<MapPin size={13} />}
                 placeholder="LGA"
@@ -1210,7 +1402,7 @@ export default function DashboardPage() {
                     if (parentLga) setFilterLga(parentLga.name);
                   }
                 }}
-                accentColor="#818cf8"
+                accentColor="var(--accent)"
                 maxWidth={170}
                 placeholder="WARD"
                 searchable
@@ -1236,7 +1428,7 @@ export default function DashboardPage() {
                     }
                   }
                 }}
-                accentColor="#fbbf24"
+                accentColor="#FF9800"
                 maxWidth={210}
                 placeholder="BEAT (PU)"
                 searchable
@@ -1259,7 +1451,32 @@ export default function DashboardPage() {
         <div style={{ flex: 1, overflow: activeTab === 'map' ? 'hidden' : 'auto', padding: activeTab === 'map' ? 0 : '32px 40px' }}>
           {activeTab === 'map' && (
             <div style={{ position: 'relative', height: '100%', width: '100%' }}>
-              <LiveMap alerts={filtered} agents={agentLocations} onResolve={resolveAlert} onEscalate={escalateAlert} theme={theme} />
+              <LiveMap
+                alerts={filtered}
+                agents={agentLocations}
+                onResolve={resolveAlert}
+                onEscalate={escalateAlert}
+                // The map could not name a reporter because it was never given
+                // the profiles. It declared `reportedBy`/`reportedAt` — Firebase
+                // names the database does not return — and had no profile map at
+                // all, so a marker could show a type and a status and nothing
+                // about the person who raised it.
+                usersMap={usersMap}
+                onOpenDossier={openDossierById}
+                // The route of whichever incident is open in the dossier,
+                // thinned for drawing: a two-hour SOS at one fix every five
+                // seconds is well over a thousand points, and a polyline of
+                // that redraws on every pan.
+                incidentTrack={
+                  selectedTrack
+                    ? thinTrack(selectedTrack).map((p) => ({
+                        lat: p.latitude,
+                        lng: p.longitude,
+                      }))
+                    : undefined
+                }
+                theme={theme}
+              />
               <div className="glass fade-in" style={{ position: 'absolute', top: 24, right: 24, width: 320, maxHeight: 'calc(100% - 48px)', display: isNarrow ? 'none' : 'flex', borderRadius: 20, flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }}>
                 <div style={{ padding: '20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1270,7 +1487,7 @@ export default function DashboardPage() {
                         // the map silently under-reports the situation.
                         <div title="Alerts with no GPS fix are listed below but cannot be plotted"
                              style={{ background: 'var(--warning)', padding: '4px 8px', borderRadius: 20 }}>
-                          <span style={{ fontSize: 10, fontWeight: 900, color: '#0f172a' }}>
+                          <span style={{ fontSize: 10, fontWeight: 900, color: '#1A1A1A' }}>
                             {filtered.filter(a => a.lat == null || a.lng == null).length} UNLOCATED
                           </span>
                         </div>
@@ -1337,6 +1554,17 @@ export default function DashboardPage() {
                 <div>
                   <h2 style={{ fontSize: 24, fontWeight: 900 }}>INCIDENT COMMAND</h2>
                   <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Active triage and escalation management</p>
+                  {/*
+                    The console reads a bounded window. When there are more
+                    incidents than that, say so: a board that silently stops at
+                    a cap looks exactly like a board with nothing older on it,
+                    and the operator has no way to tell.
+                  */}
+                  {alertsTotal !== null && alertsTotal > alerts.length && (
+                    <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--warning)' }}>
+                      SHOWING NEWEST {alerts.length} OF {alertsTotal} INCIDENTS — FILTER TO NARROW
+                    </p>
+                  )}
                 </div>
                 {isHqUser ? (
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
@@ -1346,6 +1574,26 @@ export default function DashboardPage() {
                       <option value="ACTIVE">ACTIVE</option>
                       <option value="DURESS">DURESS</option>
                       <option value="SMS_FALLBACK">📡 SMS FALLBACK REPORTS</option>
+                    </select>
+                    {/*
+                      Sorting by what kind of emergency it is. The categories
+                      offered are the ones actually on the board, with a count,
+                      rather than a fixed list of ten — a dispatcher should not
+                      be able to select KIDNAP and be shown an empty screen
+                      without knowing whether that means "none" or "not loaded".
+                    */}
+                    <select
+                      value={filterCategory}
+                      onChange={e => setFilterCategory(e.target.value)}
+                      style={fSel}
+                      aria-label="Filter by incident category"
+                    >
+                      <option value="ALL">ALL CATEGORIES</option>
+                      {categoriesOnBoard.map(c => (
+                        <option key={c} value={c}>
+                          {categoryLabel(c)} ({categoryTallies[c] ?? 0})
+                        </option>
+                      ))}
                     </select>
                      <select value={filterLga} onChange={e => { setFilterLga(e.target.value); setFilterWard('ALL'); setFilterPu('ALL'); }} style={fSel}>
                       <option value="ALL">ALL LGAS (STATEWIDE)</option>
@@ -1396,7 +1644,7 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 24 }}>
-                  {filtered.map(a => <AlertCard key={a.id} alert={a} agents={agentLocations} usersMap={usersMap} onViewDossier={(alert) => setSelectedReport(alert)} onDispatch={dispatchAlert} onEscalate={escalateAlert} onResolve={resolveAlert} onHqOverride={hqOverride} />)}
+                  {filtered.map(a => <AlertCard key={a.id} alert={a} agents={agentLocations} usersMap={usersMap} dispatcher={dispatcherPosting} onViewDossier={(alert) => setSelectedReport(alert)} onDispatch={dispatchAlert} onEscalate={escalateAlert} onResolve={resolveAlert} onHqOverride={hqOverride} />)}
                 </div>
               )}
             </div>
@@ -1456,6 +1704,7 @@ export default function DashboardPage() {
           {activeTab === 'settings' && <SystemConfig />}
           {activeTab === 'audit' && <AuditLogs />}
           {activeTab === 'uninstall' && <UninstallRequests />}
+          {activeTab === 'sim' && <SimChannelEvents />}
           {activeTab === 'agency' && (
             <AgencyPortal
               userRole={userRole}
@@ -1502,11 +1751,12 @@ export default function DashboardPage() {
           rStatus === 'DISPATCHED' ? 'var(--info)' :
           rStatus === 'ON_ROUTE' || rStatus === 'ON_SITE' || rStatus === 'ENGAGED' ? 'var(--success)' : 'var(--warning)';
 
+        // 'JUST NOW' used to be the fallback for a row with no `created_at`,
+        // which asserts that an emergency is brand new on the strength of an
+        // empty column. A missing timestamp is a missing timestamp.
         const reportedTimeStr = selectedReport.created_at
           ? new Date(selectedReport.created_at).toLocaleString()
-          : selectedReport.reportedAt
-          ? new Date(selectedReport.reportedAt.seconds * 1000).toLocaleString()
-          : 'JUST NOW';
+          : 'TIME NOT RECORDED';
 
         return (
           <div style={{
@@ -1613,6 +1863,24 @@ export default function DashboardPage() {
                           boxShadow: prioGlow
                         }}>{selectedReport.priority}</span>
                       </div>
+                      {/* MOVEMENT DURING THE INCIDENT.
+                          This was drawn live on the map and then discarded:
+                          `telemetry` keeps one row per person, overwritten, so
+                          the trail existed only in a browser tab's memory and
+                          a refresh lost it. Anybody opening the dossier after
+                          the fact saw no movement at all — and for a
+                          kidnapping, which way they went is the question. */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>Movement:</span>
+                        <span
+                          data-testid="dossier-movement"
+                          style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', textAlign: 'right' }}
+                        >
+                          {selectedTrack === null
+                            ? 'Route not loaded'
+                            : describeTrack(summariseTrack(selectedTrack))}
+                        </span>
+                      </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Incident ID:</span>
                         <span title={selectedReport.id} style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', fontFamily: "var(--font-outfit), monospace", letterSpacing: 0.5 }}>
@@ -1641,7 +1909,7 @@ export default function DashboardPage() {
                         <span style={{ 
                           fontSize: 11, 
                           fontWeight: 900, 
-                          color: '#818cf8', 
+                          color: 'var(--accent)', 
                           background: 'rgba(99, 102, 241, 0.15)', 
                           border: '1px solid rgba(99, 102, 241, 0.3)',
                           padding: '3px 10px', 
@@ -1996,10 +2264,16 @@ function MetricCard({ label, value, color }: { label: string, value: string | nu
 }
 
 
-function AlertCard({ alert, agents, usersMap, onViewDossier, onDispatch, onEscalate, onResolve, onHqOverride }: { 
+function AlertCard({ alert, agents, usersMap, dispatcher, onViewDossier, onDispatch, onEscalate, onResolve, onHqOverride }: { 
   alert: Alert; 
   agents: any[];
   usersMap: Record<string, any>;
+  /**
+   * The signed-in operator's own posting. The responder picker is scoped to
+   * it — see assignable-responders.ts — so this card cannot offer an officer
+   * outside the dispatcher's command.
+   */
+  dispatcher: Posting & { id?: string };
   onViewDossier?: (alert: Alert) => void;
   onDispatch: (ids: AlertIds, responderUid: string) => Promise<void> | void;
   onEscalate: (ids: AlertIds, t: string, notes?: string, agency?: string) => Promise<void> | void; 
@@ -2190,7 +2464,7 @@ Respond ONLY with a JSON object with this exact shape:
           alignItems: 'center',
           justifyContent: 'space-between'
         }}>
-          <span style={{ fontSize: 10, fontWeight: 900, color: '#fbbf24', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 10, fontWeight: 900, color: '#FF9800', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
             📡 SMS FALLBACK REPORT (OFFLINE CITIZEN)
           </span>
           <span style={{ fontSize: 9, fontWeight: 700, color: '#fde68a', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4 }}>
@@ -2210,7 +2484,7 @@ Respond ONLY with a JSON object with this exact shape:
           alignItems: 'center',
           justifyContent: 'space-between'
         }}>
-          <span style={{ fontSize: 10, fontWeight: 900, color: '#818cf8', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--accent)', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
             👥 HIGH-SCALE CLUSTER: {alert.witness_count.toLocaleString()} WITNESS REPORTS AGGREGATED
           </span>
           <span style={{ fontSize: 9, fontWeight: 800, color: '#c7d2fe', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4 }}>
@@ -2510,7 +2784,7 @@ Respond ONLY with a JSON object with this exact shape:
           </div>
           <div style={{ 
             fontSize: 9, 
-            color: '#818cf8', 
+            color: 'var(--accent)', 
             marginTop: 6, 
             fontWeight: 800, 
             background: 'rgba(99, 102, 241, 0.12)', 
@@ -2606,8 +2880,19 @@ Respond ONLY with a JSON object with this exact shape:
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflow: 'auto', marginBottom: 10 }}>
             {(() => {
-              const profileResponders = Object.values(usersMap || {}).filter(
-                (u: any) => u && u.role !== 'CITIZEN'
+              // This kept every profile with a role that was not CITIZEN —
+              // statewide. A ward commander in Jos North was offered, and
+              // could dispatch, an officer posted in Mangu: the officer got a
+              // push for an incident their own commander knew nothing about,
+              // and that commander never learned they had been sent.
+              //
+              // Scoped to the dispatcher's command, mirroring
+              // alert_in_my_area() in the database one axis over — that
+              // decides which incidents a posting reaches, this decides which
+              // officers it reaches.
+              const profileResponders = assignableResponders(
+                Object.values(usersMap || {}) as any[],
+                dispatcher,
               );
 
               const responderList = profileResponders.length > 0
@@ -2637,9 +2922,13 @@ Respond ONLY with a JSON object with this exact shape:
                   }));
 
               if (responderList.length === 0) {
+                // "NO REGISTERED RESPONDERS FOUND" reads as "the system is
+                // broken" during an emergency, and the causes need different
+                // actions: nobody is posted to this command, or this account
+                // has no posting and so commands nobody.
                 return (
                   <p style={{ fontSize: 10, color: 'var(--text-dim)', textAlign: 'center', padding: 10 }}>
-                    NO REGISTERED RESPONDERS FOUND
+                    {emptyRosterReason(dispatcher).toUpperCase()}
                   </p>
                 );
               }

@@ -276,7 +276,9 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1600);
     if (role === 'citizen') {
-      await typeInto('08000000000');
+      // The citizen's own number — the demo bypass is compiled out of release
+      // builds, so this is the real sign-in path. See fake_supabase.js.
+      await typeInto(byKey('citizen').phone.replace('+234', '0'));
       await tap('authorize access', { role: 'button' });
       await sleep(2600);
       await typeInto('123456');

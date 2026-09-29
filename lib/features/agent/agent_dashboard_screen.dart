@@ -15,6 +15,7 @@ import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/alerts_feed.dart';
 import 'package:rainbow_app/features/agent/alert_row.dart';
+import 'package:rainbow_app/features/agent/assignable_responders.dart';
 import 'package:rainbow_app/features/agent/responder_tier.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/auth_service.dart';
@@ -786,9 +787,49 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
         .whereType<Marker>()
         .toList();
 
+    // CENTRE ON WHAT THE MAP IS DRAWING, not on Jos.
+    //
+    // This was `const LatLng(9.9285, 8.8923)` at zoom 13 — street level, pinned
+    // to Jos. An officer in Wase or Shendam opened their tactical map on a city
+    // 150km away with their own incidents off-screen, and had to pan to find the
+    // emergency they were being dispatched to. The map was drawing markers it
+    // was not looking at.
+    //
+    // This is NOT the C-5 mistake and must not be confused with it: a viewport
+    // centre is where the camera starts, never a position attached to a report.
+    // An alert with no fix still has no coordinates and is still absent from
+    // this map — it belongs in HQ's unlocated-alerts panel, not at a guessed
+    // point on a responder's screen.
+    final plotted = <LatLng>[
+      for (final data in alerts)
+        if ((data['latitude'] ?? data['lat']) is double &&
+            (data['longitude'] ?? data['lng']) is double)
+          LatLng(
+            (data['latitude'] ?? data['lat']) as double,
+            (data['longitude'] ?? data['lng']) as double,
+          ),
+    ];
+
     return RainbowMap(
-      center: const LatLng(9.9285, 8.8923),
-      initialZoom: 13,
+      // The mean of the incidents on screen. With one incident that is the
+      // incident; with several it is between them, which is the view a
+      // dispatcher wants.
+      center: plotted.isEmpty
+          // Nothing to look at: the centre of Plateau State at a zoom that shows
+          // the state, so the map says "no located incidents" rather than
+          // "no incidents in this street".
+          ? const LatLng(9.2182, 9.5179)
+          : LatLng(
+              plotted.map((p) => p.latitude).reduce((a, b) => a + b) /
+                  plotted.length,
+              plotted.map((p) => p.longitude).reduce((a, b) => a + b) /
+                  plotted.length,
+            ),
+      initialZoom: plotted.isEmpty
+          ? 8
+          : plotted.length == 1
+              ? 14
+              : 10,
       markers: [...alertMarkers, ...responders],
     );
   }
@@ -2014,6 +2055,8 @@ class _DispatchDialog extends StatefulWidget {
 class _DispatchDialogState extends State<_DispatchDialog> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _responders = [];
+  /// The signed-in officer's own posting, which scopes the list above.
+  Map<String, dynamic> _commander = <String, dynamic>{};
   final Set<String> _selectedResponderIds = {};
   bool _isSubmitting = false;
 
@@ -2030,13 +2073,28 @@ class _DispatchDialogState extends State<_DispatchDialog> {
           .select('id, full_name, badge_number, role, geo_lga, geo_ward');
 
       final rawList = List<Map<String, dynamic>>.from(res as List);
-      final filtered = rawList.where((r) {
-        final role = (r['role'] as String? ?? '').toUpperCase();
-        return role != 'CITIZEN' && role.isNotEmpty;
-      }).toList();
+
+      // This kept every profile in the state whose role was not CITIZEN — and
+      // the query above asks for geo_lga and geo_ward, which nothing then
+      // read. So a ward commander in Jos North was offered, and could
+      // dispatch, an officer posted in Mangu: that officer got a dispatch for
+      // an incident their own commander knew nothing about.
+      //
+      // Scoped to this account's command. See assignable_responders.dart.
+      final me = await SupabaseConfig.client
+          .from('profiles')
+          .select('id, role, geo_lga, geo_ward, geo_pu')
+          .eq('id', SupabaseConfig.client.auth.currentUser?.id ?? '')
+          .maybeSingle();
+
+      final commander = Map<String, dynamic>.from(
+        (me as Map?) ?? <String, dynamic>{},
+      );
+      final filtered = assignableResponders(rawList, commander);
 
       if (mounted) {
         setState(() {
+          _commander = commander;
           _responders = filtered;
           _isLoading = false;
         });
@@ -2119,7 +2177,11 @@ class _DispatchDialogState extends State<_DispatchDialog> {
               )
             : _responders.isEmpty
                 ? Text(
-                    'No registered officers available in database.',
+                    // "No registered officers available in database" reads as
+                    // "the app is broken" mid-emergency, and the two causes
+                    // need different actions: nobody is posted to this
+                    // command, or this account has no posting at all.
+                    emptyRosterReason(_commander),
                     style: GoogleFonts.inter(color: const Color(0xFF94A3B8), fontSize: 12),
                   )
                 : Column(

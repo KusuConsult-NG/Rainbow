@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:rainbow_app/core/config/map_tiles.dart';
 import 'package:latlong2/latlong.dart';
 
 /// Documentation for this public member.
@@ -46,13 +47,27 @@ class RainbowMap extends StatelessWidget {
         ),
       ),
       children: [
-        // CartoDB Dark Matter Tiles for Tactical Aesthetic
-        TileLayer(
-          urlTemplate:
-              'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-          subdomains: const ['a', 'b', 'c', 'd'],
-          userAgentPackageName: 'com.plateau.rainbow',
-        ),
+        // CARTO's dark basemap was here. It now answers unauthenticated
+        // requests with a placeholder tile reading "API key required", so the
+        // command map rendered as a grid of watermarks with the markers floating
+        // on top — worse than a blank map, because it looks like somebody
+        // else's configuration problem while every geographic reference is gone.
+        //
+        // OpenStreetMap needs no key. It is light, so it is darkened here rather
+        // than bought dark. See lib/core/config/map_tiles.dart.
+        if (mapTilesAreAlreadyDark)
+          TileLayer(
+            urlTemplate: mapTileUrl,
+            userAgentPackageName: 'com.plateau.rainbow',
+          )
+        else
+          ColorFiltered(
+            colorFilter: darkenTiles,
+            child: TileLayer(
+              urlTemplate: mapTileUrl,
+              userAgentPackageName: 'com.plateau.rainbow',
+            ),
+          ),
         if (polylines.isNotEmpty) PolylineLayer(polylines: polylines),
         if (markers.isNotEmpty) MarkerLayer(markers: markers),
       ],

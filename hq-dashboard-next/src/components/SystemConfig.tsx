@@ -73,7 +73,7 @@ export default function SystemConfig() {
       )}
 
       {error && (
-        <div style={{ padding: 12, background: 'rgba(239,68,68,0.1)', border: '1px solid #ef4444', borderRadius: 10, color: '#ef4444', marginBottom: 16, fontSize: 13 }}>
+        <div style={{ padding: 12, background: 'rgba(239,68,68,0.1)', border: '1px solid #E31E24', borderRadius: 10, color: '#E31E24', marginBottom: 16, fontSize: 13 }}>
           ✗ {error}
         </div>
       )}

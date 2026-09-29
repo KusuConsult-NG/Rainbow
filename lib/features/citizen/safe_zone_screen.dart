@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:rainbow_app/core/config/map_tiles.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -402,9 +403,8 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                       children: [
                         TileLayer(
                           urlTemplate:
-                              'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                          subdomains: const ['a', 'b', 'c', 'd'],
-                        ),
+                              mapTileUrl,
+                                                  ),
                         if (_currentRoute != null)
                           PolylineLayer(
                             polylines: [

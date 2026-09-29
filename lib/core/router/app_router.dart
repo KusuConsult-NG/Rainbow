@@ -8,6 +8,7 @@ import 'package:rainbow_app/features/agent/agent_dashboard_screen.dart';
 import 'package:rainbow_app/features/agent/mission_intel_screen.dart';
 import 'package:rainbow_app/features/agent/mission_resolution_screen.dart';
 import 'package:rainbow_app/features/agent/secure_chat_screen.dart';
+import 'package:rainbow_app/features/auth/lock_screen.dart';
 import 'package:rainbow_app/features/auth/login_screen.dart';
 import 'package:rainbow_app/features/citizen/dispatcher_chat_screen.dart';
 import 'package:rainbow_app/features/citizen/safe_zone_screen.dart';
@@ -29,6 +30,7 @@ import 'package:rainbow_app/features/splash/splash_screen.dart';
 import 'package:rainbow_app/features/tracking/live_tracking_screen.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/navigation_provider.dart';
+import 'package:rainbow_app/providers/reentry_lock_provider.dart';
 import 'package:rainbow_app/shared/widgets/global_navigation_shell.dart';
 
 // Transition Helpers
@@ -51,6 +53,7 @@ String? computeRedirect({
   required String? resolutionError,
   required bool splashFinished,
   required String location,
+  bool isLocked = false,
 }) {
   // 0. Always wait for auth to finish resolving before redirecting
   if (isLoading) return null;
@@ -60,6 +63,31 @@ String? computeRedirect({
 
   final loggingIn = location == AppRoutes.login;
   final onSplash = location == AppRoutes.splash;
+
+  // 1b. The re-entry lock.
+  //
+  // Above every other rule but auth resolution, and deliberately expressed
+  // HERE rather than as a widget wrapped around some screens: a gate that a
+  // route can be reached around is not a gate, and this app has thirty-odd
+  // routes including deep links into a report in progress.
+  //
+  // The two exceptions are the point of the whole design (see
+  // `lib/core/auth/reentry_lock.dart`): the emergency screen, because locking
+  // somebody out of their own running alarm is the worst thing this feature
+  // could do, and the login screen, because signing out is always allowed.
+  if (isAuthenticated && isLocked) {
+    final allowedWhileLocked = location == AppRoutes.lock ||
+        location == AppRoutes.emergencyActive ||
+        location == AppRoutes.login;
+    if (!allowedWhileLocked) return AppRoutes.lock;
+    return null;
+  }
+
+  // A lock that has been lifted must not strand the person on the lock screen.
+  if (location == AppRoutes.lock) {
+    if (!isAuthenticated) return AppRoutes.login;
+    return role == UserRole.responder ? AppRoutes.agentDashboard : AppRoutes.home;
+  }
 
   // 2. Auth Logic
   if (isAuthenticated && isDeactivated) {
@@ -149,7 +177,11 @@ class RouterNotifier extends ChangeNotifier {
   RouterNotifier(this._ref) {
     _ref
       ..listen(authProvider, (prev, next) => notifyListeners())
-      ..listen(splashFinishedProvider, (prev, next) => notifyListeners());
+      ..listen(splashFinishedProvider, (prev, next) => notifyListeners())
+      // Without this the gate would only take effect on the next navigation
+      // the user happened to make — so the app would sit unlocked on whatever
+      // screen it was on until they tapped something.
+      ..listen(reentryLockProvider, (prev, next) => notifyListeners());
   }
 
   final Ref _ref;
@@ -169,6 +201,9 @@ class AppRoutes {
 
   /// Documentation for this public member.
   static const String login = '/login';
+
+  /// The re-entry lock: the app was left and has been picked up again.
+  static const String lock = '/lock';
 
   /// Documentation for this public member.
   static const String agentDashboard = '/agent-dashboard';
@@ -247,6 +282,7 @@ final appRouter = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final auth = ref.read(authProvider);
       final splashFinished = ref.read(splashFinishedProvider);
+      final isLocked = ref.read(reentryLockProvider);
 
       debugPrint(
         '🧭 [ROUTER] Redirect check: path=${state.matchedLocation}, auth=${auth.user?.id}, splashFinished=$splashFinished, role=${auth.role}',
@@ -261,6 +297,7 @@ final appRouter = Provider<GoRouter>((ref) {
         resolutionError: auth.resolutionError,
         splashFinished: splashFinished,
         location: state.matchedLocation,
+        isLocked: isLocked,
       );
       debugPrint('🧭 [ROUTER] Redirect result: $result');
       return result;
@@ -269,6 +306,10 @@ final appRouter = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.splash,
         builder: (context, state) => const SplashScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.lock,
+        builder: (context, state) => const LockScreen(),
       ),
       GoRoute(
         path: AppRoutes.login,
