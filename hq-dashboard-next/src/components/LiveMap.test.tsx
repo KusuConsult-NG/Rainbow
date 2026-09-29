@@ -394,6 +394,134 @@ describe('LiveMap', () => {
     invalidateSize.mockRestore();
   });
 
+  // ── The blinking dossier ──────────────────────────────────────────────────
+  //
+  // Reported from the console: "when admin click on the point on the map to see
+  // more details, the info card blinks why?"
+  //
+  // Because every realtime event ends in an unconditional `setAlerts(mapped)` —
+  // a new array even when nothing differs — so the marker effect re-ran two or
+  // three times a minute and called `setIcon` and `setContent` on every
+  // existing marker. `Marker.setIcon` re-binds the popup and `Popup.setContent`
+  // replaces its content node, so the open card was torn down and rebuilt from
+  // inputs that had not changed.
+  //
+  // These assert on DOM IDENTITY, not on text: the card showing the same words
+  // is exactly what it looked like before, and is not the same thing as the
+  // card not having been rebuilt.
+
+  describe('a refetch that changes nothing', () => {
+    it('leaves an open dossier standing rather than rebuilding it', async () => {
+      const LiveMap = await load();
+      const rows = [alert('a-1', 9.9167, 8.8917, { reported_by: REPORTER_ID })];
+      const props = {
+        agents: [],
+        usersMap: { [REPORTER_ID]: REPORTER },
+        onResolve: noop,
+        onEscalate: noop,
+        theme: 'dark' as const,
+      };
+      const { container, rerender } = render(<LiveMap alerts={rows} {...props} />);
+      await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+
+      const before = await openPopup(container);
+      const markerBefore = container.querySelector('.leaflet-marker-icon');
+
+      // What a realtime poll actually hands down: equal rows, new identities.
+      rerender(<LiveMap alerts={rows.map(r => ({ ...r }))} {...props} />);
+      await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0));
+
+      const after = container.querySelector('.leaflet-popup-content');
+      expect(after).not.toBeNull();
+      // The same node, not merely a node with the same words in it.
+      expect(after).toBe(before);
+      expect(container.querySelector('.leaflet-marker-icon')).toBe(markerBefore);
+    });
+
+    it('does not replace the contents of the card either', async () => {
+      // A SECOND signal, because the first one cannot see this defect.
+      //
+      // `Popup.setContent` with a string ends in `contentNode.innerHTML = html`,
+      // which REUSES the content node and destroys everything inside it. So
+      // node identity is blind to it, and the children are what to watch: an
+      // innerHTML assignment gives the card a whole new first child even when
+      // the html is identical.
+      const LiveMap = await load();
+      const rows = [alert('a-1', 9.9167, 8.8917)];
+      const props = { agents: [], onResolve: noop, onEscalate: noop, theme: 'dark' as const };
+      const { container, rerender } = render(<LiveMap alerts={rows} {...props} />);
+      await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+
+      const card = await openPopup(container);
+      const childBefore = card.firstElementChild;
+      expect(childBefore).not.toBeNull();
+
+      for (let i = 0; i < 5; i += 1) {
+        rerender(<LiveMap alerts={[{ ...rows[0] }]} {...props} />);
+        await waitFor(() => expect(markerCount(container)).toBe(1));
+      }
+
+      const cardAfter = container.querySelector('.leaflet-popup-content')!;
+      expect(cardAfter.firstElementChild).toBe(childBefore);
+    });
+  });
+
+  describe('a refetch that changes something', () => {
+    it('updates the dossier when the incident actually changed', async () => {
+      // The guard must not become a cache. An incident that has been taken has
+      // to say so on the card the operator is looking at.
+      const LiveMap = await load();
+      const props = { agents: [], onResolve: noop, onEscalate: noop, theme: 'dark' as const };
+      const { container, rerender } = render(
+        <LiveMap alerts={[alert('a-1', 9.9167, 8.8917, { status: 'PENDING' })]} {...props} />,
+      );
+      await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+      const popup = await openPopup(container);
+      // The card prints plain words, not the enum: statusLabel() in
+      // incident-dossier.ts maps PENDING to AWAITING DISPATCH.
+      expect(popup.textContent).toContain('AWAITING DISPATCH');
+
+      rerender(
+        <LiveMap
+          alerts={[alert('a-1', 9.9167, 8.8917, { status: 'DISPATCHED' })]}
+          {...props}
+        />,
+      );
+      await waitFor(() => {
+        expect(
+          container.querySelector('.leaflet-popup-content')!.textContent,
+        ).toContain('UNIT DISPATCHED');
+      });
+    });
+
+    it('follows a marker that moved, and the card stays open on it', async () => {
+      // This test first asserted that a move leaves the card's contents
+      // untouched, and that was simply wrong: the dossier PRINTS the
+      // coordinates (the COORDINATES row in incident-dossier.ts), so a move
+      // genuinely changes the html and setContent firing is correct.
+      //
+      // What matters is what an operator would notice: the card must not CLOSE,
+      // and it must tell the truth about where the incident now is.
+      const LiveMap = await load();
+      const props = { agents: [], onResolve: noop, onEscalate: noop, theme: 'dark' as const };
+      const { container, rerender } = render(
+        <LiveMap alerts={[alert('a-1', 9.9167, 8.8917)]} {...props} />,
+      );
+      await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+      const before = await openPopup(container);
+      expect(before.textContent).toContain('9.91670');
+
+      rerender(<LiveMap alerts={[alert('a-1', 9.9300, 8.9000)]} {...props} />);
+      await waitFor(() => {
+        expect(
+          container.querySelector('.leaflet-popup-content')!.textContent,
+        ).toContain('9.93000');
+      });
+      // Still open, and still the same card rather than a fresh one.
+      expect(container.querySelector('.leaflet-popup-content')).toBe(before);
+    });
+  });
+
   it('unmounts without throwing', async () => {
     const LiveMap = await load();
     const { container, unmount } = render(
