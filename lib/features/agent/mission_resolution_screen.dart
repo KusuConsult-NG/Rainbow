@@ -1,7 +1,8 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
+import 'package:rainbow_app/core/router/app_router.dart';
+import 'package:rainbow_app/core/router/safe_pop.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
@@ -49,7 +50,9 @@ class _MissionResolutionScreenState
       }).eq('id', alertId);
 
       if (!mounted) return;
-      context.pop();
+      // The debrief is already SAVED at this point, so a throw here would
+      // leave the officer looking at a form that appears to have failed.
+      context.popOrGo(AppRoutes.agentDashboard);
     } catch (e) {
       debugPrint('[RESOLUTION_ERR] Resolution update failed: $e');
     } finally {

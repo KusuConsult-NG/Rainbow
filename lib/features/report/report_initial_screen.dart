@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rainbow_app/core/router/safe_pop.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
@@ -46,7 +47,7 @@ class ReportInitialScreen extends StatelessWidget {
                   padding: const EdgeInsets.all(16),
                   child: IconButton(
                            tooltip: 'Close',
-                    onPressed: () => context.pop(),
+                    onPressed: () => context.popOrGo(AppRoutes.home),
                     icon: const Icon(
                       Icons.close_rounded,
                       color: AppColors.onBackground,

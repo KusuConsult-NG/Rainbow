@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rainbow_app/core/router/safe_pop.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/constants/alert_categories.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
@@ -82,7 +83,7 @@ class _ReportSubtypeScreenState extends State<ReportSubtypeScreen> {
                   ),
                 ),
                 GestureDetector(
-                  onTap: () => context.pop(),
+                  onTap: () => context.popOrGo(AppRoutes.reportInitial),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 14,
