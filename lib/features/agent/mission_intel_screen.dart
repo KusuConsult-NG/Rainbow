@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
+import 'package:rainbow_app/services/alert_media.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
@@ -110,13 +111,34 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
           // failure path already does.
           throw Exception('Alert has no id — cannot attach evidence');
         }
-        final existingMedia = (alertData['media_urls'] as List<dynamic>?)?.cast<String>() ?? [];
-        final newMediaUrls = [...existingMedia, url];
+        // This read `alertData['media_urls']` — the copy loaded when this
+        // screen OPENED — and wrote the whole array back. Not a race: a
+        // guaranteed overwrite. Anything attached by anyone else since the
+        // screen opened, including by the reporter's own duress screen, was
+        // erased by this upload, and the UI then said "Evidence uploaded
+        // successfully".
+        //
+        // append_alert_media() appends in one locked statement and returns what
+        // the incident actually carries now, which is also what this screen
+        // should be showing.
+        final res = await AlertMedia.append(alertId, [url]);
+        if (!res.isOnTheIncident) {
+          throw Exception('Evidence could not be attached: ${res.outcome.name}');
+        }
 
-        await SupabaseConfig.client.from('alerts').update({'media_urls': newMediaUrls}).eq('id', alertId);
-        
+        // Re-read rather than guess. The append may have brought in files
+        // attached elsewhere, and a dossier that shows fewer than the incident
+        // holds is the same defect one layer up.
+        final fresh = await SupabaseConfig.client
+            .from('alerts')
+            .select('media_urls')
+            .eq('id', alertId)
+            .maybeSingle();
+
+        if (!mounted) return;
         setState(() {
-          alertData['media_urls'] = newMediaUrls;
+          alertData['media_urls'] =
+              (fresh?['media_urls'] as List<dynamic>?)?.cast<String>() ?? [url];
           _isUploading = false;
         });
         
