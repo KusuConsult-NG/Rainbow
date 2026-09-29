@@ -132,6 +132,25 @@ def splice(generated_array: str) -> str:
     return src[:start] + generated_array + src[end:]
 
 
+def geo_key(name: str) -> str:
+    """The comparison key, mirroring public.geo_key() and geo-key.ts.
+
+    Four of the seven wards this check used to report were not missing at all:
+    the GPS asset spells them with Roman numerals (GINDIRI  I) and the map with
+    Arabic (GINDIRI  1). Listing those beside a genuinely absent ward made the
+    report worth less than it should have been — the real gaps were buried in
+    notation noise, and the notation ones looked like work nobody could do.
+
+    They are now folded everywhere a place name is compared, so this check
+    folds them too and reports only what a human still has to settle.
+    """
+    s = ' '.join(name.strip().upper().split())
+    for roman, arabic in ((' III', ' 111'), (' II', ' 11'), (' I', ' 1')):
+        if s.endswith(roman):
+            return s[: -len(roman)] + arabic
+    return s
+
+
 def gps_wards_missing_from_map(lgas):
     """Wards the app can resolve a coordinate to, but that the map does not list.
 
@@ -140,15 +159,150 @@ def gps_wards_missing_from_map(lgas):
     and so from the console — an incident can be FILED in that ward while no
     officer can be posted to it and no filter can select it.
 
+    Compared on geo_key(), so a difference of notation is not reported as a
+    missing ward. What survives is a real divergence: a ward the map does not
+    have under any spelling this code is willing to guess at.
+
     Reported rather than repaired: inventing the missing entries would put
     wards in the console that nobody has confirmed exist under those names.
     """
     asset = REPO / 'assets' / 'geo' / 'plateau_wards.json'
     if not asset.exists():
         return []
-    gps = {w['ward'] for w in json.loads(asset.read_text())['wards']}
-    known = {w['name'] for l in lgas for w in l['wards']}
-    return sorted(gps - known)
+    known = {geo_key(w['name']) for l in lgas for w in l['wards']}
+    gps = {geo_key(w['ward']): w['ward']
+           for w in json.loads(asset.read_text())['wards']}
+    return sorted(original for key, original in gps.items() if key not in known)
+
+
+SEED = REPO / 'scripts' / 'seed_demo_incidents.sql'
+
+
+def sql_values_rows(src: str, table: str):
+    """Yield (column name -> literal) for each VALUES row of one INSERT.
+
+    By column name, not by position. A regex sweep for adjacent quoted
+    place-like strings was tried first and matched one column too early on the
+    profiles insert — it read `'CITIZEN', 'JOS NORTH', 'ABBA NA SHEHU'` as an
+    LGA, a ward and a polling unit, and reported the role as a missing LGA.
+    Anything that guesses where the geography sits will find something; this
+    reads the column list the statement declares.
+    """
+    at = src.find(f'INSERT INTO public.{table}')
+    if at == -1:
+        return
+
+    open_paren = src.index('(', at)
+    close_paren = src.index(')', open_paren)
+    cols = [c.strip() for c in src[open_paren + 1:close_paren].split(',')]
+
+    values_at = src.index('VALUES', close_paren)
+    # The statement ends at its semicolon, or at ON CONFLICT if it has one.
+    stop = min(x for x in (src.find(';', values_at),
+                          src.find('ON CONFLICT', values_at),
+                          len(src)) if x != -1)
+    body = src[values_at + len('VALUES'):stop]
+
+    # Split into top-level tuples, tracking quotes so a ')' or ',' inside a
+    # string literal is not read as structure.
+    depth, in_str, start = 0, False, None
+    for i, ch in enumerate(body):
+        if in_str:
+            in_str = ch != "'"
+            continue
+        if ch == "'":
+            in_str = True
+        elif ch == '(':
+            if depth == 0:
+                start = i + 1
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth == 0 and start is not None:
+                yield dict(zip(cols, split_tuple(body[start:i])))
+                start = None
+
+
+def split_tuple(row: str):
+    """The literals of one VALUES tuple, quotes stripped, commas respected."""
+    out, buf, in_str = [], '', False
+    for ch in row:
+        if in_str:
+            if ch == "'":
+                in_str = False
+            else:
+                buf += ch
+        elif ch == "'":
+            in_str = True
+        elif ch == ',':
+            out.append(buf.strip())
+            buf = ''
+        else:
+            buf += ch
+    out.append(buf.strip())
+    return out
+
+
+def seed_geography_not_in_map(lgas):
+    """Place names the demo seed writes that the tactical map does not know.
+
+    ## Why this is checked and not merely synced
+
+    The seed was written with the console's OLD invented geography — wards
+    called "Bokkos Central" and "Mangu Central", polling units called
+    "BEAT-MANGU-11" — none of which exist in `tactical_mapping.dart` or in the
+    INEC ward list the app resolves coordinates against.
+
+    Seeded rows carrying those names are worse than useless for a demo, because
+    they look right and behave wrong in two places at once:
+
+      * The console's ward and polling-unit filters cannot select them. The
+        dropdowns are built from the map, so an operator narrowing to a ward
+        sees the board go empty and has no way to tell that from quiet.
+
+      * `alert_in_my_area()` compares `alerts.geo_ward` against
+        `profiles.geo_ward`. A ward officer posted to a real ward is refused
+        every seeded incident in it — so a demo of ward-level command shows an
+        officer who can see nothing, which is indistinguishable from the
+        scoping being broken.
+
+    This is the same class of defect this file exists to prevent, arriving
+    through the seed instead of through the console, so it is checked in the
+    same place and in CI.
+    """
+    if not SEED.exists():
+        return []
+
+    lga_names = {l['name'].upper() for l in lgas}
+    ward_names = {w['name'].upper() for l in lgas for w in l['wards']}
+    pu_names = {p.upper() for l in lgas for w in l['wards'] for p in w['pollingUnits']}
+
+    src = SEED.read_text()
+    rows = list(sql_values_rows(src, 'profiles')) + list(sql_values_rows(src, 'alerts'))
+    if not rows:
+        print('  note: no INSERT rows parsed out of the demo seed; the geography '
+              'check did not run', file=sys.stderr)
+        return []
+
+    bad = []
+    for row in rows:
+        for column, known, kind in (
+            ('geo_lga', lga_names, 'LGA'),
+            ('geo_ward', ward_names, 'ward'),
+            ('geo_pu', pu_names, 'polling unit'),
+        ):
+            value = row.get(column, '')
+            # NULL geography is legitimate: the console reports an UNLOCATED
+            # count for SOS reports that reached us without a GPS fix, and the
+            # seed carries some deliberately.
+            if not value or value.upper() == 'NULL':
+                continue
+            # A collapsed run of spaces is the map's own quirk ('SHUKUR  I'),
+            # not a different place; compare on a single-spaced form as well.
+            squashed = {' '.join(k.split()) for k in known}
+            if value.upper() not in known and ' '.join(value.upper().split()) not in squashed:
+                bad.append(f'{kind} "{value}"')
+    return sorted(set(bad))
 
 
 def main():
@@ -170,7 +324,15 @@ def main():
                   file=sys.stderr)
             print('  Run: python3 scripts/sync_tactical_map.py', file=sys.stderr)
             return 1
+        bad = seed_geography_not_in_map(lgas)
+        if bad:
+            print('✗ seed_demo_incidents.sql names places the tactical map does not '
+                  'have, so the console cannot filter them and ward scoping refuses '
+                  f'them:\n    {chr(10).join("    " + b for b in bad).strip()}',
+                  file=sys.stderr)
+            return 1
         print('✓ the app and the console agree about Plateau')
+        print('✓ the demo seed names only places that exist in the map')
         report_gaps(lgas)
         return 0
 
@@ -187,8 +349,12 @@ def report_gaps(lgas):
     missing = gps_wards_missing_from_map(lgas)
     if missing:
         print(f'  note: {len(missing)} ward(s) exist in the GPS centroid data but '
-              f'not in the map, so an incident can be filed there while no '
-              f'officer can be posted to it: {", ".join(missing)}')
+              f'not in the map under any spelling, so an incident can be filed '
+              f'there while no officer can be posted to it and no filter can '
+              f'select it: {", ".join(missing)}')
+        print('        These need a human who knows Plateau, not a code change. '
+              'KADUN/KADUNU and DAMWAI/KAMWAI are one letter apart and may or '
+              'may not be the same ward; BWALL is absent outright.')
 
 
 if __name__ == '__main__':

@@ -56,11 +56,11 @@ INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.profiles (id, email, phone, full_name, role, geo_lga, geo_ward, geo_pu) VALUES
-  ('cccc0000-0000-4000-8000-00000000c001', 'demo.amina@example.test',   '+2348030010001', 'Amina Bello',    'CITIZEN', 'Jos North',    'Abba Na Shehu',      'Abba Na Shehu Junction Beat (BEAT-JOS_NORTH-11)'),
-  ('cccc0000-0000-4000-8000-00000000c002', 'demo.danjuma@example.test', '+2348030010002', 'Danjuma Yakubu', 'CITIZEN', 'Jos South',    'Bukuru',             'Bukuru Central Market Square Patrol Post (BEAT-JOS_SOUTH-11)'),
-  ('cccc0000-0000-4000-8000-00000000c003', 'demo.ladi@example.test',    '+2348030010003', 'Ladi Dashe',     'CITIZEN', 'Mangu',        'Mangu Central',      'Mangu Central Market Square Security Post (BEAT-MANGU-11)'),
-  ('cccc0000-0000-4000-8000-00000000c004', 'demo.ruth@example.test',    '+2348030010004', 'Ruth Gyang',     'CITIZEN', 'Barkin Ladi',  'Barkin Ladi Central','Barkin Ladi Central Motor Park Beat (BEAT-BARKIN_LADI-11)'),
-  ('cccc0000-0000-4000-8000-00000000c005', 'demo.musa@example.test',    '+2348030010005', 'Musa Adamu',     'CITIZEN', 'Bokkos',       'Bokkos Central',     'Bokkos Main Market Security Beat (BEAT-BOKKOS-11)')
+  ('cccc0000-0000-4000-8000-00000000c001', 'demo.amina@example.test',   '+2348030010001', 'Amina Bello',    'CITIZEN', 'JOS NORTH',    'ABBA NA SHEHU',      'BAUCHI ROAD I'),
+  ('cccc0000-0000-4000-8000-00000000c002', 'demo.danjuma@example.test', '+2348030010002', 'Danjuma Yakubu', 'CITIZEN', 'JOS SOUTH',    'BUKURU',             'BAPTIST PRIMARY SCHOOL'),
+  ('cccc0000-0000-4000-8000-00000000c003', 'demo.ladi@example.test',    '+2348030010003', 'Ladi Dashe',     'CITIZEN', 'MANGU',        'AMPANG WEST',      'AMPANG 1'),
+  ('cccc0000-0000-4000-8000-00000000c004', 'demo.ruth@example.test',    '+2348030010004', 'Ruth Gyang',     'CITIZEN', 'BARKIN LADI',  'BARAKIN LADI','KATAKO'),
+  ('cccc0000-0000-4000-8000-00000000c005', 'demo.musa@example.test',    '+2348030010005', 'Musa Adamu',     'CITIZEN', 'BOKKOS',       'BOKKOS',     'SHUKUR  I')
 ON CONFLICT (id) DO UPDATE
   SET full_name = EXCLUDED.full_name,
       phone     = EXCLUDED.phone,
@@ -85,21 +85,21 @@ VALUES
    'Kidnap - Immediate Abduction',
    '[DEMO] Three men took a trader from the motor park in a grey pickup heading north.',
    'OPEN', 'CRITICAL', 'cccc0000-0000-4000-8000-00000000c001',
-   'Jos North', 'Abba Na Shehu', 'Abba Na Shehu Junction Beat (BEAT-JOS_NORTH-11)',
+   'JOS NORTH', 'ABBA NA SHEHU', 'BAUCHI ROAD I',
    9.9285, 8.8921, 'UNIT', NOW() - INTERVAL '40 minutes', NULL, NOW() - INTERVAL '42 minutes'),
 
   ('dddd0000-0000-4000-8000-00000000d002',
    'Community attack - Armed Invasion',
    '[DEMO] Gunfire reported at the edge of the village; families moving towards the main road.',
    'OPEN', 'CRITICAL', 'cccc0000-0000-4000-8000-00000000c005',
-   'Bokkos', 'Bokkos Central', 'Bokkos Main Market Security Beat (BEAT-BOKKOS-11)',
+   'BOKKOS', 'BOKKOS', 'SHUKUR  I',
    9.3006, 9.0028, 'WARD', NOW() - INTERVAL '25 minutes', NULL, NOW() - INTERVAL '50 minutes'),
 
   ('dddd0000-0000-4000-8000-00000000d003',
    'Fire - Building Fire',
    '[DEMO] Lock-up shops alight beside the market; smoke visible from the junction.',
    'DISPATCHED', 'HIGH', 'cccc0000-0000-4000-8000-00000000c002',
-   'Jos South', 'Bukuru', 'Bukuru Central Market Square Patrol Post (BEAT-JOS_SOUTH-11)',
+   'JOS SOUTH', 'BUKURU', 'BAPTIST PRIMARY SCHOOL',
    9.7896, 8.8608, 'UNIT', NOW() - INTERVAL '12 minutes', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '18 minutes'),
 
   -- No severity at all. Must read UNKNOWN and stay OUT of the CRITICAL filter:
@@ -108,7 +108,7 @@ VALUES
    'Flood - Rising Water',
    '[DEMO] Water across the road after last night''s rain; one culvert blocked.',
    'OPEN', NULL, 'cccc0000-0000-4000-8000-00000000c004',
-   'Barkin Ladi', 'Barkin Ladi Central', 'Barkin Ladi Central Motor Park Beat (BEAT-BARKIN_LADI-11)',
+   'BARKIN LADI', 'BARAKIN LADI', 'KATAKO',
    9.5361, 8.9003, 'UNIT', NOW() - INTERVAL '6 minutes', NULL, NOW() - INTERVAL '8 minutes'),
 
   -- No coordinates: the map must call this out as UNLOCATED rather than
@@ -117,7 +117,7 @@ VALUES
    'PANIC SOS',
    '[DEMO] Panic button pressed. No GPS fix was available on the handset.',
    'OPEN', 'CRITICAL', 'cccc0000-0000-4000-8000-00000000c003',
-   'Mangu', 'Mangu Central', 'Mangu Central Market Square Security Post (BEAT-MANGU-11)',
+   'MANGU', 'AMPANG WEST', 'AMPANG 1',
    NULL, NULL, 'UNIT', NOW() - INTERVAL '3 minutes', NULL, NOW() - INTERVAL '3 minutes'),
 
   -- DURESS: its own counter and its own colour on the board.
@@ -125,7 +125,7 @@ VALUES
    'Kidnap - Held Hostage',
    '[DEMO] Duress PIN entered when closing an alert. Treat as still in progress.',
    'DURESS', 'CRITICAL', 'cccc0000-0000-4000-8000-00000000c003',
-   'Mangu', 'Mangu Central', 'Mangu Central Market Square Security Post (BEAT-MANGU-11)',
+   'MANGU', 'AMPANG WEST', 'AMPANG 1',
    9.5228, 9.1003, 'LGA', NOW() - INTERVAL '15 minutes', NULL, NOW() - INTERVAL '35 minutes'),
 
   -- Handed to the ARMY. The Army liaison sees this and the Police liaison
@@ -134,7 +134,7 @@ VALUES
    'Cattle rustling - Herd Taken',
    '[DEMO] Herd driven off overnight towards the hills; tracks visible at the stream.',
    'ESCALATED', 'HIGH', 'cccc0000-0000-4000-8000-00000000c005',
-   'Bokkos', 'Bokkos Central', 'Bokkos Main Market Security Beat (BEAT-BOKKOS-11)',
+   'BOKKOS', 'BOKKOS', 'SHUKUR  I',
    9.2978, 9.0112, 'HQ', NOW() - INTERVAL '20 minutes', NOW() - INTERVAL '19 minutes', NOW() - INTERVAL '90 minutes'),
 
   -- Handed to the POLICE, for the other side of the same test.
@@ -142,35 +142,35 @@ VALUES
    'Police brutality - Assault In Custody',
    '[DEMO] Complaint of assault during an arrest at the checkpoint.',
    'ESCALATED', 'HIGH', 'cccc0000-0000-4000-8000-00000000c002',
-   'Jos South', 'Bukuru', 'Bukuru Central Market Square Patrol Post (BEAT-JOS_SOUTH-11)',
+   'JOS SOUTH', 'BUKURU', 'BAPTIST PRIMARY SCHOOL',
    9.7812, 8.8701, 'HQ', NOW() - INTERVAL '30 minutes', NOW() - INTERVAL '28 minutes', NOW() - INTERVAL '2 hours'),
 
   ('dddd0000-0000-4000-8000-00000000d009',
    'Domestic violence - Ongoing Assault',
    '[DEMO] Neighbour reports shouting and a struggle in the compound behind the school.',
    'OPEN', 'HIGH', 'cccc0000-0000-4000-8000-00000000c001',
-   'Jos North', 'Abba Na Shehu', 'Abba Na Shehu Junction Beat (BEAT-JOS_NORTH-11)',
+   'JOS NORTH', 'ABBA NA SHEHU', 'BAUCHI ROAD I',
    9.9401, 8.8802, 'UNIT', NOW() - INTERVAL '30 minutes', NULL, NOW() - INTERVAL '31 minutes'),
 
   ('dddd0000-0000-4000-8000-00000000d010',
    'Drug abuse - Distribution',
    '[DEMO] Selling to schoolchildren reported behind the motor park at closing time.',
    'OPEN', 'MEDIUM', 'cccc0000-0000-4000-8000-00000000c004',
-   'Barkin Ladi', 'Barkin Ladi Central', 'Barkin Ladi Central Motor Park Beat (BEAT-BARKIN_LADI-11)',
+   'BARKIN LADI', 'BARAKIN LADI', 'KATAKO',
    9.5402, 8.9108, 'UNIT', NOW() - INTERVAL '4 minutes', NULL, NOW() - INTERVAL '5 minutes'),
 
   ('dddd0000-0000-4000-8000-00000000d011',
    'Child abuse - Neglect',
    '[DEMO] Two children left unattended overnight; reported by a neighbour.',
    'OPEN', 'MEDIUM', 'cccc0000-0000-4000-8000-00000000c003',
-   'Mangu', 'Mangu Central', 'Mangu Central Market Square Security Post (BEAT-MANGU-11)',
+   'MANGU', 'AMPANG WEST', 'AMPANG 1',
    9.5301, 9.0955, 'UNIT', NOW() - INTERVAL '2 minutes', NULL, NOW() - INTERVAL '2 minutes'),
 
   ('dddd0000-0000-4000-8000-00000000d012',
    'Cyber crime - Financial Fraud',
    '[DEMO] Trader reports money moved from their account after a call asking for a code.',
    'OPEN', 'LOW', 'cccc0000-0000-4000-8000-00000000c002',
-   'Jos South', 'Bukuru', 'Bukuru Central Market Square Patrol Post (BEAT-JOS_SOUTH-11)',
+   'JOS SOUTH', 'BUKURU', 'BAPTIST PRIMARY SCHOOL',
    9.7901, 8.8555, 'UNIT', NOW() - INTERVAL '1 minute', NULL, NOW() - INTERVAL '1 minute'),
 
   -- Resolved, so Mission History is not an empty screen.
@@ -178,7 +178,7 @@ VALUES
    'Fire - Bush Fire',
    '[DEMO] Bush fire near the farms. Contained by the community with the fire service.',
    'RESOLVED', 'MEDIUM', 'cccc0000-0000-4000-8000-00000000c005',
-   'Bokkos', 'Bokkos Central', 'Bokkos Main Market Security Beat (BEAT-BOKKOS-11)',
+   'BOKKOS', 'BOKKOS', 'SHUKUR  I',
    9.2890, 9.0201, 'UNIT', NOW() - INTERVAL '3 hours', NOW() - INTERVAL '3 hours', NOW() - INTERVAL '4 hours')
 ON CONFLICT (id) DO NOTHING;
 

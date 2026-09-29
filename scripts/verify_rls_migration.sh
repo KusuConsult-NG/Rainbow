@@ -56,6 +56,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/alert_scoping_behaviour_test.sql \
    "$REPO"/scripts/notification_outbox_behaviour_test.sql \
    "$REPO"/scripts/escalation_targets_behaviour_test.sql \
+   "$REPO"/scripts/geo_key_behaviour_test.sql \
    "$REPO"/scripts/seed_demo_incidents.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
@@ -286,6 +287,20 @@ ESC_OUT=$(psql_run "-f $PGROOT/escalation_targets_behaviour_test.sql" 2>&1) && E
 echo "$ESC_OUT" | grep -E "PASS|FAIL|ERROR" || true
 if [ "$ESC_RC" -ne 0 ]; then
   echo "$ESC_OUT"; echo "✗ escalation target assertions failed"; exit 1
+fi
+
+# The app writes ward names from the GPS asset (GINDIRI  I) and officers are
+# posted from the tactical map (GINDIRI  1). alert_in_my_area() compared them
+# raw, so four Mangu wards had no supervision and nothing said so.
+echo "▶ Applying 20261009000000_ward_names_compared_by_key.sql"
+psql_run "-f $PGROOT/20261009000000_ward_names_compared_by_key.sql" >/dev/null
+psql_run "-f $PGROOT/20261009000000_ward_names_compared_by_key.sql" >/dev/null
+
+echo "▶ Asserting a ward is matched by key, not by spelling"
+GEOK_OUT=$(psql_run "-f $PGROOT/geo_key_behaviour_test.sql" 2>&1) && GEOK_RC=0 || GEOK_RC=$?
+echo "$GEOK_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$GEOK_RC" -ne 0 ]; then
+  echo "$GEOK_OUT"; echo "✗ ward key assertions failed"; exit 1
 fi
 
 echo "▶ Asserting the mesh recognises a duplicate, and forgets in time"
