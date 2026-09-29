@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import type { Alert } from './types';
 import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
+import { emptyBoardMeaning, emptyBoardWording } from '@/lib/empty-board';
 import { consoleAccess } from '@/lib/console-access';
 import { describeTrack, summariseTrack, thinTrack, type TrackPoint } from '@/lib/incident-track';
 import { resolveReporterDetails } from '@/lib/incident-dossier';
@@ -411,6 +412,8 @@ export default function DashboardPage() {
   const [filterCategory, setFilterCategory] = useState('ALL');
   /** How many alerts exist, against the ALERT_WINDOW actually loaded. */
   const [alertsTotal, setAlertsTotal] = useState<number | null>(null);
+  /** Non-null when the last read of the feed FAILED. Never "no incidents". */
+  const [feedError, setFeedError] = useState<string | null>(null);
   const [theme, setTheme] = usePersistedTheme();
   const [timeString, setTimeString] = useState('');
   const [selectedReport, setSelectedReport] = useState<Alert | null>(null);
@@ -594,7 +597,7 @@ export default function DashboardPage() {
       const mine = ++latestAlertsRequest;
 
       // `count: 'exact'` so the cap below can be reported rather than hidden.
-      const { data, count } = await supabase
+      const { data, count, error } = await supabase
         .from('alerts')
         .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
@@ -602,6 +605,31 @@ export default function DashboardPage() {
 
       // A newer refetch has already answered; this one is stale.
       if (mine !== latestAlertsRequest) return;
+
+      // AN EMPTY BOARD AND A REFUSED ONE ARE NOT THE SAME THING.
+      //
+      // `error` was never destructured. A failed read — a row-level security
+      // policy that does not admit this account, a dropped connection, a
+      // column that does not exist — left `data` null, skipped the mapping
+      // below, and left `alerts` as []. The screen then said:
+      //
+      //     ALL SECTORS CLEAR
+      //     No active incidents require intervention at this time.
+      //
+      // which is an affirmative claim about the safety of Plateau State, made
+      // on the strength of a question nobody answered. It is the most
+      // dangerous failure a console like this has, because it is indisputable
+      // and it is calm.
+      //
+      // The mobile app already had this rule — mission_feed_liveness_test.dart
+      // asserts that a LIVE, empty feed is the only thing allowed to say ALL
+      // CLEAR. The console never did.
+      if (error) {
+        console.error('[HQ_FEED_ERR]', error);
+        setFeedError(error.message || 'The incident feed could not be read.');
+        return;
+      }
+      setFeedError(null);
 
       setAlertsTotal(count ?? null);
 
@@ -917,6 +945,14 @@ export default function DashboardPage() {
     ward: filterWard,
     pu: filterPu,
   });
+
+  // What an empty board means, and therefore what it is allowed to say.
+  // `alerts.length`, not `displayAlerts.length`: clustering folds rows together
+  // but never drops them, and the number an operator needs is how many
+  // incidents came back from the database.
+  const boardState = { feedError, loaded: alerts.length, visible: filtered.length };
+  const boardMeaning = emptyBoardMeaning(boardState);
+  const boardWording = emptyBoardWording(boardState);
 
   const norm = (str?: string) => (str || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -1477,7 +1513,21 @@ export default function DashboardPage() {
                 }
                 theme={theme}
               />
-              <div className="glass fade-in" style={{ position: 'absolute', top: 24, right: 24, width: 320, maxHeight: 'calc(100% - 48px)', display: isNarrow ? 'none' : 'flex', borderRadius: 20, flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }}>
+              {/*
+                zIndex, or Leaflet paints over this.
+
+                The feed is absolutely positioned as a SIBLING of the map, and
+                had no z-index at all — so it sat at `auto`, which is 0. Leaflet
+                gives its own children positive ones: panes 200-700, controls
+                800. `.leaflet-container` sets no z-index of its own, so it
+                creates no stacking context and those values compete directly
+                with this panel's 0. The map won, and the situational feed was
+                rendered underneath it.
+
+                1000 is what the map's own legend in LiveMap.tsx already uses to
+                sit above the same panes.
+              */}
+              <div className="glass fade-in" style={{ position: 'absolute', top: 24, right: 24, width: 320, maxHeight: 'calc(100% - 48px)', display: isNarrow ? 'none' : 'flex', borderRadius: 20, flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', zIndex: 1000 }}>
                 <div style={{ padding: '20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h3 style={{ fontSize: 12, fontWeight: 900, color: 'var(--accent)', letterSpacing: 1.5 }}>SITUATIONAL FEED</h3>
@@ -1499,10 +1549,22 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div style={{ overflow: 'auto', flex: 1, padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {filtered.length === 0 ? (
+                  {boardMeaning !== 'NOT_EMPTY' ? (
+                    // The same rule as the triage board: "NO ACTIVE THREATS"
+                    // is a claim, and a refused read has not earned it.
                     <div style={{ textAlign: 'center', padding: '40px 0' }}>
-                      <CheckCircle size={32} color="var(--text-dim)" style={{ marginBottom: 12 }} />
-                      <p style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>NO ACTIVE THREATS</p>
+                      {boardMeaning === 'ALL_CLEAR' ? (
+                        <CheckCircle size={32} color="var(--text-dim)" style={{ marginBottom: 12 }} />
+                      ) : (
+                        <AlertTriangle size={32} color="var(--duress)" style={{ marginBottom: 12 }} />
+                      )}
+                      <p style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: boardMeaning === 'ALL_CLEAR' ? 'var(--text-muted)' : 'var(--duress)',
+                      }}>
+                        {boardMeaning === 'ALL_CLEAR' ? 'NO ACTIVE THREATS' : boardWording.heading}
+                      </p>
                     </div>
                   ) : filtered.map(a => {
                     const statusColors: any = {
@@ -1636,11 +1698,41 @@ export default function DashboardPage() {
                   </div>
                 )}
               </div>
-              {filtered.length === 0 ? (
-                <div className="glass" style={{ padding: '80px', textAlign: 'center', borderRadius: 24 }}>
-                  <CheckCircle size={64} color="var(--success)" style={{ opacity: 0.3, marginBottom: 20 }} />
-                  <h3 style={{ fontSize: 20, fontWeight: 900, marginBottom: 8 }}>ALL SECTORS CLEAR</h3>
-                  <p style={{ color: 'var(--text-muted)' }}>No active incidents require intervention at this time.</p>
+              {boardMeaning !== 'NOT_EMPTY' ? (
+                // Three different empty boards, three different things to do.
+                // Only ALL_CLEAR is allowed to look reassuring; see
+                // src/lib/empty-board.ts for why that distinction is the whole
+                // safety of this panel.
+                <div
+                  className="glass"
+                  style={{
+                    padding: '80px',
+                    textAlign: 'center',
+                    borderRadius: 24,
+                    border: boardMeaning === 'ALL_CLEAR' ? undefined : '1px solid var(--duress)',
+                  }}
+                >
+                  {boardMeaning === 'ALL_CLEAR' ? (
+                    <CheckCircle size={64} color="var(--success)" style={{ opacity: 0.3, marginBottom: 20 }} />
+                  ) : (
+                    <AlertTriangle size={64} color="var(--duress)" style={{ opacity: 0.8, marginBottom: 20 }} />
+                  )}
+                  <h3 style={{
+                    fontSize: 20,
+                    fontWeight: 900,
+                    marginBottom: 8,
+                    color: boardMeaning === 'ALL_CLEAR' ? undefined : 'var(--duress)',
+                  }}>
+                    {boardWording.heading}
+                  </h3>
+                  <p style={{ color: 'var(--text-muted)', maxWidth: 520, margin: '0 auto' }}>
+                    {boardWording.detail}
+                  </p>
+                  {feedError && (
+                    <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 12, fontFamily: 'monospace' }}>
+                      {feedError}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 24 }}>
