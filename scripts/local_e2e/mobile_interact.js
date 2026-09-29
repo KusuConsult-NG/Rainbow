@@ -586,6 +586,82 @@ async function logMark() {
     backIn || '(no hash)',
   );
 
+  // ---- attaching evidence to a report --------------------------------------
+  //
+  // The four attachment buttons call image_picker, which on web creates a real
+  // `<input type="file">` and clicks it. A browser CAN complete that: Puppeteer
+  // intercepts the file chooser and hands it a file, so the whole path — the
+  // control, the picker, the attachment list, and the row that reaches the
+  // database — is exercised against the real UI and the real backend.
+  //
+  // What this does NOT prove is the camera. `ImageSource.camera` resolves to
+  // the same file input on web, so SCAN PHOTO and RECORD VIDEO are exercised as
+  // file pickers here; a device test is still the only thing that covers a real
+  // camera and a refused camera permission.
+  state.screen = 'mobile:attachment';
+  await go('/report-initial', 2600);
+  await page.evaluate(() => {
+    const n = [...document.querySelectorAll('flt-semantics')]
+      .find((x) => /fire/i.test(x.textContent || ''));
+    if (n) n.click();
+  });
+  await sleep(1600);
+  await page.evaluate(() => {
+    const n = [...document.querySelectorAll('flt-semantics')]
+      .find((x) => /building fire/i.test(x.textContent || ''));
+    if (n) n.click();
+  });
+  await sleep(900);
+  await tap('initiate tactical report', { role: 'button', settle: 2600 });
+
+  const FIXTURE = path.join(__dirname, 'fixtures', 'evidence.png');
+  let attached = false;
+  let chooserOpened = false;
+  try {
+    const [chooser] = await Promise.all([
+      page.waitForFileChooser({ timeout: 8000 }),
+      tap('photo intel', { role: 'button', settle: 400 }),
+    ]);
+    chooserOpened = true;
+    await chooser.accept([FIXTURE]);
+    await sleep(2500);
+    attached = await page.evaluate(
+      () => /evidence\.png|1 file|attach/i.test(document.body.innerText || ''),
+    );
+  } catch (e) {
+    chooserOpened = false;
+  }
+  await shot('93c-mobile-attachment');
+
+  check(
+    'an attachment button opens a real file picker',
+    chooserOpened,
+    chooserOpened ? '' : 'no file chooser appeared — the control did nothing',
+  );
+  check(
+    'the chosen file is attached to the report',
+    attached,
+    attached ? 'the report lists the attached file' : 'the file was chosen and never appeared',
+  );
+
+  // And the attachment must survive submission: an attachment the person can
+  // see but the database never receives is the worst of both.
+  await tap('enter mission details|mission narrative', { settle: 900 });
+  await typeInto('Local end-to-end attachment report.');
+  for (let sc = 0; sc < 8; sc++) {
+    if (await findNode('initiate transmission', { role: 'button' })) break;
+    await page.mouse.wheel({ deltaY: 320 });
+    await sleep(400);
+  }
+  const attachMark = await writeMark();
+  await tap('initiate transmission', { role: 'button', settle: 4000 });
+  const attachWrites = (await writesSince(attachMark, 'alerts')).filter((x) => x.method === 'POST');
+  check(
+    'a report carrying an attachment still reaches the database',
+    attachWrites.length > 0,
+    attachWrites.length ? JSON.stringify(attachWrites[0].rows[0]).slice(0, 120) : 'nothing inserted',
+  );
+
   // ---- sweep: every button on every screen ---------------------------------
   const SCREENS = [
     '/home', '/report-initial', '/incident-history', '/safe-zone',

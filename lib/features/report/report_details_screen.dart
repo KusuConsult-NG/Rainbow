@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:collection/collection.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -24,6 +25,25 @@ import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 import 'package:record/record.dart';
 
 /// Documentation for this public member.
+
+/// What to tell somebody whose attachment did not work.
+///
+/// Split out from the screen because the CHOICE is the part worth pinning: a
+/// refused permission is the one cause the person can act on, so it is named,
+/// and everything else says plainly that it did not work here. Both endings
+/// say what they can still do, because the report matters more than the photo
+/// and a dead end mid-emergency is how a report gets abandoned.
+String attachmentErrorMessage(Object error) {
+  final text = error.toString().toLowerCase();
+  final denied = text.contains('permission') ||
+      text.contains('denied') ||
+      text.contains('access');
+  return denied
+      ? 'This phone has not given Operation Rainbow access to the camera. '
+          'You can still send the report without a photo.'
+      : 'That did not work on this phone. You can still send the report '
+          'without an attachment.';
+}
 
 class ReportDetailsScreen extends ConsumerStatefulWidget {
   /// Documentation for this public member.
@@ -57,7 +77,13 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   String? _selectedPu;
 
   final List<File> _attachedFiles = [];
-  final ImagePicker _picker = ImagePicker();
+  /// Test seam: a real camera and gallery cannot be opened under test, and the
+  /// failure path — a refused permission, an unavailable camera — is the one
+  /// that was broken. Overriding the picker is how that path gets exercised.
+  @visibleForTesting
+  static ImagePicker Function()? pickerOverride;
+
+  late final ImagePicker _picker = pickerOverride?.call() ?? ImagePicker();
 
   final _audioRecorder = AudioRecorder();
   bool _isRecording = false;
@@ -77,16 +103,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   void _attachmentFailed(Object error) {
     debugPrint('[ATTACH_ERR] $error');
     if (!mounted) return;
-    final denied = error.toString().toLowerCase().contains('permission');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          denied
-              ? 'This phone has not given Operation Rainbow access to the '
-                  'camera. You can still send the report without a photo.'
-              : 'That did not work on this phone. You can still send the '
-                  'report without an attachment.',
-        ),
+        content: Text(attachmentErrorMessage(error)),
         backgroundColor: AppColors.emergency,
       ),
     );
