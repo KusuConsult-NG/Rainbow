@@ -55,6 +55,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/alert_category_behaviour_test.sql \
    "$REPO"/scripts/alert_scoping_behaviour_test.sql \
    "$REPO"/scripts/notification_outbox_behaviour_test.sql \
+   "$REPO"/scripts/escalation_targets_behaviour_test.sql \
    "$REPO"/scripts/seed_demo_incidents.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
@@ -273,6 +274,18 @@ if [ "$OUTBOX_RC" -ne 0 ]; then
   echo "$OUTBOX_OUT"
   echo "✗ notification outbox assertions failed"
   exit 1
+fi
+
+# drain-outbox marked every TIER_ESCALATION delivered without telling anybody.
+echo "▶ Applying 20261008000000_escalation_push_targets.sql"
+psql_run "-f $PGROOT/20261008000000_escalation_push_targets.sql" >/dev/null
+psql_run "-f $PGROOT/20261008000000_escalation_push_targets.sql" >/dev/null
+
+echo "▶ Asserting a queued escalation reaches the right officers"
+ESC_OUT=$(psql_run "-f $PGROOT/escalation_targets_behaviour_test.sql" 2>&1) && ESC_RC=0 || ESC_RC=$?
+echo "$ESC_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$ESC_RC" -ne 0 ]; then
+  echo "$ESC_OUT"; echo "✗ escalation target assertions failed"; exit 1
 fi
 
 echo "▶ Asserting the mesh recognises a duplicate, and forgets in time"

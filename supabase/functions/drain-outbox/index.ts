@@ -45,6 +45,55 @@ function getSupabase() {
 
 // ── Delivery methods ──────────────────────────────────────────────────────────
 
+/// An automatic tier escalation: the incident moved because nobody at the
+/// previous rung acknowledged it in time.
+///
+/// Who it is for is decided by `escalation_push_targets()` in SQL, not here.
+/// There are two drainers — this function and /api/notify/drain in the console
+/// — and a rule written twice drifts. It is also subtle in both directions:
+/// too narrow and an incident climbs to a tier where nobody is told, too wide
+/// and every escalation in the state wakes every commander until they switch
+/// notifications off.
+async function deliverTierEscalation(
+  supabase: ReturnType<typeof getSupabase>,
+  outboxId: number,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const { data: targets, error } = await supabase
+    .rpc('escalation_push_targets', { p_outbox_id: outboxId });
+
+  if (error) throw new Error(`could not resolve recipients: ${error.message}`);
+
+  const playerIds = (targets ?? [])
+    .map((t: { player_id: string | null }) => t.player_id)
+    .filter((id: string | null): id is string => Boolean(id && id.length > 5));
+
+  if (playerIds.length === 0) {
+    // Deliberately a failure, not a quiet success. Nobody was told, and
+    // recording it as delivered is the defect this whole mechanism exists to
+    // prevent.
+    throw new Error(
+      `no reachable officer at ${String(payload.to_tier ?? 'that tier')} for this incident`,
+    );
+  }
+
+  const tier = String(payload.to_tier ?? 'COMMAND').toUpperCase();
+  const where = String(payload.geo_lga ?? 'an unlocated incident');
+  const ref = String(payload.alert_id ?? '').slice(0, 8);
+  const critical = String(payload.severity ?? '').toUpperCase() === 'CRITICAL';
+
+  await deliverPush({
+    player_ids: playerIds,
+    heading: critical
+      ? `⚠️ CRITICAL INCIDENT NOW AT ${tier}`
+      : `INCIDENT NOW AT ${tier}`,
+    // "Escalated" alone reads as somebody having made a decision. A timeout is
+    // the absence of one, and whoever picks it up should know which.
+    body: `Incident #${ref} in ${where} was not acknowledged in time and has come up to ${tier}. Open the console to take it.`,
+    data: { alertId: payload.alert_id, type: 'TIER_ESCALATION', toTier: tier },
+  });
+}
+
 async function deliverPush(payload: Record<string, unknown>): Promise<void> {
   if (!ONESIGNAL_REST_API_KEY) throw new Error('ONESIGNAL_REST_API_KEY not set');
   const body = {
@@ -139,8 +188,22 @@ serve(async (_req: Request) => {
         case 'PUSH':    await deliverPush(payload);    break;
         case 'SMS':     await deliverSms(payload);     break;
         case 'WEBHOOK': await deliverWebhook(payload); break;
+        case 'TIER_ESCALATION':
+          await deliverTierEscalation(supabase, row.id, payload);
+          break;
         default:
-          console.warn(`[DRAIN] Unknown kind: ${row.kind} — marking delivered`);
+          // NOT "marking delivered".
+          //
+          // This branch used to warn and fall through to ok = true, and
+          // TIER_ESCALATION landed in it — because nothing writes PUSH, SMS or
+          // WEBHOOK rows. The only writer is escalate_overdue_alerts(). So
+          // every automatic escalation queued a notice, arrived here, and was
+          // marked delivered with nobody told: exactly the failure the outbox
+          // exists to end, reproduced in the thing built to drain it.
+          //
+          // Worse than no worker, because the rows were consumed — the backlog
+          // query reads zero and the queue looks healthy.
+          throw new Error(`unknown kind '${row.kind}' — nothing was delivered`);
       }
       ok = true;
     } catch (e) {
