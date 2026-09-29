@@ -22,6 +22,15 @@ PGROOT="${PGROOT:-/var/lib/postgresql/rlstest}"
 PORT="${PGPORT:-5433}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Before any database is started: no SQL in the repository may insert into a
+# table with a generated column without naming its columns. PostgreSQL refuses
+# such a statement outright with 428C9, and the form that gets written by
+# accident — `INSERT INTO public.alerts SELECT * FROM <copy>` — never mentions
+# the generated column at all, so the error arrives from a statement that looks
+# unrelated to it.
+echo "▶ Checking no INSERT targets a generated column"
+python3 "$REPO/scripts/check_generated_column_inserts.py"
+
 command -v "$PGBIN/initdb" >/dev/null || {
   echo "PostgreSQL not found at $PGBIN. Install it, or set PGBIN." >&2; exit 2; }
 
@@ -63,6 +72,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/ai_reports_behaviour_test.sql \
    "$REPO"/scripts/oversight_behaviour_test.sql \
    "$REPO"/scripts/why_is_the_board_empty.sql \
+   "$REPO"/scripts/why_did_my_insert_fail.sql \
    "$REPO"/scripts/seed_demo_incidents.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
@@ -460,6 +470,42 @@ if [ "$DIAG_DEMO" != "13" ]; then
   exit 1
 fi
 echo "  PASS  the diagnostic runs and counts the seeded incidents"
+
+# The second diagnostic, for the failure the first one cannot explain: an insert
+# refused with 428C9. It reads the catalog, so it has to be run against a real
+# schema or its queries are only plausible. It must also NAME the generated
+# column — a version that ran cleanly and reported nothing would send an
+# operator looking somewhere else.
+echo "▶ Checking the refused-insert diagnostic still runs"
+GEN_OUT=$(psql_run "-f $PGROOT/why_did_my_insert_fail.sql" 2>&1) && GEN_RC=0 || GEN_RC=$?
+if [ "$GEN_RC" -ne 0 ]; then
+  echo "$GEN_OUT"
+  echo "✗ scripts/why_did_my_insert_fail.sql does not run against this schema"
+  exit 1
+fi
+printf '%s\n' "$GEN_OUT" | grep -q "generated columns *| *category" || {
+  echo "$GEN_OUT"
+  echo "✗ the diagnostic ran but did not report alerts.category as generated"
+  exit 1
+}
+# And it must see the trigger the migrations create, so an extra one added by
+# hand in the dashboard stands out against a known baseline rather than against
+# nothing.
+#
+# Only `route_oversight_to_hq_trg` is asserted. `trg_alerts_updated_at` comes
+# from 20260721000000_v2_agency_tables.sql, which this harness deliberately does
+# not replay — it applies 20260812000000_agency_tables.sql instead, which is the
+# file that creates those tables on a database that lacks them. Requiring it
+# here failed for that reason and not for any fault in the diagnostic.
+#
+# That difference is worth keeping in mind when reading the diagnostic against a
+# real deployment: this schema has `category` as its ONLY generated column on
+# alerts, whereas 20260721000000 also declares `lga`, `ward` and `pu`. Which of
+# those a given database has decides which column name a 428C9 error reports.
+printf '%s\n' "$GEN_OUT" | grep -q route_oversight_to_hq_trg || {
+  echo "$GEN_OUT"
+  echo "✗ the diagnostic did not list the route_oversight_to_hq_trg trigger"; exit 1; }
+echo "  PASS  the refused-insert diagnostic names the generated column and the trigger"
 
 cat <<'EOF'
 
