@@ -54,7 +54,8 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/mesh_ingest_behaviour_test.sql \
    "$REPO"/scripts/alert_category_behaviour_test.sql \
    "$REPO"/scripts/alert_scoping_behaviour_test.sql \
-   "$REPO"/scripts/notification_outbox_behaviour_test.sql "$PGROOT/"
+   "$REPO"/scripts/notification_outbox_behaviour_test.sql \
+   "$REPO"/scripts/seed_demo_incidents.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
 psql_run() {
@@ -299,6 +300,23 @@ printf '%s\n' "$PR_OUT" | grep -E "PASS|FAIL|ALL PRODUCTION" || true
 if [ "$PR_RC" -ne 0 ]; then
   printf '%s\n' "$PR_OUT" | grep -vE "PASS" | tail -20
   echo "::error::production readiness behaviour test FAILED"; exit 1
+fi
+
+# The demonstration seed is handed to people to run against staging, so it is
+# applied here to prove it actually applies: a seed that fails halfway leaves a
+# half-populated console, which is worse than an empty one.
+#
+# LAST, after every behaviour test, and deliberately so. It COMMITs thirteen
+# incidents; several of those tests count rows across a whole table rather than
+# the rows they created, so seeding before them turns a passing assertion about
+# row-level security into a failure about data it never wrote.
+echo "▶ Applying the demonstration seed"
+SEED_OUT=$(psql_run "-f $PGROOT/seed_demo_incidents.sql" 2>&1) && SEED_RC=0 || SEED_RC=$?
+echo "$SEED_OUT" | grep -E "seeded|ERROR" || true
+if [ "$SEED_RC" -ne 0 ]; then
+  echo "$SEED_OUT"
+  echo "✗ the demonstration seed does not apply"
+  exit 1
 fi
 
 cat <<'EOF'

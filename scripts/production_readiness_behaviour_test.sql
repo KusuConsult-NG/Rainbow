@@ -297,21 +297,29 @@ BEGIN
 
   -- Read follows the incident. The POLICE liaison holds ...ca01; the ARMY one
   -- does not, and must not see the route on it either.
+  -- Counted on THIS incident, not across the table. These read
+  -- `FROM public.incident_tracks` with no WHERE, so any row anyone else added
+  -- — a later fixture, a demonstration seed — broke an assertion about
+  -- row-level security, which is a confusing way to be told about a defect
+  -- that is not there.
   PERFORM pg_temp.become(police, 'authenticated');
-  SELECT count(*) INTO n FROM public.incident_tracks;
+  SELECT count(*) INTO n FROM public.incident_tracks
+   WHERE alert_id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca01';
   IF n <> 2 THEN
     RAISE EXCEPTION 'FAIL: police liaison sees % route points on their own incident, expected 2', n;
   END IF;
 
   PERFORM pg_temp.become(army, 'authenticated');
-  SELECT count(*) INTO n FROM public.incident_tracks;
+  SELECT count(*) INTO n FROM public.incident_tracks
+   WHERE alert_id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca01';
   IF n <> 0 THEN
     RAISE EXCEPTION 'FAIL: army liaison reads % route point(s) from a POLICE incident', n;
   END IF;
   RAISE NOTICE 'PASS: a route is readable only by people with a part in that incident';
 
   PERFORM pg_temp.become(hq, 'authenticated');
-  SELECT count(*) INTO n FROM public.incident_tracks;
+  SELECT count(*) INTO n FROM public.incident_tracks
+   WHERE alert_id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca01';
   IF n <> 2 THEN RAISE EXCEPTION 'FAIL: HQ cannot read the route'; END IF;
   RAISE NOTICE 'PASS: command can review the route';
 
