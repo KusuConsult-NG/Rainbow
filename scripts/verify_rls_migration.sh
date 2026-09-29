@@ -58,6 +58,8 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/escalation_targets_behaviour_test.sql \
    "$REPO"/scripts/geo_key_behaviour_test.sql \
    "$REPO"/scripts/alert_media_behaviour_test.sql \
+   "$REPO"/scripts/ussd_confirmation_behaviour_test.sql \
+   "$REPO"/scripts/ussd_filing_behaviour_test.sql \
    "$REPO"/scripts/why_is_the_board_empty.sql \
    "$REPO"/scripts/seed_demo_incidents.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
@@ -316,6 +318,34 @@ MEDIA_OUT=$(psql_run "-f $PGROOT/alert_media_behaviour_test.sql" 2>&1) && MEDIA_
 echo "$MEDIA_OUT" | grep -E "PASS|FAIL|ERROR" || true
 if [ "$MEDIA_RC" -ne 0 ]; then
   echo "$MEDIA_OUT"; echo "✗ evidence append assertions failed"; exit 1
+fi
+
+# USSD is the cheapest way to lure responders to a chosen place: no install, no
+# data, a cheap SIM, and the report looks exactly like a real one. The control is
+# that no TIMER may turn an unconfirmed USSD report into a deployment.
+echo "▶ Applying 20261011000000_ussd_reports_are_unconfirmed.sql"
+psql_run "-f $PGROOT/20261011000000_ussd_reports_are_unconfirmed.sql" >/dev/null
+psql_run "-f $PGROOT/20261011000000_ussd_reports_are_unconfirmed.sql" >/dev/null
+
+echo "▶ Asserting a USSD report cannot escalate itself to a commander"
+USSD_OUT=$(psql_run "-f $PGROOT/ussd_confirmation_behaviour_test.sql" 2>&1) && USSD_RC=0 || USSD_RC=$?
+echo "$USSD_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$USSD_RC" -ne 0 ]; then
+  echo "$USSD_OUT"; echo "✗ USSD confirmation assertions failed"; exit 1
+fi
+
+# A gateway that does not get a reply inside its window re-POSTs the same session
+# with the same input. On a congested network that is normal operation — which is
+# exactly when people report emergencies.
+echo "▶ Applying 20261012000000_ussd_filing.sql"
+psql_run "-f $PGROOT/20261012000000_ussd_filing.sql" >/dev/null
+psql_run "-f $PGROOT/20261012000000_ussd_filing.sql" >/dev/null
+
+echo "▶ Asserting a gateway retry cannot raise the same emergency twice"
+UFIL_OUT=$(psql_run "-f $PGROOT/ussd_filing_behaviour_test.sql" 2>&1) && UFIL_RC=0 || UFIL_RC=$?
+echo "$UFIL_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$UFIL_RC" -ne 0 ]; then
+  echo "$UFIL_OUT"; echo "✗ USSD filing assertions failed"; exit 1
 fi
 
 echo "▶ Asserting the mesh recognises a duplicate, and forgets in time"
