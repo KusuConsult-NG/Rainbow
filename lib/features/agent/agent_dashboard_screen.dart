@@ -10,6 +10,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:local_auth/local_auth.dart' as local_auth;
+import 'package:rainbow_app/core/geo/geo_key.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
@@ -54,23 +55,31 @@ final alertsStreamProvider = StreamProvider<AlertsFeed>((ref) {
       // 2. State HQ Commanders -> ALWAYS SHOW ALL
       if (role.contains('STATE') || role.contains('HQ') || role == 'ADMIN') return true;
 
+      // Place names are compared on geoKey, not on toUpperCase(). This app
+      // writes a ward resolved from the GPS centroid asset ('GINDIRI  I') while
+      // an officer is posted from the tactical map ('GINDIRI  1'), so the raw
+      // comparison failed for four Mangu wards. Here it was masked by the LGA
+      // fallback below the ward test — the commander saw the incident for the
+      // wrong reason — and for a polling-unit responder it was not masked at
+      // all. See lib/core/geo/geo_key.dart.
+
       // 3. LGA Commanders -> Show alerts matching LGA, unassigned, or escalated to LGA
       if (role.contains('LGA')) {
         if (geoLga == null || geoLga == 'ALL') return true;
-        return aGeoLga == null || aGeoLga.toUpperCase() == geoLga.toUpperCase();
+        return aGeoLga == null || sameGeo(aGeoLga, geoLga);
       }
 
       // 4. Ward Commanders -> Show alerts matching Ward/LGA
       if (role.contains('WARD')) {
         if (geoWard == null || geoWard == 'ALL') return true;
-        return aGeoWard == null || aGeoWard.toUpperCase() == geoWard.toUpperCase() ||
-               (aGeoLga != null && geoLga != null && aGeoLga.toUpperCase() == geoLga.toUpperCase());
+        return aGeoWard == null || sameGeo(aGeoWard, geoWard) ||
+               sameGeo(aGeoLga, geoLga);
       }
 
       // 5. PU / Beat Responders -> Show alerts in their PU, Ward, LGA, or unassigned general alerts
-      if (geoPu != null && aGeoPu != null && aGeoPu.toUpperCase() == geoPu.toUpperCase()) return true;
-      if (geoWard != null && aGeoWard != null && aGeoWard.toUpperCase() == geoWard.toUpperCase()) return true;
-      if (geoLga != null && aGeoLga != null && aGeoLga.toUpperCase() == geoLga.toUpperCase()) return true;
+      if (sameGeo(aGeoPu, geoPu)) return true;
+      if (sameGeo(aGeoWard, geoWard)) return true;
+      if (sameGeo(aGeoLga, geoLga)) return true;
       if (aGeoPu == null && aGeoWard == null && aGeoLga == null) return true;
 
       // No matching rule — don't show this alert to avoid delivering all
@@ -520,23 +529,27 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
         return false;
       }
 
+      // `contains` on the raw string has the same spelling problem as the
+      // stream filter above, and here it is exact rather than merely
+      // case-insensitive — so a posting list holding 'GINDIRI  1' matched
+      // nothing filed as 'GINDIRI  I'. Keyed on both sides.
+      bool postedTo(List<String> postings, Object? place) =>
+          postings.contains('ALL') ||
+          postings.any((p) => sameGeo(p, place));
+
       if (auth.tier == ResponderTier.lga) {
-        return assignedLgas.contains(alert['geo_lga']) ||
-            assignedLgas.contains('ALL') ||
+        return postedTo(assignedLgas, alert['geo_lga']) ||
             alert['geo_lga'] == null;
       }
       if (auth.tier == ResponderTier.ward) {
-        return assignedWards.contains(alert['geo_ward']) ||
-            assignedWards.contains('ALL') ||
-            assignedLgas.contains(alert['geo_lga']) ||
+        return postedTo(assignedWards, alert['geo_ward']) ||
+            postedTo(assignedLgas, alert['geo_lga']) ||
             alert['geo_ward'] == null;
       }
       if (auth.tier == ResponderTier.pu) {
-        return assignedPus.contains(alert['geo_pu']) ||
-            assignedPus.contains('ALL') ||
-            assignedWards.contains(alert['geo_ward']) ||
-            assignedWards.contains('ALL') ||
-            assignedLgas.contains(alert['geo_lga']) ||
+        return postedTo(assignedPus, alert['geo_pu']) ||
+            postedTo(assignedWards, alert['geo_ward']) ||
+            postedTo(assignedLgas, alert['geo_lga']) ||
             alert['geo_pu'] == null;
       }
       // HQ or special commands fall back to true

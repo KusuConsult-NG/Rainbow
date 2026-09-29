@@ -1,5 +1,6 @@
 import type { Alert } from '@/app/dashboard/types';
 import { matchesCategory } from './alert-category';
+import { geoMatchesKeyed } from './geo-key';
 
 /**
  * What HQ actually sees.
@@ -169,12 +170,13 @@ function isSmsFallback(a: Alert): boolean {
  * Field-entered place names are inconsistent ("Jos North" vs "JOS NORTH LGA"),
  * and under-matching here hides live incidents from the officer responsible
  * for them.
+ *
+ * Both sides are keyed first, because loose matching was not loose enough for
+ * the one difference that actually occurs in the data: the app files a ward as
+ * "GINDIRI  I" and the map offers "GINDIRI  1", and neither string contains the
+ * other. See geo-key.ts, and public.geo_key() which row-level security uses.
  */
-function geoMatches(alertValue: string | undefined, target: string): boolean {
-  const a = (alertValue || '').trim().toLowerCase();
-  const t = target.trim().toLowerCase();
-  return a === t || a.includes(t) || t.includes(a);
-}
+const geoMatches = geoMatchesKeyed;
 
 export function filterAlerts(alerts: Alert[], filters: AlertFilters): Alert[] {
   return alerts.filter(a => {

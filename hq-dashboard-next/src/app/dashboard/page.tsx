@@ -30,6 +30,7 @@ import {
 import type { Alert } from './types';
 import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
 import { emptyBoardMeaning, emptyBoardWording } from '@/lib/empty-board';
+import { geoKey, geoMatchesKeyed } from '@/lib/geo-key';
 import { consoleAccess } from '@/lib/console-access';
 import { describeTrack, summariseTrack, thinTrack, type TrackPoint } from '@/lib/incident-track';
 import { resolveReporterDetails } from '@/lib/incident-dossier';
@@ -954,20 +955,21 @@ export default function DashboardPage() {
   const boardMeaning = emptyBoardMeaning(boardState);
   const boardWording = emptyBoardWording(boardState);
 
-  const norm = (str?: string) => (str || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-
   const isMatchingLocation = (target: string, value?: string) => {
     if (!target || target === 'ALL') return true;
     if (!value) return false;
-    const nTarget = norm(target);
-    const nValue = norm(value);
-    if (nTarget === nValue) return true;
-    if (nValue.includes(nTarget) || nTarget.includes(nValue)) return true;
-    // Strip (BEAT-...) suffixes for clean name comparison
-    const cleanTarget = norm(target.replace(/\s*\([^)]+\)/g, ''));
-    const cleanValue = norm(value.replace(/\s*\([^)]+\)/g, ''));
-    if (cleanTarget && cleanValue && (cleanTarget.includes(cleanValue) || cleanValue.includes(cleanTarget))) return true;
-    return false;
+    // Keyed, not alphanumeric-squashed. The old version stripped every
+    // non-alphanumeric character, which turned 'GINDIRI  I' into 'gindirii'
+    // and 'GINDIRI  1' into 'gindiri1' — the two spellings of one ward, made
+    // further apart by the normalisation meant to bring them together. Worse,
+    // squashing let 'mangu11' contain 'mangu1', so the sector counters beside
+    // the filter added the neighbouring ward's duress alarms to this one's.
+    // geo-key.ts handles both, and matches what RLS compares on.
+    if (geoMatchesKeyed(value, target)) return true;
+    // A polling unit may carry a beat code in brackets that the other side
+    // does not: 'KATAKO (BEAT-BARKIN_LADI-11)' against 'KATAKO'.
+    const bare = (s: string) => s.replace(/\s*\([^)]+\)/g, '');
+    return geoMatchesKeyed(bare(value), bare(target));
   };
 
   const formatPuOption = (puRaw: string, defaultBadge?: string): SelectOption => {
@@ -1050,13 +1052,17 @@ export default function DashboardPage() {
       })));
 
   // Extract extra wards from live alerts that might not be in static map
+  // Deduplicated on geoKey, not on an alphanumeric squash. The squash kept
+  // 'GINDIRI  I' and 'GINDIRI  1' apart, so the dropdown offered the same
+  // ward twice — once from the map and once marked LIVE — and whichever the
+  // operator picked selected only half its incidents.
   const alertWards: SelectOption[] = [];
-  const seenWardVals = new Set(mapWards.map(w => norm(w.value)));
+  const seenWardVals = new Set(mapWards.map(w => geoKey(w.value)));
   
   alerts.forEach(a => {
     const wName = a.geo_ward || (a as any).ward;
-    if (wName && !seenWardVals.has(norm(wName))) {
-      seenWardVals.add(norm(wName));
+    if (wName && !seenWardVals.has(geoKey(wName))) {
+      seenWardVals.add(geoKey(wName));
       alertWards.push({
         value: wName,
         label: wName.toUpperCase(),
@@ -1079,12 +1085,12 @@ export default function DashboardPage() {
         : plateauTacticalMap.flatMap(l => l.wards.flatMap(w => w.pollingUnits.map(pu => formatPuOption(pu, l.name.substring(0, 4).toUpperCase())))));
 
   const alertPus: SelectOption[] = [];
-  const seenPuVals = new Set(mapPus.map(p => norm(p.value)));
+  const seenPuVals = new Set(mapPus.map(p => geoKey(p.value)));
   
   alerts.forEach(a => {
     const puName = a.geo_pu || (a as any).pu || (a as any).polling_unit;
-    if (puName && !seenPuVals.has(norm(puName))) {
-      seenPuVals.add(norm(puName));
+    if (puName && !seenPuVals.has(geoKey(puName))) {
+      seenPuVals.add(geoKey(puName));
       alertPus.push(formatPuOption(puName, 'LIVE'));
     }
   });

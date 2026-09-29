@@ -24,7 +24,14 @@
 /// name that leads to a dispatch nobody downstream expects is its own defect.
 library;
 
-/// Compare postings the way the database does: trimmed, case-insensitively.
+import 'package:rainbow_app/core/geo/geo_key.dart';
+
+/// Compare roles the way the database does: trimmed, case-insensitively.
+///
+/// PLACE names go through [geoKey] instead, which additionally folds the two
+/// spellings of the numbered Mangu wards — this app files an incident in
+/// 'GINDIRI  I' while an officer is posted to 'GINDIRI  1'. Roles have no such
+/// divergence and are left on the simpler rule.
 String? _norm(Object? value) {
   final v = (value as String?)?.trim().toUpperCase();
   return (v == null || v.isEmpty) ? null : v;
@@ -49,15 +56,15 @@ bool isUnderCommand(
 ) {
   if (commandsWholeState(commander['role'] as String?)) return true;
 
-  final myLga = _norm(commander['geo_lga']);
+  final myLga = geoKey(commander['geo_lga']);
   if (myLga == null) return false;
-  if (_norm(officer['geo_lga']) != myLga) return false;
+  if (geoKey(officer['geo_lga']) != myLga) return false;
 
   final role = _norm(commander['role']) ?? '';
 
   if (role.startsWith('WARD')) {
-    final myWard = _norm(commander['geo_ward']);
-    return myWard != null && _norm(officer['geo_ward']) == myWard;
+    final myWard = geoKey(commander['geo_ward']);
+    return myWard != null && geoKey(officer['geo_ward']) == myWard;
   }
 
   // A polling-unit officer IS the field unit, not a dispatcher.
@@ -96,12 +103,14 @@ String emptyRosterReason(Map<String, dynamic> commander) {
   if (commandsWholeState(commander['role'] as String?)) {
     return 'No officers are registered.';
   }
-  final lga = _norm(commander['geo_lga']);
+  final lga = geoKey(commander['geo_lga']);
   if (lga == null) {
     return 'Your account has no posting, so it commands no officers. '
         'Ask HQ to set your LGA.';
   }
   final role = _norm(commander['role']) ?? '';
-  final where = role.startsWith('WARD') ? (_norm(commander['geo_ward']) ?? lga) : lga;
+  final where = role.startsWith('WARD')
+      ? (geoKey(commander['geo_ward']) ?? lga)
+      : lga;
   return 'No officers are posted to $where. Escalate to have one sent.';
 }
