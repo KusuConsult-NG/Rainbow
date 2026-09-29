@@ -107,7 +107,7 @@ class LocationService {
   Future<Position?> getCurrentPosition({bool force = false}) async {
     try {
       final hasPermission = await requestPermission(force: force).timeout(
-        const Duration(seconds: 4),
+        const Duration(seconds: 30),
         onTimeout: () => false,
       );
       if (!hasPermission) return null;
@@ -120,7 +120,17 @@ class LocationService {
     } catch (e) {
       debugPrint('[LOC_ERR] Failed to get current position: $e');
       try {
-        return await Geolocator.getLastKnownPosition();
+        final lastKnown = await Geolocator.getLastKnownPosition();
+        if (lastKnown != null) {
+          // Only use cached position if it's less than 30 minutes old
+          final age = DateTime.now().difference(lastKnown.timestamp);
+          if (age.inMinutes < 30) {
+            return lastKnown;
+          } else {
+            debugPrint('[LOC] Last known position is ${age.inMinutes} minutes old — ignoring stale data');
+          }
+        }
+        return null;
       } catch (_) {
         return null;
       }
@@ -133,7 +143,7 @@ class LocationService {
   Stream<Position?> streamLocation() async* {
     try {
       final hasPermission = await requestPermission().timeout(
-        const Duration(seconds: 4),
+        const Duration(seconds: 30),
         onTimeout: () => false,
       );
       if (!hasPermission) {
@@ -155,7 +165,13 @@ class LocationService {
         try {
           final lastKnown = await Geolocator.getLastKnownPosition();
           if (lastKnown != null) {
-            yield lastKnown;
+            // Only use cached position if it's less than 30 minutes old
+            final age = DateTime.now().difference(lastKnown.timestamp);
+            if (age.inMinutes < 30) {
+              yield lastKnown;
+            } else {
+              debugPrint('[LOC] Last known position is ${age.inMinutes} minutes old — ignoring stale data');
+            }
           }
         } catch (_) {}
       }

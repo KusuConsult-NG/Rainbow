@@ -66,6 +66,23 @@ export async function POST(req: NextRequest) {
 
     const supabase = getSupabaseAdmin();
 
+    // A SECOND authorisation check used to sit here, and it was broken twice
+    // over. It called `createClient` without importing it, so the deployment
+    // failed to type check and nothing shipped at all. And it read the caller
+    // from an `Authorization: Bearer` header, while the only caller —
+    // alert-actions.ts escalateAlert — sends no such header, so once it
+    // compiled it would have refused every agency notification with a 401.
+    //
+    // The route is already authorised: `requireRole(COMMAND_ROLES)` runs above
+    // before any work, reads the session from cookies (which is what a browser
+    // actually has), and looks the role up with admin privileges so a
+    // permissive policy cannot spoof it.
+    //
+    // NOTE: that block also listed a NARROWER set — HQ_COMMAND, HQ_OFFICER,
+    // ADMIN — where COMMAND_ROLES also includes LGA_COMMAND. Excluding LGA
+    // command from agency escalation may well be intended, but it is a change
+    // to who can do this, not a bug fix, so it is not being made silently here.
+
     const results: { method: string; status: string; detail?: string }[] = [];
 
     // ── 1. SMS via Termii ──────────────────────────────────────────────────
@@ -87,7 +104,7 @@ export async function POST(req: NextRequest) {
       ].join('\n');
 
       try {
-        const termiiRes = await fetch('https://v3.api.termii.com/api/sms/send', {
+        const termiiRes = await fetch('https://v4.api.termii.com/api/sms/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

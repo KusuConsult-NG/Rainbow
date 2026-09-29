@@ -238,6 +238,13 @@ fi
 # The command chain had structure for ROUTING and none for AUTHORITY: is_staff()
 # means "not a citizen", so every officer at every tier could read AND write
 # every incident in the state.
+# Applied FIRST, because production has it: it adds an LGA-wide permissive
+# policy that the scoping migration below has to remove. Testing the scoping
+# without it present is testing a database nobody runs.
+echo "▶ Applying 20260725000000_v6_geo_lga_scoping_staging.sql"
+psql_run "-f $PGROOT/20260725000000_v6_geo_lga_scoping_staging.sql" >/dev/null 2>&1 || \
+  echo "  (v6 not applicable here; continuing)"
+
 echo "▶ Applying 20261006000000_alerts_scoped_to_posting.sql"
 psql_run "-f $PGROOT/20261006000000_alerts_scoped_to_posting.sql" >/dev/null
 echo "▶ Re-applying it (must be idempotent)"

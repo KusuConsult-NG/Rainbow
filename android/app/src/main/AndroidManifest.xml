@@ -51,6 +51,20 @@
     <!-- Phone calls for emergency escalation -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
 
+    <!--
+        SMS — Play Store Declaration Required
+        Permission:   SEND_SMS
+        Use case:     Emergency gateway dispatcher sends one-time confirmation codes
+                      and SOS activation acknowledgements to citizens via Termii
+                      shortcode when internet connectivity is degraded or unavailable.
+        Shortcode:    stored in SMS_EMERGENCY_SHORTCODE env var (never hardcoded).
+        Data sent:    Incident reference number + safe-word acknowledgement only.
+                      No PII, location, or media is transmitted via SMS.
+        Alternative:  Not possible — internet may be unavailable during the exact
+                      emergency scenario this app is designed for.
+    -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+
     <!-- Camera & Audio for WebRTC Live Stream -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -118,6 +132,12 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>
     </queries>
 </manifest>
