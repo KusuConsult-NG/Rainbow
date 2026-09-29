@@ -61,6 +61,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/ussd_confirmation_behaviour_test.sql \
    "$REPO"/scripts/ussd_filing_behaviour_test.sql \
    "$REPO"/scripts/ai_reports_behaviour_test.sql \
+   "$REPO"/scripts/oversight_behaviour_test.sql \
    "$REPO"/scripts/why_is_the_board_empty.sql \
    "$REPO"/scripts/seed_demo_incidents.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
@@ -365,6 +366,20 @@ AIR_OUT=$(psql_run "-f $PGROOT/ai_reports_behaviour_test.sql" 2>&1) && AIR_RC=0 
 echo "$AIR_OUT" | grep -E "PASS|NOTE|FAIL|ERROR" || true
 if [ "$AIR_RC" -ne 0 ]; then
   echo "$AIR_OUT"; echo "✗ AI report assertions failed"; exit 1
+fi
+
+# 'Police brutality' is a reportable category, and it routed like a flood: to the
+# local ward, the local LGA, and every responder posted there — which may include
+# the officer complained about — with the complainant's number on the dossier.
+echo "▶ Applying 20261015000000_oversight_and_debrief.sql"
+psql_run "-f $PGROOT/20261015000000_oversight_and_debrief.sql" >/dev/null
+psql_run "-f $PGROOT/20261015000000_oversight_and_debrief.sql" >/dev/null
+
+echo "▶ Asserting a complaint about an officer does not reach that officer"
+OVS_OUT=$(psql_run "-f $PGROOT/oversight_behaviour_test.sql" 2>&1) && OVS_RC=0 || OVS_RC=$?
+echo "$OVS_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$OVS_RC" -ne 0 ]; then
+  echo "$OVS_OUT"; echo "✗ oversight assertions failed"; exit 1
 fi
 
 echo "▶ Asserting the mesh recognises a duplicate, and forgets in time"

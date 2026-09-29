@@ -105,18 +105,49 @@ async function deliverPush(payload: Record<string, unknown>): Promise<void> {
       ? { include_player_ids: payload.player_ids }
       : { included_segments: ['Active Users'] }),
   };
-  const res = await fetch('https://onesignal.com/api/v1/notifications', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Key ${ONESIGNAL_REST_API_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`OneSignal ${res.status}: ${err}`);
+  // Trying the other authentication scheme once if the credential is refused.
+  //
+  // This was the FOURTH place sending the same OneSignal key, and it used `Key`
+  // while the console's two routes used `Basic` — so at most one group of them
+  // ever authenticated. A CI gate now refuses a hardcoded scheme anywhere; the
+  // canonical implementation, with the full account, is
+  // hq-dashboard-next/src/lib/onesignal-auth.ts.
+  const configured = (Deno.env.get('ONESIGNAL_AUTH_SCHEME') ?? '').toLowerCase();
+  const guess = ONESIGNAL_REST_API_KEY.trim().startsWith('os_v2_') ? 'Key' : 'Basic';
+  const first = configured === 'basic' ? 'Basic' : configured === 'key' ? 'Key' : guess;
+  const attempts = [first, first === 'Basic' ? 'Key' : 'Basic'];
+
+  let lastStatus = 0;
+  let lastBody = '';
+  for (let i = 0; i < attempts.length; i += 1) {
+    const scheme = attempts[i];
+    const res = await fetch('https://onesignal.com/api/v1/notifications', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `${scheme} ${ONESIGNAL_REST_API_KEY.trim()}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      if (i > 0) {
+        console.warn(
+          `[ONESIGNAL] authenticated with "${scheme}" after "${attempts[0]}" was ` +
+            `refused. Set ONESIGNAL_AUTH_SCHEME=${scheme} to skip the retry.`,
+        );
+      }
+      return;
+    }
+    lastStatus = res.status;
+    lastBody = await res.text().catch(() => '');
+    // Only an auth failure is worth a second attempt.
+    if (res.status !== 401 && res.status !== 403) break;
   }
+
+  // Thrown, so the caller marks the outbox row FAILED and it is retried. A
+  // swallowed error here would mark an escalation delivered with nobody told —
+  // the defect the outbox exists to end.
+  throw new Error(`OneSignal ${lastStatus}: ${lastBody.slice(0, 300)}`);
 }
 
 async function deliverSms(payload: Record<string, unknown>): Promise<void> {

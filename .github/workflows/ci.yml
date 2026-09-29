@@ -172,6 +172,31 @@ jobs:
       - name: Assert the console's ward centroids match the app's
         run: python3 scripts/sync_ward_centroids.py --check
 
+      # Three call sites sent the SAME OneSignal credential under two different
+      # schemes — Basic twice, Key once — so at least one had never
+      # authenticated, and the one most likely to be broken reported
+      # `success: true` without checking response.ok. A Deno edge function cannot
+      # import from the Next app, so the fallback logic is duplicated there; this
+      # asserts nobody hardcodes a scheme again.
+      - name: Assert no OneSignal auth scheme is hardcoded
+        run: |
+          set -euo pipefail
+          # A literal `Basic ${key}` or `Key ${key}` outside the canonical module.
+          HITS=$(grep -rnE 'Authorization.{0,4}: *.?(Basic|Key) \$\{' \
+                   hq-dashboard-next/src supabase/functions \
+                 | grep -v 'onesignal-auth' || true)
+          if [ -n "$HITS" ]; then
+            echo "$HITS"
+            echo "::error::send OneSignal pushes through lib/onesignal-auth.ts — a hardcoded scheme is how three call sites came to disagree"
+            exit 1
+          fi
+          # ...and both copies must still carry the fallback, or the gate guards
+          # an absence.
+          grep -q 'ONESIGNAL_AUTH_SCHEME' hq-dashboard-next/src/lib/onesignal-auth.test.ts \
+            || { echo "::error::the auth-scheme fallback is no longer covered"; exit 1; }
+          grep -q 'ONESIGNAL_AUTH_SCHEME' supabase/functions/notify-alert/index.ts \
+            || { echo "::error::notify-alert lost its auth-scheme fallback"; exit 1; }
+
       # The mesh sealer shipped with DateTime.now().microsecondsSinceEpoch as the
       # seed for the generator that produces every AES-GCM nonce AND HQ's own
       # keypair. Two seals in one microsecond would then repeat a nonce, which

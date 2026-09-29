@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { serverEnv } from '@/lib/env';
+import { postNotification } from '@/lib/onesignal-auth';
 import {
   escalationMessage,
   recipientsFor,
@@ -140,13 +141,12 @@ export async function POST(request: Request) {
       }
 
       const { heading, body } = escalationMessage(row);
-      const response = await fetch('https://onesignal.com/api/v1/notifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Basic ${oneSignalRestKey}`,
-        },
-        body: JSON.stringify({
+      // Through the shared sender, so the scheme cannot diverge from the other
+      // two call sites again — this one sent `Basic` while
+      // supabase/functions/notify-alert sent `Key` for the same key.
+      const outcome = await postNotification(
+        oneSignalRestKey,
+        {
           app_id: oneSignalAppId,
           include_player_ids: playerIds,
           headings: { en: heading },
@@ -156,14 +156,14 @@ export async function POST(request: Request) {
             type: 'TIER_ESCALATION',
             toTier: row.payload?.to_tier,
           },
-        }),
-      });
+        },
+        { configuredScheme: process.env.ONESIGNAL_AUTH_SCHEME },
+      );
 
-      if (!response.ok) {
-        const detail = await response.text().catch(() => '');
+      if (!outcome.ok) {
         await supabase.rpc('mark_notification_failed', {
           p_id: row.id,
-          p_error: `OneSignal ${response.status}: ${detail.slice(0, 200)}`,
+          p_error: `OneSignal ${outcome.status}: ${(outcome.error ?? '').slice(0, 200)}`,
         });
         failed += 1;
         continue;
