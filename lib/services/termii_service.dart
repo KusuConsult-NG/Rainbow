@@ -25,7 +25,10 @@ class TermiiService {
     return dotenv.env['TERMII_API_KEY'] ?? 'MOCK_TERMII_API_KEY';
   }
 
-  static const String _senderId = 'N-Alert';
+  static String get _senderId =>
+      dotenv.isInitialized && (dotenv.env['TERMII_SENDER_ID'] ?? '').isNotEmpty
+          ? dotenv.env['TERMII_SENDER_ID']!
+          : 'OE Alert';
   static String get _baseUrl =>
       dotenv.isInitialized && (dotenv.env['TERMII_BASE_URL'] ?? '').isNotEmpty
           ? dotenv.env['TERMII_BASE_URL']!
