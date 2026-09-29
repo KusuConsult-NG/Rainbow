@@ -473,15 +473,40 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
  * "No GPS" discovered three rows down, after a coordinate-shaped circle has
  * already been believed, is not a warning.
  */
-function approximateDossier(html: string, where: IncidentLocation): string {
+/**
+ * The landmark is typed by a member of the public, into a field that lands in
+ * innerHTML. Escaped here rather than trusted: incident-dossier.ts already runs
+ * every reporter-supplied value through escapeHtml for exactly this reason, and a
+ * banner that skipped it would be the one place a reporter could script the
+ * dispatcher's console.
+ */
+function escapeForPopup(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function approximateDossier(html: string, alert: Alert, where: IncidentLocation): string {
   const note = where.precision === 'WARD'
     ? `NO GPS — approximate area only, about ${approxRadiusLabel(where.radiusM)} across.`
     : `NO GPS — only the LGA is known, about ${approxRadiusLabel(where.radiusM)} across.`;
+  // The landmark goes in the SAME banner as the warning, not further down. It is
+  // the answer to the question the warning raises — "then where is it?" — and a
+  // dispatcher who reads "no GPS" and stops has missed the one navigable thing on
+  // the card.
+  const landmark = (alert as { reporter_landmark?: string | null }).reporter_landmark;
+  const landmarkRow = landmark
+    ? `<br>Nearest landmark: ${escapeForPopup(landmark)}`
+    : '';
   return (
     '<div style="background:rgba(245,158,11,0.18);border:1px solid rgba(245,158,11,0.5);'
     + 'padding:6px 8px;border-radius:6px;margin-bottom:8px;font-size:10px;font-weight:800;'
     + 'color:#b45309;line-height:1.35">'
     + note
+    + landmarkRow
     + '<br>Do not dispatch to this circle as an address.'
     + '</div>'
     + html
@@ -672,7 +697,7 @@ function drawApproximateArea(
         drawApproximateArea(
           alert, where, L, clusterGroup,
           alertMarkersRef.current, areaDrawnFromRef.current,
-          approximateDossier(popupContent, where),
+          approximateDossier(popupContent, alert, where),
         );
         return;
       }

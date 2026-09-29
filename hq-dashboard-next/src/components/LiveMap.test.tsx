@@ -598,6 +598,69 @@ describe('LiveMap', () => {
     });
   });
 
+  describe('the landmark on an approximate incident', () => {
+    it('is in the same banner as the no-GPS warning', async () => {
+      // It is the answer to the question the warning raises — "then where is
+      // it?" — and a dispatcher who reads "no GPS" and stops has missed the one
+      // navigable thing on the card.
+      const LiveMap = await load();
+      const withLandmark = {
+        ...alert('u-3', 0, 0),
+        lat: undefined, lng: undefined,
+        geo_lga: 'JOS NORTH', geo_ward: 'ABBA NA SHEHU',
+        reporter_landmark: 'behind the Bauchi Road mosque',
+      } as unknown as Alert;
+      const { container } = render(
+        <LiveMap alerts={[withLandmark]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" />,
+      );
+      const circle = await waitFor(() => {
+        const p = container.querySelector('.leaflet-overlay-pane path');
+        expect(p).not.toBeNull();
+        return p as Element;
+      });
+      circle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const popup = await waitFor(() => {
+        const el = container.querySelector('.leaflet-popup-content');
+        expect(el).not.toBeNull();
+        return el as HTMLElement;
+      }, { timeout: 5000 });
+      expect(popup.textContent).toContain('behind the Bauchi Road mosque');
+      expect(popup.textContent).toContain('NO GPS');
+    });
+
+    it('does not execute markup a reporter typed into it', async () => {
+      // The landmark is typed by a member of the public and lands in innerHTML.
+      // incident-dossier.ts escapes every reporter-supplied value for exactly
+      // this reason; a banner that skipped it would be the one place a reporter
+      // could script the dispatcher's console.
+      const LiveMap = await load();
+      const hostile = {
+        ...alert('u-4', 0, 0),
+        lat: undefined, lng: undefined,
+        geo_lga: 'JOS NORTH', geo_ward: 'ABBA NA SHEHU',
+        reporter_landmark: '<img src=x onerror="window.__pwned=1">near the market',
+      } as unknown as Alert;
+      const { container } = render(
+        <LiveMap alerts={[hostile]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" />,
+      );
+      const circle = await waitFor(() => {
+        const p = container.querySelector('.leaflet-overlay-pane path');
+        expect(p).not.toBeNull();
+        return p as Element;
+      });
+      circle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const popup = await waitFor(() => {
+        const el = container.querySelector('.leaflet-popup-content');
+        expect(el).not.toBeNull();
+        return el as HTMLElement;
+      }, { timeout: 5000 });
+      expect(popup.querySelector('img')).toBeNull();
+      expect((globalThis as Record<string, unknown>).__pwned).toBeUndefined();
+      // The words still reach the dispatcher, escaped.
+      expect(popup.textContent).toContain('near the market');
+    });
+  });
+
   describe('an incident with nothing at all', () => {
     it('is still not drawn, and no coordinates are invented', async () => {
       // The C-5 line. An alert with no location must not appear anywhere on the

@@ -49,6 +49,15 @@ export interface ProvenanceAlert {
   reporter_msisdn?: string | null;
   caller_may_be_called?: boolean | null;
   public_reference?: string | null;
+  /**
+   * The nearest landmark as the reporter typed it.
+   *
+   * The most navigable thing on a keypad report: a USSD alert has no GPS, so the
+   * map can only draw a circle the size of the ward. This is what a driver can
+   * actually go to. It is text for a person to read and never becomes
+   * coordinates — see migration 20261013000000.
+   */
+  reporter_landmark?: string | null;
 }
 
 export function arrivedByKeypad(alert: ProvenanceAlert): boolean {
