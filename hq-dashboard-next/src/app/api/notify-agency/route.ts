@@ -66,6 +66,27 @@ export async function POST(req: NextRequest) {
 
     const supabase = getSupabaseAdmin();
 
+    // Verify caller is authenticated with a valid Supabase session
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    const authClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    const { data: { user }, error: authErr } = await authClient.auth.getUser(token);
+    if (authErr || !user) {
+      return NextResponse.json({ error: 'Unauthorized: Invalid session' }, { status: 401 });
+    }
+
+    const { data: callerProfile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+    const allowedRoles = ['HQ_COMMAND', 'HQ_OFFICER', 'ADMIN'];
+    if (!callerProfile || !allowedRoles.includes(callerProfile.role)) {
+      return NextResponse.json({ error: 'Forbidden: Insufficient role' }, { status: 403 });
+    }
+
     const results: { method: string; status: string; detail?: string }[] = [];
 
     // ── 1. SMS via Termii ──────────────────────────────────────────────────
@@ -87,7 +108,7 @@ export async function POST(req: NextRequest) {
       ].join('\n');
 
       try {
-        const termiiRes = await fetch('https://v3.api.termii.com/api/sms/send', {
+        const termiiRes = await fetch('https://v4.api.termii.com/api/sms/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
