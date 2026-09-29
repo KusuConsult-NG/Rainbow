@@ -415,6 +415,12 @@ export default function DashboardPage() {
   const [alertsTotal, setAlertsTotal] = useState<number | null>(null);
   /** Non-null when the last read of the feed FAILED. Never "no incidents". */
   const [feedError, setFeedError] = useState<string | null>(null);
+  /**
+   * Whether the database confirmed it knows who is asking, checked only when
+   * the board came back empty. false means an empty board proves nothing.
+   * See src/lib/empty-board.ts.
+   */
+  const [identityConfirmed, setIdentityConfirmed] = useState<boolean | null>(null);
   const [theme, setTheme] = usePersistedTheme();
   const [timeString, setTimeString] = useState('');
   const [selectedReport, setSelectedReport] = useState<Alert | null>(null);
@@ -633,6 +639,38 @@ export default function DashboardPage() {
       setFeedError(null);
 
       setAlertsTotal(count ?? null);
+
+      // AN EMPTY BOARD HAS TO BE CORROBORATED.
+      //
+      // Row-level security is not an error. A request that reaches PostgREST
+      // without a usable token — an expired session this client still holds a
+      // `user` for, an anon key from a different project — has a NULL
+      // auth.uid() in every policy, so nothing is admitted and the answer is a
+      // successful 200 with []. `error` is null. It is byte-for-byte the
+      // response an empty Plateau would give, and the check above cannot tell
+      // them apart.
+      //
+      // So when the board comes back empty, ask the database whether it knows
+      // who is asking: select our own profiles row, which
+      // profiles_select_self_or_staff admits on `id = auth.uid()`. A row back
+      // means the token arrived and the emptiness is real. Nothing back, with
+      // no error, means the token did not arrive and the emptiness means
+      // nothing at all.
+      //
+      // Only when the board is empty, so the normal path pays for none of it.
+      if ((data?.length ?? 0) === 0 && user?.id) {
+        const { data: me, error: meError } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (mine !== latestAlertsRequest) return;
+        // An error here is its own answer and is reported as one. Absence of
+        // both a row and an error is the case this exists for.
+        setIdentityConfirmed(meError ? null : Boolean(me));
+      } else {
+        setIdentityConfirmed(null);
+      }
 
       if (data) {
         const mapped = data.map((d: any) => ({
@@ -951,7 +989,12 @@ export default function DashboardPage() {
   // `alerts.length`, not `displayAlerts.length`: clustering folds rows together
   // but never drops them, and the number an operator needs is how many
   // incidents came back from the database.
-  const boardState = { feedError, loaded: alerts.length, visible: filtered.length };
+  const boardState = {
+    feedError,
+    loaded: alerts.length,
+    visible: filtered.length,
+    identityConfirmed,
+  };
   const boardMeaning = emptyBoardMeaning(boardState);
   const boardWording = emptyBoardWording(boardState);
 

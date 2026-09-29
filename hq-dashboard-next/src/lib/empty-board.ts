@@ -39,6 +39,12 @@
 export type EmptyBoardMeaning =
   /** The read failed. Nothing is known; say so loudly. */
   | 'READ_FAILED'
+  /**
+   * The read SUCCEEDED and returned nothing, and the database does not
+   * recognise this session. See the note below — this is the empty board that
+   * looks most like good news and is not.
+   */
+  | 'SESSION_NOT_RECOGNISED'
   /** Incidents are loaded; the operator's filters exclude all of them. */
   | 'HIDDEN_BY_FILTERS'
   /** A live, complete read that found nothing. The only honest all-clear. */
@@ -53,15 +59,47 @@ export interface BoardState {
   loaded: number;
   /** How many survive the operator's current filter selections. */
   visible: number;
+  /**
+   * Whether the DATABASE agrees it knows who is asking.
+   *
+   * ## Why checking `error` is not enough
+   *
+   * Row-level security is not an error. When a request reaches PostgREST
+   * without a usable token — an expired session the client still holds a `user`
+   * object for, an anon key belonging to a different project, a token the
+   * browser dropped — every policy's `auth.uid()` is NULL, so nothing is
+   * admitted and the response is a perfectly successful `200` with `[]`.
+   *
+   * `error` is null. `data` is an empty array. It is byte-for-byte the response
+   * an empty Plateau would give, and the board would say ALL SECTORS CLEAR on
+   * the strength of a request that was never authenticated.
+   *
+   * So when the board comes back empty and somebody IS signed in, the console
+   * asks the database to confirm it: select the caller's own `profiles` row,
+   * which `profiles_select_self_or_staff` admits on `id = auth.uid()`. A row
+   * back means the token arrived and the emptiness is real. No row back, with
+   * no error, means the token did not arrive and the emptiness means nothing.
+   *
+   * null when the question was not asked — the board had rows to draw, or
+   * nobody is signed in yet.
+   */
+  identityConfirmed?: boolean | null;
 }
 
 /**
  * A failed read never yields ALL_CLEAR, whatever else is true. It is checked
  * first and unconditionally: a stale `alerts` array from a previous successful
  * poll must not let a refusal borrow the last good answer's confidence.
+ *
+ * An unrecognised session is checked before the filter explanation for the same
+ * reason — "your filters hide everything" invites the operator to clear the
+ * filters, see nothing, and conclude the state is quiet.
  */
-export function emptyBoardMeaning({ feedError, loaded, visible }: BoardState): EmptyBoardMeaning {
+export function emptyBoardMeaning(
+  { feedError, loaded, visible, identityConfirmed }: BoardState,
+): EmptyBoardMeaning {
   if (feedError) return 'READ_FAILED';
+  if (identityConfirmed === false) return 'SESSION_NOT_RECOGNISED';
   if (visible > 0) return 'NOT_EMPTY';
   if (loaded > 0) return 'HIDDEN_BY_FILTERS';
   return 'ALL_CLEAR';
@@ -82,6 +120,15 @@ export function emptyBoardWording(state: BoardState): { heading: string; detail:
         detail:
           'The incident feed could not be read, so this screen is not showing the '
           + 'state of Plateau. Do not treat it as quiet.',
+      };
+    case 'SESSION_NOT_RECOGNISED':
+      return {
+        heading: 'SESSION NOT RECOGNISED',
+        detail:
+          'The incident feed returned nothing, and the database did not recognise '
+          + 'this session — so an empty board proves nothing about Plateau. Sign out '
+          + 'and sign in again. If it persists, the console is using credentials for '
+          + 'a different project.',
       };
     case 'HIDDEN_BY_FILTERS':
       return {
