@@ -478,11 +478,62 @@ export default function DashboardPage() {
   // one frame before clearing it. Deriving removes both problems: opening a
   // different report simply has nothing to show.
   const [summary, setSummary] = useState<
-    { reportId: string; text: string | null; generating: boolean } | null
+    {
+      reportId: string;
+      text: string | null;
+      generating: boolean;
+      /** When this report was produced, if it came from the record. */
+      keptAt?: string | null;
+    } | null
   >(null);
+
+  // Read back the report the SERVER kept, rather than generating a new one.
+  //
+  // The forensic summary used to live in React state and nowhere else, so an
+  // administrator had no way to see a report that had been generated and every
+  // reopen billed Gemini again for the same analysis. It is now written by
+  // /api/ai/analyze at the moment the model answers (migration 20261014000000),
+  // and this simply looks for it.
+  //
+  // Only when there is nothing on screen for this report already: a freshly
+  // generated summary must not be overwritten by an older stored one a moment
+  // later.
+  useEffect(() => {
+    const id = selectedReport?.id;
+    if (!id) return;
+    if (summary && summary.reportId === id) return;
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase.rpc('latest_ai_report', {
+        p_alert_id: id,
+        p_kind: 'summary',
+      });
+      if (cancelled || error) return;
+      const row = Array.isArray(data) && data.length > 0
+        ? (data[0] as { body: string; created_at: string })
+        : null;
+      if (!row) return;
+      setSummary({
+        reportId: id,
+        text: row.body,
+        generating: false,
+        keptAt: row.created_at,
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [selectedReport?.id, summary]);
   const summaryIsForSelected =
     summary !== null && selectedReport !== null && summary.reportId === selectedReport.id;
   const aiSummary = summaryIsForSelected ? summary.text : null;
+  /**
+   * When the report on screen was produced, or null if it was just generated.
+   *
+   * Shown because a forensic debrief written before the incident was resolved
+   * reads identically to one written after it, and an operator acting on a
+   * week-old assessment as though it were current is the kind of mistake a
+   * timestamp prevents for the cost of one line.
+   */
+  const aiSummaryKeptAt = summaryIsForSelected ? (summary.keptAt ?? null) : null;
   const isGeneratingSummary = summaryIsForSelected ? summary.generating : false;
   const router = useRouter();
   const toast = useToast();
@@ -2265,6 +2316,16 @@ export default function DashboardPage() {
 
                   {aiSummary && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      {/* When it was produced. A debrief written before the
+                          incident was resolved reads identically to one written
+                          after it, and an operator acting on a week-old
+                          assessment as though it were current is the kind of
+                          mistake a timestamp prevents for one line. */}
+                      <div style={{ fontSize: 9.5, fontWeight: 800, color: 'var(--text-dim)', letterSpacing: 0.5 }}>
+                        {aiSummaryKeptAt
+                          ? `ON RECORD · PRODUCED ${new Date(aiSummaryKeptAt).toLocaleString()}`
+                          : 'JUST GENERATED · NOW ON RECORD'}
+                      </div>
                       {renderFormattedSummary(aiSummary)}
                     </div>
                   )}

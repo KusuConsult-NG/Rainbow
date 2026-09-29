@@ -60,6 +60,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/alert_media_behaviour_test.sql \
    "$REPO"/scripts/ussd_confirmation_behaviour_test.sql \
    "$REPO"/scripts/ussd_filing_behaviour_test.sql \
+   "$REPO"/scripts/ai_reports_behaviour_test.sql \
    "$REPO"/scripts/why_is_the_board_empty.sql \
    "$REPO"/scripts/seed_demo_incidents.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
@@ -350,6 +351,20 @@ UFIL_OUT=$(psql_run "-f $PGROOT/ussd_filing_behaviour_test.sql" 2>&1) && UFIL_RC
 echo "$UFIL_OUT" | grep -E "PASS|FAIL|ERROR" || true
 if [ "$UFIL_RC" -ne 0 ]; then
   echo "$UFIL_OUT"; echo "✗ USSD filing assertions failed"; exit 1
+fi
+
+# The forensic summary used to live in React state and nowhere else. Now the
+# server that called the model writes it — and the control is that nobody signed
+# in can, or an operator could put words in the model's mouth in the audit record.
+echo "▶ Applying 20261014000000_ai_reports_are_kept.sql"
+psql_run "-f $PGROOT/20261014000000_ai_reports_are_kept.sql" >/dev/null
+psql_run "-f $PGROOT/20261014000000_ai_reports_are_kept.sql" >/dev/null
+
+echo "▶ Asserting nobody can put words in the model's mouth"
+AIR_OUT=$(psql_run "-f $PGROOT/ai_reports_behaviour_test.sql" 2>&1) && AIR_RC=0 || AIR_RC=$?
+echo "$AIR_OUT" | grep -E "PASS|NOTE|FAIL|ERROR" || true
+if [ "$AIR_RC" -ne 0 ]; then
+  echo "$AIR_OUT"; echo "✗ AI report assertions failed"; exit 1
 fi
 
 echo "▶ Asserting the mesh recognises a duplicate, and forgets in time"

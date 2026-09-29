@@ -154,6 +154,35 @@ export async function POST(request: Request) {
 
     const data = await res.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+
+    // KEEP IT. This used to return the text and nothing more: the console put it
+    // in React state, rendered it, and lost it when the dossier closed. So there
+    // was nowhere for an administrator to see a report that had been generated,
+    // every reopen billed the same analysis again, and — the one that matters —
+    // there was no record of what the model said at the moment an officer acted
+    // on it. A forensic assessment that lives until a browser tab closes cannot
+    // be part of an audit trail.
+    //
+    // Written HERE, by the server that actually called Gemini, and INSERT on that
+    // table is service-role only. If the browser wrote it, an operator could put
+    // words in the model's mouth in the audit record and nothing downstream could
+    // tell that from a real completion. See migration 20261014000000.
+    if (text) {
+      const { error: keepErr } = await admin.from('incident_ai_reports').insert({
+        alert_id: alertId,
+        kind,
+        body: text,
+        model: MODEL,
+        requested_by: auth.userId,
+      });
+      if (keepErr) {
+        // The analysis still goes back to the operator who asked for it. Losing
+        // the record is bad; withholding a forensic debrief from the person
+        // looking at the incident because a write failed is worse.
+        console.error('[AI_ANALYZE] could not keep the report', keepErr);
+      }
+    }
+
     return NextResponse.json({ status: 'OK', text }, { status: 200 });
   } catch (err) {
     console.error('[AI_ANALYZE_ERR]', err);
