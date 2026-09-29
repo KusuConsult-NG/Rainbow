@@ -126,6 +126,30 @@ describe('the credibility panel', () => {
   });
 });
 
+describe('the landmark', () => {
+  it('is shown, because it is the only navigable thing on a keypad report', async () => {
+    mount({ ...KEYPAD, reporter_landmark: 'behind Bukuru market, by the junction' });
+    expect(await screen.findByText(/behind Bukuru market, by the junction/)).toBeTruthy();
+  });
+
+  it('is shown on a CONFIRMED report too', async () => {
+    // It is what the responder needs, and it does not stop being useful once an
+    // officer has stood behind the report.
+    mount({
+      ...KEYPAD,
+      ussd_confirmed_at: '2026-09-29T10:00:00Z',
+      reporter_landmark: 'POLICE BARRACKS',
+    });
+    expect(await screen.findByText(/POLICE BARRACKS/)).toBeTruthy();
+  });
+
+  it('is absent when the caller skipped it', async () => {
+    mount({ ...KEYPAD, reporter_landmark: null });
+    await screen.findByText(/KEYPAD · UNCONFIRMED/);
+    expect(screen.queryByText(/Nearest landmark/)).toBeNull();
+  });
+});
+
 describe('confirming', () => {
   it('calls the action and tells the board to refetch', async () => {
     const { onChanged } = mount();

@@ -32,6 +32,12 @@ import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
 import { emptyBoardMeaning, emptyBoardWording } from '@/lib/empty-board';
 import { geoKey, geoMatchesKeyed } from '@/lib/geo-key';
 import UssdProvenancePanel from '@/components/UssdProvenancePanel';
+import {
+  alreadyApplied,
+  applyButtonLabel,
+  triageChanges,
+  type TriageRecommendation,
+} from '@/lib/ai-triage-apply';
 import { consoleAccess } from '@/lib/console-access';
 import { describeTrack, summariseTrack, thinTrack, type TrackPoint } from '@/lib/incident-track';
 import { resolveReporterDetails } from '@/lib/incident-dossier';
@@ -2541,18 +2547,55 @@ Respond ONLY with a JSON object with this exact shape:
     }
   };
 
+  /**
+   * Apply the AI's grading to this incident.
+   *
+   * The previous version wrote `status: 'DISPATCHED'` and nothing else: no
+   * classification was applied, the incident was marked as having a unit sent
+   * when none was, and the `catch` never fired because the Supabase client
+   * returns `{ error }` rather than throwing — so a refused write still reported
+   * "Classifications Applied". See lib/ai-triage-apply.ts for the whole account.
+   */
   const applyTriage = async () => {
-    setLoading(true);
-    const toastId = toast.loading('Applying Classifications...', 'Updating incident status');
-    try {
-      await supabase.from('alerts').update({ status: 'DISPATCHED' }).eq('id', alert.id);
-      toast.update(toastId, 'success', 'Classifications Applied', 'Incident status updated to DISPATCHED');
-    } catch (err: any) {
-      console.error("Failed to apply triage:", err);
-      toast.update(toastId, 'error', 'Apply Failed', err.message || 'Could not update incident classifications');
-    } finally {
-      setLoading(false);
+    const triage = (alert as any).ai_triage as TriageRecommendation | undefined;
+    if (!triage) return;
+    const change = triageChanges(alert, triage, { id: dispatcher?.id ?? null });
+    if (Object.keys(change.patch).length === 0) {
+      toast.info('Nothing to apply', 'This incident already carries that grading.');
+      return;
     }
+
+    setLoading(true);
+    const toastId = toast.loading('Applying grading...', change.note.split('.')[0]);
+    // The note appends to ai_summary so the change is on the record. Read fresh
+    // rather than from props: another operator may have written to it since this
+    // card rendered.
+    const { data: fresh } = await supabase
+      .from('alerts').select('ai_summary').eq('id', alert.id).maybeSingle();
+    const existing = (fresh as { ai_summary?: string } | null)?.ai_summary ?? '';
+
+    const { error } = await supabase
+      .from('alerts')
+      .update({
+        ...change.patch,
+        ai_summary: existing ? `${existing}\n${change.note}` : change.note,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', alert.id);
+
+    setLoading(false);
+    if (error) {
+      // CHECKED, at last. The client does not throw, so the old try/catch was
+      // decoration and every failure was reported as a success.
+      console.error('[APPLY_TRIAGE_ERR]', error);
+      toast.update(toastId, 'error', 'Not applied', error.message || 'The grading was not saved.');
+      return;
+    }
+    toast.update(
+      toastId, 'success',
+      change.direction === 'lowered' ? 'Severity lowered' : 'Severity applied',
+      change.note.split('.')[0],
+    );
   };
 
   const { name: reporterName, contact: reporterContact, type: reporterType } = resolveReporterDetails(alert, usersMap);
@@ -2826,7 +2869,12 @@ Respond ONLY with a JSON object with this exact shape:
 
         {(alert as any).ai_triage && !triageLoading && (() => {
           const triage = (alert as any).ai_triage;
-          const isMatch = alert.type === triage.recommended_type && alert.priority === triage.recommended_priority;
+          // Was `alert.type === triage.recommended_type && ...`, comparing
+          // 'Kidnap - Immediate Abduction' to 'CRIME'. Never equal, so the
+          // button was offered on every graded incident including immediately
+          // after being pressed. alreadyApplied() compares severity to severity.
+          const isMatch = alreadyApplied(alert, triage);
+          const pendingChange = triageChanges(alert, triage, { id: dispatcher?.id ?? null });
           const priorityColors: Record<string, string> = {
             'LOW': 'var(--success)',
             'MEDIUM': 'var(--warning)',
@@ -2896,7 +2944,10 @@ Respond ONLY with a JSON object with this exact shape:
                     className="card-hover"
                   >
                     <CheckCircle size={10} />
-                    APPLY AI CLASSIFICATIONS
+                    {/* Raising and lowering a grading are different acts, and
+                        lowering CRITICAL on an AI's word is the one that
+                        deserves a second look. The control says which. */}
+                    {applyButtonLabel(pendingChange)}
                   </button>
                 </div>
               ) : (

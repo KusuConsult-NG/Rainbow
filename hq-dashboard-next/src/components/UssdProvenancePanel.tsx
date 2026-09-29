@@ -23,7 +23,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle, Phone, ShieldQuestion, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle, MapPin, Phone, ShieldQuestion, XCircle } from 'lucide-react';
 
 import { confirmUssdReport, markFalseReport, ussdCredibility } from '@/lib/alert-actions';
 import {
@@ -145,6 +145,18 @@ export default function UssdProvenancePanel({
           </span>
         )}
       </div>
+
+      {/* The landmark, which is the most useful line on a keypad report.
+          A USSD report has no GPS and the map can only draw a circle the size of
+          the ward; this is the thing a driver can actually navigate to. Shown for
+          a CONFIRMED report too — it is what the responder needs, and it does not
+          stop being useful once an officer has stood behind the report. */}
+      {alert.reporter_landmark && (
+        <p style={{ fontSize: 11.5, color: 'var(--text-primary)', margin: '8px 0 0', fontWeight: 700 }}>
+          <MapPin size={11} style={{ verticalAlign: -2, marginRight: 4 }} />
+          Nearest landmark: {alert.reporter_landmark}
+        </p>
+      )}
 
       {unconfirmed && (
         <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '8px 0 0' }}>
