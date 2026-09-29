@@ -955,7 +955,7 @@ export const wardCentroids: WardCentroid[] = [
   },
   {
     "lga": "MANGU",
-    "ward": "KADUN",
+    "ward": "KADUNU",
     "lat": 9.692824,
     "lng": 9.134952,
     "radiusM": 4184

@@ -458,8 +458,14 @@ const List<TacticalJurisdiction> plateauTacticalMap = [
         ],
       ),
       TacticalWard(
-        id: 'WARD_KAMWAI',
-        name: 'KAMWAI',
+        // DAMWAI, not KAMWAI. Bokkos' fourteen wards are Bokkos, Butura,
+        // Daffo, DAMWAI, Kwatas, Mangor, Mbar/Mangar, Manguna, Mushere Central,
+        // Mushere West, Richa, Sha, Tangur and Toff — this file had every one of
+        // them right except this one. Kamwai is a Bokkos DISTRICT and the
+        // settlement whose primary school is this ward's first polling unit, so
+        // the settlement's name had been taken for the ward's.
+        id: 'WARD_DAMWAI',
+        name: 'DAMWAI',
         pollingUnits: [
           'PRIM. SCHOOL, KAMWAI',
           'PRIM. SCHOOL, AMBAN',
@@ -4672,8 +4678,15 @@ const List<TacticalJurisdiction> plateauTacticalMap = [
     name: "QUA'AN PAN",
     wards: [
       TacticalWard(
+        // BWALL, not "QUA'AN PAN". The id already said WARD_BWALL and every
+        // polling unit below is a Bwall place — BWALL CENTRAL/TANBA, BWALLYIM
+        // MARKET SQUARE — so the `name` had simply been filled in with the LGA's
+        // own name. Qua'an Pan's eleven federal wards are Bwall, Doemak-Goechim,
+        // Doemak-Koplong, Dokan Kasuwa, Kurgwi, Kwa, Kwalla Moeda, Kwalla
+        // Yitla'ar, Kwande, Kwang and Namu; there is no ward called Qua'an Pan.
+        // Bwall is also one of the LGA's eight districts.
         id: 'WARD_BWALL',
-        name: "QUA'AN PAN",
+        name: 'BWALL',
         pollingUnits: [
           'BWALL CENTRAL/TANBA',
           'GEOPIL',
