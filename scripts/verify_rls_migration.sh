@@ -57,6 +57,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/notification_outbox_behaviour_test.sql \
    "$REPO"/scripts/escalation_targets_behaviour_test.sql \
    "$REPO"/scripts/geo_key_behaviour_test.sql \
+   "$REPO"/scripts/why_is_the_board_empty.sql \
    "$REPO"/scripts/seed_demo_incidents.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
@@ -353,6 +354,34 @@ if [ "$SEED_RC" -ne 0 ]; then
   echo "✗ the demonstration seed does not apply"
   exit 1
 fi
+
+# A diagnostic that errors is worse than no diagnostic: it gets handed to an
+# operator during an incident, when nobody has time to debug the debugger. Run
+# it here, after the seed, so its queries are checked against the real schema.
+echo "▶ Checking the empty-board diagnostic still runs"
+DIAG_OUT=$(psql_run "-f $PGROOT/why_is_the_board_empty.sql" 2>&1) && DIAG_RC=0 || DIAG_RC=$?
+if [ "$DIAG_RC" -ne 0 ]; then
+  echo "$DIAG_OUT"
+  echo "✗ scripts/why_is_the_board_empty.sql does not run against this schema"
+  exit 1
+fi
+# It must also actually SEE the seeded rows, or it is reassuring about nothing.
+#
+# Read the `demo` column of the diagnostic's own first query, by position under
+# its header — not with a grep for the number. The first attempt looked for
+# "^ *13 *|" anywhere in the output and passed against section 5's
+# open_incidents, which happened to be 13 too: a gate that agreed for a reason
+# unrelated to what it claimed to check.
+DIAG_DEMO=$(printf '%s\n' "$DIAG_OUT" | awk -F'|' '
+  /^ *total *\| *demo *\|/ { hdr = NR }
+  hdr && NR == hdr + 2 { gsub(/ /, "", $2); print $2; exit }
+')
+if [ "$DIAG_DEMO" != "13" ]; then
+  echo "$DIAG_OUT"
+  echo "✗ the diagnostic ran but reported demo=${DIAG_DEMO:-<nothing>}, expected 13"
+  exit 1
+fi
+echo "  PASS  the diagnostic runs and counts the seeded incidents"
 
 cat <<'EOF'
 
