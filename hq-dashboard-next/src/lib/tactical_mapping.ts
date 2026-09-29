@@ -439,8 +439,8 @@ export const plateauTacticalMap: TacticalJurisdiction[] = [
         ]
       },
       {
-        "id": "WARD_KAMWAI",
-        "name": "KAMWAI",
+        "id": "WARD_DAMWAI",
+        "name": "DAMWAI",
         "pollingUnits": [
           "PRIM. SCHOOL, KAMWAI",
           "PRIM. SCHOOL, AMBAN",
@@ -4654,7 +4654,7 @@ export const plateauTacticalMap: TacticalJurisdiction[] = [
     "wards": [
       {
         "id": "WARD_BWALL",
-        "name": "QUA'AN PAN",
+        "name": "BWALL",
         "pollingUnits": [
           "BWALL CENTRAL/TANBA",
           "GEOPIL",

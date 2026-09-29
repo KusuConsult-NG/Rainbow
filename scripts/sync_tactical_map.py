@@ -55,7 +55,8 @@ def parse_dart():
     out = []
 
     for lga_match in re.finditer(
-        r"TacticalJurisdiction\(\s*id:\s*'([^']+)',\s*name:\s*(?:'([^']*)'|\"([^\"]*)\")",
+        r"TacticalJurisdiction\((?:\s*//[^\n]*)*\s*id:\s*'([^']+)',"
+        r"(?:\s*//[^\n]*)*\s*name:\s*(?:'([^']*)'|\"([^\"]*)\")",
         src,
     ):
         lga_id = lga_match.group(1)
@@ -67,9 +68,17 @@ def parse_dart():
         body = src[start:nxt if nxt != -1 else len(src)]
 
         wards = []
+        # `(?:\s*//[^\n]*\n)*` between every field: a Dart comment may sit
+        # anywhere in a constructor, and the first version of this pattern had
+        # only `\s*`. Adding an explanatory comment above `id:` therefore made the
+        # ward STOP MATCHING — it vanished from the generated console map with no
+        # error at all, which is the same silent-shrink failure the ward-count
+        # assertion below now catches. Found by doing exactly that.
+        comment = r"(?:\s*//[^\n]*)*\s*"
         for w in re.finditer(
-            r"TacticalWard\(\s*id:\s*'([^']+)',\s*name:\s*(?:'([^']*)'|\"([^\"]*)\")"
-            r"\s*,\s*pollingUnits:\s*\[(.*?)\]",
+            r"TacticalWard\(" + comment + r"id:\s*'([^']+)'," + comment
+            + r"name:\s*(?:'([^']*)'|\"([^\"]*)\")" + comment
+            + r",?" + comment + r"pollingUnits:\s*\[(.*?)\]",
             body,
             re.S,
         ):
@@ -316,6 +325,21 @@ def main():
         print(f'✗ parsed {len(lgas)} LGAs from the Dart map, expected 17', file=sys.stderr)
         return 1
 
+    # The WARD count, not just the LGA count.
+    #
+    # A ward that stops matching the pattern above disappears from the generated
+    # console map in silence: no error, no warning, just an LGA with one fewer
+    # ward, a filter that cannot select it, and — once alert_in_my_area() is
+    # scoping by ward — an officer posted there who sees nothing. That happened
+    # while writing this very check: adding an explanatory comment above a ward's
+    # `id:` made it invisible to the parser.
+    total_wards = sum(len(l['wards']) for l in lgas)
+    if total_wards != 207:
+        print(f'✗ parsed {total_wards} wards from the Dart map, expected 207 — a '
+              f'ward has stopped matching and would vanish from the console',
+              file=sys.stderr)
+        return 1
+
     wanted = splice(render(lgas))
 
     if args.check:
@@ -347,6 +371,9 @@ def main():
 
 def report_gaps(lgas):
     missing = gps_wards_missing_from_map(lgas)
+    if not missing:
+        print('✓ every ward in the GPS data exists in the map')
+        return
     if missing:
         print(f'  note: {len(missing)} ward(s) exist in the GPS centroid data but '
               f'not in the map under any spelling, so an incident can be filed '

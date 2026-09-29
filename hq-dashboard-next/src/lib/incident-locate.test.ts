@@ -195,6 +195,34 @@ describe('the centroid data itself', () => {
     }
   });
 
+  it('has no ward the tactical map is missing', async () => {
+    // Was 7, then 3 once geo_key folded the Roman/Arabic numerals, now 0. The
+    // last three were resolved against INEC ward lists rather than guessed:
+    //
+    //   BWALL   a real Qua'an Pan ward. The map's entry already had
+    //           id: 'WARD_BWALL' and polling units called BWALL CENTRAL/TANBA
+    //           and BWALLYIM MARKET SQUARE — only the `name` had been filled in
+    //           with the LGA's own name.
+    //   DAMWAI  a real Bokkos ward. The map called it KAMWAI, which is a Bokkos
+    //           DISTRICT and the settlement whose primary school is the ward's
+    //           first polling unit.
+    //   KADUNU  the map was right and the GPS ASSET was wrong: the Mangu ward is
+    //           Kadunu, and the asset had it truncated to KADUN.
+    //
+    // A ward in one file and not the other means an incident can be FILED there
+    // that no filter can select and no officer can be posted to, so this must
+    // stay at zero.
+    const { plateauTacticalMap } = await import('./tactical_mapping');
+    const { geoKey } = await import('./geo-key');
+    const known = new Set(
+      plateauTacticalMap.flatMap(l => l.wards.map(w => geoKey(w.name))),
+    );
+    const orphans = wardCentroids
+      .map(w => w.ward)
+      .filter(name => !known.has(geoKey(name)));
+    expect(orphans).toEqual([]);
+  });
+
   it('covers every LGA the tactical map knows', async () => {
     // A USSD caller picks their LGA from the tactical map. An LGA present there
     // and absent here is one whose reports cannot be drawn at all.
