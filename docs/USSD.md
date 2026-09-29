@@ -44,6 +44,74 @@ attacked is never held at a ward list.
 
 ---
 
+## Tracking a USSD report
+
+The honest part first: **a USSD reporter's live movement cannot be tracked.** USSD
+rides the signalling channel and has no access to the handset's location. There is
+no GPS, no way to ask for one, and no engineering that changes it. The app's
+`incident_tracks` — a reporter's route, drawn on the map — has no USSD equivalent
+and cannot have one.
+
+What *is* known, in descending order of precision:
+
+| Precision | Drawn as | From |
+|---|---|---|
+| `GPS` | a pin | a real fix (app reports only) |
+| `WARD` | a circle the size of that ward | the ward chosen on the menu |
+| `LGA` | a much bigger circle | the LGA, when no ward was given |
+| `NONE` | not drawn, counted as UNLOCATED | nothing |
+
+An approximate position is a **translucent circle with a dashed edge and nothing
+at its centre** — never a pin. The distinction decides whether a vehicle can be
+sent: an area tells a commander which unit owns the incident, which is a different
+question from where to drive. The dossier says so first: *"NO GPS — approximate
+area only, about 3.5km across. Do not dispatch to this circle as an address."*
+
+Radii are computed, not guessed — half the distance to the nearest other ward
+centroid in the same LGA, clamped to [800m, 25km]. Across Plateau that is 800m to
+16.5km, median 3.5km. A single made-up 5km would flatter a Jos North ward of a few
+streets and lie about a Wase ward of open countryside.
+
+### The landmark is what actually finds someone
+
+After the report is filed — never before — the caller is asked to type the nearest
+landmark. One screen, skippable with `0`.
+
+This is the highest-value field on a USSD report. "Behind the mosque on the Bokkos
+road" or `POLICE BARRACKS` is worth more to a driver than a 3km circle, and no
+menu could have contained it. It is stored in `reporter_landmark` **and** appended
+to the description, because the description is what a dispatcher reads first and
+what the notices carry.
+
+It is **not** a location. It never becomes coordinates: there are no
+polling-unit coordinates in this system, and deriving a point from a string would
+be the fabricated-fix defect wearing a different hat.
+
+It is asked after filing so that a person under attack is never held behind one
+more screen. If the session drops, the emergency is already on the board.
+
+### What could improve this, and needs asking
+
+**Cell-site location.** The carrier knows which tower served the session. Accuracy
+runs from roughly 200m in Jos to tens of kilometres in rural Plateau — often not
+enough to find a person, but enough to confirm they are in the ward they said. Some
+aggregators expose Cell ID / LAC in the callback; many do not, and some require a
+separate location-based-service agreement.
+
+**Ask Interswitch whether their callback carries Cell ID, LAC or any location
+field.** If it does, it is worth wiring: it is the only signal available that the
+caller does not have to type. I have not built for it, because building against a
+field I cannot confirm exists would be inventing a contract.
+
+### Responders, on the other hand, *are* tracked
+
+Worth saying plainly, because it is most of what the map is for during an incident:
+the **responders** sent to a USSD report appear on the map exactly as they do for
+an app report. Responder telemetry is keyed on the alert, not on how it arrived.
+What you lose with USSD is the reporter's position, not the operation's.
+
+---
+
 ## Registration: why there is no OTP
 
 The app onboards with phone + SMS OTP, which proves somebody could read a code

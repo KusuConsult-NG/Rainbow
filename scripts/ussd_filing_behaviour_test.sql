@@ -333,6 +333,82 @@ BEGIN
   RAISE NOTICE 'PASS: the status screen can only ever know reference, kind, status and age';
 END $$;
 
+-- ── The landmark ────────────────────────────────────────────────────────
+--
+-- A USSD report cannot carry coordinates, so the console draws a circle the size
+-- of the ward. That tells a commander which unit owns the incident; it does not
+-- tell a driver where to go. A typed landmark does.
+
+DO $$
+DECLARE r RECORD; a RECORD;
+BEGIN
+  SELECT * INTO r FROM public.ussd_add_landmark(
+    'sess-known-002', '  behind Bukuru market, by the junction  ');
+  IF r.reference IS NULL THEN
+    RAISE EXCEPTION 'FAIL: a landmark could not be attached to this session''s report';
+  END IF;
+
+  SELECT * INTO a FROM public.alerts WHERE id = r.alert_id;
+  IF a.reporter_landmark <> 'behind Bukuru market, by the junction' THEN
+    RAISE EXCEPTION 'FAIL: the landmark was stored as %', a.reporter_landmark;
+  END IF;
+  -- It has to reach the description too: that is what a dispatcher reads first
+  -- and what the notices carry. A column nobody surfaces is a column nobody
+  -- reads.
+  IF a.description NOT LIKE '%Nearest landmark: behind Bukuru market%' THEN
+    RAISE EXCEPTION 'FAIL: the landmark is not in the description: %', a.description;
+  END IF;
+  -- And it must NOT have become a location. Deriving a point from a string is
+  -- the fabricated-fix defect wearing a different hat.
+  IF a.latitude IS NOT NULL OR a.longitude IS NOT NULL THEN
+    RAISE EXCEPTION 'FAIL: attaching a landmark invented coordinates';
+  END IF;
+  RAISE NOTICE 'PASS: a landmark is stored, surfaced, and is not a location';
+END $$;
+
+DO $$
+DECLARE n INTEGER;
+BEGIN
+  -- Only ever the report THIS session filed. Taking an alert id from the caller
+  -- would let anybody with the endpoint write a landmark onto any incident in
+  -- Plateau — a way to redirect a response by typing.
+  SELECT count(*) INTO n FROM public.ussd_add_landmark('sess-never-opened', 'anywhere');
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL: a landmark was attached through an unknown session';
+  END IF;
+  RAISE NOTICE 'PASS: a landmark cannot be attached through a session that filed nothing';
+END $$;
+
+DO $$
+DECLARE n INTEGER; before_text TEXT; after_text TEXT;
+BEGIN
+  SELECT reporter_landmark INTO before_text FROM public.alerts
+   WHERE id = (SELECT filed_alert FROM public.ussd_sessions WHERE session_id = 'sess-known-002');
+  -- Blank and whitespace change nothing rather than wiping what is there.
+  SELECT count(*) INTO n FROM public.ussd_add_landmark('sess-known-002', '   ');
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL: a blank landmark returned a row';
+  END IF;
+  SELECT reporter_landmark INTO after_text FROM public.alerts
+   WHERE id = (SELECT filed_alert FROM public.ussd_sessions WHERE session_id = 'sess-known-002');
+  IF after_text IS DISTINCT FROM before_text THEN
+    RAISE EXCEPTION 'FAIL: a blank landmark overwrote %', before_text;
+  END IF;
+  RAISE NOTICE 'PASS: a blank landmark changes nothing';
+END $$;
+
+DO $$
+DECLARE r RECORD; a RECORD;
+BEGIN
+  SELECT * INTO r FROM public.ussd_add_landmark('sess-nowhere', repeat('x', 400));
+  SELECT * INTO a FROM public.alerts WHERE id = r.alert_id;
+  IF length(a.reporter_landmark) <> 120 THEN
+    RAISE EXCEPTION 'FAIL: a 400-character landmark was stored as % characters',
+      length(a.reporter_landmark);
+  END IF;
+  RAISE NOTICE 'PASS: a long landmark is capped, because a dossier field is read by a person';
+END $$;
+
 -- ── Forgetting the dialogue ─────────────────────────────────────────────
 
 DO $$

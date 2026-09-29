@@ -20,8 +20,10 @@ import {
   SCREEN_LIMIT,
   type UssdCaller,
   type UssdState,
+  dialogueEndScreen,
   filedScreen,
   filingFailedScreen,
+  readLandmark,
   lastReportScreen,
   ussdTurn,
 } from './ussd-menu';
@@ -121,6 +123,9 @@ describe('the screen limit', () => {
     const cb = ussdTurn(confirm.state, '1', KNOWN, PLACES);
     expect(cb.screen.length, cb.screen).toBeLessThanOrEqual(SCREEN_LIMIT);
     expect(filedScreen('R4K2M9', true).length).toBeLessThanOrEqual(SCREEN_LIMIT);
+    expect(filedScreen('R4K2M9', false).length).toBeLessThanOrEqual(SCREEN_LIMIT);
+    expect(dialogueEndScreen('R4K2M9', true).length).toBeLessThanOrEqual(SCREEN_LIMIT);
+    expect(dialogueEndScreen('R4K2M9', false).length).toBeLessThanOrEqual(SCREEN_LIMIT);
     expect(filingFailedScreen().length).toBeLessThanOrEqual(SCREEN_LIMIT);
     expect(lastReportScreen({
       reference: 'R4K2M9',
@@ -151,7 +156,12 @@ describe('the emergency path', () => {
     const { turn } = walk(['1', '1', '1'], KNOWN);
     expect(turn.state.step).toBe('CALLBACK');
     const done = ussdTurn(turn.state, '1', KNOWN, PLACES);
-    expect(done.terminal).toBe(true);
+    // The report is FILED on this turn — that is what matters, and it is three
+    // keypresses. The session stays open for one more screen asking for a
+    // landmark, which costs the caller nothing because they already have their
+    // reference and the emergency is already on the board.
+    expect(done.terminal).toBe(false);
+    expect(done.state.step).toBe('LANDMARK');
     expect(done.action).toMatchObject({
       type: 'file',
       emergency: true,
@@ -230,8 +240,8 @@ describe('the callback question', () => {
     // A witness to a militia attack has excellent reasons not to want their
     // phone ringing, and the report matters more than the verification channel.
     const { turn } = walk(['1', '1', '1', '2'], KNOWN);
-    expect(turn.terminal).toBe(true);
     expect(turn.action).toMatchObject({ type: 'file', callback: false });
+    expect(turn.state.step).toBe('LANDMARK');
   });
 });
 
@@ -330,10 +340,23 @@ describe('what the caller is told', () => {
     expect(s).not.toContain('en route');
   });
 
-  it('says to keep the phone on and not to reply by SMS', () => {
+  it('asks for a landmark, and offers a skip', () => {
+    // The filed screen now does double duty: it confirms the report and asks the
+    // one question that can turn a ward circle into a findable place.
     const s = filedScreen('R4K2M9', false);
-    expect(s).toContain('Keep this phone on');
-    expect(s.toLowerCase()).toContain('do not reply by sms');
+    expect(s).toContain('R4K2M9');
+    expect(s.toLowerCase()).toContain('landmark');
+    expect(s).toContain('0 = skip');
+  });
+
+  it('says to keep the phone on and not to reply by SMS when the dialogue ends', () => {
+    for (const s of [dialogueEndScreen('R4K2M9', true), dialogueEndScreen('R4K2M9', false)]) {
+      expect(s).toContain('Keep this phone on');
+      expect(s.toLowerCase()).toContain('do not reply by sms');
+      // Still never claims a unit is coming.
+      expect(s.toLowerCase()).not.toContain('on the way');
+      expect(s.toLowerCase()).not.toContain('dispatched');
+    }
   });
 
   it('gives no reference and no reassurance when filing failed', () => {
@@ -366,6 +389,51 @@ describe('what the caller is told', () => {
     const { turn } = walk(['3'], STRANGER);
     expect(turn.action).toEqual({ type: 'lookup_last' });
     expect(turn.terminal).toBe(true);
+  });
+});
+
+describe('the landmark, asked after the report is filed', () => {
+  function atLandmark() {
+    const { turn } = walk(['1', '1', '1', '1'], KNOWN);
+    expect(turn.state.step).toBe('LANDMARK');
+    return turn.state;
+  }
+
+  it('attaches what the caller typed', () => {
+    const turn = ussdTurn(atLandmark(), 'behind Bukuru market', KNOWN, PLACES);
+    expect(turn.action).toEqual({ type: 'landmark', text: 'behind Bukuru market' });
+    expect(turn.terminal).toBe(true);
+  });
+
+  it('accepts a real polling-unit name, which is what the map calls a place', () => {
+    const turn = ussdTurn(atLandmark(), 'POLICE BARRACKS', KNOWN, PLACES);
+    expect(turn.action).toMatchObject({ type: 'landmark', text: 'POLICE BARRACKS' });
+  });
+
+  it('skips on 0, and on an empty press', () => {
+    for (const input of ['0', '', '   ']) {
+      const turn = ussdTurn(atLandmark(), input, KNOWN, PLACES);
+      expect(turn.action, input).toEqual({ type: 'none' });
+      expect(turn.terminal).toBe(true);
+    }
+  });
+
+  it('treats a stray keypress as a skip rather than a landmark', () => {
+    // "ok", "." and a single digit are not places. A dispatcher handed one would
+    // waste the seconds this screen exists to save.
+    for (const input of ['x', '7', '.', 'ok']) {
+      expect(readLandmark(input).skip, input).toBe(true);
+    }
+  });
+
+  it('caps a long one, because a dossier field is read by a person', () => {
+    const long = 'a'.repeat(400);
+    expect(readLandmark(long).text).toHaveLength(120);
+  });
+
+  it('ends the session either way', () => {
+    expect(ussdTurn(atLandmark(), 'the junction', KNOWN, PLACES).terminal).toBe(true);
+    expect(ussdTurn(atLandmark(), '0', KNOWN, PLACES).terminal).toBe(true);
   });
 });
 
