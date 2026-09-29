@@ -113,10 +113,12 @@ DROP POLICY IF EXISTS "system_alerts_write"   ON public.system_alerts;
 
 -- ── profiles ───────────────────────────────────────────────
 -- Everyone can read profiles (needed for name resolution in UI)
+DROP POLICY IF EXISTS "profiles_read_all" ON public.profiles;
 CREATE POLICY "profiles_read_all" ON public.profiles
   FOR SELECT USING (auth.uid() IS NOT NULL);
 
 -- Users can only write their own row
+DROP POLICY IF EXISTS "profiles_write_own" ON public.profiles;
 CREATE POLICY "profiles_write_own" ON public.profiles
   FOR ALL USING (id = auth.uid());
 
@@ -127,31 +129,38 @@ CREATE POLICY "profiles_write_own" ON public.profiles
 -- (the app-side stream filter in agent_dashboard_screen.dart
 --  already restricts by LGA — keeping DB policy permissive
 --  avoids the recursive sub-query trap).
+DROP POLICY IF EXISTS "alerts_read_authenticated" ON public.alerts;
 CREATE POLICY "alerts_read_authenticated" ON public.alerts
   FOR SELECT USING (auth.uid() IS NOT NULL);
 
 -- ── alerts — INSERT ────────────────────────────────────────
+DROP POLICY IF EXISTS "alerts_insert_authenticated" ON public.alerts;
 CREATE POLICY "alerts_insert_authenticated" ON public.alerts
   FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 
 -- ── alerts — UPDATE ────────────────────────────────────────
+DROP POLICY IF EXISTS "alerts_update_authenticated" ON public.alerts;
 CREATE POLICY "alerts_update_authenticated" ON public.alerts
   FOR UPDATE USING (auth.uid() IS NOT NULL);
 
 
 -- ── telemetry ─────────────────────────────────────────────
+DROP POLICY IF EXISTS "telemetry_read_authenticated" ON public.telemetry;
 CREATE POLICY "telemetry_read_authenticated" ON public.telemetry
   FOR SELECT USING (auth.uid() IS NOT NULL);
 
+DROP POLICY IF EXISTS "telemetry_write_own" ON public.telemetry;
 CREATE POLICY "telemetry_write_own" ON public.telemetry
   FOR ALL USING (user_id = auth.uid());
 
 
 -- ── system_alerts ─────────────────────────────────────────
+DROP POLICY IF EXISTS "sysalerts_read_authenticated" ON public.system_alerts;
 CREATE POLICY "sysalerts_read_authenticated" ON public.system_alerts
   FOR SELECT USING (auth.uid() IS NOT NULL);
 
 -- Only users whose JWT role claim is HQ_COMMAND or ADMIN can write
+DROP POLICY IF EXISTS "sysalerts_write_hq" ON public.system_alerts;
 CREATE POLICY "sysalerts_write_hq" ON public.system_alerts
   FOR ALL USING (
     auth.jwt() ->> 'role' IN ('HQ_COMMAND', 'ADMIN')
@@ -162,9 +171,11 @@ CREATE POLICY "sysalerts_write_hq" ON public.system_alerts
 DROP POLICY IF EXISTS "Allow reading chat messages"   ON public.chat_messages;
 DROP POLICY IF EXISTS "Allow inserting chat messages" ON public.chat_messages;
 
+DROP POLICY IF EXISTS "chat_read_authenticated" ON public.chat_messages;
 CREATE POLICY "chat_read_authenticated" ON public.chat_messages
   FOR SELECT USING (auth.uid() IS NOT NULL);
 
+DROP POLICY IF EXISTS "chat_insert_authenticated" ON public.chat_messages;
 CREATE POLICY "chat_insert_authenticated" ON public.chat_messages
   FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 

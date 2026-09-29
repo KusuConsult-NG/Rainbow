@@ -217,6 +217,7 @@ DROP POLICY IF EXISTS "alerts_select_own_or_ours" ON public.alerts;
 -- and get exactly what that policy gave them.
 DROP POLICY IF EXISTS "alerts_select_geo_lga_scoped" ON public.alerts;
 
+DROP POLICY IF EXISTS "alerts_select_own_or_ours" ON public.alerts;
 CREATE POLICY "alerts_select_own_or_ours" ON public.alerts
   FOR SELECT TO authenticated
   USING (public.alert_is_ours(alerts));

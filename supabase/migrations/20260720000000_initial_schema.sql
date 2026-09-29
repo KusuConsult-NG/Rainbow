@@ -121,24 +121,35 @@ ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.system_alerts ENABLE ROW LEVEL SECURITY;
 
 -- Profiles RLS
+DROP POLICY IF EXISTS "Allow public read access to profiles" ON public.profiles;
 CREATE POLICY "Allow public read access to profiles" ON public.profiles FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow individual insert/update to own profile" ON public.profiles;
 CREATE POLICY "Allow individual insert/update to own profile" ON public.profiles FOR ALL USING (auth.uid() = id);
 
 -- Alerts RLS
+DROP POLICY IF EXISTS "Allow authenticated users to read alerts" ON public.alerts;
 CREATE POLICY "Allow authenticated users to read alerts" ON public.alerts FOR SELECT USING (auth.role() = 'authenticated' OR auth.role() = 'service_role');
+DROP POLICY IF EXISTS "Allow authenticated users to insert alerts" ON public.alerts;
 CREATE POLICY "Allow authenticated users to insert alerts" ON public.alerts FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow authenticated users to update alerts" ON public.alerts;
 CREATE POLICY "Allow authenticated users to update alerts" ON public.alerts FOR UPDATE USING (true);
 
 -- Telemetry RLS
+DROP POLICY IF EXISTS "Allow reading telemetry" ON public.telemetry;
 CREATE POLICY "Allow reading telemetry" ON public.telemetry FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow users to update own telemetry" ON public.telemetry;
 CREATE POLICY "Allow users to update own telemetry" ON public.telemetry FOR ALL USING (true);
 
 -- Chat Messages RLS
+DROP POLICY IF EXISTS "Allow reading chat messages" ON public.chat_messages;
 CREATE POLICY "Allow reading chat messages" ON public.chat_messages FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow inserting chat messages" ON public.chat_messages;
 CREATE POLICY "Allow inserting chat messages" ON public.chat_messages FOR INSERT WITH CHECK (true);
 
 -- System Alerts RLS
+DROP POLICY IF EXISTS "Allow reading system alerts" ON public.system_alerts;
 CREATE POLICY "Allow reading system alerts" ON public.system_alerts FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow service role to manage system alerts" ON public.system_alerts;
 CREATE POLICY "Allow service role to manage system alerts" ON public.system_alerts FOR ALL USING (true);
 
 -- Enable Realtime for Alerts, Telemetry & Chat (idempotent)

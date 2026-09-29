@@ -56,6 +56,7 @@ DROP POLICY IF EXISTS "telemetry_select_self_or_responding_staff" ON public.tele
 -- then to any staff member, deliberately, because whoever is nearest may not
 -- be whoever it was assigned to. Once the incident is resolved or cancelled,
 -- the row stops being readable by anyone but its owner.
+DROP POLICY IF EXISTS "telemetry_select_self_or_responding_staff" ON public.telemetry;
 CREATE POLICY "telemetry_select_self_or_responding_staff" ON public.telemetry
   FOR SELECT TO authenticated
   USING (

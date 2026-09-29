@@ -225,14 +225,17 @@ ALTER TABLE public.app_config         ENABLE ROW LEVEL SECURITY;
 --    reporter and officer names). Nobody may change their own role/tier.
 -- ────────────────────────────────────────────────────────────────────────────
 
+DROP POLICY IF EXISTS "profiles_select_self_or_staff" ON public.profiles;
 CREATE POLICY "profiles_select_self_or_staff" ON public.profiles
   FOR SELECT TO authenticated
   USING (id = auth.uid() OR public.is_staff());
 
+DROP POLICY IF EXISTS "profiles_insert_self" ON public.profiles;
 CREATE POLICY "profiles_insert_self" ON public.profiles
   FOR INSERT TO authenticated
   WITH CHECK (id = auth.uid());
 
+DROP POLICY IF EXISTS "profiles_update_self" ON public.profiles;
 CREATE POLICY "profiles_update_self" ON public.profiles
   FOR UPDATE TO authenticated
   USING (id = auth.uid())
@@ -286,14 +289,17 @@ CREATE TRIGGER profiles_no_privilege_escalation
 --    Was `FOR ALL USING (true)`: anyone could read AND falsify positions.
 -- ────────────────────────────────────────────────────────────────────────────
 
+DROP POLICY IF EXISTS "telemetry_select_self_or_staff" ON public.telemetry;
 CREATE POLICY "telemetry_select_self_or_staff" ON public.telemetry
   FOR SELECT TO authenticated
   USING (user_id = auth.uid() OR public.is_staff());
 
+DROP POLICY IF EXISTS "telemetry_insert_own" ON public.telemetry;
 CREATE POLICY "telemetry_insert_own" ON public.telemetry
   FOR INSERT TO authenticated
   WITH CHECK (user_id = auth.uid());
 
+DROP POLICY IF EXISTS "telemetry_update_own" ON public.telemetry;
 CREATE POLICY "telemetry_update_own" ON public.telemetry
   FOR UPDATE TO authenticated
   USING (user_id = auth.uid())
@@ -303,6 +309,7 @@ CREATE POLICY "telemetry_update_own" ON public.telemetry
 -- 6. ALERTS
 -- ────────────────────────────────────────────────────────────────────────────
 
+DROP POLICY IF EXISTS "alerts_select_own_or_staff" ON public.alerts;
 CREATE POLICY "alerts_select_own_or_staff" ON public.alerts
   FOR SELECT TO authenticated
   USING (
@@ -311,6 +318,7 @@ CREATE POLICY "alerts_select_own_or_staff" ON public.alerts
     OR public.is_staff()
   );
 
+DROP POLICY IF EXISTS "alerts_insert_as_self" ON public.alerts;
 CREATE POLICY "alerts_insert_as_self" ON public.alerts
   FOR INSERT TO authenticated
   WITH CHECK (reported_by = auth.uid() OR public.is_staff());
@@ -320,6 +328,7 @@ CREATE POLICY "alerts_insert_as_self" ON public.alerts
 -- (emergency_provider.dart::verifyCancellation). Residual risk: someone holding a
 -- victim's unlocked phone can mark the SOS resolved. Moving resolution behind an
 -- RPC that records WHO resolved it is the follow-up.
+DROP POLICY IF EXISTS "alerts_update_own_or_staff" ON public.alerts;
 CREATE POLICY "alerts_update_own_or_staff" ON public.alerts
   FOR UPDATE TO authenticated
   USING (
@@ -332,6 +341,7 @@ CREATE POLICY "alerts_update_own_or_staff" ON public.alerts
 -- 7. CHAT MESSAGES
 -- ────────────────────────────────────────────────────────────────────────────
 
+DROP POLICY IF EXISTS "chat_select_participant_or_staff" ON public.chat_messages;
 CREATE POLICY "chat_select_participant_or_staff" ON public.chat_messages
   FOR SELECT TO authenticated
   USING (
@@ -344,6 +354,7 @@ CREATE POLICY "chat_select_participant_or_staff" ON public.chat_messages
     )
   );
 
+DROP POLICY IF EXISTS "chat_insert_as_self" ON public.chat_messages;
 CREATE POLICY "chat_insert_as_self" ON public.chat_messages
   FOR INSERT TO authenticated
   WITH CHECK (sender_id = auth.uid());
@@ -353,18 +364,22 @@ CREATE POLICY "chat_insert_as_self" ON public.chat_messages
 --    could push a state-wide emergency broadcast.
 -- ────────────────────────────────────────────────────────────────────────────
 
+DROP POLICY IF EXISTS "system_alerts_read" ON public.system_alerts;
 CREATE POLICY "system_alerts_read" ON public.system_alerts
   FOR SELECT TO authenticated
   USING (true);
 
+DROP POLICY IF EXISTS "system_alerts_write_command" ON public.system_alerts;
 CREATE POLICY "system_alerts_write_command" ON public.system_alerts
   FOR INSERT TO authenticated
   WITH CHECK (public.is_command());
 
+DROP POLICY IF EXISTS "system_alerts_update_command" ON public.system_alerts;
 CREATE POLICY "system_alerts_update_command" ON public.system_alerts
   FOR UPDATE TO authenticated
   USING (public.is_command());
 
+DROP POLICY IF EXISTS "system_alerts_delete_command" ON public.system_alerts;
 CREATE POLICY "system_alerts_delete_command" ON public.system_alerts
   FOR DELETE TO authenticated
   USING (public.is_command());
@@ -373,23 +388,29 @@ CREATE POLICY "system_alerts_delete_command" ON public.system_alerts
 -- 9. SAFE ZONES / UNINSTALL REQUESTS / APP CONFIG
 -- ────────────────────────────────────────────────────────────────────────────
 
+DROP POLICY IF EXISTS "safe_zones_read" ON public.safe_zones;
 CREATE POLICY "safe_zones_read" ON public.safe_zones
   FOR SELECT TO authenticated USING (true);
 
+DROP POLICY IF EXISTS "safe_zones_write_command" ON public.safe_zones;
 CREATE POLICY "safe_zones_write_command" ON public.safe_zones
   FOR ALL TO authenticated
   USING (public.is_command()) WITH CHECK (public.is_command());
 
+DROP POLICY IF EXISTS "uninstall_insert_own" ON public.uninstall_requests;
 CREATE POLICY "uninstall_insert_own" ON public.uninstall_requests
   FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
 
+DROP POLICY IF EXISTS "uninstall_read_own_or_staff" ON public.uninstall_requests;
 CREATE POLICY "uninstall_read_own_or_staff" ON public.uninstall_requests
   FOR SELECT TO authenticated
   USING (user_id = auth.uid() OR public.is_staff());
 
+DROP POLICY IF EXISTS "uninstall_update_command" ON public.uninstall_requests;
 CREATE POLICY "uninstall_update_command" ON public.uninstall_requests
   FOR UPDATE TO authenticated USING (public.is_command());
 
+DROP POLICY IF EXISTS "app_config_read_authenticated" ON public.app_config;
 CREATE POLICY "app_config_read_authenticated" ON public.app_config
   FOR SELECT TO authenticated USING (true);
 -- Writes intentionally have NO policy: only service_role (which bypasses RLS)
@@ -460,25 +481,31 @@ ALTER TABLE public.agency_deployments    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agency_action_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agency_notifications  ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "agency_personnel_liaison_read" ON public.agency_personnel;
 CREATE POLICY "agency_personnel_liaison_read" ON public.agency_personnel
   FOR SELECT TO authenticated
   USING (public.is_command() OR agency = public.liaison_agency());
+DROP POLICY IF EXISTS "agency_personnel_liaison_write" ON public.agency_personnel;
 CREATE POLICY "agency_personnel_liaison_write" ON public.agency_personnel
   FOR ALL TO authenticated
   USING      (public.is_command() OR agency = public.liaison_agency())
   WITH CHECK (public.is_command() OR agency = public.liaison_agency());
 
+DROP POLICY IF EXISTS "agency_deployments_liaison_read" ON public.agency_deployments;
 CREATE POLICY "agency_deployments_liaison_read" ON public.agency_deployments
   FOR SELECT TO authenticated
   USING (public.is_command() OR agency = public.liaison_agency());
+DROP POLICY IF EXISTS "agency_deployments_liaison_write" ON public.agency_deployments;
 CREATE POLICY "agency_deployments_liaison_write" ON public.agency_deployments
   FOR ALL TO authenticated
   USING      (public.is_command() OR agency = public.liaison_agency())
   WITH CHECK (public.is_command() OR agency = public.liaison_agency());
 
+DROP POLICY IF EXISTS "agency_action_reports_liaison_read" ON public.agency_action_reports;
 CREATE POLICY "agency_action_reports_liaison_read" ON public.agency_action_reports
   FOR SELECT TO authenticated
   USING (public.is_command() OR agency = public.liaison_agency());
+DROP POLICY IF EXISTS "agency_action_reports_liaison_write" ON public.agency_action_reports;
 CREATE POLICY "agency_action_reports_liaison_write" ON public.agency_action_reports
   FOR ALL TO authenticated
   USING      (public.is_command() OR agency = public.liaison_agency())
@@ -488,8 +515,10 @@ CREATE POLICY "agency_action_reports_liaison_write" ON public.agency_action_repo
 -- service key (bypasses RLS); command may read it. Nobody else needs it.
 DROP POLICY IF EXISTS "agency_notifications_command_read"  ON public.agency_notifications;
 DROP POLICY IF EXISTS "agency_notifications_command_write" ON public.agency_notifications;
+DROP POLICY IF EXISTS "agency_notifications_command_read" ON public.agency_notifications;
 CREATE POLICY "agency_notifications_command_read" ON public.agency_notifications
   FOR SELECT TO authenticated USING (public.is_command());
+DROP POLICY IF EXISTS "agency_notifications_command_write" ON public.agency_notifications;
 CREATE POLICY "agency_notifications_command_write" ON public.agency_notifications
   FOR ALL TO authenticated USING (public.is_command()) WITH CHECK (public.is_command());
 
