@@ -84,23 +84,63 @@ serve(async (req) => {
       ...(playerIds.length > 0 ? { include_player_ids: playerIds } : { included_segments: ["Active Users"] }),
     };
 
-    // Dispatch to OneSignal REST API
-    const response = await fetch("https://onesignal.com/api/v1/notifications", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        Authorization: `Key ${ONESIGNAL_REST_API_KEY}`,
-      },
-      body: JSON.stringify(notificationBody),
-    });
+    // Dispatch to OneSignal, trying the other authentication scheme once if the
+    // credential is refused.
+    //
+    // This function sent `Key` while the console's two routes sent `Basic` — the
+    // SAME key under two schemes, so at least one of the three had never
+    // authenticated and nothing reported it. A Deno edge function cannot import
+    // from the Next app, so the logic is duplicated here and a CI gate asserts
+    // the two stay in step; the canonical copy, with the full account, is
+    // hq-dashboard-next/src/lib/onesignal-auth.ts.
+    const configured = (Deno.env.get("ONESIGNAL_AUTH_SCHEME") ?? "").toLowerCase();
+    const guess = ONESIGNAL_REST_API_KEY.trim().startsWith("os_v2_") ? "Key" : "Basic";
+    const first = configured === "basic" ? "Basic" : configured === "key" ? "Key" : guess;
+    const attempts = [first, first === "Basic" ? "Key" : "Basic"];
 
-    const resData = await response.json();
+    let response: Response | null = null;
+    let resData: unknown = null;
+    let usedScheme = first;
+
+    for (let i = 0; i < attempts.length; i += 1) {
+      usedScheme = attempts[i];
+      response = await fetch("https://onesignal.com/api/v1/notifications", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          Authorization: `${usedScheme} ${ONESIGNAL_REST_API_KEY.trim()}`,
+        },
+        body: JSON.stringify(notificationBody),
+      });
+      resData = await response.json().catch(() => null);
+      if (response.ok) {
+        if (i > 0) {
+          console.warn(
+            `[ONESIGNAL] authenticated with "${usedScheme}" after "${attempts[0]}" was ` +
+              `refused. Set ONESIGNAL_AUTH_SCHEME=${usedScheme} to skip the retry.`,
+          );
+        }
+        break;
+      }
+      // Only an authentication failure is worth a second attempt. A 400 is a bad
+      // payload and a 429 is a rate limit.
+      if (response.status !== 401 && response.status !== 403) break;
+    }
+
+    if (!response || !response.ok) {
+      console.error(
+        "[NOTIFY_ALERT] OneSignal refused the push",
+        response?.status,
+        JSON.stringify(resData),
+      );
+    }
 
     return new Response(
       JSON.stringify({
-        success: response.ok,
+        success: response?.ok ?? false,
         alert_id: record.id,
-        notified_devices: playerIds.length,
+        notified_devices: response?.ok ? playerIds.length : 0,
+        scheme: response?.ok ? usedScheme : undefined,
         onesignal_response: resData,
       }),
       {

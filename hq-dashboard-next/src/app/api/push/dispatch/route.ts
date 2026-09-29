@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin, requireRole, COMMAND_ROLES } from '@/lib/supabase-server';
 import { serverEnv } from '@/lib/env';
+import { postNotification } from '@/lib/onesignal-auth';
 
 export async function POST(request: Request) {
   try {
@@ -74,13 +75,13 @@ export async function POST(request: Request) {
       });
     }
 
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Basic ${oneSignalRestKey}`,
-      },
-      body: JSON.stringify({
+    // The scheme is decided in ONE place now, and a refused credential is retried
+    // under the other one. This route sent `Basic` while
+    // supabase/functions/notify-alert sent `Key` for the SAME key, so at least
+    // one of them had never authenticated. See lib/onesignal-auth.ts.
+    const outcome = await postNotification(
+      oneSignalRestKey,
+      {
         app_id: oneSignalAppId,
         include_player_ids: playerIds,
         headings: { en: isStandDown ? '🛑 STAND DOWN' : '⚡ TACTICAL MISSION DISPATCH' },
@@ -89,15 +90,34 @@ export async function POST(request: Request) {
             ? `You have been STOOD DOWN from Emergency Incident #${alertId.substring(0, 8)}. Do not proceed. Await further orders.`
             : `You have been dispatched to Emergency Incident #${alertId.substring(0, 8)}. Report immediately.`,
         },
-        data: { alertId, type: isStandDown ? 'STAND_DOWN' : 'DISPATCH' }
-      })
-    });
+        data: { alertId, type: isStandDown ? 'STAND_DOWN' : 'DISPATCH' },
+      },
+      { configuredScheme: process.env.ONESIGNAL_AUTH_SCHEME },
+    );
 
-    const resData = await response.json();
-    return NextResponse.json({ 
-      success: true, 
-      notifiedCount: playerIds.length, 
-      oneSignalResponse: resData 
+    if (!outcome.ok) {
+      // This used to return `{ success: true, notifiedCount: N }` WITHOUT looking
+      // at response.ok, so a 401 from OneSignal was reported to the console as N
+      // notifications delivered. A dispatcher believed a stand-down had reached a
+      // team that never heard it.
+      //
+      // 200 with success:false rather than a 5xx: the assignment itself is
+      // already committed in the database, and the caller distinguishes "they are
+      // assigned but not notified" from "the dispatch failed". Telling it the
+      // dispatch failed would invite a second one.
+      console.error('[PUSH_API_ERR] OneSignal refused the push', outcome.status, outcome.body);
+      return NextResponse.json({
+        success: false,
+        notifiedCount: 0,
+        error: outcome.error ?? 'The push was not delivered.',
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      notifiedCount: playerIds.length,
+      scheme: outcome.scheme,
+      oneSignalResponse: outcome.body,
     });
 
   } catch (err: any) {

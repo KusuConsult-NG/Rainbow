@@ -39,22 +39,51 @@ class _MissionResolutionScreenState
       final alertId = widget.alertData['id'] as String;
       final user = SupabaseConfig.client.auth.currentUser;
       final email = user?.email ?? 'OFFICER';
-      final existingNotes = widget.alertData['ai_summary'] as String? ?? '';
-      final debriefNote = '[RESOLVED DEBRIEF] $text (by $email)';
 
+      // The debrief goes in its OWN column.
+      //
+      // It used to be appended to `ai_summary` as '[RESOLVED DEBRIEF] ...', which
+      // made that column carry three unrelated kinds of content — AI triage
+      // notes, the [AI CLASSIFICATION APPLIED] lines, and human debriefs — so
+      // "what did the responder say happened", the question an inquiry asks,
+      // needed string-parsing to answer.
+      //
+      // Worse, the append read `widget.alertData['ai_summary']`: the copy loaded
+      // when this screen OPENED. Anything written to it since — a classification
+      // applied by HQ while the officer was typing — was erased by submitting the
+      // debrief. Not a race; a guaranteed overwrite, the same shape as the
+      // media_urls defect. Writing to its own column removes the read entirely.
       await SupabaseConfig.client.from('alerts').update({
         'status': 'RESOLVED',
         'resolved_by': email,
         'resolved_at': DateTime.now().toIso8601String(),
-        'ai_summary': existingNotes.isEmpty ? debriefNote : '$existingNotes\n$debriefNote',
+        'debrief': text,
+        'debrief_by': user?.id,
+        'debrief_at': DateTime.now().toIso8601String(),
       }).eq('id', alertId);
 
       if (!mounted) return;
       // The debrief is already SAVED at this point, so a throw here would
       // leave the officer looking at a form that appears to have failed.
       context.popOrGo(AppRoutes.agentDashboard);
+      // ignore: avoid_catches_without_on_clauses, any failure is the same answer
+      // to the officer: it did not save, do not walk away.
     } catch (e) {
       debugPrint('[RESOLUTION_ERR] Resolution update failed: $e');
+      // TOLD, not just logged. This only debugPrinted, so a refused write left
+      // the officer looking at the same form with no explanation — and an officer
+      // who believes their debrief is filed does not write it again.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'NOT SAVED. Your debrief is still here — check your connection and '
+              'submit again.',
+            ),
+            duration: Duration(seconds: 6),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
