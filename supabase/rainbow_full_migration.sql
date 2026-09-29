@@ -1,7 +1,7 @@
 -- ============================================================
 -- OPERATION RAINBOW — FULL MIGRATION SCRIPT (ALL 27)
 -- Project: xkgqvkjmcsnavelsyasq
--- Generated: 2026-09-29T08:30:34Z
+-- Generated: 2026-09-29T08:49:03Z
 -- Paste into: https://supabase.com/dashboard/project/xkgqvkjmcsnavelsyasq/sql/new
 -- ============================================================
 
@@ -152,11 +152,23 @@ CREATE POLICY "Allow inserting chat messages" ON public.chat_messages FOR INSERT
 CREATE POLICY "Allow reading system alerts" ON public.system_alerts FOR SELECT USING (true);
 CREATE POLICY "Allow service role to manage system alerts" ON public.system_alerts FOR ALL USING (true);
 
--- Enable Realtime for Alerts, Telemetry & Chat
-ALTER PUBLICATION supabase_realtime ADD TABLE public.alerts;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.telemetry;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_messages;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.system_alerts;
+-- Enable Realtime for Alerts, Telemetry & Chat (idempotent)
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.alerts;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.telemetry;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_messages;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.system_alerts;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 
 -- ──────────────────────────────────────────────────────────
@@ -4020,6 +4032,22 @@ COMMENT ON FUNCTION public.alert_is_ours(public.alerts) IS
 
 DROP POLICY IF EXISTS "alerts_select_own_or_staff" ON public.alerts;
 DROP POLICY IF EXISTS "alerts_select_own_or_ours" ON public.alerts;
+
+-- And the separate LGA-scoping policy from
+-- 20260725000000_v6_geo_lga_scoping_staging.sql.
+--
+-- That one ADDS a permissive policy granting FIELD_OFFICER, WARD_OFFICER and
+-- LGA_OFFICER every alert in their LGA. PostgreSQL ORs permissive policies
+-- together, so leaving it beside this one means a WARD_OFFICER keeps the whole
+-- LGA and the ward scoping below never binds for them — the same trap this
+-- file's header describes, arriving from the other direction.
+--
+-- Nothing is lost by dropping it: `alert_in_my_area()` covers all three of
+-- those roles and covers them more precisely. WARD_OFFICER matches 'WARD%' and
+-- gets their ward; LGA_OFFICER and FIELD_OFFICER fall through to the LGA rule
+-- and get exactly what that policy gave them.
+DROP POLICY IF EXISTS "alerts_select_geo_lga_scoped" ON public.alerts;
+
 CREATE POLICY "alerts_select_own_or_ours" ON public.alerts
   FOR SELECT TO authenticated
   USING (public.alert_is_ours(alerts));

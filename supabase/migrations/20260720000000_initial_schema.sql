@@ -141,8 +141,20 @@ CREATE POLICY "Allow inserting chat messages" ON public.chat_messages FOR INSERT
 CREATE POLICY "Allow reading system alerts" ON public.system_alerts FOR SELECT USING (true);
 CREATE POLICY "Allow service role to manage system alerts" ON public.system_alerts FOR ALL USING (true);
 
--- Enable Realtime for Alerts, Telemetry & Chat
-ALTER PUBLICATION supabase_realtime ADD TABLE public.alerts;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.telemetry;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_messages;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.system_alerts;
+-- Enable Realtime for Alerts, Telemetry & Chat (idempotent)
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.alerts;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.telemetry;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_messages;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.system_alerts;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
