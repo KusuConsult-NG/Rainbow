@@ -1,7 +1,7 @@
 -- ============================================================
 -- OPERATION RAINBOW — FULL MIGRATION SCRIPT (ALL 27, IDEMPOTENT)
 -- Project: xkgqvkjmcsnavelsyasq
--- Generated: 2026-09-29T08:50:32Z
+-- Generated: 2026-09-29T08:56:54Z
 -- All CREATE POLICY statements are guarded with DROP POLICY IF EXISTS
 -- All ALTER PUBLICATION calls are wrapped in EXCEPTION WHEN duplicate_object
 -- ============================================================
@@ -4538,7 +4538,7 @@ ALTER TABLE public.app_config ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "app_config_read" ON public.app_config;
 CREATE POLICY "app_config_read" ON public.app_config
-  FOR SELECT USING (TRUE);
+  FOR SELECT TO authenticated USING (TRUE);
 
 INSERT INTO public.app_config (key, value) VALUES
   ('min_version',      '1.0.0'),
@@ -4640,6 +4640,7 @@ ALTER TABLE public.app_config ENABLE ROW LEVEL SECURITY;
 -- DROP first so re-runs are idempotent (CREATE POLICY has no IF NOT EXISTS in PG)
 DO $$
 BEGIN
+  DROP POLICY IF EXISTS "app_config_read" ON public.app_config;
   DROP POLICY IF EXISTS "app_config_read_authenticated" ON public.app_config;
   DROP POLICY IF EXISTS "app_config_write_service_role" ON public.app_config;
 END $$;

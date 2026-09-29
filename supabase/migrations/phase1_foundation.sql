@@ -152,7 +152,7 @@ ALTER TABLE public.app_config ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "app_config_read" ON public.app_config;
 CREATE POLICY "app_config_read" ON public.app_config
-  FOR SELECT USING (TRUE);
+  FOR SELECT TO authenticated USING (TRUE);
 
 INSERT INTO public.app_config (key, value) VALUES
   ('min_version',      '1.0.0'),

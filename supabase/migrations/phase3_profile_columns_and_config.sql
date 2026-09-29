@@ -37,6 +37,7 @@ ALTER TABLE public.app_config ENABLE ROW LEVEL SECURITY;
 -- DROP first so re-runs are idempotent (CREATE POLICY has no IF NOT EXISTS in PG)
 DO $$
 BEGIN
+  DROP POLICY IF EXISTS "app_config_read" ON public.app_config;
   DROP POLICY IF EXISTS "app_config_read_authenticated" ON public.app_config;
   DROP POLICY IF EXISTS "app_config_write_service_role" ON public.app_config;
 END $$;
