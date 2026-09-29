@@ -464,6 +464,38 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
   const alertMarkersRef = useRef<Map<string, any>>(new Map());
   const clusterGroupRef = useRef<any>(null);
 
+  /**
+   * What each marker was last drawn FROM, so an unchanged marker is left alone.
+   *
+   * ## The blink
+   *
+   * Every realtime event refetches the board, and `fetchAlertsData` ends in an
+   * unconditional `setAlerts(mapped)` — a brand-new array even when not one
+   * field differs. So `alerts` changes identity two or three times a minute,
+   * this effect re-runs, and it used to call `setLatLng`, `setIcon` and
+   * `setContent` on every existing marker unconditionally.
+   *
+   * Both of the latter two are destructive:
+   *
+   *   * `Marker.setIcon` replaces the marker's DOM element via `_initIcon` and
+   *     then RE-BINDS the popup — so an open dossier is torn down and put back.
+   *   * `Popup.setContent` replaces the content node and re-runs the layout and
+   *     position passes, which re-measures and nudges the card.
+   *
+   * Neither had anything to do: the icon HTML is a pure function of status and
+   * acknowledgement, and the dossier HTML of the alert and the profile map. The
+   * operator was watching a card be rebuilt from identical inputs, and it read
+   * as a flicker on the one thing they were trying to read.
+   *
+   * So each marker remembers the three strings it was drawn from, and each
+   * setter is called only when its own string changed. Position, icon and
+   * content are tracked separately because a moving marker must still move
+   * without its popup being rebuilt.
+   */
+  const markerDrawnFromRef = useRef<Map<string, { pos: string; icon: string; html: string }>>(
+    new Map(),
+  );
+
   useEffect(() => {
     if (!mapReady || !mapInstanceRef.current) return;
     const { map, L } = mapInstanceRef.current;
@@ -533,10 +565,19 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
       });
 
       const existingMarker = alertMarkersRef.current.get(alert.id);
+      // The three things this marker is drawn from. Compared as strings rather
+      // than rebuilt objects, because that is what changing actually means
+      // here: `icon` is a fresh L.divIcon on every pass and would never be ===.
+      const pos = `${alert.lat},${alert.lng}`;
+      const iconSig = `${size}|${color}|${pulse}`;
       if (existingMarker) {
-        existingMarker.setLatLng([alert.lat!, alert.lng!]);
-        existingMarker.setIcon(icon);
-        if (existingMarker.getPopup()) {
+        const was = markerDrawnFromRef.current.get(alert.id);
+        if (was?.pos !== pos) existingMarker.setLatLng([alert.lat!, alert.lng!]);
+        // Guarded because setIcon re-binds the popup: calling it with an
+        // identical icon closed and rebuilt the dossier the operator was
+        // reading. See the note on markerDrawnFromRef.
+        if (was?.icon !== iconSig) existingMarker.setIcon(icon);
+        if (was?.html !== popupContent && existingMarker.getPopup()) {
           existingMarker.getPopup().setContent(popupContent);
         }
       } else {
@@ -553,6 +594,7 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
         clusterGroup.addLayer(marker);
         alertMarkersRef.current.set(alert.id, marker);
       }
+      markerDrawnFromRef.current.set(alert.id, { pos, icon: iconSig, html: popupContent });
     });
 
     // Remove old markers that no longer exist
@@ -560,6 +602,7 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
       if (!currentIds.has(id)) {
         clusterGroup.removeLayer(marker);
         alertMarkersRef.current.delete(id);
+        markerDrawnFromRef.current.delete(id);
       }
     });
     // `usersMap` belongs here. Profiles load in their OWN effect, which

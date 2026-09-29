@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
+import 'package:rainbow_app/services/alert_media.dart';
 import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
 
@@ -129,26 +130,26 @@ class SyncService {
     }
 
     // ── Atomic URL append to alerts.media_urls ───────────────────────────
+    //
+    // This block was labelled atomic and was not: it read media_urls, merged
+    // into the copy, and wrote the whole array back. Read-modify-write over a
+    // network is lost-update by construction, and this loop is the worst place
+    // for it — a queue of uploads racing the duress screen's own unawaited
+    // attach, both reading the same array, the later write erasing the earlier.
+    //
+    // append_alert_media() does it in one locked statement. See
+    // lib/services/alert_media.dart and migration 20261010000000.
     if (uploadedUrls.isNotEmpty) {
-      try {
-        final alertData = await SupabaseConfig.client
-            .from('alerts')
-            .select('media_urls')
-            .eq('id', alertId)
-            .single();
-
-        final existing =
-            (alertData['media_urls'] as List<dynamic>?)?.cast<String>() ?? [];
-        final merged = {...existing, ...uploadedUrls}.toList();
-
-        await SupabaseConfig.client
-            .from('alerts')
-            .update({'media_urls': merged, 'updated_at': DateTime.now().toIso8601String()})
-            .eq('id', alertId);
-
-        debugPrint('[SYNC] Appended ${uploadedUrls.length} URL(s) to alert $alertId media_urls');
-      } catch (e) {
-        debugPrint('[SYNC] Failed to append URLs to alert $alertId: $e');
+      final res = await AlertMedia.append(alertId, uploadedUrls);
+      if (res.isOnTheIncident) {
+        debugPrint('[SYNC] Attached ${res.added} of ${uploadedUrls.length} '
+            'URL(s) to alert $alertId (total ${res.total})');
+      } else {
+        // A refusal is not a transport failure and the difference matters when
+        // reading these logs: one means this account has no part in the
+        // incident, the other means try again.
+        debugPrint('[SYNC] Could NOT attach ${uploadedUrls.length} URL(s) to '
+            'alert $alertId: ${res.outcome.name}${res.error == null ? '' : ' — ${res.error}'}');
       }
     } else {
       debugPrint('[SYNC] No files successfully uploaded for alert $alertId');

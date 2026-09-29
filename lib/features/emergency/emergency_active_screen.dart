@@ -14,7 +14,9 @@ import 'package:latlong2/latlong.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/features/emergency/pending_evidence.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
+import 'package:rainbow_app/services/alert_media.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
 import 'package:rainbow_app/services/live_stream_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
@@ -42,6 +44,49 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
 
   bool _showMap = false;
   bool _isCapturingEvidence = false;
+
+  /// Photographs taken before the SOS had an incident to attach them to.
+  /// See pending_evidence.dart for why holding them is the whole point.
+  final PendingEvidence _pending = PendingEvidence();
+
+  /// Whether a flush has been started for the incident id we have now, so the
+  /// per-second timer tick on this screen cannot start a second one.
+  String? _flushedFor;
+
+  /// Send everything held, now that [alertId] exists.
+  ///
+  /// Anything that does not make it stays held and the marker is cleared, so the
+  /// next confirmation — or the next photograph — tries again rather than
+  /// leaving the queue stranded.
+  void _flushHeldEvidence(String alertId) {
+    if (_pending.isEmpty || _flushedFor == alertId) return;
+    _flushedFor = alertId;
+    unawaited(
+      _pending.flush((path) => _attachOne(path, alertId)).then((res) async {
+        if (res.stillHeld > 0) _flushedFor = null;
+        if (!res.anythingDelivered) return;
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(deliveredEvidenceMessage(res.delivered.length)),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }),
+    );
+  }
+
+  /// Upload one local file and attach it to [alertId].
+  ///
+  /// Returns whether the file is now ON the incident. A refusal and a transport
+  /// failure both answer false, and both mean the caller keeps the file — see
+  /// AttachResult.isOnTheIncident.
+  Future<bool> _attachOne(String path, String alertId) async {
+    final url = await CloudinaryService.instance.uploadMedia(File(path));
+    if (url == null) return false;
+    final res = await AlertMedia.append(alertId, [url]);
+    return res.isOnTheIncident;
+  }
 
   @override
   void initState() {
@@ -130,40 +175,44 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
       }
       final alertId = ref.read(emergencyProvider).alertId;
       if (alertId == null) {
+        // The SOS has not round-tripped yet. This used to say "evidence saved
+        // locally" and then DROP the path — nothing recorded it and nothing
+        // retried, so the photograph was gone. That window is the first seconds
+        // of the emergency, which is usually the only moment the person gets.
+        //
+        // Held instead, and flushed by the listener in build() the moment an
+        // incident id exists. See pending_evidence.dart.
+        _pending.hold(photo.path);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('SOS not yet confirmed — evidence saved locally')),
-        );
+            SnackBar(content: Text(heldEvidenceMessage(_pending.count))),
+          );
         }
         setState(() => _isCapturingEvidence = false);
         return;
       }
-      // Upload in background — do not await, just fire and forget with error handling
+      // Upload in the background — the person should not be made to watch a
+      // progress bar during a duress event. Failure HOLDS the file rather than
+      // discarding it, so the next flush tries again.
       unawaited(
-        CloudinaryService.instance.uploadMedia(File(photo.path)).then((url) async {
-          if (url == null) return;
-          try {
-            final alertData = await SupabaseConfig.client
-                .from('alerts')
-                .select('media_urls')
-                .eq('id', alertId)
-                .single();
-            final existing = (alertData['media_urls'] as List<dynamic>?)?.cast<String>() ?? [];
-            await SupabaseConfig.client.from('alerts').update({
-              'media_urls': [...existing, url],
-              'updated_at': DateTime.now().toIso8601String(),
-            }).eq('id', alertId);
+        _attachOne(photo.path, alertId).then((ok) {
+          if (!ok) {
+            _pending.hold(photo.path);
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('📷 Evidence captured and sent to HQ'),
-                  backgroundColor: Colors.green,
-                  duration: Duration(seconds: 2),
-                ),
+                SnackBar(content: Text(heldEvidenceMessage(_pending.count))),
               );
             }
-          } catch (e) {
-            debugPrint('[SOS_EVIDENCE_ERR] Failed to attach evidence: $e');
+            return;
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('📷 Evidence captured and sent to HQ'),
+                backgroundColor: Colors.green,
+                duration: Duration(seconds: 2),
+              ),
+            );
           }
         }),
       );
@@ -213,6 +262,20 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
   @override
   Widget build(BuildContext context) {
     final emergencyState = ref.watch(emergencyProvider);
+
+    // Send anything photographed before the SOS had an incident to attach it to.
+    //
+    // `ref.listen` on the id ALONE, not a plain statement in build and not a
+    // listen on the whole state. This screen's timer ticks every second, so both
+    // of those would fire sixty times a minute; selecting the id means this runs
+    // exactly once, when the SOS is confirmed.
+    ref.listen<String?>(
+      emergencyProvider.select((s) => s.alertId),
+      (previous, next) {
+        if (next == null || next == previous) return;
+        _flushHeldEvidence(next);
+      },
+    );
     final locAsync = ref.watch(userLocationStreamProvider);
 
     return Scaffold(

@@ -177,6 +177,31 @@ jobs:
       # that reach for the client. It is a static mutable pointing at
       # the whole app's database access, so production code must never call it:
       # one call from lib/ would silently redirect every query in the app. It is
+      # Evidence of a kidnapping that the app SAID it had sent is the worst
+      # thing in this system to lose quietly, and read-modify-write over a
+      # network loses it by construction: two overlapping uploads both read the
+      # same array and the second write erases the first. Three separate places
+      # did this, and one of them wrote back a copy loaded when the screen
+      # opened, which is not even a race — it is a guaranteed overwrite.
+      #
+      # append_alert_media() (migration 20261010000000) does it in one locked
+      # statement. AlertMedia.append is the only caller, so this gate keeps it
+      # the only one.
+      - name: Assert evidence is never attached by read-modify-write
+        run: |
+          set -euo pipefail
+          HITS=$(grep -rn "media_urls" lib --include=*.dart \
+                   | grep -E "update\(|upsert\(" || true)
+          if [ -n "$HITS" ]; then
+            echo "$HITS"
+            echo "::error::media_urls must be appended with AlertMedia.append (append_alert_media), never written back wholesale"
+            exit 1
+          fi
+          # ...and the one sanctioned path must still exist, or this gate is
+          # guarding an absence.
+          grep -q "append_alert_media" lib/services/alert_media.dart \
+            || { echo "::error::AlertMedia.append no longer calls append_alert_media"; exit 1; }
+
       # @visibleForTesting, but that is an analyzer info the CI gate does not
       # fail on, so the ban is enforced here instead.
       - name: Assert the test-only Supabase seam is not used in production code

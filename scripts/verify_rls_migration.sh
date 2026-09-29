@@ -57,6 +57,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/notification_outbox_behaviour_test.sql \
    "$REPO"/scripts/escalation_targets_behaviour_test.sql \
    "$REPO"/scripts/geo_key_behaviour_test.sql \
+   "$REPO"/scripts/alert_media_behaviour_test.sql \
    "$REPO"/scripts/why_is_the_board_empty.sql \
    "$REPO"/scripts/seed_demo_incidents.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
@@ -302,6 +303,19 @@ GEOK_OUT=$(psql_run "-f $PGROOT/geo_key_behaviour_test.sql" 2>&1) && GEOK_RC=0 |
 echo "$GEOK_OUT" | grep -E "PASS|FAIL|ERROR" || true
 if [ "$GEOK_RC" -ne 0 ]; then
   echo "$GEOK_OUT"; echo "✗ ward key assertions failed"; exit 1
+fi
+
+# Three places appended to alerts.media_urls with read-modify-write, so two
+# overlapping uploads erased each other while the UI said the evidence was sent.
+echo "▶ Applying 20261010000000_append_alert_media_atomically.sql"
+psql_run "-f $PGROOT/20261010000000_append_alert_media_atomically.sql" >/dev/null
+psql_run "-f $PGROOT/20261010000000_append_alert_media_atomically.sql" >/dev/null
+
+echo "▶ Asserting two uploads cannot erase each other"
+MEDIA_OUT=$(psql_run "-f $PGROOT/alert_media_behaviour_test.sql" 2>&1) && MEDIA_RC=0 || MEDIA_RC=$?
+echo "$MEDIA_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$MEDIA_RC" -ne 0 ]; then
+  echo "$MEDIA_OUT"; echo "✗ evidence append assertions failed"; exit 1
 fi
 
 echo "▶ Asserting the mesh recognises a duplicate, and forgets in time"
