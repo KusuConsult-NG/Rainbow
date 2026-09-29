@@ -37,7 +37,7 @@
 -- jurisdictions taken from tactical_mapping.ts, because a console full of
 -- "Test User 1" teaches nobody what it looks like in use.
 
-\set ON_ERROR_STOP on
+-- \set ON_ERROR_STOP on
 SET client_min_messages TO NOTICE;
 
 BEGIN;
