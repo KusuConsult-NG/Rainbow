@@ -341,6 +341,10 @@ echo "▶ Applying 20261012000000_ussd_filing.sql"
 psql_run "-f $PGROOT/20261012000000_ussd_filing.sql" >/dev/null
 psql_run "-f $PGROOT/20261012000000_ussd_filing.sql" >/dev/null
 
+echo "▶ Applying 20261013000000_ussd_landmark.sql"
+psql_run "-f $PGROOT/20261013000000_ussd_landmark.sql" >/dev/null
+psql_run "-f $PGROOT/20261013000000_ussd_landmark.sql" >/dev/null
+
 echo "▶ Asserting a gateway retry cannot raise the same emergency twice"
 UFIL_OUT=$(psql_run "-f $PGROOT/ussd_filing_behaviour_test.sql" 2>&1) && UFIL_RC=0 || UFIL_RC=$?
 echo "$UFIL_OUT" | grep -E "PASS|FAIL|ERROR" || true

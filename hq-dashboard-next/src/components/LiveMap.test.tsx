@@ -522,6 +522,120 @@ describe('LiveMap', () => {
     });
   });
 
+  // ── An incident with no GPS ───────────────────────────────────────────────
+  //
+  // A USSD report has no GPS and cannot have one. This component used to skip
+  // any alert without finite coordinates, so a USSD emergency appeared in the
+  // incident list and NOWHERE on the map the operator is watching.
+  //
+  // The fix is not to invent coordinates — that is the C-5 defect, where a
+  // missing fix fell back to central Jos and drew a confident pin. It is to draw
+  // an approximate position as an approximate position, and these tests hold that
+  // line: an AREA, never a marker, and never mistakable for a fix.
+
+  describe('an incident with a ward but no GPS', () => {
+    const wardAlert = () =>
+      ({
+        ...alert('u-1', 0, 0),
+        lat: undefined,
+        lng: undefined,
+        geo_lga: 'JOS NORTH',
+        geo_ward: 'ABBA NA SHEHU',
+      }) as unknown as Alert;
+
+    it('is drawn, rather than vanishing from the map', async () => {
+      const LiveMap = await load();
+      const { container } = render(
+        <LiveMap alerts={[wardAlert()]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" />,
+      );
+      await waitFor(() =>
+        expect(container.querySelector('.leaflet-container')).not.toBeNull(),
+      );
+      // Leaflet renders a circle into the overlay pane as an SVG path.
+      await waitFor(() =>
+        expect(container.querySelectorAll('.leaflet-overlay-pane path').length)
+          .toBeGreaterThan(0),
+      );
+    });
+
+    it('is NOT drawn as a marker', async () => {
+      // The whole point. A pin says "here"; this is not here, it is somewhere in
+      // a ward, and the difference decides whether a vehicle can be sent.
+      const LiveMap = await load();
+      const { container } = render(
+        <LiveMap alerts={[wardAlert()]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" />,
+      );
+      await waitFor(() =>
+        expect(container.querySelectorAll('.leaflet-overlay-pane path').length)
+          .toBeGreaterThan(0),
+      );
+      expect(markerCount(container)).toBe(0);
+    });
+
+    it('warns in the dossier, at the TOP, and says not to dispatch to it', async () => {
+      // A warning found three rows down, after a coordinate-shaped circle has
+      // already been believed, is not a warning.
+      const LiveMap = await load();
+      const { container } = render(
+        <LiveMap alerts={[wardAlert()]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" />,
+      );
+      const circle = await waitFor(() => {
+        const p = container.querySelector('.leaflet-overlay-pane path');
+        expect(p).not.toBeNull();
+        return p as Element;
+      });
+      circle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const popup = await waitFor(() => {
+        const el = container.querySelector('.leaflet-popup-content');
+        expect(el).not.toBeNull();
+        return el as HTMLElement;
+      }, { timeout: 5000 });
+      expect(popup.textContent).toContain('NO GPS');
+      expect(popup.textContent).toContain('Do not dispatch');
+      // And it carries the SAME dossier a marker would, so an approximate
+      // incident is not second-class on the screen that decides who gets help.
+      expect(popup.textContent).toContain('INCIDENT');
+    });
+  });
+
+  describe('an incident with nothing at all', () => {
+    it('is still not drawn, and no coordinates are invented', async () => {
+      // The C-5 line. An alert with no location must not appear anywhere on the
+      // map — the console reports it in the UNLOCATED counter instead.
+      const LiveMap = await load();
+      const nowhere = {
+        ...alert('n-1', 0, 0),
+        lat: undefined, lng: undefined, geo_lga: undefined, geo_ward: undefined,
+      } as unknown as Alert;
+      const { container } = render(
+        <LiveMap alerts={[nowhere]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" />,
+      );
+      await waitFor(() =>
+        expect(container.querySelector('.leaflet-container')).not.toBeNull(),
+      );
+      expect(markerCount(container)).toBe(0);
+      expect(container.querySelectorAll('.leaflet-overlay-pane path')).toHaveLength(0);
+    });
+  });
+
+  describe('a GPS fix beside an approximate one', () => {
+    it('draws one marker and one circle, not two of either', async () => {
+      const LiveMap = await load();
+      const fixed = alert('g-1', 9.9167, 8.8917);
+      const approx = {
+        ...alert('u-2', 0, 0),
+        lat: undefined, lng: undefined,
+        geo_lga: 'MANGU', geo_ward: 'AMPANG WEST',
+      } as unknown as Alert;
+      const { container } = render(
+        <LiveMap alerts={[fixed, approx]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" />,
+      );
+      await waitFor(() => expect(markerCount(container)).toBe(1));
+      expect(container.querySelectorAll('.leaflet-overlay-pane path').length)
+        .toBeGreaterThan(0);
+    });
+  });
+
   it('unmounts without throwing', async () => {
     const LiveMap = await load();
     const { container, unmount } = render(

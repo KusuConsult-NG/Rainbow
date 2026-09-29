@@ -23,6 +23,8 @@ let fileError: { message: string } | null = null;
 let sessionReadError: { message: string } | null = null;
 /** Force a named RPC to answer with an error, without re-mocking the module. */
 let rpcErrors: Record<string, { message: string }> = {};
+/** Answers for RPCs beyond the four the main mock knows. */
+let extraAnswers: Record<string, { data: unknown; error: unknown }> = {};
 let createUserResult: { data: { user: { id: string } } | null; error: unknown } =
   { data: { user: { id: 'new-user-1' } }, error: null };
 
@@ -34,6 +36,7 @@ vi.mock('@/lib/supabase-server', () => ({
       if (fn === 'ussd_caller') return { data: callerRows, error: null };
       if (fn === 'ussd_last_report') return { data: lastReportRows, error: null };
       if (fn === 'ussd_file_report') return { data: fileRows, error: fileError };
+      if (extraAnswers[fn]) return extraAnswers[fn];
       return { data: null, error: null };
     },
     from: (table: string) => ({
@@ -90,6 +93,9 @@ async function post(
 }
 
 const filed = () => rpcCalls.filter(c => c.fn === 'ussd_file_report');
+const answersFor = (fn: string, data: unknown) => {
+  extraAnswers[fn] = { data, error: null };
+};
 
 beforeEach(() => {
   vi.resetModules();
@@ -104,6 +110,7 @@ beforeEach(() => {
   fileError = null;
   sessionReadError = null;
   rpcErrors = {};
+  extraAnswers = {};
   createUserResult = { data: { user: { id: 'new-user-1' } }, error: null };
   process.env.USSD_GATEWAY_SECRET = SECRET;
   delete process.env.USSD_REPLY_FORMAT;
@@ -246,8 +253,12 @@ describe('filing a report', () => {
       p_lga: 'JOS NORTH',
       p_callback: true,
     });
-    expect(text.startsWith('END ')).toBe(true);
+    // Not terminal any more: the report is filed and the next screen asks for a
+    // landmark. The caller already has their reference, so the session staying
+    // open costs them nothing.
+    expect(text.startsWith('CON ')).toBe(true);
     expect(text).toContain('R4K2M9');
+    expect(text.toLowerCase()).toContain('landmark');
   });
 
   it('does not create an account for a caller who already has one', async () => {
@@ -331,7 +342,58 @@ describe('filing a report', () => {
     };
     const { text } = await post({ sessionId: 'S14', phoneNumber: '08030001111', text: '1' });
     expect(text).toContain('RAAAAA');
+  });
+});
+
+describe('the landmark turn', () => {
+  const AT_LANDMARK = {
+    state: { step: 'LANDMARK', emergency: true, kind: 'Kidnap - Immediate Abduction', page: 0 },
+    last_input: '1',
+    last_screen: 'SENT TO COMMAND. Ref R4K2M9',
+    filed_alert: 'a-1',
+  };
+
+  it('attaches what the caller typed and closes the dialogue', async () => {
+    sessionRow = AT_LANDMARK;
+    answersFor('ussd_add_landmark', [{ reference: 'R4K2M9', alert_id: 'a-1' }]);
+    const { text } = await post({
+      sessionId: 'S30', phoneNumber: '08030001111', text: 'behind Bukuru market',
+    });
+    const call = rpcCalls.find(c => c.fn === 'ussd_add_landmark');
+    expect(call!.args).toEqual({ p_session_id: 'S30', p_landmark: 'behind Bukuru market' });
     expect(text.startsWith('END ')).toBe(true);
+    expect(text).toContain('Keep this phone on');
+  });
+
+  it('does NOT report a failure when the landmark could not be attached', async () => {
+    // The report is already filed and the caller has their reference. Telling
+    // them something went wrong would invite them to dial again and raise a
+    // SECOND incident for the same event.
+    sessionRow = AT_LANDMARK;
+    rpcErrors = { ussd_add_landmark: { message: 'boom' } };
+    const { text } = await post({
+      sessionId: 'S31', phoneNumber: '08030001111', text: 'behind the market',
+    });
+    expect(text).not.toContain('NOT SENT');
+    expect(text).toContain('Keep this phone on');
+    expect(text.startsWith('END ')).toBe(true);
+  });
+
+  it('closes the dialogue on a skip without calling the database', async () => {
+    sessionRow = AT_LANDMARK;
+    const { text } = await post({ sessionId: 'S32', phoneNumber: '08030001111', text: '0' });
+    expect(rpcCalls.some(c => c.fn === 'ussd_add_landmark')).toBe(false);
+    expect(text.startsWith('END ')).toBe(true);
+    expect(text).toContain('Do not reply by SMS');
+  });
+
+  it('files nothing on the landmark turn', async () => {
+    // The one thing that would be catastrophic here: a second alert for the same
+    // emergency because the landmark turn re-ran the filing.
+    sessionRow = AT_LANDMARK;
+    answersFor('ussd_add_landmark', [{ reference: 'R4K2M9', alert_id: 'a-1' }]);
+    await post({ sessionId: 'S33', phoneNumber: '08030001111', text: 'the junction' });
+    expect(filed()).toHaveLength(0);
   });
 });
 

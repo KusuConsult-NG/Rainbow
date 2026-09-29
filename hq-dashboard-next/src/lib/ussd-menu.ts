@@ -65,6 +65,7 @@ export type UssdStep =
   | 'PICK_LGA'
   | 'PICK_WARD'
   | 'CALLBACK'
+  | 'LANDMARK'
   | 'LAST_REPORT'
   | 'MY_DETAILS'
   | 'DONE';
@@ -109,7 +110,16 @@ export type UssdAction =
       callback: boolean;
     }
   /** Read back the caller's most recent report for the LAST_REPORT screen. */
-  | { type: 'lookup_last' };
+  | { type: 'lookup_last' }
+  /**
+   * Attach a typed landmark to the report already filed in this session.
+   *
+   * Asked AFTER filing, never before. The emergency is already recorded and HQ
+   * can already see it; the extra detail arrives seconds later. Asking first
+   * would put another screen between a person under attack and the report
+   * landing, and if the session then dropped they would have neither.
+   */
+  | { type: 'landmark'; text: string };
 
 export interface UssdTurn {
   /** The text to send back, already under SCREEN_LIMIT. */
@@ -447,10 +457,14 @@ export function ussdTurn(
       }
       const callback = n === 1;
       return {
-        // The route substitutes the reference into this; see FILED_TEMPLATE.
+        // The route substitutes the reference into this.
         screen: '',
-        terminal: true,
-        state: { ...state, callback, step: 'DONE' },
+        // NOT terminal: the report is filed on this turn, and the next screen
+        // asks for a landmark. The session staying open costs the caller
+        // nothing — they already have their reference — and buys the one piece
+        // of information that can turn a ward circle into a findable place.
+        terminal: false,
+        state: { ...state, callback, step: 'LANDMARK' },
         action: {
           type: 'file',
           kind: state.kind ?? 'Other danger - Immediate Threat',
@@ -459,6 +473,17 @@ export function ussdTurn(
           ward: state.ward,
           callback,
         },
+      };
+    }
+
+    case 'LANDMARK': {
+      const { skip, text } = readLandmark(input);
+      return {
+        // The route fills this in; it needs the reference, which it has.
+        screen: '',
+        terminal: true,
+        state: { ...state, step: 'DONE' },
+        action: skip ? { type: 'none' } : { type: 'landmark', text },
       };
     }
 
@@ -491,11 +516,44 @@ export function ussdTurn(
 export function filedScreen(reference: string, emergency: boolean): string {
   const head = emergency ? 'SENT TO COMMAND.' : 'REPORT SENT.';
   return [
-    head,
-    `Ref ${reference}`,
+    `${head} Ref ${reference}`,
+    'Now type the nearest landmark - market, school, junction - to help us find you.',
+    '0 = skip',
+  ].join('\n');
+}
+
+/**
+ * The end of the dialogue, once a landmark has been given or skipped.
+ *
+ * Still does not say help is on the way — nobody has decided that, and a USSD
+ * report waits for a named officer. It says the two things that are true and
+ * useful: keep the phone on, because the callback is how a dispatcher confirms an
+ * emergency before committing officers, and do not reply by SMS, because this
+ * shortcode is not an SMS endpoint and a reply would go nowhere while the sender
+ * believed they had added something.
+ */
+export function dialogueEndScreen(reference: string, landmarkGiven: boolean): string {
+  return [
+    landmarkGiven ? `Noted. Ref ${reference}` : `Ref ${reference}`,
     'Keep this phone on, we may call.',
     'Do not reply by SMS.',
   ].join('\n');
+}
+
+/**
+ * Is this a usable landmark, or a skip?
+ *
+ * `0` skips. Anything under three characters is treated as a mis-key rather than
+ * a landmark: "ok", "." and a stray digit are not places, and a dispatcher given
+ * one would waste the seconds this screen exists to save.
+ */
+export function readLandmark(input: string): { skip: boolean; text: string } {
+  const t = input.trim();
+  if (t === '' || t === '0') return { skip: true, text: '' };
+  if (t.length < 3) return { skip: true, text: '' };
+  // Capped: some gateways will forward a long string, and a dossier field is
+  // read by a person, not parsed.
+  return { skip: false, text: t.slice(0, 120) };
 }
 
 /** What a caller is told when the report could not be written. */

@@ -38,6 +38,7 @@ import {
   INITIAL_STATE,
   type UssdCaller,
   type UssdState,
+  dialogueEndScreen,
   filedScreen,
   filingFailedScreen,
   lastReportScreen,
@@ -198,6 +199,35 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (turn.action.type === 'landmark') {
+    // The report is already filed; this only adds detail to it. So a failure here
+    // is NOT reported as a failed report — the caller has their reference and the
+    // emergency is on the board. Telling them something went wrong would invite
+    // them to dial again and raise a second incident for the same event.
+    const { data, error } = await supabase.rpc('ussd_add_landmark', {
+      p_session_id: sessionId,
+      p_landmark: turn.action.text,
+    });
+    const row = Array.isArray(data) && data.length > 0
+      ? (data[0] as { reference: string })
+      : null;
+    if (error || !row) {
+      console.error(`[USSD] ${sessionId}: could not attach the landmark`, error);
+      screen = dialogueEndScreen(await referenceFor(supabase, sessionId), false);
+    } else {
+      console.warn(`[USSD] ${sessionId}: landmark attached to ${row.reference}`);
+      screen = dialogueEndScreen(row.reference, true);
+    }
+    terminal = true;
+  }
+
+  // The caller skipped the landmark. The reducer has nothing to do, so the route
+  // closes the dialogue with the reference it already has.
+  if (turn.state.step === 'DONE' && turn.action.type === 'none' && state.step === 'LANDMARK') {
+    screen = dialogueEndScreen(await referenceFor(supabase, sessionId), false);
+    terminal = true;
+  }
+
   if (turn.action.type === 'file') {
     const { kind, emergency, lga, ward, callback } = turn.action;
 
@@ -233,6 +263,10 @@ export async function POST(req: NextRequest) {
       // their report went through stops trying.
       console.error(`[USSD] ${sessionId}: filing failed`, error);
       screen = filingFailedScreen();
+      // NOT SENT ends the dialogue. There is nothing to add a landmark to, and
+      // keeping the session open would put a caller whose report did not go
+      // through on a screen asking them to describe where they are.
+      terminal = true;
     } else {
       if (row.already_filed) {
         console.warn(`[USSD] ${sessionId}: filing was a retry, same ref ${row.reference}`);
@@ -242,8 +276,11 @@ export async function POST(req: NextRequest) {
         );
       }
       screen = filedScreen(row.reference, emergency);
+      // Deliberately NOT terminal. The reducer moved to LANDMARK and the next
+      // screen asks for one; forcing the session closed here was the first
+      // version of this branch and it silently dropped the landmark step
+      // entirely, which a route test caught by finding END where CON belonged.
     }
-    terminal = true;
   }
 
   // ── Remember where we are ───────────────────────────────────────────────
@@ -265,6 +302,37 @@ export async function POST(req: NextRequest) {
   }
 
   return reply(screen, terminal);
+}
+
+/**
+ * The reference of the report this session filed.
+ *
+ * Read back rather than carried in the menu state: the state is what the reducer
+ * owns and it has no business holding a database key. Falling back to an empty
+ * string is deliberate — the closing screen is worth showing even without it,
+ * because "keep this phone on" and "do not reply by SMS" are the useful parts.
+ */
+async function referenceFor(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  sessionId: string,
+): Promise<string> {
+  try {
+    const { data } = await supabase
+      .from('ussd_sessions')
+      .select('filed_alert')
+      .eq('session_id', sessionId)
+      .maybeSingle();
+    const id = (data as { filed_alert?: string } | null)?.filed_alert;
+    if (!id) return '';
+    const { data: alert } = await supabase
+      .from('alerts')
+      .select('public_reference')
+      .eq('id', id)
+      .maybeSingle();
+    return (alert as { public_reference?: string } | null)?.public_reference ?? '';
+  } catch {
+    return '';
+  }
 }
 
 /**
