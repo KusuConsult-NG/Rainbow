@@ -22,6 +22,43 @@
 -- the ones after it will look wrong as a consequence.
 
 
+-- ─── 0. One row that usually settles it ────────────────────────────────────
+--
+-- Run this first. Every other section exists to confirm what this one implies,
+-- and it returns exactly one row, so there is no ambiguity about which query
+-- produced which answer — which is why it was added: a run of the sections
+-- below came back with "0 rows" and nothing to say which section it came from.
+--
+--   alerts_total = 0            Nothing is here. The console may be pointed at
+--                               a different Supabase project entirely.
+--   staff_profiles = 0          NOBODY has a staff role. Every account is a
+--                               CITIZEN, so alert_is_ours() gives each one only
+--                               the incidents it reported, and every console
+--                               board is empty and always will be.
+--   whole_state_accounts = 0    No account can see all of Plateau. That is
+--                               HQ_COMMAND, HQ_OFFICER or ADMIN and nothing
+--                               else — not SUPER_ADMIN, not STATE_COMMAND.
+--   users_with_no_profile > 0   Someone can sign in but has no profiles row.
+--                               auth.users is the credential; public.profiles
+--                               carries the role and the posting, and RLS reads
+--                               only the latter. A sign-in with no profile is
+--                               authenticated and authorised for nothing.
+
+SELECT (SELECT count(*) FROM public.alerts)                                   AS alerts_total,
+       (SELECT count(*) FROM public.profiles)                                 AS profiles_total,
+       (SELECT count(*) FROM public.profiles
+          WHERE upper(coalesce(role, '')) <> 'CITIZEN')                       AS staff_profiles,
+       (SELECT count(*) FROM public.profiles
+          WHERE upper(coalesce(role, ''))
+                IN ('HQ_COMMAND', 'HQ_OFFICER', 'ADMIN'))                     AS whole_state_accounts,
+       (SELECT count(*) FROM public.profiles
+          WHERE upper(coalesce(role, '')) <> 'CITIZEN'
+            AND nullif(trim(coalesce(geo_lga, '')), '') IS NULL)              AS staff_with_no_posting,
+       (SELECT count(*) FROM auth.users)                                      AS auth_users,
+       (SELECT count(*) FROM auth.users u
+          WHERE NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = u.id)) AS users_with_no_profile;
+
+
 -- ─── 1. Are the incidents actually in the database? ─────────────────────────
 --
 -- total = 0        nothing is seeded, or the console points at a different
