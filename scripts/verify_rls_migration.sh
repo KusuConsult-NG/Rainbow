@@ -613,6 +613,38 @@ if [ -n "$FINAL_OPEN" ]; then
 fi
 echo "  PASS  after the full replay, no policy in public reaches anon or public"
 
+# A gate nobody has watched fail is not a gate. The early version of this exact
+# check has passed every run for weeks while a TO PUBLIC policy sat on telemetry,
+# so "it reports clean" earns no credit on its own — plant one and confirm the
+# query finds it.
+#
+# Staged as a FILE rather than passed with -c. The first attempt nested three
+# levels of quoting inside `su … -c "psql … -tAc \\\"…\\\""` and bash rejected
+# the line before psql saw it: `syntax error near unexpected token '('`. The rest
+# of this script uses one level; a file needs none.
+cat > "$PGROOT/zz_public_probe.sql" <<'PROBE'
+CREATE POLICY zz_public_probe ON public.app_config FOR SELECT USING (true);
+SELECT 'found=' || tablename || '.' || policyname
+  FROM pg_policies
+ WHERE schemaname = 'public'
+   AND ('anon' = ANY(roles) OR 'public' = ANY(roles));
+DROP POLICY zz_public_probe ON public.app_config;
+SELECT 'leftover=' || count(*)
+  FROM pg_policies
+ WHERE schemaname = 'public' AND policyname = 'zz_public_probe';
+PROBE
+chown postgres:postgres "$PGROOT/zz_public_probe.sql"
+PROBE_OUT=$(psql_run "-t -A -f $PGROOT/zz_public_probe.sql" 2>&1)
+printf '%s\n' "$PROBE_OUT" | grep -qx "found=app_config.zz_public_probe" || {
+  printf '%s\n' "$PROBE_OUT" | sed 's/^/    /'
+  echo "✗ a policy with no TO clause was not detected — this sweep checks nothing"
+  exit 1; }
+# And the probe must be gone, or the sweep would fail on every later run.
+printf '%s\n' "$PROBE_OUT" | grep -qx "leftover=0" || {
+  printf '%s\n' "$PROBE_OUT" | sed 's/^/    /'
+  echo "✗ the probe policy outlived the check"; exit 1; }
+echo "  PASS  and it detects a planted TO PUBLIC policy, so it is checking something"
+
 cat <<'EOF'
 
 ✓ Migration verified against a real PostgreSQL.
