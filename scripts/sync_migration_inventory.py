@@ -35,6 +35,13 @@ What is extracted, per migration file:
 Columns declared inside a CREATE TABLE body are deliberately not listed: if the
 table is there, they came with it, and listing them would triple the output for
 no new information.
+
+Known limitation: a migration that only creates or replaces a POLICY contributes
+nothing, so it cannot be detected as missing here —
+20261016000000_telemetry_policy_is_not_public.sql is exactly that shape. Policies
+are covered instead by the end-of-replay sweep in verify_rls_migration.sh, which
+fails if any policy in `public` reaches anon or public, and by
+scripts/rls_inventory.sql against a live database.
 """
 from __future__ import annotations
 

@@ -69,8 +69,27 @@ run_pasted() {
     "$PGBIN/psql -h $PGROOT/sock -p $PORT -U postgres -d $DB -f $PGROOT/apply_all_migrations.sql" 2>&1
 }
 
+check_for_errors() {
+  # An ERROR anywhere in the buffer is a failure even when psql exits 0.
+  #
+  # psql runs without ON_ERROR_STOP and apply_all_migrations.sql is not one
+  # transaction, so a statement can fail, every other statement can succeed, the
+  # verification block at the end can report 33/33 PASS, and the process exits 0.
+  # That is exactly what happened: a migration referencing a function that did
+  # not exist produced `ERROR: function public.normalise_lga(text) does not
+  # exist` and this script reported success, while verify_apply_in_parts.sh —
+  # which does use ON_ERROR_STOP — failed on the same file. A green run from the
+  # script that tests the operator's actual paste is the one that matters.
+  if printf '%s\n' "$1" | grep -qE '^psql.*ERROR:|^ERROR:'; then
+    printf '%s\n' "$1" | grep -E 'ERROR:|FATAL:' | head -10
+    echo "::error::$2 raised an error (psql still exited 0)"
+    exit 1
+  fi
+}
+
 echo "▶ Running apply_all_migrations.sql exactly as pasted"
 OUT=$(run_pasted) && RC=0 || RC=$?
+check_for_errors "$OUT" "the first paste"
 if [ "$RC" -ne 0 ]; then
   printf '%s\n' "$OUT" | grep -E "ERROR|FATAL" | head -20
   echo "::error::the generated apply script failed to run"; exit 1
@@ -92,6 +111,7 @@ fi
 
 echo "▶ Running it a second time (the RLS part is atomic, so it rolls back and says so)"
 OUT2=$(run_pasted) && RC2=0 || RC2=$?
+check_for_errors "$OUT2" "the second paste"
 if [ "$RC2" -ne 0 ]; then
   printf '%s\n' "$OUT2" | grep -E "ERROR|FATAL" | head -20
   echo "::error::re-running the apply script failed — it is not idempotent"; exit 1
@@ -115,6 +135,7 @@ psql_c() { su postgres -s /bin/bash -c \
   "$PGBIN/psql -h $PGROOT/sock -p $PORT -U postgres -d $DB -q -c \"$1\""; }
 psql_c "CREATE POLICY zz_mutation_probe ON public.app_config FOR SELECT USING (true)" >/dev/null
 MUT=$(run_pasted)
+check_for_errors "$MUT" "the paste over a planted policy"
 psql_c "DROP POLICY zz_mutation_probe ON public.app_config" >/dev/null
 
 ROW=$(printf '%s\n' "$MUT" | grep "no policy grants anon or public" || true)
@@ -180,6 +201,7 @@ echo "  reproduced: $(printf '%s\n' "$AFTER_PHASE1" | grep -c .) policies now re
 
 echo "▶ Re-pasting the apply script, which is the repair"
 FIXED=$(run_pasted)
+check_for_errors "$FIXED" "the repair paste"
 # The verdict must be CLEAN, not a named failure. A first draft of this test
 # expected the check to fail here and name the seven, and it reported PASS —
 # correctly, because 20260813 runs inside the same paste and drops them before

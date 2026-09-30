@@ -85,9 +85,17 @@ BEGIN
       AND policyname = 'telemetry_select_geo_lga_scoped'
   ) THEN
     EXECUTE $pol$
+      -- TO authenticated is not decoration. Without it PostgreSQL records the
+      -- policy as TO PUBLIC, PUBLIC includes anon, and
+      -- 20260813000000_rls_least_privilege.sql cannot drop it by name because
+      -- that migration predates this file. A production database carried it as
+      -- the single policy reaching anon for weeks. Repaired on existing
+      -- databases by 20261016000000_telemetry_policy_is_not_public.sql, since
+      -- the guard above correctly does nothing where the policy already exists.
       CREATE POLICY "telemetry_select_geo_lga_scoped"
         ON public.telemetry
         FOR SELECT
+        TO authenticated
         USING (
           auth.role() = 'authenticated'
           AND EXISTS (

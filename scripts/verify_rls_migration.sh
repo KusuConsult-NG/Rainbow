@@ -386,6 +386,24 @@ echo "▶ Applying 20261015000000_oversight_and_debrief.sql"
 psql_run "-f $PGROOT/20261015000000_oversight_and_debrief.sql" >/dev/null
 psql_run "-f $PGROOT/20261015000000_oversight_and_debrief.sql" >/dev/null
 
+# The single policy on a live database that PUBLIC could reach. Applied twice,
+# like the rest, because the operator repairing a database may well paste it
+# twice and a DROP/CREATE pair has to survive that.
+echo "▶ Applying 20261016000000_telemetry_policy_is_not_public.sql"
+psql_run "-f $PGROOT/20261016000000_telemetry_policy_is_not_public.sql" >/dev/null
+psql_run "-f $PGROOT/20261016000000_telemetry_policy_is_not_public.sql" >/dev/null
+
+# Asserted here as well as in the end-of-replay sweep below, because this is the
+# migration whose whole purpose it is: the policy must exist, and must be scoped
+# to authenticated rather than recorded as TO PUBLIC.
+TELEM_ROLES=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
+  \"select roles::text from pg_policies where schemaname='public' \
+    and tablename='telemetry' and policyname='telemetry_select_geo_lga_scoped';\"")
+[ "$TELEM_ROLES" = "{authenticated}" ] || {
+  echo "✗ telemetry_select_geo_lga_scoped is $TELEM_ROLES, expected {authenticated}"
+  exit 1; }
+echo "  PASS  telemetry_select_geo_lga_scoped is scoped TO authenticated"
+
 echo "▶ Asserting a complaint about an officer does not reach that officer"
 OVS_OUT=$(psql_run "-f $PGROOT/oversight_behaviour_test.sql" 2>&1) && OVS_RC=0 || OVS_RC=$?
 echo "$OVS_OUT" | grep -E "PASS|FAIL|ERROR" || true
@@ -564,6 +582,68 @@ printf '%s\n' "$MIG_OUT" | grep -q "absence is not a fault" || {
   echo "$MIG_OUT"
   echo "✗ the inventory did not mark the hand-made v2–v5 migrations"; exit 1; }
 echo "  PASS  every object from every replayed migration is present"
+
+# ── No policy reaches anon or public — asked at the END this time ─────────────
+#
+# This is already asserted earlier, immediately after
+# 20260813000000_rls_least_privilege.sql. That assertion passes and always has,
+# and it missed a real defect on a live database for weeks:
+#
+#   telemetry | telemetry_select_geo_lga_scoped | SELECT | {public}
+#
+# created by 20260725000000_v6_geo_lga_scoping_staging.sql with no `TO` clause,
+# which PostgreSQL records as TO PUBLIC, and PUBLIC includes anon. 20260813 could
+# not drop it by name — it predates the file. And the check could not see it,
+# because at the point it runs, eleven migrations before 20260725 is applied, the
+# policy does not exist yet.
+#
+# A check at one point in the history cannot answer a question about the end
+# state. Both now run: the early one proves the migration does its job, this one
+# proves nothing later undoes it.
+FINAL_OPEN=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
+  \"select tablename || '.' || policyname || ' ' || roles::text from pg_policies \
+    where schemaname='public' and ('anon' = any(roles) or 'public' = any(roles)) \
+    order by tablename, policyname;\"")
+if [ -n "$FINAL_OPEN" ]; then
+  printf '%s\n' "$FINAL_OPEN" | sed 's/^/    /'
+  echo "✗ after the FULL replay, the policies above reach anon or public."
+  echo "  A policy with no TO clause is recorded as TO PUBLIC, and PUBLIC"
+  echo "  includes anon. Add TO authenticated where it belongs."
+  exit 1
+fi
+echo "  PASS  after the full replay, no policy in public reaches anon or public"
+
+# A gate nobody has watched fail is not a gate. The early version of this exact
+# check has passed every run for weeks while a TO PUBLIC policy sat on telemetry,
+# so "it reports clean" earns no credit on its own — plant one and confirm the
+# query finds it.
+#
+# Staged as a FILE rather than passed with -c. The first attempt nested three
+# levels of quoting inside `su … -c "psql … -tAc \\\"…\\\""` and bash rejected
+# the line before psql saw it: `syntax error near unexpected token '('`. The rest
+# of this script uses one level; a file needs none.
+cat > "$PGROOT/zz_public_probe.sql" <<'PROBE'
+CREATE POLICY zz_public_probe ON public.app_config FOR SELECT USING (true);
+SELECT 'found=' || tablename || '.' || policyname
+  FROM pg_policies
+ WHERE schemaname = 'public'
+   AND ('anon' = ANY(roles) OR 'public' = ANY(roles));
+DROP POLICY zz_public_probe ON public.app_config;
+SELECT 'leftover=' || count(*)
+  FROM pg_policies
+ WHERE schemaname = 'public' AND policyname = 'zz_public_probe';
+PROBE
+chown postgres:postgres "$PGROOT/zz_public_probe.sql"
+PROBE_OUT=$(psql_run "-t -A -f $PGROOT/zz_public_probe.sql" 2>&1)
+printf '%s\n' "$PROBE_OUT" | grep -qx "found=app_config.zz_public_probe" || {
+  printf '%s\n' "$PROBE_OUT" | sed 's/^/    /'
+  echo "✗ a policy with no TO clause was not detected — this sweep checks nothing"
+  exit 1; }
+# And the probe must be gone, or the sweep would fail on every later run.
+printf '%s\n' "$PROBE_OUT" | grep -qx "leftover=0" || {
+  printf '%s\n' "$PROBE_OUT" | sed 's/^/    /'
+  echo "✗ the probe policy outlived the check"; exit 1; }
+echo "  PASS  and it detects a planted TO PUBLIC policy, so it is checking something"
 
 cat <<'EOF'
 

@@ -334,5 +334,3 @@ COMMENT ON FUNCTION public.audit_trail(INTEGER) IS
 REVOKE ALL ON FUNCTION public.audit_trail(INTEGER) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.audit_trail(INTEGER) TO authenticated, service_role;
 
-
-
