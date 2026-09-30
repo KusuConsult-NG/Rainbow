@@ -71,10 +71,30 @@ if [ "$RC" -ne 0 ]; then
   echo "::error::bootstrap_staging.sql failed on an empty database"; exit 1
 fi
 
+# An ERROR anywhere in the buffer is a failure even though psql exited 0.
+#
+# The whole file is one transaction and psql runs without ON_ERROR_STOP, so a
+# statement that fails aborts the transaction, every later statement reports
+# "current transaction is aborted", the COMMIT becomes a ROLLBACK — and the
+# process still exits 0. The check below used to print the ERROR lines only when
+# the exit code was non-zero, so a bootstrap that had rolled back entirely
+# reported `checks passed: 0   failed: 0` and the run died on the >= 19 test with
+# no indication of why. The real cause was `function auth.jwt() does not exist`
+# at line 699, missing from the shim, and it took a manual re-run to see it.
+if printf '%s\n' "$OUT" | grep -qE '^psql.*ERROR:|^ERROR:'; then
+  printf '%s\n' "$OUT" | grep -E 'ERROR:|FATAL:' | head -10
+  echo "::error::bootstrap_staging.sql raised an error and rolled back (psql still exited 0)"
+  exit 1
+fi
+
 printf '%s\n' "$OUT" | grep -E '^\s*(PASS|\*\*\* FAIL)' || true
 FAILED=$(printf '%s\n' "$OUT" | grep -c '\*\*\* FAIL \*\*\*' || true)
 PASSED=$(printf '%s\n' "$OUT" | grep -c '^ PASS' || true)
 echo "  checks passed: $PASSED   failed: $FAILED"
+# Zero passes is not "no failures". It is the shape of a file that rolled back,
+# and it used to satisfy FAILED -eq 0.
+[ "$PASSED" -gt 0 ] || {
+  echo "::error::the bootstrap's verification produced NO rows — it rolled back"; exit 1; }
 [ "$FAILED" -eq 0 ] && [ "$PASSED" -ge 19 ] || {
   echo "::error::the bootstrap's own verification reported a failure"; exit 1; }
 

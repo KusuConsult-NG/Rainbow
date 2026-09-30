@@ -34,6 +34,8 @@ import re
 import shutil
 import sys
 
+import migration_sets
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "scripts/apply_all_migrations.sql"
 OUT = ROOT / "scripts/apply_in_parts"
@@ -145,16 +147,11 @@ def main() -> int:
     lines = SRC.read_text().splitlines(keepends=True)
     found = sections(lines)
 
-    migrations = sorted(
-        p.name for p in (ROOT / "supabase/migrations").glob("*.sql")
-    )
-    historical = {
-        "20260720000000_initial_schema.sql",
-        "phase1_foundation.sql",
-        "phase2_assigned_responders.sql",
-        "phase3_profile_columns_and_config.sql",
-    }
-    expected = len([m for m in migrations if m not in historical]) + 1  # + VERIFY
+    # One definition, in scripts/migration_sets.py. This list used to be a third
+    # copy of the original four, so when the v2–v5 era was written down as
+    # migration files the split inherited them from apply_all_migrations.sql and
+    # part 01 failed outright on `auth.jwt() does not exist`.
+    expected = len(migration_sets.outstanding()) + 1  # + VERIFY
     if len(found) != expected:
         print(
             f"found {len(found)} sections but expected {expected} "
