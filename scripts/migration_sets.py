@@ -94,6 +94,56 @@ def outstanding() -> list[str]:
     return names
 
 
+# phase1_foundation.sql creates seven policies with NO `TO` clause, which in
+# PostgreSQL means TO PUBLIC — and PUBLIC includes anon:
+#
+#   chat_read, chat_insert                 on chat_messages
+#   telemetry_own_upsert, telemetry_read_all on telemetry
+#   safe_zones_read                        on safe_zones
+#   uninstall_insert, uninstall_read       on uninstall_requests
+#
+# 20260813000000_rls_least_privilege.sql drops all seven by name and creates
+# scoped replacements. So the ORDER of these two files in a bundle decides
+# whether a database ends up locked down or re-opened, and a bundle that puts
+# phase1 last silently undoes the migration whose entire purpose is to close it.
+#
+# supabase/rainbow_full_migration.sql does exactly that: 20260813 at section 7,
+# phase1 at section 28. It is hand-assembled, has no generator, and was not
+# covered by any check. Pasting it leaves chat_messages, telemetry, safe_zones
+# and uninstall_requests carrying TO PUBLIC policies. What stops that being an
+# open database today is only that 20260813 also REVOKEs the table privileges
+# from anon — so it survives on one layer, and a single GRANT (or one click in
+# the dashboard's table editor) exposes citizens' position history.
+PERMISSIVE_SOURCE = 'phase1_foundation.sql'
+LEAST_PRIVILEGE = '20260813000000_rls_least_privilege.sql'
+BUNDLES = [
+    'scripts/apply_all_migrations.sql',
+    'scripts/bootstrap_staging.sql',
+    'supabase/rainbow_full_migration.sql',
+]
+
+
+def assert_no_bundle_reopens_the_database() -> list[str]:
+    """No bundle may apply phase1 after the least-privilege migration."""
+    import re
+    problems: list[str] = []
+    for rel in BUNDLES:
+        path = ROOT / rel
+        if not path.is_file():
+            continue
+        order = re.findall(r'^-- Migration: (.+?)\s*$',
+                           path.read_text(encoding='utf-8'), re.M)
+        if PERMISSIVE_SOURCE not in order or LEAST_PRIVILEGE not in order:
+            continue
+        if order.index(PERMISSIVE_SOURCE) > order.index(LEAST_PRIVILEGE):
+            problems.append(
+                f'{rel} applies {PERMISSIVE_SOURCE} (section '
+                f'{order.index(PERMISSIVE_SOURCE) + 1}) AFTER {LEAST_PRIVILEGE} '
+                f'(section {order.index(LEAST_PRIVILEGE) + 1}), which re-creates '
+                f'the TO PUBLIC policies that migration exists to remove')
+    return problems
+
+
 def assert_coverage() -> int:
     """Every outstanding migration reaches both paste scripts; no excluded one does.
 
@@ -132,6 +182,8 @@ def assert_coverage() -> int:
                 f'already on production and re-running it is not a no-op')
         if any(name in p for p in parts):
             problems.append(f'{name} has a part in scripts/apply_in_parts/')
+
+    problems += assert_no_bundle_reopens_the_database()
 
     for p in problems:
         print(f'✗ {p}')
