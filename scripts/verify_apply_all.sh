@@ -135,7 +135,75 @@ STILL=$(run_pasted | grep -c "zz_mutation_probe" || true)
   echo "::error::the probe policy outlived the check"; exit 1; }
 echo "  ok: the check fails and names the policy"
 
+# ── phase1 applied out of order, and the repair ──────────────────────────────
+#
+# A live database failed check 2 after a paste. The run before it had ended with
+# `Phase 3 profile columns & app_config migration complete` — the last line of
+# phase3_foundation's sibling — which means supabase/rainbow_full_migration.sql
+# had been pasted, and that file used to apply phase1/2/3 at sections 29–31,
+# twenty-one sections AFTER 20260813000000_rls_least_privilege.
+#
+# phase1 creates seven policies with no `TO` clause. In PostgreSQL that is TO
+# PUBLIC, and PUBLIC includes anon. 20260813 drops all seven by name and creates
+# scoped replacements, so running phase1 afterwards puts every one of them back.
+#
+# This reproduces that exactly, and then proves the remedy: re-pasting
+# apply_all_migrations.sql closes them again, because 20260813 is in it.
+#
+# It also establishes the negative, which is the part that matters when reading a
+# live failure: because the repair is INSIDE the paste, the paste's own verdict
+# can never report the phase1 seven. 20260813 drops them long before the
+# verification block at the end runs. So a `*** FAIL *** | no policy grants anon
+# or public anything` coming back from a real paste is NOT phase1 applied out of
+# order — whatever it is, it survives 20260813, which means it is not one of the
+# 78 names that migration drops. That rules out every policy in the migration
+# history and leaves something created outside it.
+REOPENED="chat_read chat_insert telemetry_own_upsert telemetry_read_all \
+safe_zones_read uninstall_insert uninstall_read"
+
+anon_public_policies() {
+  su postgres -s /bin/bash -c "$PGBIN/psql -h $PGROOT/sock -p $PORT -U postgres \
+    -d $DB -tAc \"select policyname from pg_policies where schemaname='public' \
+    and ('anon' = any(roles) or 'public' = any(roles)) order by policyname;\""
+}
+
+echo "▶ Re-applying phase1 out of order, as the old full-migration bundle did"
+psql_f phase1_foundation.sql >/dev/null 2>&1 || true
+AFTER_PHASE1=$(anon_public_policies)
+for name in $REOPENED; do
+  printf '%s\n' "$AFTER_PHASE1" | grep -qx "$name" || {
+    echo "::error::expected phase1 to re-open $name as TO PUBLIC — it did not, so"
+    echo "  this test is no longer reproducing the failure it was written for"
+    exit 1; }
+done
+echo "  reproduced: $(printf '%s\n' "$AFTER_PHASE1" | grep -c .) policies now reach anon/public"
+
+echo "▶ Re-pasting the apply script, which is the repair"
+FIXED=$(run_pasted)
+# The verdict must be CLEAN, not a named failure. A first draft of this test
+# expected the check to fail here and name the seven, and it reported PASS —
+# correctly, because 20260813 runs inside the same paste and drops them before
+# the verification block is reached. Asserting the pass is the honest assertion,
+# and it is what rules phase1 out as the explanation for a live FAIL.
+VERDICT=$(printf '%s\n' "$FIXED" | grep "no policy grants anon or public" || true)
+printf '%s\n' "$VERDICT" | sed 's/^/    /'
+case "$VERDICT" in
+  *'PASS'*) ;;
+  *) echo "::error::re-pasting left the anon/public check failing"; exit 1 ;;
+esac
+LEFT=$(anon_public_policies | grep -c . || true)
+[ "$LEFT" -eq 0 ] || {
+  echo "::error::$LEFT policy/policies still reach anon or public after the repair"
+  anon_public_policies | sed 's/^/    /'
+  exit 1; }
+FIXED_FAILS=$(printf '%s\n' "$FIXED" | grep -c '\*\*\* FAIL \*\*\*' || true)
+[ "$FIXED_FAILS" -eq 0 ] || {
+  printf '%s\n' "$FIXED" | grep '\*\*\* FAIL \*\*\*'
+  echo "::error::re-pasting did not restore a clean verdict"; exit 1; }
+echo "  ok: re-pasting apply_all_migrations.sql drops all seven and reports clean"
+
 echo
 echo "✓ apply_all_migrations.sql applies cleanly in one paste, twice over,"
-echo "  its own verification reports $PASSED/$EXPECTED PASS, and the"
-echo "  anon/public check names the policy it objects to."
+echo "  its own verification reports $PASSED/$EXPECTED PASS, the anon/public"
+echo "  check names the policy it objects to, and re-pasting repairs a database"
+echo "  where phase1 was applied after the least-privilege migration."
