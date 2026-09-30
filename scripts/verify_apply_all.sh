@@ -100,6 +100,42 @@ FAILED2=$(printf '%s\n' "$OUT2" | grep -c '\*\*\* FAIL \*\*\*' || true)
 [ "$FAILED2" -eq 0 ] || {
   echo "::error::second run reported failures"; exit 1; }
 
+# ── The anon/public check must NAME what it found ────────────────────────────
+#
+# A live database came back with `*** FAIL *** | no policy grants anon or public
+# anything` and nothing else — no table, no policy name, no way to tell a
+# hand-made policy from one of ours. The operator could do nothing with that.
+#
+# The row carries the names now, and this proves it by planting one. `public` in
+# pg_policies.roles is what a CREATE POLICY with no TO clause produces, which is
+# the shape an over-broad policy usually arrives in — nobody writes TO anon on
+# purpose.
+echo "▶ Planting a TO PUBLIC policy, to prove the check names what it finds"
+psql_c() { su postgres -s /bin/bash -c \
+  "$PGBIN/psql -h $PGROOT/sock -p $PORT -U postgres -d $DB -q -c \"$1\""; }
+psql_c "CREATE POLICY zz_mutation_probe ON public.app_config FOR SELECT USING (true)" >/dev/null
+MUT=$(run_pasted)
+psql_c "DROP POLICY zz_mutation_probe ON public.app_config" >/dev/null
+
+ROW=$(printf '%s\n' "$MUT" | grep "no policy grants anon or public" || true)
+printf '%s\n' "$ROW" | sed 's/^/    /'
+case "$ROW" in
+  *'*** FAIL ***'*) ;;
+  *) echo "::error::a TO PUBLIC policy did not fail the check — it is not testing anything"
+     exit 1 ;;
+esac
+case "$ROW" in
+  *app_config.zz_mutation_probe*) ;;
+  *) echo "::error::the check failed but did not name app_config.zz_mutation_probe"
+     exit 1 ;;
+esac
+# And the planted policy must be gone again, or every later run inherits it.
+STILL=$(run_pasted | grep -c "zz_mutation_probe" || true)
+[ "$STILL" -eq 0 ] || {
+  echo "::error::the probe policy outlived the check"; exit 1; }
+echo "  ok: the check fails and names the policy"
+
 echo
 echo "✓ apply_all_migrations.sql applies cleanly in one paste, twice over,"
-echo "  and its own verification reports $PASSED/$EXPECTED PASS."
+echo "  its own verification reports $PASSED/$EXPECTED PASS, and the"
+echo "  anon/public check names the policy it objects to."
