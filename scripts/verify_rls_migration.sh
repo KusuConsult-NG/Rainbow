@@ -483,9 +483,24 @@ if [ "$GEN_RC" -ne 0 ]; then
   echo "✗ scripts/why_did_my_insert_fail.sql does not run against this schema"
   exit 1
 fi
-printf '%s\n' "$GEN_OUT" | grep -q "generated columns *| *category" || {
+printf '%s\n' "$GEN_OUT" | grep -q "generated column *| *category" || {
   echo "$GEN_OUT"
   echo "✗ the diagnostic ran but did not report alerts.category as generated"
+  exit 1
+}
+# And it must be ONE statement. The Supabase SQL editor shows only the last
+# result set of a multi-statement run, so a file of several SELECTs silently
+# hides all but the final one — which is how an operator ends up running a
+# diagnostic section by section and reporting it a section at a time.
+#
+# Counted by the stripper rather than with awk. Counting semicolons with awk
+# said two for this one-statement file, because one of them lives inside the
+# regex literal `'…alerts[^;]{0,100}'`.
+STMTS=$(python3 "$REPO/scripts/check_generated_column_inserts.py" --statements \
+          "$REPO/scripts/why_did_my_insert_fail.sql")
+[ "$STMTS" -eq 1 ] || {
+  echo "✗ why_did_my_insert_fail.sql is $STMTS statements; the Supabase editor "
+  echo "  would show only the last result. It must be exactly one."
   exit 1
 }
 # And it must see the trigger the migrations create, so an extra one added by

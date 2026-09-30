@@ -168,7 +168,21 @@ def deliberate(raw: str, line: int) -> bool:
     return any(MARKER in lines[i] for i in range(max(0, line - 4), min(len(lines), line)))
 
 
+def count_statements(path: Path) -> int:
+    """How many statements a file really holds.
+
+    Counting semicolons with awk said two for a file with one statement: the
+    extra was inside the regex literal `'…alerts[^;]{0,100}'`. Comments and
+    string literals have to come out first, which strip_noise already does.
+    """
+    return strip_noise(path.read_text(encoding='utf-8')).count(';')
+
+
 def main() -> int:
+    if len(sys.argv) > 2 and sys.argv[1] == '--statements':
+        print(count_statements(Path(sys.argv[2])))
+        return 0
+
     gen = generated_columns()
     if 'alerts' not in gen or 'category' not in gen.get('alerts', set()):
         # The check is only meaningful if it can still see the column it was
