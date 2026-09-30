@@ -73,6 +73,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/oversight_behaviour_test.sql \
    "$REPO"/scripts/why_is_the_board_empty.sql \
    "$REPO"/scripts/why_did_my_insert_fail.sql \
+   "$REPO"/scripts/which_migrations_are_applied.sql \
    "$REPO"/scripts/seed_demo_incidents.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
@@ -521,6 +522,48 @@ printf '%s\n' "$GEN_OUT" | grep -q route_oversight_to_hq_trg || {
   echo "$GEN_OUT"
   echo "✗ the diagnostic did not list the route_oversight_to_hq_trg trigger"; exit 1; }
 echo "  PASS  the refused-insert diagnostic names the generated column and the trigger"
+
+# ── Which migrations has this database had? ──────────────────────────────────
+#
+# Twice an operational failure has come down to a migration that was never
+# applied, and neither time did it present that way: the agency tables existed
+# in production because someone made them by hand, and route_oversight_to_hq_trg
+# was absent from a live database whose console already shipped screens calling
+# audit_trail() and latest_ai_report(). A missing function is a failed RPC when
+# somebody opens a screen during an incident.
+#
+# The inventory is extracted from the migrations, so it cannot drift into being
+# reassuring about objects it never learned existed.
+echo "▶ Checking the migration inventory is current"
+python3 "$REPO/scripts/sync_migration_inventory.py" --check
+
+echo "▶ Checking every applied migration's objects exist"
+MIG_OUT=$(psql_run "-f $PGROOT/which_migrations_are_applied.sql" 2>&1) && MIG_RC=0 || MIG_RC=$?
+if [ "$MIG_RC" -ne 0 ]; then
+  echo "$MIG_OUT"
+  echo "✗ scripts/which_migrations_are_applied.sql does not run against this schema"
+  exit 1
+fi
+# Everything must be present EXCEPT the v2–v5 era, which this harness
+# deliberately does not replay (20260812000000_agency_tables.sql stands in for
+# it). A missing object from any other migration means either the migration
+# does not do what its file says, or this harness has stopped applying it — and
+# both are the kind of gap that only shows up in production.
+MISSING=$(printf '%s\n' "$MIG_OUT" | awk -F'|' '
+  { for (i = 1; i <= NF; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i) }
+  $2 == "missing" && $4 !~ /^2026072[1-4]000000_v[2-5]/ { print "    " $3 "  (" $4 ")" }')
+if [ -n "$MISSING" ]; then
+  echo "$MISSING"
+  echo "✗ objects declared by an applied migration are absent from the schema"
+  exit 1
+fi
+# And the v2–v5 era must actually be RECOGNISED rather than silently absent, or
+# the exemption above would hide a real regression the day one of those files
+# starts being replayed.
+printf '%s\n' "$MIG_OUT" | grep -q "absence is not a fault" || {
+  echo "$MIG_OUT"
+  echo "✗ the inventory did not mark the hand-made v2–v5 migrations"; exit 1; }
+echo "  PASS  every object from every replayed migration is present"
 
 cat <<'EOF'
 
