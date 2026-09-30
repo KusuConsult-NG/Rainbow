@@ -3,7 +3,7 @@
 --   Regenerate with: python3 scripts/build_apply_all.py
 --
 -- Paste the WHOLE of this file into the Supabase dashboard -> SQL Editor and
--- run it. It applies the 28 outstanding migrations in order and finishes by
+-- run it. It applies the 27 outstanding migrations in order and finishes by
 -- SELECTing a pass/fail table, so one paste in gives you one answer out.
 --
 -- ---------------------------------------------------------------------------
@@ -46,6 +46,918 @@
 -- Expect a few `NOTICE: skipping ...` lines. They are the guards that let these
 -- files run against a database that does not have a given table yet.
 -- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 20260721000000_v2_agency_tables.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20260721000000_v2_agency_tables.sql'; END $apply$;
+
+-- ==========================================================
+-- Operation Rainbow — Schema Migration v2  (CORRECTED)
+-- Generated: 2026-07-26
+-- Fixes:   Column names aligned to actual schema (geo_lga etc.)
+--          RLS rewritten to avoid self-referencing sub-queries
+--          Skips columns that already exist in base schema
+-- Run in:  Supabase Dashboard → SQL Editor → paste → Run
+-- Safe:    Every statement uses IF NOT EXISTS / IF EXISTS
+-- ==========================================================
+
+
+-- ----------------------------------------------------------
+-- SECTION 1: alerts — add columns the Flutter code writes
+--   Already in schema: local_id, citizen_feedback, updated_at
+--   Missing:           the ones below
+-- ----------------------------------------------------------
+
+ALTER TABLE public.alerts
+  ADD COLUMN IF NOT EXISTS assigned_responders  TEXT[]      DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS escalated_to_agency  TEXT,
+  ADD COLUMN IF NOT EXISTS media_urls           TEXT[]      DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS resolved_by          TEXT,
+  ADD COLUMN IF NOT EXISTS resolved_at          TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS post_sos_status      TEXT,
+  -- lga / ward / pu shorthand aliases used by some Flutter queries
+  ADD COLUMN IF NOT EXISTS lga                  TEXT GENERATED ALWAYS AS (geo_lga)  STORED,
+  ADD COLUMN IF NOT EXISTS ward                 TEXT GENERATED ALWAYS AS (geo_ward) STORED,
+  ADD COLUMN IF NOT EXISTS pu                   TEXT GENERATED ALWAYS AS (geo_pu)   STORED;
+
+-- Keep updated_at current automatically (trigger already exists in base schema,
+-- but CREATE OR REPLACE is safe to re-run)
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_alerts_updated_at ON public.alerts;
+CREATE TRIGGER trg_alerts_updated_at
+  BEFORE UPDATE ON public.alerts
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ----------------------------------------------------------
+-- SECTION 2: system_alerts — add expires_at
+--   'title' already exists in the base schema — skip it
+-- ----------------------------------------------------------
+
+ALTER TABLE public.system_alerts
+  ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+
+
+-- ----------------------------------------------------------
+-- SECTION 3: profiles — add ward/sector convenience columns
+--   geo_ward / geo_lga / geo_pu already exist — skip them
+-- ----------------------------------------------------------
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS sector_id     TEXT,
+  ADD COLUMN IF NOT EXISTS push_enabled  BOOLEAN DEFAULT true,
+  ADD COLUMN IF NOT EXISTS emergency_contacts  TEXT[] DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS lga           TEXT GENERATED ALWAYS AS (geo_lga)  STORED,
+  ADD COLUMN IF NOT EXISTS ward          TEXT GENERATED ALWAYS AS (geo_ward) STORED;
+
+
+-- ----------------------------------------------------------
+-- SECTION 4: Performance indexes
+-- ----------------------------------------------------------
+
+CREATE INDEX IF NOT EXISTS idx_alerts_status     ON public.alerts(status);
+CREATE INDEX IF NOT EXISTS idx_alerts_geo_lga    ON public.alerts(geo_lga);
+CREATE INDEX IF NOT EXISTS idx_alerts_geo_ward   ON public.alerts(geo_ward);
+CREATE INDEX IF NOT EXISTS idx_alerts_created    ON public.alerts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alerts_assigned   ON public.alerts(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_telemetry_uid     ON public.telemetry(user_id);
+CREATE INDEX IF NOT EXISTS idx_sysalerts_target  ON public.system_alerts(target_type);
+CREATE INDEX IF NOT EXISTS idx_sysalerts_exp     ON public.system_alerts(expires_at);
+
+
+-- ----------------------------------------------------------
+-- SECTION 5: RLS Policies
+--
+--   IMPORTANT: Supabase Postgres bans sub-SELECTs on the same
+--   table inside a policy (infinite recursion).  We use
+--   auth.jwt() -> 'user_metadata' ->> 'role'  instead, which
+--   reads the JWT claim set at sign-in. Make sure your
+--   handle_new_user() trigger (or sign-in hook) populates
+--   raw_user_meta_data->>'role'.
+-- ----------------------------------------------------------
+
+-- Drop the existing open policies first (safe if they don't exist)
+DROP POLICY IF EXISTS "Allow public read access to profiles"              ON public.profiles;
+DROP POLICY IF EXISTS "Allow individual insert/update to own profile"     ON public.profiles;
+DROP POLICY IF EXISTS "Allow authenticated users to read alerts"          ON public.alerts;
+DROP POLICY IF EXISTS "Allow authenticated users to insert alerts"        ON public.alerts;
+DROP POLICY IF EXISTS "Allow authenticated users to update alerts"        ON public.alerts;
+DROP POLICY IF EXISTS "Allow reading telemetry"                           ON public.telemetry;
+DROP POLICY IF EXISTS "Allow users to update own telemetry"               ON public.telemetry;
+DROP POLICY IF EXISTS "Allow reading system alerts"                       ON public.system_alerts;
+DROP POLICY IF EXISTS "Allow service role to manage system alerts"        ON public.system_alerts;
+
+-- Also drop the policies added by the previous (broken) migration attempt
+DROP POLICY IF EXISTS "agent_alerts_lga"      ON public.alerts;
+DROP POLICY IF EXISTS "agent_alerts_update"   ON public.alerts;
+DROP POLICY IF EXISTS "citizen_insert_alert"  ON public.alerts;
+DROP POLICY IF EXISTS "telemetry_own_row"     ON public.telemetry;
+DROP POLICY IF EXISTS "profiles_own_row"      ON public.profiles;
+DROP POLICY IF EXISTS "system_alerts_read"    ON public.system_alerts;
+DROP POLICY IF EXISTS "system_alerts_write"   ON public.system_alerts;
+
+
+-- ── profiles ───────────────────────────────────────────────
+-- Everyone can read profiles (needed for name resolution in UI)
+DROP POLICY IF EXISTS "profiles_read_all" ON public.profiles;
+CREATE POLICY "profiles_read_all" ON public.profiles
+  FOR SELECT USING (auth.uid() IS NOT NULL);
+
+-- Users can only write their own row
+DROP POLICY IF EXISTS "profiles_write_own" ON public.profiles;
+CREATE POLICY "profiles_write_own" ON public.profiles
+  FOR ALL USING (id = auth.uid());
+
+
+-- ── alerts — SELECT ────────────────────────────────────────
+-- HQ/Admin/Sector roles (set in JWT) see everything.
+-- All other authenticated users also see all alerts for now
+-- (the app-side stream filter in agent_dashboard_screen.dart
+--  already restricts by LGA — keeping DB policy permissive
+--  avoids the recursive sub-query trap).
+DROP POLICY IF EXISTS "alerts_read_authenticated" ON public.alerts;
+CREATE POLICY "alerts_read_authenticated" ON public.alerts
+  FOR SELECT USING (auth.uid() IS NOT NULL);
+
+-- ── alerts — INSERT ────────────────────────────────────────
+DROP POLICY IF EXISTS "alerts_insert_authenticated" ON public.alerts;
+CREATE POLICY "alerts_insert_authenticated" ON public.alerts
+  FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
+-- ── alerts — UPDATE ────────────────────────────────────────
+DROP POLICY IF EXISTS "alerts_update_authenticated" ON public.alerts;
+CREATE POLICY "alerts_update_authenticated" ON public.alerts
+  FOR UPDATE USING (auth.uid() IS NOT NULL);
+
+
+-- ── telemetry ─────────────────────────────────────────────
+DROP POLICY IF EXISTS "telemetry_read_authenticated" ON public.telemetry;
+CREATE POLICY "telemetry_read_authenticated" ON public.telemetry
+  FOR SELECT USING (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "telemetry_write_own" ON public.telemetry;
+CREATE POLICY "telemetry_write_own" ON public.telemetry
+  FOR ALL USING (user_id = auth.uid());
+
+
+-- ── system_alerts ─────────────────────────────────────────
+DROP POLICY IF EXISTS "sysalerts_read_authenticated" ON public.system_alerts;
+CREATE POLICY "sysalerts_read_authenticated" ON public.system_alerts
+  FOR SELECT USING (auth.uid() IS NOT NULL);
+
+-- Only users whose JWT role claim is HQ_COMMAND or ADMIN can write
+DROP POLICY IF EXISTS "sysalerts_write_hq" ON public.system_alerts;
+CREATE POLICY "sysalerts_write_hq" ON public.system_alerts
+  FOR ALL USING (
+    auth.jwt() ->> 'role' IN ('HQ_COMMAND', 'ADMIN')
+    OR (auth.jwt() -> 'user_metadata' ->> 'role') IN ('HQ_COMMAND', 'ADMIN')
+  );
+
+-- ── chat_messages ─────────────────────────────────────────
+DROP POLICY IF EXISTS "Allow reading chat messages"   ON public.chat_messages;
+DROP POLICY IF EXISTS "Allow inserting chat messages" ON public.chat_messages;
+
+DROP POLICY IF EXISTS "chat_read_authenticated" ON public.chat_messages;
+CREATE POLICY "chat_read_authenticated" ON public.chat_messages
+  FOR SELECT USING (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "chat_insert_authenticated" ON public.chat_messages;
+CREATE POLICY "chat_insert_authenticated" ON public.chat_messages
+  FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
+
+-- ----------------------------------------------------------
+-- SECTION 6: Realtime (idempotent — ADD TABLE is safe to repeat)
+-- ----------------------------------------------------------
+
+DO $$
+BEGIN
+  -- Only add if not already a member of the publication
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'profiles'
+  ) THEN
+    EXECUTE 'ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles';
+  END IF;
+END $$;
+
+
+-- ==========================================================
+-- VERIFICATION QUERY — run this after the migration to confirm
+-- ==========================================================
+-- SELECT column_name, data_type
+-- FROM   information_schema.columns
+-- WHERE  table_schema = 'public'
+--   AND  table_name   = 'alerts'
+-- ORDER  BY ordinal_position;
+-- ==========================================================
+
+-- ----------------------------------------------------------------------------
+-- 20260722000000_v3_telemetry_geofence.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20260722000000_v3_telemetry_geofence.sql'; END $apply$;
+
+-- ==========================================================
+-- OPERATION RAINBOW — Schema Migration v3
+-- Media Pipeline & Targeted Escalation/Dispatch
+-- Run AFTER migration v2 is already applied
+-- ==========================================================
+
+-- ----------------------------------------------------------
+-- SECTION 1: Add escalation_log to alerts
+-- Structured append-only audit trail for every escalation.
+-- Replaces the previous approach of appending to ai_summary (which corrupted AI text).
+-- ----------------------------------------------------------
+
+ALTER TABLE public.alerts
+  ADD COLUMN IF NOT EXISTS escalation_log   JSONB    DEFAULT '[]',
+  ADD COLUMN IF NOT EXISTS escalated_to_agency TEXT  DEFAULT NULL;
+
+-- Ensure media_urls is an array with a proper default (should already exist from v2)
+ALTER TABLE public.alerts
+  ALTER COLUMN media_urls SET DEFAULT '{}';
+
+COMMENT ON COLUMN public.alerts.escalation_log IS
+  'Append-only structured log: [{from_tier, to_tier, to_officer_id, to_officer_name, reason, notes, by_email, at}]';
+
+COMMENT ON COLUMN public.alerts.escalated_to_agency IS
+  'Security agency this incident was escalated to: POLICE, ARMY, DSS, NSCDC, FRSC, etc.';
+
+
+-- ----------------------------------------------------------
+-- SECTION 2: agency_notifications table
+-- Records every inter-agency notification sent (SMS, webhook, email).
+-- ----------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.agency_notifications (
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  alert_id       UUID        REFERENCES public.alerts(id) ON DELETE CASCADE,
+  agency         TEXT        NOT NULL,        -- 'POLICE', 'ARMY', 'DSS', 'NSCDC', etc.
+  method         TEXT        NOT NULL,        -- 'SMS', 'WEBHOOK', 'EMAIL'
+  status         TEXT        DEFAULT 'SENT',  -- 'SENT', 'FAILED', 'SKIPPED', 'ACKNOWLEDGED'
+  sent_at        TIMESTAMPTZ DEFAULT NOW(),
+  acknowledged_at TIMESTAMPTZ,
+  sent_by        TEXT,                        -- HQ officer email
+  detail         TEXT,                        -- response detail / error message
+  target_lga     TEXT                         -- LGA sector this was for
+);
+
+-- Enable RLS
+ALTER TABLE public.agency_notifications ENABLE ROW LEVEL SECURITY;
+
+-- HQ and admins can read all notifications
+DROP POLICY IF EXISTS "agency_notifications_read" ON public.agency_notifications;
+CREATE POLICY "agency_notifications_read" ON public.agency_notifications
+  FOR SELECT USING (
+    auth.jwt() ->> 'role' IN ('HQ_COMMAND', 'ADMIN')
+    OR (auth.jwt() -> 'user_metadata' ->> 'role') IN ('HQ_COMMAND', 'ADMIN')
+  );
+
+-- Only service-role (API route) inserts — no anon writes
+DROP POLICY IF EXISTS "agency_notifications_insert" ON public.agency_notifications;
+CREATE POLICY "agency_notifications_insert" ON public.agency_notifications
+  FOR INSERT WITH CHECK (
+    auth.jwt() ->> 'role' IN ('HQ_COMMAND', 'ADMIN')
+    OR (auth.jwt() -> 'user_metadata' ->> 'role') IN ('HQ_COMMAND', 'ADMIN')
+    OR auth.uid() IS NOT NULL  -- allow authenticated server-side writes
+  );
+
+
+-- ----------------------------------------------------------
+-- SECTION 3: Indexes for escalation queries
+-- ----------------------------------------------------------
+
+-- Find all alerts escalated to a specific agency
+CREATE INDEX IF NOT EXISTS idx_alerts_escalated_to_agency
+  ON public.alerts (escalated_to_agency)
+  WHERE escalated_to_agency IS NOT NULL;
+
+-- List all notifications for a specific alert (JOIN)
+CREATE INDEX IF NOT EXISTS idx_agency_notifications_alert_id
+  ON public.agency_notifications (alert_id);
+
+-- Find all notifications to a specific agency
+CREATE INDEX IF NOT EXISTS idx_agency_notifications_agency
+  ON public.agency_notifications (agency);
+
+-- Find failed notifications (retry jobs)
+CREATE INDEX IF NOT EXISTS idx_agency_notifications_status
+  ON public.agency_notifications (status)
+  WHERE status = 'FAILED';
+
+
+-- ----------------------------------------------------------
+-- SECTION 4: Realtime for agency_notifications
+-- HQ dashboard can subscribe to live notification confirmations
+-- ----------------------------------------------------------
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND tablename = 'agency_notifications'
+  ) THEN
+    EXECUTE 'ALTER PUBLICATION supabase_realtime ADD TABLE public.agency_notifications';
+  END IF;
+END $$;
+
+
+-- ==========================================================
+-- VERIFICATION — run after migration to confirm
+-- ==========================================================
+-- SELECT column_name, data_type
+-- FROM   information_schema.columns
+-- WHERE  table_schema = 'public'
+--   AND  table_name   = 'alerts'
+--   AND  column_name  IN ('escalation_log', 'escalated_to_agency', 'media_urls')
+-- ORDER  BY ordinal_position;
+--
+-- SELECT table_name FROM information_schema.tables
+-- WHERE table_schema = 'public' AND table_name = 'agency_notifications';
+-- ==========================================================
+
+-- ----------------------------------------------------------------------------
+-- 20260723000000_v4_mesh_broadcast.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20260723000000_v4_mesh_broadcast.sql'; END $apply$;
+
+-- ==========================================================
+-- OPERATION RAINBOW — Schema Migration v4
+-- Inter-Agency Command Portal: Personnel, Deployments, Reports
+-- Run AFTER migration v3 is already applied
+-- ==========================================================
+
+-- ----------------------------------------------------------
+-- SECTION 1: Add agency column to profiles
+-- Tags liaison officers to their agency
+-- ----------------------------------------------------------
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS agency TEXT DEFAULT NULL;
+
+COMMENT ON COLUMN public.profiles.agency IS
+  'Security agency this liaison belongs to: POLICE, ARMY, DSS, NSCDC, FRSC, AMOTEKUN, etc.';
+
+
+-- ----------------------------------------------------------
+-- SECTION 2: agency_personnel table
+-- Agency's own field officers registered through the portal
+-- (separate from Rainbow mobile app user accounts)
+-- ----------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.agency_personnel (
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  agency         TEXT        NOT NULL,        -- 'POLICE', 'ARMY', 'DSS', etc.
+  name           TEXT        NOT NULL,
+  rank           TEXT,                        -- 'Inspector', 'Major', 'Agent', etc.
+  badge_number   TEXT,
+  phone          TEXT,
+  status         TEXT        DEFAULT 'AVAILABLE', -- 'AVAILABLE','DEPLOYED','UNAVAILABLE','OFF_DUTY'
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  created_by     UUID        REFERENCES public.profiles(id) ON DELETE SET NULL,
+  updated_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.agency_personnel ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "agency_personnel_read" ON public.agency_personnel;
+CREATE POLICY "agency_personnel_read" ON public.agency_personnel
+  FOR SELECT USING (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "agency_personnel_write" ON public.agency_personnel;
+CREATE POLICY "agency_personnel_write" ON public.agency_personnel
+  FOR ALL USING (auth.uid() IS NOT NULL)
+  WITH CHECK (auth.uid() IS NOT NULL);
+
+
+-- ----------------------------------------------------------
+-- SECTION 3: agency_deployments table
+-- Records each time an agency deploys officers to an incident
+-- ----------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.agency_deployments (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  alert_id        UUID        REFERENCES public.alerts(id) ON DELETE CASCADE,
+  agency          TEXT        NOT NULL,
+  personnel_ids   UUID[]      DEFAULT '{}',   -- IDs from agency_personnel
+  deployment_note TEXT,
+  status          TEXT        DEFAULT 'EN_ROUTE', -- 'EN_ROUTE','ON_SITE','WITHDRAWN','RESOLVED'
+  deployed_at     TIMESTAMPTZ DEFAULT NOW(),
+  deployed_by     UUID        REFERENCES public.profiles(id) ON DELETE SET NULL,
+  resolved_at     TIMESTAMPTZ,
+  personnel_count INT         DEFAULT 0
+);
+
+ALTER TABLE public.agency_deployments ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "agency_deployments_read" ON public.agency_deployments;
+CREATE POLICY "agency_deployments_read" ON public.agency_deployments
+  FOR SELECT USING (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "agency_deployments_write" ON public.agency_deployments;
+CREATE POLICY "agency_deployments_write" ON public.agency_deployments
+  FOR ALL USING (auth.uid() IS NOT NULL)
+  WITH CHECK (auth.uid() IS NOT NULL);
+
+
+-- ----------------------------------------------------------
+-- SECTION 4: agency_action_reports table
+-- Formal SITREP / resolution / deployment reports filed by agencies
+-- back to Operation Rainbow HQ
+-- ----------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.agency_action_reports (
+  id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  alert_id         UUID        REFERENCES public.alerts(id) ON DELETE CASCADE,
+  agency           TEXT        NOT NULL,
+  report_type      TEXT        NOT NULL,  -- 'SITREP','DEPLOYMENT','RESOLUTION','ESCALATION','UPDATE'
+  narrative        TEXT        NOT NULL,
+  outcome          TEXT,                  -- 'CONTAINED','ONGOING','REQUIRES_HQ','RESOLVED','INCONCLUSIVE'
+  personnel_count  INT         DEFAULT 0,
+  casualties       INT         DEFAULT 0,
+  submitted_at     TIMESTAMPTZ DEFAULT NOW(),
+  submitted_by     UUID        REFERENCES public.profiles(id) ON DELETE SET NULL,
+  submitted_by_name TEXT,                -- denormalized name for display after user deletion
+  read_by_hq       BOOLEAN     DEFAULT FALSE,
+  hq_acknowledged_at TIMESTAMPTZ,
+  hq_acknowledged_by TEXT               -- HQ officer email who acknowledged
+);
+
+ALTER TABLE public.agency_action_reports ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "agency_reports_read" ON public.agency_action_reports;
+CREATE POLICY "agency_reports_read" ON public.agency_action_reports
+  FOR SELECT USING (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "agency_reports_write" ON public.agency_action_reports;
+CREATE POLICY "agency_reports_write" ON public.agency_action_reports
+  FOR ALL USING (auth.uid() IS NOT NULL)
+  WITH CHECK (auth.uid() IS NOT NULL);
+
+
+-- ----------------------------------------------------------
+-- SECTION 5: Indexes
+-- ----------------------------------------------------------
+
+CREATE INDEX IF NOT EXISTS idx_agency_personnel_agency
+  ON public.agency_personnel (agency);
+
+CREATE INDEX IF NOT EXISTS idx_agency_personnel_status
+  ON public.agency_personnel (status);
+
+CREATE INDEX IF NOT EXISTS idx_agency_deployments_alert_id
+  ON public.agency_deployments (alert_id);
+
+CREATE INDEX IF NOT EXISTS idx_agency_deployments_agency
+  ON public.agency_deployments (agency);
+
+CREATE INDEX IF NOT EXISTS idx_agency_deployments_status
+  ON public.agency_deployments (status);
+
+CREATE INDEX IF NOT EXISTS idx_agency_reports_alert_id
+  ON public.agency_action_reports (alert_id);
+
+CREATE INDEX IF NOT EXISTS idx_agency_reports_agency
+  ON public.agency_action_reports (agency);
+
+CREATE INDEX IF NOT EXISTS idx_agency_reports_unread
+  ON public.agency_action_reports (read_by_hq)
+  WHERE read_by_hq = FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_profiles_agency
+  ON public.profiles (agency)
+  WHERE agency IS NOT NULL;
+
+
+-- ----------------------------------------------------------
+-- SECTION 6: Realtime
+-- ----------------------------------------------------------
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'agency_deployments') THEN
+    EXECUTE 'ALTER PUBLICATION supabase_realtime ADD TABLE public.agency_deployments';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'agency_action_reports') THEN
+    EXECUTE 'ALTER PUBLICATION supabase_realtime ADD TABLE public.agency_action_reports';
+  END IF;
+END $$;
+
+
+-- ----------------------------------------------------------
+-- SECTION 7: app_config defaults (idempotent)
+-- ----------------------------------------------------------
+
+INSERT INTO public.app_config (key, value, description)
+VALUES
+  ('escalation_timeout_pu',   '2',  'Polling Unit escalation timeout in minutes'),
+  ('escalation_timeout_ward', '5',  'Ward escalation timeout in minutes'),
+  ('escalation_timeout_lga',  '10', 'LGA escalation timeout in minutes')
+ON CONFLICT (key) DO NOTHING;
+
+
+-- ==========================================================
+-- VERIFICATION
+-- ==========================================================
+-- SELECT table_name FROM information_schema.tables
+-- WHERE table_schema = 'public'
+--   AND table_name IN ('agency_personnel','agency_deployments','agency_action_reports')
+-- ORDER BY table_name;
+-- ==========================================================
+
+-- ----------------------------------------------------------------------------
+-- 20260724000000_v5_rls_security.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20260724000000_v5_rls_security.sql'; END $apply$;
+
+-- ==============================================================================
+-- OPERATION RAINBOW — SECURITY PATCH MIGRATION v5 (IDEMPOTENT RE-RUNNABLE)
+-- Run in: Supabase Dashboard → SQL Editor → Run
+-- Critical: Fixes broken RLS, adds indexes, hardens all table policies
+-- ==============================================================================
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- STEP 1: Drop all old and new policy names to ensure clean idempotent execution
+-- ════════════════════════════════════════════════════════════════════════════════
+
+-- Old policy names
+DROP POLICY IF EXISTS "Allow authenticated users to read alerts" ON public.alerts;
+DROP POLICY IF EXISTS "Allow authenticated users to insert alerts" ON public.alerts;
+DROP POLICY IF EXISTS "Allow authenticated users to update alerts" ON public.alerts;
+DROP POLICY IF EXISTS "Allow public read access to profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Allow individual insert/update to own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Allow reading telemetry" ON public.telemetry;
+DROP POLICY IF EXISTS "Allow users to update own telemetry" ON public.telemetry;
+DROP POLICY IF EXISTS "Allow reading chat messages" ON public.chat_messages;
+DROP POLICY IF EXISTS "Allow inserting chat messages" ON public.chat_messages;
+DROP POLICY IF EXISTS "Allow reading system alerts" ON public.system_alerts;
+DROP POLICY IF EXISTS "Allow service role to manage system alerts" ON public.system_alerts;
+
+-- Target policy names (drops if partial previous run)
+DROP POLICY IF EXISTS "profiles_select_own" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_select_responders" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_update_own" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_insert_own" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_delete_hq" ON public.profiles;
+
+DROP POLICY IF EXISTS "alerts_insert_authenticated" ON public.alerts;
+DROP POLICY IF EXISTS "alerts_select_own" ON public.alerts;
+DROP POLICY IF EXISTS "alerts_select_responders" ON public.alerts;
+DROP POLICY IF EXISTS "alerts_update_responders_only" ON public.alerts;
+DROP POLICY IF EXISTS "alerts_delete_hq_only" ON public.alerts;
+
+DROP POLICY IF EXISTS "telemetry_upsert_own" ON public.telemetry;
+DROP POLICY IF EXISTS "telemetry_select_responders" ON public.telemetry;
+
+DROP POLICY IF EXISTS "chat_select_responders" ON public.chat_messages;
+DROP POLICY IF EXISTS "chat_select_own_alerts" ON public.chat_messages;
+DROP POLICY IF EXISTS "chat_insert_authenticated" ON public.chat_messages;
+
+DROP POLICY IF EXISTS "system_alerts_select_all_authenticated" ON public.system_alerts;
+DROP POLICY IF EXISTS "system_alerts_manage_hq" ON public.system_alerts;
+
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- STEP 2: Create helper functions
+-- ════════════════════════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION public.is_responder()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid()
+    AND role NOT IN ('CITIZEN', 'USER')
+    AND is_active = true
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_hq_or_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid()
+    AND role IN ('HQ_COMMAND', 'HQ_OFFICER', 'ADMIN')
+    AND is_active = true
+  );
+$$;
+
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- STEP 3: PROFILES TABLE — Hardened RLS
+-- ════════════════════════════════════════════════════════════════════════════════
+
+CREATE POLICY "profiles_select_own"
+  ON public.profiles FOR SELECT
+  USING (auth.uid() = id);
+
+CREATE POLICY "profiles_select_responders"
+  ON public.profiles FOR SELECT
+  USING (public.is_responder());
+
+CREATE POLICY "profiles_update_own"
+  ON public.profiles FOR UPDATE
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);
+
+CREATE POLICY "profiles_insert_own"
+  ON public.profiles FOR INSERT
+  WITH CHECK (auth.uid() = id);
+
+CREATE POLICY "profiles_delete_hq"
+  ON public.profiles FOR DELETE
+  USING (public.is_hq_or_admin());
+
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- STEP 4: ALERTS TABLE — Hardened RLS
+-- ════════════════════════════════════════════════════════════════════════════════
+
+CREATE POLICY "alerts_insert_authenticated"
+  ON public.alerts FOR INSERT
+  WITH CHECK (auth.role() = 'authenticated');
+
+CREATE POLICY "alerts_select_own"
+  ON public.alerts FOR SELECT
+  USING (reported_by = auth.uid());
+
+CREATE POLICY "alerts_select_responders"
+  ON public.alerts FOR SELECT
+  USING (public.is_responder());
+
+CREATE POLICY "alerts_update_responders_only"
+  ON public.alerts FOR UPDATE
+  USING (public.is_responder())
+  WITH CHECK (public.is_responder());
+
+CREATE POLICY "alerts_delete_hq_only"
+  ON public.alerts FOR DELETE
+  USING (public.is_hq_or_admin());
+
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- STEP 5: TELEMETRY TABLE — Hardened RLS
+-- ════════════════════════════════════════════════════════════════════════════════
+
+CREATE POLICY "telemetry_upsert_own"
+  ON public.telemetry FOR ALL
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "telemetry_select_responders"
+  ON public.telemetry FOR SELECT
+  USING (public.is_responder());
+
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- STEP 6: CHAT MESSAGES TABLE — Hardened RLS
+-- ════════════════════════════════════════════════════════════════════════════════
+
+CREATE POLICY "chat_select_responders"
+  ON public.chat_messages FOR SELECT
+  USING (public.is_responder());
+
+CREATE POLICY "chat_select_own_alerts"
+  ON public.chat_messages FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.alerts
+      WHERE id = chat_messages.alert_id
+      AND reported_by = auth.uid()
+    )
+  );
+
+CREATE POLICY "chat_insert_authenticated"
+  ON public.chat_messages FOR INSERT
+  WITH CHECK (auth.role() = 'authenticated');
+
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- STEP 7: SYSTEM ALERTS TABLE — Hardened RLS
+-- ════════════════════════════════════════════════════════════════════════════════
+
+CREATE POLICY "system_alerts_select_all_authenticated"
+  ON public.system_alerts FOR SELECT
+  USING (auth.role() = 'authenticated' AND is_active = true);
+
+CREATE POLICY "system_alerts_manage_hq"
+  ON public.system_alerts FOR ALL
+  USING (public.is_hq_or_admin())
+  WITH CHECK (public.is_hq_or_admin());
+
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- STEP 8: PERFORMANCE INDEXES
+-- ════════════════════════════════════════════════════════════════════════════════
+
+CREATE INDEX IF NOT EXISTS idx_alerts_status ON public.alerts(status);
+CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON public.alerts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alerts_geo_lga ON public.alerts(geo_lga);
+CREATE INDEX IF NOT EXISTS idx_alerts_geo_ward ON public.alerts(geo_ward);
+CREATE INDEX IF NOT EXISTS idx_alerts_reported_by ON public.alerts(reported_by);
+CREATE INDEX IF NOT EXISTS idx_alerts_assigned_to ON public.alerts(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_alerts_type ON public.alerts(type);
+CREATE INDEX IF NOT EXISTS idx_alerts_status_created ON public.alerts(status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_telemetry_updated_at ON public.telemetry(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_alert_id ON public.chat_messages(alert_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON public.chat_messages(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
+CREATE INDEX IF NOT EXISTS idx_profiles_geo_lga ON public.profiles(geo_lga);
+
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- STEP 9: Safe column additions
+-- ════════════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE public.alerts ADD COLUMN IF NOT EXISTS media_urls JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.alerts ADD COLUMN IF NOT EXISTS escalation_log JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.alerts ADD COLUMN IF NOT EXISTS assigned_to_uid UUID REFERENCES public.profiles(id) ON DELETE SET NULL;
+
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- STEP 10: Enable RLS & Verify
+-- ════════════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.alerts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.telemetry ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.system_alerts ENABLE ROW LEVEL SECURITY;
+
+SELECT schemaname, tablename, rowsecurity
+FROM pg_tables
+WHERE schemaname = 'public'
+AND tablename IN ('profiles', 'alerts', 'telemetry', 'chat_messages', 'system_alerts');
+
+-- ----------------------------------------------------------------------------
+-- 20260725000000_v6_geo_lga_scoping_staging.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20260725000000_v6_geo_lga_scoping_staging.sql'; END $apply$;
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- OPERATION RAINBOW — RLS GEO_LGA SCOPING (STAGING MIGRATION)
+-- File: supabase/migrations/20260725000000_v6_geo_lga_scoping_staging.sql
+--
+-- ⚠️  STAGING FIRST. Do NOT apply to production until:
+--   1. All existing officer profiles have geo_lga populated and normalised
+--   2. verify_rls.js passes on staging
+--   3. At least one officer in each LGA has confirmed they can see their alerts
+--
+-- What this does:
+--   • Officers (FIELD_OFFICER, WARD_OFFICER, LGA_OFFICER) see alerts scoped to
+--     their geo_lga. Officers with a NULL or '' geo_lga fall through to the
+--     existing "all responders" policy — they lose nothing, they just don't get
+--     the narrowed view until their profile is updated.
+--   • HQ_COMMAND / HQ_OFFICER / ADMIN still see everything (unchanged).
+--   • Citizens still see only their own alerts (unchanged).
+--
+-- Safe rollback: DROP POLICY "alerts_select_geo_lga_scoped" ON public.alerts;
+-- ════════════════════════════════════════════════════════════════════════════════
+
+BEGIN;
+
+-- ── Helper: normalise LGA strings before comparing ───────────────────────────
+-- Strips leading/trailing whitespace and lowercases both sides so that
+-- "Jos North" and "jos north " compare equal.
+
+CREATE OR REPLACE FUNCTION public.normalise_lga(lga TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+AS $$
+  SELECT LOWER(TRIM(lga));
+$$;
+
+-- ── Scoped officer policy ─────────────────────────────────────────────────────
+-- Only applies when:
+--   a) The caller is a field/ward/LGA officer (not HQ, not citizen)
+--   b) The officer's profile has a non-empty geo_lga
+-- When either condition is false the policy produces no rows (it doesn't fire),
+-- so the existing "alerts_select_responders" policy still covers HQ and officers
+-- whose geo_lga is not yet filled in.
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename  = 'alerts'
+      AND policyname = 'alerts_select_geo_lga_scoped'
+  ) THEN
+    EXECUTE $pol$
+      CREATE POLICY "alerts_select_geo_lga_scoped"
+        ON public.alerts
+        FOR SELECT
+        USING (
+          -- Caller must be an authenticated field-level officer
+          auth.role() = 'authenticated'
+          AND EXISTS (
+            SELECT 1 FROM public.profiles p
+            WHERE p.id = auth.uid()
+              AND p.role IN ('FIELD_OFFICER', 'WARD_OFFICER', 'LGA_OFFICER')
+              AND p.geo_lga IS NOT NULL
+              AND TRIM(p.geo_lga) <> ''
+              -- Alert's LGA matches officer's LGA (case- and space-insensitive)
+              AND public.normalise_lga(p.geo_lga) = public.normalise_lga(alerts.geo_lga)
+          )
+        )
+    $pol$;
+    RAISE NOTICE 'Created policy: alerts_select_geo_lga_scoped';
+  ELSE
+    RAISE NOTICE 'Policy alerts_select_geo_lga_scoped already exists — skipped';
+  END IF;
+END $$;
+
+
+-- ── Equivalent scoping for telemetry (track officers in-LGA only) ─────────────
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename  = 'telemetry'
+      AND policyname = 'telemetry_select_geo_lga_scoped'
+  ) THEN
+    EXECUTE $pol$
+      CREATE POLICY "telemetry_select_geo_lga_scoped"
+        ON public.telemetry
+        FOR SELECT
+        USING (
+          auth.role() = 'authenticated'
+          AND EXISTS (
+            SELECT 1 FROM public.profiles caller
+            WHERE caller.id = auth.uid()
+              AND caller.role IN ('FIELD_OFFICER', 'WARD_OFFICER', 'LGA_OFFICER')
+              AND caller.geo_lga IS NOT NULL
+              AND TRIM(caller.geo_lga) <> ''
+              AND EXISTS (
+                SELECT 1 FROM public.profiles target
+                WHERE target.id = telemetry.user_id
+                  AND public.normalise_lga(target.geo_lga) = public.normalise_lga(caller.geo_lga)
+              )
+          )
+        )
+    $pol$;
+    RAISE NOTICE 'Created policy: telemetry_select_geo_lga_scoped';
+  ELSE
+    RAISE NOTICE 'Policy telemetry_select_geo_lga_scoped already exists — skipped';
+  END IF;
+END $$;
+
+
+-- ── Audit view: show which officers have no geo_lga (so you can fix them) ────
+
+CREATE OR REPLACE VIEW public.officers_missing_geo_lga AS
+SELECT
+  id,
+  full_name,
+  role,
+  geo_lga,
+  badge_number,
+  created_at
+FROM public.profiles
+WHERE role IN ('FIELD_OFFICER', 'WARD_OFFICER', 'LGA_OFFICER')
+  AND (geo_lga IS NULL OR TRIM(geo_lga) = '')
+ORDER BY created_at;
+
+COMMENT ON VIEW public.officers_missing_geo_lga IS
+  'Officers whose geo_lga is blank — they will not get the LGA-scoped RLS view '
+  'until their profile is updated. Run: SELECT * FROM officers_missing_geo_lga;';
+
+
+-- ── Verify ────────────────────────────────────────────────────────────────────
+
+SELECT
+  policyname,
+  tablename,
+  cmd
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND policyname IN (
+    'alerts_select_geo_lga_scoped',
+    'telemetry_select_geo_lga_scoped'
+  );
+
+COMMIT;
 
 -- ----------------------------------------------------------------------------
 -- 20260812000000_agency_tables.sql
@@ -3688,1373 +4600,13 @@ CREATE INDEX IF NOT EXISTS profiles_geo_key_idx
 REVOKE ALL ON FUNCTION public.geo_key(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.geo_key(TEXT) TO anon, authenticated, service_role;
 
--- ----------------------------------------------------------------------------
--- 20261010000000_append_alert_media_atomically.sql
--- ----------------------------------------------------------------------------
-DO $apply$ BEGIN RAISE NOTICE 'applying 20261010000000_append_alert_media_atomically.sql'; END $apply$;
-
--- Attaching evidence to an incident without losing any of it.
---
--- ## What was wrong
---
--- Three places append a URL to `alerts.media_urls`, and all three did it by
--- reading the array, adding to the copy, and writing the whole thing back:
---
---   lib/services/sync_service.dart                       the offline flush
---   lib/features/agent/mission_intel_screen.dart          a responder's evidence
---   lib/features/emergency/emergency_active_screen.dart   DURESS evidence
---
--- Read-modify-write over a network is lost-update by construction. Two uploads
--- that overlap both read the same array, and the second write erases the first.
--- The overlap is not hypothetical: the offline flush uploads a whole queue in a
--- loop, the duress screen fires each upload without awaiting it
--- (`unawaited(...)`), and a responder can photograph a scene twice in a few
--- seconds. Whichever upload finished second won and the other photograph was
--- gone — while the UI said "Evidence captured and sent to HQ".
---
--- `sync_service.dart` even labels its block "Atomic URL append to
--- alerts.media_urls". It is a comment, not a mechanism.
---
--- Evidence of a kidnapping that the app said it had sent is the worst thing in
--- this system to lose quietly.
---
--- ## The fix
---
--- ONE statement, and the row is locked inside it.
---
--- `FOR UPDATE` in the first CTE takes the row lock before anything is read, so
--- concurrent callers serialise rather than interleave: the second one blocks,
--- then re-reads the committed array and appends to THAT. Nothing is lost
--- whatever the ordering, and `added` is exact rather than approximate — which it
--- could not be if the old length were read in a separate statement.
---
--- Deduplicated on the way in, first occurrence winning, so retrying an upload
--- that actually succeeded does not put the same photograph in front of a
--- dispatcher twice, and does not shuffle it to the end of the dossier.
---
--- `coalesce(p_urls, '{}')` is not defensive habit. In PostgreSQL
--- `array || NULL::text[]` is NULL, so a caller passing a null array would have
--- ERASED every photograph already attached. That is a lost-evidence bug one
--- keystroke wide, and it is asserted against.
---
--- ## Why SECURITY INVOKER
---
--- Deliberately NOT a definer function. `alerts_update_own_or_ours` already says
--- who may change an incident — the reporter, the assigned team, and staff within
--- their command — and that is exactly the right rule for attaching evidence to
--- it. A definer function here would be a hole straight through the scoping
--- migration: anybody with a token could bolt media onto any incident in Plateau.
---
--- So row-level security applies, and the function returns NO ROW when the caller
--- is refused. The caller must treat an empty result as a refusal and never as
--- success — that is the one thing the Dart side has to get right, and
--- AlertMedia.append does.
-
-CREATE OR REPLACE FUNCTION public.append_alert_media(
-  p_alert_id UUID,
-  p_urls     TEXT[]
-)
-RETURNS TABLE (added INTEGER, total INTEGER)
-LANGUAGE sql
-SECURITY INVOKER
-SET search_path = public, pg_temp
-AS $$
-  WITH locked AS (
-    -- The lock, taken before the array is read. Row-level security applies to
-    -- this SELECT, so an account with no part in the incident stops here and
-    -- the whole statement returns nothing.
-    SELECT a.id,
-           coalesce(array_length(a.media_urls, 1), 0) AS before_n
-      FROM public.alerts a
-     WHERE a.id = p_alert_id
-       FOR UPDATE
-  ),
-  updated AS (
-    UPDATE public.alerts a
-       SET media_urls = (
-             -- WITH ORDINALITY so the order photographs were taken in survives,
-             -- and min(ord) so a duplicate keeps its FIRST position rather than
-             -- jumping to the end.
-             SELECT coalesce(array_agg(d.u ORDER BY d.ord), '{}'::TEXT[])
-               FROM (
-                 SELECT t.u, min(t.ord) AS ord
-                   FROM unnest(coalesce(a.media_urls, '{}'::TEXT[])
-                               || coalesce(p_urls, '{}'::TEXT[]))
-                          WITH ORDINALITY AS t(u, ord)
-                  WHERE nullif(trim(t.u), '') IS NOT NULL
-                  GROUP BY t.u
-               ) d
-           ),
-           updated_at = now()
-      FROM locked l
-     WHERE a.id = l.id
-    RETURNING coalesce(array_length(a.media_urls, 1), 0) AS after_n, l.before_n
-  )
-  SELECT (u.after_n - u.before_n)::INTEGER, u.after_n::INTEGER FROM updated u;
-$$;
-
-COMMENT ON FUNCTION public.append_alert_media(UUID, TEXT[]) IS
-  'Append evidence URLs to an incident in ONE locked statement, so two '
-  'concurrent uploads cannot erase each other. SECURITY INVOKER: '
-  'alerts_update_own_or_ours decides who may attach. Returns no row when the '
-  'caller is refused — a caller must not read that as success.';
-
-REVOKE ALL ON FUNCTION public.append_alert_media(UUID, TEXT[]) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.append_alert_media(UUID, TEXT[]) FROM anon;
-GRANT EXECUTE ON FUNCTION public.append_alert_media(UUID, TEXT[])
-  TO authenticated, service_role;
-
--- ----------------------------------------------------------------------------
--- 20261011000000_ussd_reports_are_unconfirmed.sql
--- ----------------------------------------------------------------------------
-DO $apply$ BEGIN RAISE NOTICE 'applying 20261011000000_ussd_reports_are_unconfirmed.sql'; END $apply$;
-
--- A stranger's keystrokes must not become armed officers at a chosen place.
---
--- ## The threat this is about
---
--- USSD is the right channel for a citizen with no data, no smartphone and no
--- credit — in Plateau State that is most of the people this system protects. It
--- is also the cheapest possible way to lure responders into an ambush: no
--- install, no data, a ₦100 SIM, and the report is indistinguishable from a real
--- one. Security personnel in this state have been attacked after being drawn to
--- a location. This is not a theoretical risk being written up for completeness.
---
--- Two mitigations are theatre and are not implemented as if they were defences:
--- rate-limiting per number, and requiring registration. Both cost one more SIM
--- to defeat, and USSD self-registration is instant BY DESIGN — the carrier
--- asserts the MSISDN, so there is nothing to verify and nothing to slow down.
--- That openness is the point of the channel and is worth its cost; pretending a
--- rate limit closes the hole would be worse than leaving it open knowingly.
---
--- What this migration does instead is remove the AUTOMATIC path from a keypress
--- to a deployment, and give the officer who decides the provenance to decide on.
---
--- ## 1. A USSD report does not climb the ladder on its own
---
--- `escalate_overdue_alerts()` moves any unacknowledged alert up a tier on a
--- timer: UNIT after its window, then WARD, then LGA, then HQ. Every new row
--- defaults to `assigned_tier = 'UNIT'`, so a fake USSD report would page a
--- ward commander, then an LGA commander, then Command HQ, with no human having
--- ever judged whether it is real. The timers do the attacker's work.
---
--- So an unconfirmed USSD report is held out of the ladder. It is NOT hidden and
--- NOT quiet: it is on the board, it is counted, and the console shows it with
--- its provenance. What it does not do is manufacture urgency by itself.
---
--- The moment a human confirms it — `confirm_ussd_report()` — it joins the ladder
--- with a fresh clock and behaves exactly like any other incident.
---
--- ## 2. A false report becomes recordable
---
--- There was no way to say a report was a lie. `status` had RESOLVED and
--- CANCELLED, and CANCELLED is what a reporter does when they stand themselves
--- down. With no distinct outcome, no signal could ever accumulate against a
--- number, which means every other credibility measure was guesswork dressed up.
--- FALSE_REPORT is that outcome, and it is deliberately an ACTION BY AN OFFICER,
--- recorded with who said so.
---
--- ## 3. Corroboration, not a severity badge
---
--- One report of an armed attack from a number never seen before is a different
--- thing from four reports from four numbers on three carriers in the same ward
--- within twenty minutes. `ussd_report_credibility()` gives a dispatcher both
--- figures rather than a score, because a single number invites the reader to
--- stop thinking, and the shape of the corroboration is the part that matters.
-
--- ── Where it came from, and whether anybody has stood behind it ──────────────
-
-ALTER TABLE public.alerts
-  ADD COLUMN IF NOT EXISTS reporter_msisdn TEXT,
-  ADD COLUMN IF NOT EXISTS caller_may_be_called BOOLEAN,
-  ADD COLUMN IF NOT EXISTS ussd_confirmed_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS ussd_confirmed_by UUID REFERENCES public.profiles(id),
-  ADD COLUMN IF NOT EXISTS public_reference TEXT;
-
-COMMENT ON COLUMN public.alerts.reporter_msisdn IS
-  'The number the CARRIER asserted for a USSD session. Stronger evidence than '
-  'the app''s SMS OTP — it cannot be typed, mistyped or phished — but it '
-  'identifies a SIM, never a person.';
-
-COMMENT ON COLUMN public.alerts.caller_may_be_called IS
-  'Whether the USSD reporter agreed to be rung back. The ANSWER is a signal in '
-  'itself; refusing never blocked the report, because a witness to an attack '
-  'has good reasons not to want their phone ringing.';
-
-COMMENT ON COLUMN public.alerts.ussd_confirmed_at IS
-  'When a named officer stood behind this report. Until then it is out of the '
-  'escalation ladder: no timer may turn a stranger''s keypresses into a '
-  'deployment.';
-
-COMMENT ON COLUMN public.alerts.public_reference IS
-  'The short reference read back to a USSD caller. The only handle a person '
-  'with no smartphone has on their own report.';
-
--- Looking a caller's own history up, and the corroboration window, both read
--- this constantly.
-CREATE INDEX IF NOT EXISTS alerts_reporter_msisdn_idx
-  ON public.alerts (reporter_msisdn, created_at DESC)
-  WHERE reporter_msisdn IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS alerts_public_reference_idx
-  ON public.alerts (public_reference)
-  WHERE public_reference IS NOT NULL;
-
--- ── Holding an unconfirmed report out of the ladder ─────────────────────────
---
--- Expressed as a predicate rather than inlined, so the escalation job and the
--- console cannot drift about what "unconfirmed" means.
-
-CREATE OR REPLACE FUNCTION public.awaiting_human_confirmation(p_alert public.alerts)
-RETURNS BOOLEAN
-LANGUAGE sql
-IMMUTABLE
-PARALLEL SAFE
-AS $$
-  SELECT upper(coalesce(p_alert.arrived_via, '')) = 'USSD'
-     AND p_alert.ussd_confirmed_at IS NULL;
-$$;
-
-COMMENT ON FUNCTION public.awaiting_human_confirmation(public.alerts) IS
-  'A USSD report nobody has stood behind yet. On the board and counted, but '
-  'out of the escalation ladder, so no timer can manufacture urgency for a '
-  'report that may have been filed to draw officers somewhere.';
-
--- Copied VERBATIM from 20261007000000_notification_outbox.sql with ONE line
--- added, and copied rather than rewritten on purpose. The first version of this
--- migration restated the function "in full for readability" and silently
--- dropped four things: status = 'ESCALATED', updated_at, the escalation_log key
--- names the console and drain-outbox read (from_tier/to_tier, not from/to), and
--- the 'reason':'TIMEOUT' in the outbox payload. A CREATE OR REPLACE that looks
--- like a tidy-up is how a working mechanism gets reverted by a migration about
--- something else.
-
-CREATE OR REPLACE FUNCTION public.escalate_overdue_alerts()
-RETURNS TABLE (alert_id UUID, from_tier TEXT, to_tier TEXT)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-BEGIN
-  RETURN QUERY
-  WITH overdue AS (
-    SELECT a.id,
-           upper(a.assigned_tier)            AS current_tier,
-           public.next_tier(a.assigned_tier) AS target_tier
-      FROM public.alerts a
-     WHERE a.status NOT IN ('RESOLVED', 'CANCELLED')
-       -- Acknowledged means somebody at this tier has it. Climbing past a
-       -- responder who is already on it is how you get two units dispatched
-       -- to the same incident and none to the next one.
-       AND a.acknowledged_at IS NULL
-       -- A report filed over USSD that no officer has stood behind. The timers
-       -- must not turn a stranger's keypresses into a deployment; see
-       -- awaiting_human_confirmation() above.
-       AND NOT public.awaiting_human_confirmation(a)
-       AND public.next_tier(a.assigned_tier) IS NOT NULL
-       AND a.tier_assigned_at IS NOT NULL
-       AND a.tier_assigned_at <
-             NOW() - make_interval(
-               mins => public.tier_timeout_minutes(a.assigned_tier)
-             )
-     FOR UPDATE OF a SKIP LOCKED
-  ),
-  moved AS (
-    UPDATE public.alerts a
-       SET assigned_tier    = o.target_tier,
-           tier_assigned_at = NOW(),
-           status           = 'ESCALATED',
-           updated_at       = NOW(),
-           escalation_log = COALESCE(a.escalation_log, '[]'::jsonb) || jsonb_build_object(
-             'from_tier',  o.current_tier,
-             'to_tier',    o.target_tier,
-             'reason',     'TIMEOUT',
-             'by',         'SYSTEM',
-             'at',         to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
-           )
-      FROM overdue o
-     WHERE a.id = o.id
-    RETURNING a.id, o.current_tier, o.target_tier, a.geo_lga, a.geo_ward, a.geo_pu, a.severity
-  ),
-  queued AS (
-    INSERT INTO public.notification_outbox (alert_id, kind, payload)
-    SELECT m.id,
-           'TIER_ESCALATION',
-           jsonb_build_object(
-             'alert_id',  m.id,
-             'from_tier', m.current_tier,
-             'to_tier',   m.target_tier,
-             'geo_lga',   m.geo_lga,
-             'geo_ward',  m.geo_ward,
-             'geo_pu',    m.geo_pu,
-             'severity',  m.severity,
-             'reason',    'TIMEOUT'
-           )
-      FROM moved m
-    -- `RETURNING alert_id` collides with this function's own OUT parameter of
-    -- that name and is rejected as ambiguous. Nothing reads this CTE's output;
-    -- it exists so the INSERT runs inside the same statement as the UPDATE.
-    RETURNING id
-  )
-  SELECT m.id, m.current_tier, m.target_tier FROM moved m;
-END;
-$$;
-
--- ── An officer standing behind a report ────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION public.confirm_ussd_report(p_alert_id UUID)
-RETURNS TABLE (confirmed BOOLEAN, tier TEXT)
-LANGUAGE plpgsql
-SECURITY INVOKER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_tier TEXT;
-BEGIN
-  -- SECURITY INVOKER: alerts_update_own_or_ours already decides who may act on
-  -- an incident, and that is exactly the right rule here. A definer function
-  -- would let any account with a token confirm a report anywhere in Plateau —
-  -- which is the whole control, handed away.
-  UPDATE public.alerts a
-     SET ussd_confirmed_at = NOW(),
-         ussd_confirmed_by = auth.uid(),
-         -- A fresh clock. Inheriting the age it accumulated while unconfirmed
-         -- would make it overdue the instant it was confirmed and climb several
-         -- tiers in one pass of the job — the cascade
-         -- 20260928000000 already had to fix once for hand escalations.
-         tier_assigned_at  = NOW(),
-         escalation_log    = coalesce(a.escalation_log, '[]'::jsonb) || jsonb_build_object(
-           'at',     NOW(),
-           'by',     auth.uid(),
-           'action', 'CONFIRMED',
-           'reason', 'a named officer stood behind a USSD report'
-         )
-   WHERE a.id = p_alert_id
-     AND upper(coalesce(a.arrived_via, '')) = 'USSD'
-     AND a.ussd_confirmed_at IS NULL
-  RETURNING a.assigned_tier INTO v_tier;
-
-  IF v_tier IS NULL THEN
-    -- Not ours, not USSD, already confirmed, or gone. No row, so a caller
-    -- cannot read a refusal as a confirmation.
-    RETURN;
-  END IF;
-  RETURN QUERY SELECT true, v_tier;
-END $$;
-
-COMMENT ON FUNCTION public.confirm_ussd_report(UUID) IS
-  'A named officer stands behind a USSD report, which joins the escalation '
-  'ladder with a fresh clock. Returns no row if the caller may not act on that '
-  'incident, so a refusal can never read as a confirmation.';
-
-REVOKE ALL ON FUNCTION public.confirm_ussd_report(UUID) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.confirm_ussd_report(UUID) TO authenticated, service_role;
-
--- ── Recording that a report was a lie ──────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION public.mark_false_report(p_alert_id UUID, p_note TEXT)
-RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY INVOKER
-SET search_path = public, pg_temp
-AS $$
-DECLARE v_id UUID;
-BEGIN
-  -- FALSE_REPORT, not CANCELLED. CANCELLED is what a reporter does when they
-  -- stand themselves down and carries no accusation. This is an officer saying
-  -- the report was untrue, and it is the ONLY thing that can ever make a
-  -- number's history mean anything — without it, every credibility measure in
-  -- this file would be guesswork dressed up as evidence.
-  UPDATE public.alerts a
-     SET status         = 'FALSE_REPORT',
-         resolved_at    = NOW(),
-         escalation_log = coalesce(a.escalation_log, '[]'::jsonb) || jsonb_build_object(
-           'at',     NOW(),
-           'by',     auth.uid(),
-           'action', 'FALSE_REPORT',
-           'reason', coalesce(nullif(trim(p_note), ''), 'marked false by an officer')
-         )
-   WHERE a.id = p_alert_id
-  RETURNING a.id INTO v_id;
-  RETURN v_id IS NOT NULL;
-END $$;
-
-COMMENT ON FUNCTION public.mark_false_report(UUID, TEXT) IS
-  'An officer records that a report was untrue. Distinct from CANCELLED, which '
-  'is a reporter standing themselves down. This is the only source of the '
-  'history that makes a number''s credibility a fact rather than a guess.';
-
-REVOKE ALL ON FUNCTION public.mark_false_report(UUID, TEXT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.mark_false_report(UUID, TEXT) TO authenticated, service_role;
-
--- ── What a dispatcher should know before sending anybody ────────────────────
-
-CREATE OR REPLACE FUNCTION public.ussd_report_credibility(p_alert_id UUID)
-RETURNS TABLE (
-  first_time_caller     BOOLEAN,
-  caller_report_count   INTEGER,
-  caller_false_reports  INTEGER,
-  caller_known_days     INTEGER,
-  callback_offered      BOOLEAN,
-  corroborating_reports INTEGER,
-  corroborating_numbers INTEGER
-)
-LANGUAGE sql
-SECURITY DEFINER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-  WITH it AS (
-    SELECT a.id, a.reporter_msisdn, a.created_at, a.category,
-           public.geo_key(a.geo_lga)  AS lga,
-           public.geo_key(a.geo_ward) AS ward,
-           a.caller_may_be_called
-      FROM public.alerts a
-     WHERE a.id = p_alert_id
-  ),
-  history AS (
-    SELECT count(*)::INTEGER AS n,
-           count(*) FILTER (WHERE upper(coalesce(h.status, '')) = 'FALSE_REPORT')::INTEGER
-             AS false_n,
-           min(h.created_at) AS first_seen
-      FROM public.alerts h, it
-     WHERE h.reporter_msisdn IS NOT NULL
-       AND h.reporter_msisdn = it.reporter_msisdn
-       AND h.id <> it.id
-  ),
-  -- Independent reports of what may be the same event: the same ward, the same
-  -- category, inside a window, from OTHER numbers. Counted two ways on purpose
-  -- — four reports from one number is one person pressing keys, and four from
-  -- four numbers is a village.
-  nearby AS (
-    SELECT count(*)::INTEGER AS n,
-           count(DISTINCT coalesce(c.reporter_msisdn, c.id::text))::INTEGER AS numbers
-      FROM public.alerts c, it
-     WHERE c.id <> it.id
-       AND c.created_at BETWEEN it.created_at - INTERVAL '45 minutes'
-                           AND it.created_at + INTERVAL '45 minutes'
-       AND c.category IS NOT DISTINCT FROM it.category
-       AND it.lga IS NOT NULL
-       AND public.geo_key(c.geo_lga) = it.lga
-       AND (it.ward IS NULL OR public.geo_key(c.geo_ward) = it.ward)
-       AND coalesce(c.reporter_msisdn, '') <> coalesce(it.reporter_msisdn, '')
-  )
-  SELECT (history.n = 0),
-         history.n,
-         history.false_n,
-         CASE WHEN history.first_seen IS NULL THEN 0
-              ELSE GREATEST(0, (EXTRACT(EPOCH FROM (NOW() - history.first_seen)) / 86400)::INTEGER)
-         END,
-         coalesce(it.caller_may_be_called, false),
-         nearby.n,
-         nearby.numbers
-    FROM it, history, nearby;
-$$;
-
-COMMENT ON FUNCTION public.ussd_report_credibility(UUID) IS
-  'What a dispatcher should know before committing officers on the word of a '
-  'phone number: is this the first time it has ever been heard from, what has '
-  'it reported before, has anything it filed been marked false, did it agree '
-  'to a callback, and is anybody else saying the same thing. Figures, not a '
-  'score — a single number invites the reader to stop thinking, and the shape '
-  'of the corroboration is the part that matters.';
-
-REVOKE ALL ON FUNCTION public.ussd_report_credibility(UUID) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.ussd_report_credibility(UUID) TO authenticated, service_role;
-
--- ── The USSD session store ─────────────────────────────────────────────────
---
--- USSD is stateless HTTP per screen. Some aggregators hand over the whole
--- `*`-joined input path and some only the latest keypress, so the state has to
--- live here regardless — and it has to live here anyway for idempotency,
--- because a gateway that times out RE-POSTS the same session and the same input
--- and must not produce a second alert.
-
-CREATE TABLE IF NOT EXISTS public.ussd_sessions (
-  session_id   TEXT PRIMARY KEY,
-  msisdn       TEXT NOT NULL,
-  state        JSONB NOT NULL DEFAULT '{}'::jsonb,
-  -- The last screen sent. A retry is answered from here rather than re-running
-  -- the reducer, which is what makes a repeat POST harmless.
-  last_screen  TEXT,
-  last_input   TEXT,
-  -- Set once a report has been filed in this session, so a retry of the final
-  -- keypress returns the same reference instead of filing a second emergency.
-  filed_alert  UUID REFERENCES public.alerts(id) ON DELETE SET NULL,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-COMMENT ON TABLE public.ussd_sessions IS
-  'One row per USSD dialogue. Holds the menu state between screens, and the '
-  'alert already filed, so a gateway retry cannot raise the same emergency '
-  'twice.';
-
-CREATE INDEX IF NOT EXISTS ussd_sessions_stale_idx
-  ON public.ussd_sessions (updated_at);
-
--- Nobody signed in from a phone or a browser may read these: they contain the
--- MSISDNs of people who reported anonymously, and the whole point of an
--- anonymous report is that the reporter is not in a table anyone can query.
-ALTER TABLE public.ussd_sessions ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON public.ussd_sessions FROM PUBLIC, anon, authenticated;
-GRANT ALL ON public.ussd_sessions TO service_role;
-
-COMMENT ON INDEX public.ussd_sessions_stale_idx IS
-  'Sessions are short-lived; this supports the sweep that deletes finished and '
-  'abandoned dialogues rather than keeping a log of who dialled what.';
-
--- ----------------------------------------------------------------------------
--- 20261012000000_ussd_filing.sql
--- ----------------------------------------------------------------------------
-DO $apply$ BEGIN RAISE NOTICE 'applying 20261012000000_ussd_filing.sql'; END $apply$;
-
--- Filing a report from a USSD session, exactly once.
---
--- ## Why the filing is here and not in the route
---
--- A USSD gateway that does not get a reply inside its window RE-POSTS the same
--- session with the same input. That is not an error condition, it is normal
--- operation on a congested network — which is precisely when people are
--- reporting emergencies. A route that files on every POST would raise the same
--- kidnapping two, three, four times, and a dispatcher would see four incidents
--- and have no way to tell them from four real reports.
---
--- Guarding that in the route means reading the session, deciding, then writing —
--- and two concurrent retries both read "not filed yet" and both file. The only
--- place that race can actually be closed is inside one statement holding the
--- session row's lock, which is here.
---
--- So `ussd_file_report()` is the whole transaction: lock the session, return the
--- report it already filed if there is one, otherwise write the alert and record
--- it against the session. A retry gets the SAME reference, which is also the
--- right answer for the caller — they are told again what they were told before,
--- instead of being handed a second reference for an incident that does not exist.
---
--- ## What is deliberately NOT here
---
--- Creating the caller's account. `profiles.id` references `auth.users`, and
--- `auth.users` is Supabase's table: its column set has changed across versions
--- and several columns are NOT NULL with no default depending on the release.
--- Hand-inserting into it from a migration is the kind of thing that works in
--- staging and fails on an upgrade, so the route uses the Admin API for that and
--- this file never touches it.
-
--- ── The reference a caller is read back ────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION public.ussd_reference()
-RETURNS TEXT
-LANGUAGE plpgsql
-VOLATILE
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  -- No 0/O, 1/I/L, 5/S, 2/Z or 8/B. This reference is read off a feature-phone
-  -- screen and then spoken down a phone line to a desk officer, so a character
-  -- somebody can hear or see wrongly costs a real minute in an emergency.
-  alphabet CONSTANT TEXT := '34679ACDEFGHJKMNPQRTUVWXY';
-  candidate TEXT;
-  attempt   INTEGER := 0;
-BEGIN
-  LOOP
-    candidate := 'R';
-    FOR i IN 1..5 LOOP
-      candidate := candidate ||
-        substr(alphabet, 1 + floor(random() * length(alphabet))::INTEGER, 1);
-    END LOOP;
-    -- 25^5 is about 9.7 million, and there is a unique index, so a collision is
-    -- rare and cheap to walk away from. Bounded rather than looping for ever:
-    -- a USSD session has seconds, and spinning here would time out the call.
-    EXIT WHEN NOT EXISTS (
-      SELECT 1 FROM public.alerts WHERE public_reference = candidate
-    );
-    attempt := attempt + 1;
-    IF attempt >= 12 THEN
-      -- Fall back to something guaranteed unique rather than failing the report.
-      -- Uglier to read aloud, and infinitely better than losing an emergency.
-      candidate := 'R' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 7));
-      EXIT;
-    END IF;
-  END LOOP;
-  RETURN candidate;
-END $$;
-
-COMMENT ON FUNCTION public.ussd_reference() IS
-  'A short report reference with no visually or audibly confusable characters, '
-  'because it is read off a feature phone and then spoken to a desk officer.';
-
--- ── Who is dialling ───────────────────────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION public.ussd_caller(p_msisdn TEXT)
-RETURNS TABLE (user_id UUID, role TEXT, geo_lga TEXT, geo_ward TEXT, geo_pu TEXT)
-LANGUAGE sql
-SECURITY DEFINER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-  -- Matched on the last nine digits, not on equality. The carrier may present
-  -- 2348030001111, +2348030001111 or 08030001111 for the same SIM depending on
-  -- the aggregator and the network, and a citizen who registered in the app
-  -- typed whichever form they think of as their number. Comparing raw strings
-  -- would hand a returning app user the stranger's path — six keypresses and no
-  -- posting — while their profile sat right there.
-  SELECT p.id, p.role, p.geo_lga, p.geo_ward, p.geo_pu
-    FROM public.profiles p
-   WHERE p.phone IS NOT NULL
-     AND right(regexp_replace(p.phone, '\D', '', 'g'), 9)
-       = right(regexp_replace(coalesce(p_msisdn, ''), '\D', '', 'g'), 9)
-     AND length(regexp_replace(coalesce(p_msisdn, ''), '\D', '', 'g')) >= 9
-   ORDER BY p.created_at
-   LIMIT 1;
-$$;
-
-COMMENT ON FUNCTION public.ussd_caller(TEXT) IS
-  'The profile behind a dialling MSISDN, matched on the last nine digits because '
-  'carriers and app users write the same number several ways.';
-
-REVOKE ALL ON FUNCTION public.ussd_caller(TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.ussd_caller(TEXT) TO service_role;
-
--- ── Filing, exactly once per session ──────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION public.ussd_file_report(
-  p_session_id TEXT,
-  p_msisdn     TEXT,
-  p_reporter   UUID,
-  p_type       TEXT,
-  p_emergency  BOOLEAN,
-  p_lga        TEXT,
-  p_ward       TEXT,
-  p_callback   BOOLEAN
-)
-RETURNS TABLE (reference TEXT, alert_id UUID, already_filed BOOLEAN)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_existing UUID;
-  v_ref      TEXT;
-  v_id       UUID;
-BEGIN
-  -- Lock the session first. Everything below depends on being the only writer
-  -- for this dialogue, and two concurrent retries are the normal case this
-  -- function exists for.
-  SELECT s.filed_alert INTO v_existing
-    FROM public.ussd_sessions s
-   WHERE s.session_id = p_session_id
-     FOR UPDATE;
-
-  IF NOT FOUND THEN
-    -- The route always opens the session before filing, so this is a caller
-    -- bug rather than a user one. Refuse rather than inventing a session: an
-    -- alert with no dialogue behind it cannot be deduplicated on a retry.
-    RETURN;
-  END IF;
-
-  IF v_existing IS NOT NULL THEN
-    -- A retry. Hand back what was already filed, so the caller is told the same
-    -- reference again instead of a second one for an incident that never existed.
-    RETURN QUERY
-      SELECT a.public_reference, a.id, true
-        FROM public.alerts a
-       WHERE a.id = v_existing;
-    RETURN;
-  END IF;
-
-  v_ref := public.ussd_reference();
-
-  INSERT INTO public.alerts (
-    -- No `priority`: that is not a column. The console DERIVES it when it maps a
-    -- row (`priority: d.severity || 'UNKNOWN'` in dashboard/page.tsx), and
-    -- writing it here was rejected outright by the first harness run.
-    type, description, status, severity,
-    reported_by, geo_lga, geo_ward,
-    arrived_via, reporter_msisdn, caller_may_be_called, public_reference,
-    assigned_tier, tier_assigned_at, created_at, updated_at
-  ) VALUES (
-    p_type,
-    -- The description is the provenance. A dispatcher reading this row has to
-    -- know, without clicking anything, that it came from a keypad and that
-    -- nobody has stood behind it yet.
-    '[USSD] Reported by keypad from ' || coalesce(p_msisdn, 'an unknown number')
-      || '. Not yet confirmed by an officer.',
-    'PENDING',
-    -- The emergency branch is CRITICAL whatever else is true, exactly as the
-    -- offline-channel ingest treats a duress alert. A person choosing "armed
-    -- attack" on a menu is not grading their own incident.
-    CASE WHEN p_emergency THEN 'CRITICAL' ELSE 'MEDIUM' END,
-    p_reporter,
-    nullif(trim(coalesce(p_lga, '')), ''),
-    nullif(trim(coalesce(p_ward, '')), ''),
-    'USSD',
-    p_msisdn,
-    coalesce(p_callback, false),
-    v_ref,
-    'UNIT',
-    -- The clock starts, but awaiting_human_confirmation() holds it out of the
-    -- ladder until an officer confirms it (20261011000000). Both are true at
-    -- once on purpose: the age is real and visible, and the timer cannot act on
-    -- it. Setting this to NULL instead would make the row look ageless on the
-    -- board, which is its own kind of lie.
-    NOW(), NOW(), NOW()
-  )
-  RETURNING id INTO v_id;
-
-  UPDATE public.ussd_sessions
-     SET filed_alert = v_id, updated_at = NOW()
-   WHERE session_id = p_session_id;
-
-  RETURN QUERY SELECT v_ref, v_id, false;
-END $$;
-
-COMMENT ON FUNCTION public.ussd_file_report(TEXT, TEXT, UUID, TEXT, BOOLEAN, TEXT, TEXT, BOOLEAN) IS
-  'Files one report for one USSD session, holding the session row''s lock, so a '
-  'gateway retry gets the SAME reference rather than raising the same emergency '
-  'twice. Returns no row if the session was never opened.';
-
-REVOKE ALL ON FUNCTION
-  public.ussd_file_report(TEXT, TEXT, UUID, TEXT, BOOLEAN, TEXT, TEXT, BOOLEAN)
-  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION
-  public.ussd_file_report(TEXT, TEXT, UUID, TEXT, BOOLEAN, TEXT, TEXT, BOOLEAN)
-  TO service_role;
-
--- ── The caller's own last report ──────────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION public.ussd_last_report(p_msisdn TEXT)
-RETURNS TABLE (reference TEXT, kind TEXT, status TEXT, age_minutes INTEGER)
-LANGUAGE sql
-SECURITY DEFINER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-  -- Status only, and by column rather than by `select *`, so nobody can widen
-  -- this later without noticing. Whoever holds the SIM can read this screen,
-  -- and somebody who filed a report to draw officers to a place must not be
-  -- able to watch them come: no assigned_to, no assigned_responders, no
-  -- coordinates, no tier.
-  SELECT a.public_reference,
-         a.type,
-         a.status,
-         GREATEST(0, (EXTRACT(EPOCH FROM (NOW() - a.created_at)) / 60)::INTEGER)
-    FROM public.alerts a
-   WHERE a.reporter_msisdn IS NOT NULL
-     AND right(regexp_replace(a.reporter_msisdn, '\D', '', 'g'), 9)
-       = right(regexp_replace(coalesce(p_msisdn, ''), '\D', '', 'g'), 9)
-     AND length(regexp_replace(coalesce(p_msisdn, ''), '\D', '', 'g')) >= 9
-   -- `id` breaks the tie. Two reports from one number can share a created_at —
-   -- `NOW()` is the transaction timestamp, and a double-dial or a burst arrives
-   -- inside the same second — and ordering on created_at alone would then return
-   -- an arbitrary one of them. A caller reading back "my last report" and being
-   -- shown a different one each time they dial is worse than useless.
-   ORDER BY a.created_at DESC, a.id DESC
-   LIMIT 1;
-$$;
-
-COMMENT ON FUNCTION public.ussd_last_report(TEXT) IS
-  'The status of a caller''s most recent report, for the USSD status screen. '
-  'Named columns only: this screen is readable by anyone holding the SIM, so it '
-  'must never carry a unit, a position or a tier.';
-
-REVOKE ALL ON FUNCTION public.ussd_last_report(TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.ussd_last_report(TEXT) TO service_role;
-
--- ── Forgetting the dialogue ───────────────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION public.sweep_ussd_sessions(p_older_than INTERVAL DEFAULT INTERVAL '2 hours')
-RETURNS INTEGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-DECLARE n INTEGER;
-BEGIN
-  -- These rows hold the MSISDNs of people who reported, including anonymously.
-  -- Keeping them after the dialogue has ended would turn a session store into a
-  -- log of who dialled what, which is not a thing this system should own. The
-  -- ALERT keeps what it needs; the dialogue does not need to outlive the call.
-  DELETE FROM public.ussd_sessions
-   WHERE updated_at < NOW() - p_older_than;
-  GET DIAGNOSTICS n = ROW_COUNT;
-  RETURN n;
-END $$;
-
-COMMENT ON FUNCTION public.sweep_ussd_sessions(INTERVAL) IS
-  'Deletes finished and abandoned USSD dialogues. The session store must not '
-  'become a log of who dialled what — the alert keeps what is needed.';
-
-REVOKE ALL ON FUNCTION public.sweep_ussd_sessions(INTERVAL) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.sweep_ussd_sessions(INTERVAL) TO service_role;
-
--- ----------------------------------------------------------------------------
--- 20261013000000_ussd_landmark.sql
--- ----------------------------------------------------------------------------
-DO $apply$ BEGIN RAISE NOTICE 'applying 20261013000000_ussd_landmark.sql'; END $apply$;
-
--- The nearest landmark, typed by somebody who has no GPS.
---
--- ## Why this is worth a column
---
--- A USSD report cannot carry coordinates. USSD rides the signalling channel with
--- no access to the handset's location, so the best the console can draw is a
--- circle the size of the ward the caller chose — 800m across in Jos North, 16km
--- in parts of Wase. That circle tells a commander which unit owns the incident.
--- It does not tell a driver where to go.
---
--- A landmark does. The polling units in the tactical map are real findable places
--- — POLICE BARRACKS, PRIM. SCHOOL DAFFO, DISPENSARY GORO, NEW MARKET SCHOOL LANE
--- — and so are the ones a caller types from their own knowledge. "Behind the
--- mosque on the Bokkos road" is worth more to a responder than a 3km circle, and
--- no list could have contained it.
---
--- It is asked AFTER the report is filed, never before. The emergency is already
--- recorded and HQ can already see it; this arrives seconds later. Asking first
--- would put another screen between a person under attack and the report landing,
--- and if the session then dropped they would have neither.
---
--- ## What it is NOT
---
--- It is not a location. It does not change `locateIncident()`'s precision, and it
--- must never be parsed into coordinates — there are no polling-unit coordinates
--- in this system, and deriving a point from a string would be the fabricated-fix
--- defect again wearing a different hat. It is text, written by a person, for a
--- person to read.
-
-ALTER TABLE public.alerts
-  ADD COLUMN IF NOT EXISTS reporter_landmark TEXT;
-
-COMMENT ON COLUMN public.alerts.reporter_landmark IS
-  'The nearest landmark as the reporter typed it, for a responder to read. NOT a '
-  'location: it never becomes coordinates, because deriving a point from a '
-  'string is the fabricated-fix defect wearing a different hat.';
-
--- ── Attaching one to the report this session already filed ─────────────────
-
-CREATE OR REPLACE FUNCTION public.ussd_add_landmark(
-  p_session_id TEXT,
-  p_landmark   TEXT
-)
-RETURNS TABLE (reference TEXT, alert_id UUID)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_alert UUID;
-  v_text  TEXT;
-BEGIN
-  v_text := nullif(btrim(coalesce(p_landmark, '')), '');
-  IF v_text IS NULL THEN RETURN; END IF;
-
-  -- Only ever the report THIS session filed. Taking an alert id from the caller
-  -- would let anybody with the endpoint write a landmark onto any incident in
-  -- Plateau — a way to redirect a response by typing, which is the same class of
-  -- problem as the ambush this channel is already careful about.
-  SELECT s.filed_alert INTO v_alert
-    FROM public.ussd_sessions s
-   WHERE s.session_id = p_session_id;
-  IF v_alert IS NULL THEN RETURN; END IF;
-
-  UPDATE public.alerts a
-     SET reporter_landmark = left(v_text, 120),
-         -- Appended to the description as well, because that is what a
-         -- dispatcher reads first and what the SMS and push notices carry. A
-         -- column nobody surfaces is a column nobody reads.
-         description = coalesce(a.description, '')
-                       || ' Nearest landmark: ' || left(v_text, 120) || '.',
-         updated_at = NOW()
-   WHERE a.id = v_alert
-  RETURNING a.public_reference, a.id INTO reference, alert_id;
-
-  IF reference IS NULL THEN RETURN; END IF;
-  RETURN NEXT;
-END $$;
-
-COMMENT ON FUNCTION public.ussd_add_landmark(TEXT, TEXT) IS
-  'Attaches a typed landmark to the report THIS USSD session filed. Never takes '
-  'an alert id from the caller: that would let anybody write a landmark onto any '
-  'incident in Plateau and redirect a response by typing.';
-
-REVOKE ALL ON FUNCTION public.ussd_add_landmark(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.ussd_add_landmark(TEXT, TEXT) TO service_role;
-
--- ----------------------------------------------------------------------------
--- 20261014000000_ai_reports_are_kept.sql
--- ----------------------------------------------------------------------------
-DO $apply$ BEGIN RAISE NOTICE 'applying 20261014000000_ai_reports_are_kept.sql'; END $apply$;
-
--- The forensic report the AI produced, kept.
---
--- ## What was wrong
---
--- `generateAISummary()` in the console called Gemini, put the text in React
--- state, and rendered it. Nothing wrote it anywhere. Close the dossier and the
--- forensic debrief was gone; reopen the incident and the console billed another
--- Gemini call to produce it again.
---
--- Three separate costs, and the third is the one that matters:
---
---   * There was nowhere for an administrator to see a report that had been
---     generated. That was the operator's own question — "where can admin see the
---     forensic report that was generated?" — and the answer was nowhere.
---   * Every reopen paid for the same analysis.
---   * **There was no record of what the AI said at the moment a decision was
---     made.** If an officer escalated an incident or cleared it partly on the
---     strength of an AI debrief, the text they read is part of why. A forensic
---     assessment that exists only until a browser tab closes cannot be part of an
---     audit trail, which is the entire purpose of the word forensic.
---
--- ## Why a table and not the existing ai_summary column
---
--- `alerts.ai_summary` is free text that already accumulates operator-facing
--- notes — the classification lines `[AI CLASSIFICATION APPLIED] severity ...`
--- are appended to it. Mixing a multi-paragraph forensic document into the same
--- column means neither can be read back reliably, and it makes "which report was
--- generated when, by whom, by which model" unanswerable.
---
--- A report is also not singular. One may be generated while an incident is
--- running and another after the debrief, and the earlier one does not stop being
--- evidence of what was known at the time. So: rows, with provenance, kept.
---
--- ## Why only the server may write one
---
--- This is the important rule. `/api/ai/analyze` holds the Gemini key, composes
--- the prompt from the alert row, and receives the answer. It is the only thing
--- that knows what the model actually said.
---
--- If the browser wrote the text, an operator could put words in the model's mouth
--- in the audit record — "the AI concluded the responders acted correctly" — and
--- nothing downstream could tell that from a genuine completion. So INSERT is
--- service-role only. Nobody signed in from a browser or a phone can create one,
--- and the console reads them back rather than supplying them.
-
-CREATE TABLE IF NOT EXISTS public.incident_ai_reports (
-  id           BIGSERIAL PRIMARY KEY,
-  alert_id     UUID NOT NULL REFERENCES public.alerts(id) ON DELETE CASCADE,
-  -- 'summary' is the forensic debrief; 'triage' is the classification
-  -- recommendation. Kept apart because they are read in different places and a
-  -- triage recommendation is not a report.
-  kind         TEXT NOT NULL CHECK (kind IN ('summary', 'triage')),
-  body         TEXT NOT NULL,
-  -- Which model produced it. A debrief written by a model that has since been
-  -- retired still has to be readable as such: "the AI said" is not a fact
-  -- without knowing which AI.
-  model        TEXT,
-  -- Who asked for it. Not who wrote it — the model wrote it — but an AI
-  -- assessment appearing on an incident with nobody's name against the request
-  -- is an unattributed document in an audit trail.
-  requested_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-COMMENT ON TABLE public.incident_ai_reports IS
-  'Forensic debriefs and triage recommendations as the model actually returned '
-  'them. INSERT is service-role only: if a browser could write these, an operator '
-  'could put words in the model''s mouth in the audit record.';
-
--- The console reads the newest report for one incident, constantly.
-CREATE INDEX IF NOT EXISTS incident_ai_reports_alert_idx
-  ON public.incident_ai_reports (alert_id, kind, created_at DESC);
-
-ALTER TABLE public.incident_ai_reports ENABLE ROW LEVEL SECURITY;
-
--- ── Who may read one ───────────────────────────────────────────────────────
-
-DROP POLICY IF EXISTS "ai_reports_select_with_alert" ON public.incident_ai_reports;
-CREATE POLICY "ai_reports_select_with_alert" ON public.incident_ai_reports
-  FOR SELECT TO authenticated
-  USING (
-    -- Operation Rainbow STAFF, within their command, and no one else.
-    --
-    -- Two exclusions, both for the same reason. A machine assessment is
-    -- Rainbow's own working note: it may speculate about what happened and who
-    -- was involved, and it may be wrong.
-    --
-    --   * A LIAISON sees the incidents escalated to their agency, deliberately.
-    --     Handing another organisation our internal assessment of those
-    --     incidents is not a decision a policy should make on a commander's
-    --     behalf. If it should be shared, a person can share it.
-    --
-    --   * The REPORTER is excluded for the same reason, and this was a
-    --     correction. The first version of this policy required only
-    --     alert_is_ours(), which admits the person who reported the incident —
-    --     so a citizen would have read a forensic debrief of their own
-    --     kidnapping, including whatever the model speculated about suspects or
-    --     about how the response went. The behaviour test caught it and recorded
-    --     it as a NOTE rather than a failure; leaving it as a note would have
-    --     been leaving the inconsistency in, since the liaison exclusion rests
-    --     on exactly the same argument.
-    --
-    -- This is reversible: if Plateau decides a reporter should see the analysis
-    -- of their own incident, removing is_staff() here is the whole change.
-    public.is_staff()
-    AND NOT public.is_liaison()
-    AND EXISTS (
-      SELECT 1 FROM public.alerts a
-       WHERE a.id = incident_ai_reports.alert_id
-         AND public.alert_is_ours(a)
-    )
-  );
-
--- No INSERT, UPDATE or DELETE policy at all, for anybody signed in. The absence
--- is the control: with RLS enabled and no permissive policy, `authenticated`
--- cannot write a row whatever it tries. Stated explicitly so a later migration
--- does not read the gap as an oversight and "fix" it.
---
--- There are in fact TWO independent blocks here, which is worth knowing before
--- anybody relaxes either one. Verifying the behaviour test by deliberately
--- adding a permissive INSERT policy AND the table grant did not break it — the
--- insert still failed, on `permission denied for sequence
--- incident_ai_reports_id_seq`, because the BIGSERIAL default needs USAGE on the
--- sequence and only service_role has it. The test only failed once all three
--- were granted.
---
--- So a future migration that adds an INSERT policy will appear to have no
--- effect, and the reason will be forty lines away in a GRANT. That is a good
--- accident to have, and a terrible one to debug blind.
-REVOKE INSERT, UPDATE, DELETE ON public.incident_ai_reports FROM anon, authenticated;
-GRANT SELECT ON public.incident_ai_reports TO authenticated;
-GRANT ALL ON public.incident_ai_reports TO service_role;
-GRANT USAGE, SELECT ON SEQUENCE public.incident_ai_reports_id_seq TO service_role;
-
--- ── Reading the latest one back ────────────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION public.latest_ai_report(p_alert_id UUID, p_kind TEXT)
-RETURNS TABLE (body TEXT, model TEXT, requested_by UUID, created_at TIMESTAMPTZ)
-LANGUAGE sql
-SECURITY INVOKER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-  -- SECURITY INVOKER, so the SELECT policy above decides. A definer function
-  -- here would hand every authenticated account the analysis of every incident
-  -- in Plateau, straight through the scoping this policy relies on.
-  SELECT r.body, r.model, r.requested_by, r.created_at
-    FROM public.incident_ai_reports r
-   WHERE r.alert_id = p_alert_id
-     AND r.kind = p_kind
-   ORDER BY r.created_at DESC, r.id DESC
-   LIMIT 1;
-$$;
-
-COMMENT ON FUNCTION public.latest_ai_report(UUID, TEXT) IS
-  'The most recent AI report of one kind for one incident. SECURITY INVOKER so '
-  'the table''s own policy decides who may read it.';
-
-REVOKE ALL ON FUNCTION public.latest_ai_report(UUID, TEXT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.latest_ai_report(UUID, TEXT) TO authenticated, service_role;
-
--- ----------------------------------------------------------------------------
--- 20261015000000_oversight_and_debrief.sql
--- ----------------------------------------------------------------------------
-DO $apply$ BEGIN RAISE NOTICE 'applying 20261015000000_oversight_and_debrief.sql'; END $apply$;
-
--- A complaint about an officer must not be delivered to that officer.
---
--- ## Item 1: oversight routing
---
--- `alert_categories.dart` offers **Police brutality** as a reportable category,
--- with the subtypes Physical Assault, Extortion and Unlawful Arrest. A citizen
--- can file one from the app and, as of this migration's parent, over USSD.
---
--- It then routed exactly like a flood.
---
--- `alert_is_ours()` admits Operation Rainbow staff within their command, so a
--- complaint filed in Jos North reached Jos North ward command, Jos North LGA
--- command, and every RESPONDER posted to that LGA — which may include the
--- officer complained about. The responder picker offered them. The escalation
--- ladder climbed it rung by rung through the accused's own chain. And the
--- reporter's name and phone number travelled with it, because
--- `resolveReporterDetails()` puts them on the dossier.
---
--- So the system took a citizen's allegation that an officer assaulted them and
--- handed it to that officer's colleagues, with the complainant's number attached.
--- That is not a process defect. In Plateau State it is a safety problem for the
--- person who reported it.
---
--- ### The rule
---
--- An oversight matter is visible to HQ, to ADMIN, and to the person who reported
--- it. Nobody else — not the local ward, not the LGA, not a responder in the area,
--- and not an outside agency liaison, whose own personnel may be the subject.
---
--- It is also held out of the escalation ladder. Climbing UNIT → WARD → LGA is
--- precisely the wrong direction for this one kind of report: each rung is closer
--- to the accused. HQ owns it from the moment it arrives.
---
--- ### What this deliberately does NOT do
---
--- It does not hide the incident from the reporter, and it does not delete or
--- anonymise anything. The complaint is on the record, with the complainant's
--- details, available to HQ. Oversight requires knowing who complained; the
--- control is WHO can see it, not whether it exists.
---
--- ## Item 2: the debrief gets its own column
---
--- `mission_resolution_screen.dart` appended the responder's after-action notes
--- to `alerts.ai_summary`, tagged `[RESOLVED DEBRIEF]`. That column now carries
--- three unrelated kinds of content: AI triage notes, the
--- `[AI CLASSIFICATION APPLIED]` lines, and human debriefs. None of them can be
--- read back without string-parsing, and "what did the responder say happened"
--- is the one an inquiry asks.
---
--- A debrief is a person's account of what they did. It gets a column.
-
--- ── Which reports are oversight matters ────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION public.is_oversight_matter(p_type TEXT)
-RETURNS BOOLEAN
-LANGUAGE sql
-IMMUTABLE
-PARALLEL SAFE
-AS $$
-  -- Matched on the CATEGORY — the part of `type` before ' - ' — so every
-  -- subtype is covered without listing them, and a new subtype added to
-  -- alert_categories.dart is covered the day it ships rather than the day
-  -- somebody remembers this function.
-  SELECT upper(trim(split_part(coalesce(p_type, ''), ' - ', 1)))
-         IN ('POLICE BRUTALITY', 'SECURITY PERSONNEL MISCONDUCT');
-$$;
-
-COMMENT ON FUNCTION public.is_oversight_matter(TEXT) IS
-  'A complaint against security personnel. Matched on the category so new '
-  'subtypes are covered automatically. These are routed to HQ only: every rung '
-  'of the normal ladder is closer to the person complained about.';
-
--- ── Who may see one ───────────────────────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION public.alert_is_ours(p_alert public.alerts)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-AS $$
-  SELECT CASE
-    -- A complaint about security personnel goes to HQ and the person who made
-    -- it. Checked FIRST and exclusively: the clauses below would otherwise hand
-    -- it to the accused's own command, which is the defect.
-    WHEN public.is_oversight_matter(p_alert.type) THEN
-      public.commands_whole_state()
-      OR p_alert.reported_by = auth.uid()
-
-    ELSE
-      -- HQ and administrators: the state.
-      public.commands_whole_state()
-      -- The reporter, the lead, and every officer on the dispatched team.
-      OR p_alert.reported_by = auth.uid()
-      OR p_alert.assigned_to = auth.uid()
-      OR auth.uid()::text = ANY (COALESCE(p_alert.assigned_responders, '{}'::text[]))
-      -- Operation Rainbow staff, within their command.
-      OR (public.is_staff() AND NOT public.is_liaison()
-          AND (public.alert_in_my_area(p_alert)
-               OR public.alert_delegated_to_my_lga(p_alert)))
-      -- An outside agency: only what was handed to them.
-      OR (public.is_liaison()
-          AND upper(COALESCE(p_alert.escalated_to_agency, '')) = public.liaison_agency())
-  END;
-$$;
-
-COMMENT ON FUNCTION public.alert_is_ours(public.alerts) IS
-  'Whether the calling account has a part in this incident: HQ sees the state, '
-  'everyone else sees their command plus their own work — EXCEPT a complaint '
-  'against security personnel, which only HQ and the complainant may see.';
-
--- ── And out of the escalation ladder ──────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION public.awaiting_human_confirmation(p_alert public.alerts)
-RETURNS BOOLEAN
-LANGUAGE sql
-IMMUTABLE
-PARALLEL SAFE
-AS $$
-  SELECT
-    -- A USSD report nobody has stood behind. See 20261011000000.
-    (upper(coalesce(p_alert.arrived_via, '')) = 'USSD'
-     AND p_alert.ussd_confirmed_at IS NULL)
-    -- OR an oversight matter, at any tier, for ever. The ladder's whole purpose
-    -- is to escalate towards the local command, and for this one kind of report
-    -- every rung is closer to the person complained about. HQ owns it on
-    -- arrival; there is nowhere useful for it to climb to.
-    OR public.is_oversight_matter(p_alert.type);
-$$;
-
-COMMENT ON FUNCTION public.awaiting_human_confirmation(public.alerts) IS
-  'Held out of the escalation ladder: an unconfirmed USSD report, or a complaint '
-  'against security personnel. For the latter every rung of the ladder is closer '
-  'to the accused, so it does not climb at all.';
-
--- Route new oversight matters to HQ on arrival rather than leaving them at UNIT
--- looking unowned.
-CREATE OR REPLACE FUNCTION public.route_oversight_to_hq()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-BEGIN
-  IF public.is_oversight_matter(NEW.type) THEN
-    NEW.assigned_tier    := 'HQ';
-    NEW.tier_assigned_at := NOW();
-    -- Cleared, not preserved. A complaint must never arrive pre-assigned to a
-    -- responder in the area it was filed in — which is what the app's own
-    -- default would do if the report were raised from a responder's handset.
-    NEW.assigned_to        := NULL;
-    NEW.assigned_responders := NULL;
-    NEW.escalation_log := coalesce(NEW.escalation_log, '[]'::jsonb) || jsonb_build_object(
-      'at',     to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
-      'by',     'SYSTEM',
-      'action', 'OVERSIGHT_ROUTED',
-      'reason', 'a complaint against security personnel is routed to HQ, not to the local command'
-    );
-  END IF;
-  RETURN NEW;
-END $$;
-
-DROP TRIGGER IF EXISTS route_oversight_to_hq_trg ON public.alerts;
-CREATE TRIGGER route_oversight_to_hq_trg
-  BEFORE INSERT ON public.alerts
-  FOR EACH ROW EXECUTE FUNCTION public.route_oversight_to_hq();
-
-COMMENT ON FUNCTION public.route_oversight_to_hq() IS
-  'BEFORE INSERT: sends a complaint against security personnel to HQ and clears '
-  'any assignment, so it can never arrive pre-assigned to a responder in the '
-  'area it was filed in.';
-
--- Existing rows: move any already in the local chain.
-UPDATE public.alerts
-   SET assigned_tier = 'HQ',
-       assigned_to = NULL,
-       assigned_responders = NULL
- WHERE public.is_oversight_matter(type)
-   AND status NOT IN ('RESOLVED', 'CANCELLED', 'FALSE_REPORT')
-   AND (upper(coalesce(assigned_tier, '')) <> 'HQ'
-        OR assigned_to IS NOT NULL
-        OR assigned_responders IS NOT NULL);
-
-CREATE INDEX IF NOT EXISTS alerts_oversight_idx
-  ON public.alerts (created_at DESC)
-  WHERE category IN ('Police brutality', 'Security personnel misconduct');
-
--- ── Item 2: the debrief ───────────────────────────────────────────────────
-
-ALTER TABLE public.alerts
-  ADD COLUMN IF NOT EXISTS debrief TEXT,
-  ADD COLUMN IF NOT EXISTS debrief_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS debrief_at TIMESTAMPTZ;
-
-COMMENT ON COLUMN public.alerts.debrief IS
-  'The responder''s own account of what they did, in their words. Was appended '
-  'to ai_summary tagged [RESOLVED DEBRIEF], mixed in with AI triage notes and '
-  'classification lines — so "what did the responder say happened", the question '
-  'an inquiry asks, needed string-parsing to answer.';
-
--- Backfill from the tag. Safe because `[RESOLVED DEBRIEF] ` is unambiguous and
--- was written by exactly one place; anything else in ai_summary is left alone.
-UPDATE public.alerts a
-   SET debrief = btrim(substring(line FROM '\[RESOLVED DEBRIEF\] (.*)$'))
-  FROM (
-    SELECT id, unnest(string_to_array(ai_summary, E'\n')) AS line
-      FROM public.alerts
-     WHERE ai_summary LIKE '%[RESOLVED DEBRIEF]%'
-  ) src
- WHERE a.id = src.id
-   AND src.line LIKE '[RESOLVED DEBRIEF]%'
-   AND a.debrief IS NULL;
-
-CREATE INDEX IF NOT EXISTS alerts_debriefed_idx
-  ON public.alerts (debrief_at DESC)
-  WHERE debrief IS NOT NULL;
-
--- ── Item 3: a real audit trail ────────────────────────────────────────────
---
--- The console's "System Tactical Audit History" read `chat_messages` — the
--- private conversations between dispatchers and responders. It showed no action
--- anybody had taken: not a dispatch, not an escalation, not a resolution, not a
--- classification applied, not a report marked false.
---
--- Those are all in `alerts.escalation_log`, a jsonb array appended to by every
--- action in the system. PR #2 suggested reading `alert_timeline` instead, and
--- that table does not exist in any migration — so the suggested fix would have
--- produced an empty screen.
---
--- SECURITY INVOKER, so `alert_is_ours()` scopes it. That matters more here than
--- anywhere: without it this function would hand every authenticated account the
--- action history of every incident in Plateau, including the oversight matters
--- the rest of this migration exists to protect.
-
-CREATE OR REPLACE FUNCTION public.audit_trail(p_limit INTEGER DEFAULT 100)
-RETURNS TABLE (
-  alert_id   UUID,
-  reference  TEXT,
-  incident   TEXT,
-  at         TIMESTAMPTZ,
-  action     TEXT,
-  actor      TEXT,
-  detail     TEXT
-)
-LANGUAGE sql
-SECURITY INVOKER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-  SELECT a.id,
-         coalesce(a.public_reference, left(a.id::text, 8)),
-         a.type,
-         -- Entries have been written with two different key names over this
-         -- schema's life ('at' as a formatted string, and an ISO timestamp), and
-         -- a row whose timestamp cannot be parsed must still appear — an audit
-         -- entry dropped for a formatting reason is the worst possible thing for
-         -- this list to do quietly. Falls back to the incident's own time.
-         coalesce(
-           nullif(e.entry ->> 'at', '')::timestamptz,
-           a.updated_at,
-           a.created_at
-         ),
-         upper(coalesce(
-           nullif(e.entry ->> 'action', ''),
-           -- A tier move has no 'action' key; it is identified by carrying a
-           -- from_tier. Without this, every automatic escalation in the system
-           -- would read as 'UNKNOWN'.
-           CASE WHEN e.entry ? 'from_tier' THEN 'ESCALATED' END,
-           'UPDATED'
-         )),
-         coalesce(nullif(e.entry ->> 'by', ''), 'SYSTEM'),
-         -- For a tier move, BOTH the tiers and the reason. The first version
-         -- coalesced the reason first, so an automatic escalation read simply
-         -- "TIMEOUT" — the word without the movement, which is the half that
-         -- tells a reader nothing. Where an incident WENT is the point of the
-         -- entry; why is the qualifier.
-         CASE
-           WHEN e.entry ? 'from_tier' THEN
-             (e.entry ->> 'from_tier') || ' → ' || (e.entry ->> 'to_tier')
-             || coalesce(' (' || nullif(e.entry ->> 'reason', '') || ')', '')
-           ELSE coalesce(nullif(e.entry ->> 'reason', ''), '')
-         END
-    FROM public.alerts a
-    CROSS JOIN LATERAL jsonb_array_elements(
-           CASE WHEN jsonb_typeof(a.escalation_log) = 'array'
-                THEN a.escalation_log ELSE '[]'::jsonb END
-         ) AS e(entry)
-   ORDER BY 4 DESC
-   LIMIT greatest(1, least(coalesce(p_limit, 100), 500));
-$$;
-
-COMMENT ON FUNCTION public.audit_trail(INTEGER) IS
-  'What was actually DONE to incidents, flattened out of alerts.escalation_log. '
-  'The console previously showed chat_messages under this heading, which '
-  'contained no action anybody had taken. SECURITY INVOKER so alert_is_ours() '
-  'scopes it — including keeping oversight matters out of it.';
-
-REVOKE ALL ON FUNCTION public.audit_trail(INTEGER) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.audit_trail(INTEGER) TO authenticated, service_role;
-
 
 
 -- ============================================================================
 -- DID IT WORK?
 --
 -- One row per thing that had to be true. `result` is PASS or FAIL; nothing here
--- writes. If every row says PASS, the 28 migrations are applied.
+-- writes. If every row says PASS, the 27 migrations are applied.
 --
 -- These check BEHAVIOUR-ADJACENT FACTS, not just that statements ran: that anon
 -- holds no policy at all, that the escalation columns exist (their absence made
