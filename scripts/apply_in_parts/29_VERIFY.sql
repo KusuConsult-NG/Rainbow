@@ -80,7 +80,12 @@ WITH checks(ord, name, ok) AS (
           WHERE table_schema = 'public'
             AND table_name IN ('agency_personnel','agency_deployments',
                                'agency_action_reports','agency_notifications'))),
-    (2, 'no policy grants anon or public anything',
+    (2, 'no policy grants anon or public anything'
+          || coalesce(' — ' || (SELECT string_agg(tablename || '.' || policyname, ', '
+                                                  ORDER BY tablename, policyname)
+                                  FROM pg_policies
+                                 WHERE schemaname = 'public'
+                                   AND ('anon' = ANY(roles) OR 'public' = ANY(roles))), ''),
         (SELECT count(*) = 0 FROM pg_policies
           WHERE schemaname = 'public'
             AND ('anon' = ANY(roles) OR 'public' = ANY(roles)))),
