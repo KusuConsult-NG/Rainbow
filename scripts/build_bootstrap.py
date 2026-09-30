@@ -25,6 +25,8 @@ import pathlib
 import re
 import sys
 
+import migration_sets
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "scripts/bootstrap_staging.sql"
 
@@ -32,21 +34,17 @@ OUT = ROOT / "scripts/bootstrap_staging.sql"
 # are the outstanding ones. On a fresh database they apply cleanly in this
 # sequence — phase1 drops each policy before creating it, so it supersedes the
 # initial schema's permissive versions rather than colliding with them.
-HISTORICAL = [
-    "20260720000000_initial_schema.sql",
-    "phase1_foundation.sql",
-    "phase2_assigned_responders.sql",
-    "phase3_profile_columns_and_config.sql",
-]
+HISTORICAL = migration_sets.ORIGINAL_SCHEMA
 # Derived, for the reason given in build_apply_all.py: a hand-maintained list
 # silently omits any migration nobody remembers to add, and the in-sync check
 # cannot see the omission because the missing file was never in the output to
 # diff.
-OUTSTANDING = sorted(
-    p.name
-    for p in (ROOT / "supabase/migrations").glob("*.sql")
-    if p.name not in set(HISTORICAL)
-)
+# Everything the original schema does not cover, in timestamp order. Unlike the
+# production apply script this DOES include the v2–v6 era: on an empty database
+# those tables and columns have to come from somewhere, and re-running them is
+# not re-running anything.
+OUTSTANDING = [n for n in migration_sets.from_zero()
+               if n not in set(migration_sets.ORIGINAL_SCHEMA)]
 
 HEADER = """-- ============================================================================
 -- BOOTSTRAP A STAGING PROJECT — generated file, do not edit by hand.

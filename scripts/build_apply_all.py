@@ -37,35 +37,16 @@ OUT = ROOT / "scripts/apply_all_migrations.sql"
 # script's OUTPUT against the committed copy, so a migration that was never in
 # the list was never in the diff either, and nothing anywhere said so.
 #
-# It is derived now. HISTORICAL_FILES is the exclusion list, and it is short,
-# closed and explained: those four built the original schema, they are already
-# applied on production, and re-running them would re-create the permissive
-# `USING (true)` policies that 20260813 exists to remove.
-HISTORICAL_FILES = {
-    "20260720000000_initial_schema.sql",
-    "phase1_foundation.sql",
-    "phase2_assigned_responders.sql",
-    "phase3_profile_columns_and_config.sql",
-}
+# It is derived now, and the exclusion list lives in ONE place —
+# scripts/migration_sets.py — because it existed in three copies here, in
+# build_apply_in_parts.py and in build_bootstrap.py, and all three listed only
+# the original four. When the v2–v5 era was written down as migration files on
+# 2026-09-29, every generator silently pulled five already-applied files into
+# the script an operator pastes into production, one of which calls auth.jwt()
+# before that function exists and fails outright. See migration_sets.py.
+import migration_sets  # noqa: E402  (sibling module; scripts/ is sys.path[0])
 
-
-def outstanding_migrations() -> list[str]:
-    """Every migration that is not part of the already-applied original schema.
-
-    Sorted by filename, which is the timestamp prefix, which is the order they
-    must apply in.
-    """
-    names = sorted(
-        p.name
-        for p in (ROOT / "supabase/migrations").glob("*.sql")
-        if p.name not in HISTORICAL_FILES
-    )
-    if not names:
-        raise SystemExit("no migrations found — is supabase/migrations present?")
-    return names
-
-
-MIGRATIONS = outstanding_migrations()
+MIGRATIONS = migration_sets.outstanding()
 
 HEADER = f"""-- ============================================================================
 -- APPLY ALL OUTSTANDING MIGRATIONS — generated file, do not edit by hand.

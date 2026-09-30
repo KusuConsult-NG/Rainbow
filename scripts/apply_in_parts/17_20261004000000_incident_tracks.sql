@@ -210,5 +210,3 @@ BEGIN
   END IF;
 END $cron$;
 
-
-

@@ -711,26 +711,18 @@ jobs:
       # cannot see that: a migration that was never in the list was never in
       # the output to differ. The lists are derived from the directory now;
       # this asserts the derivation actually reached every file.
-      - name: Assert every migration reaches the apply scripts
-        run: |
-          set -euo pipefail
-          MISSING=0
-          for f in supabase/migrations/*.sql; do
-            name=$(basename "$f")
-            case "$name" in
-              20260720000000_initial_schema.sql|phase1_foundation.sql| \
-              phase2_assigned_responders.sql|phase3_profile_columns_and_config.sql)
-                # The original schema, already applied on production. Re-running
-                # it would re-create the permissive policies 20260813 removes.
-                continue ;;
-            esac
-            grep -q -- "$name" scripts/apply_all_migrations.sql || {
-              echo "::error::$name is missing from scripts/apply_all_migrations.sql"; MISSING=1; }
-            grep -q -- "$name" scripts/bootstrap_staging.sql || {
-              echo "::error::$name is missing from scripts/bootstrap_staging.sql"; MISSING=1; }
-          done
-          [ "$MISSING" -eq 0 ] || exit 1
-          echo "OK: every migration is present in both apply scripts."
+      # This was a FOURTH copy of the exclusion list, and it listed only the
+      # original four files — so when the v2–v5 era was written down as
+      # migrations, this step required them to be in the production apply script,
+      # the generators duly put them there, and pasting it re-ran an era
+      # production already had. One of those files calls auth.jwt() before that
+      # function exists, so the paste failed outright.
+      #
+      # The list lives in scripts/migration_sets.py now, and the assertion checks
+      # BOTH directions: every outstanding migration reaches the paste scripts,
+      # and no already-applied one does.
+      - name: Assert every migration reaches the apply scripts, and no excluded one does
+        run: python3 scripts/migration_sets.py --assert-coverage
 
       # The inventory's "is this policy ours?" list is extracted from the
       # migration files. A hand-written version was tried first and was

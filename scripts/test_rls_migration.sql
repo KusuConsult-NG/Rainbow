@@ -30,6 +30,30 @@ LANGUAGE sql STABLE AS $$
   SELECT COALESCE(NULLIF(current_setting('request.jwt.claim.role', true), ''), 'anon');
 $$;
 
+-- The shim was missing this one, and its absence was invisible for a day.
+--
+-- 20260721000000_v2_agency_tables.sql builds a policy on
+-- `auth.jwt() -> 'user_metadata' ->> 'role'` — deliberately, because Supabase
+-- Postgres bans a sub-SELECT on the policy's own table. bootstrap_staging.sql
+-- includes that file, because a database being built from zero has to get those
+-- tables from somewhere, and on an empty database re-running it is not
+-- re-running anything. So the bootstrap hit `ERROR: function auth.jwt() does
+-- not exist`, the whole single-transaction file rolled back, and psql — with no
+-- ON_ERROR_STOP — still exited 0. verify_bootstrap.sh prints the ERROR lines
+-- only when the exit code is non-zero, so what it reported was `checks passed:
+-- 0   failed: 0`: a verification that ran against nothing.
+--
+-- Real Supabase composes this from the request GUCs, singular first, which is
+-- what PostgREST sets for a JWT it has verified.
+CREATE OR REPLACE FUNCTION auth.jwt() RETURNS JSONB
+LANGUAGE sql STABLE AS $$
+  SELECT COALESCE(
+    NULLIF(current_setting('request.jwt.claim',  true), ''),
+    NULLIF(current_setting('request.jwt.claims', true), ''),
+    '{}'
+  )::jsonb;
+$$;
+
 DO $$ BEGIN
   CREATE ROLE anon NOLOGIN;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
