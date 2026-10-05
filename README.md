@@ -209,17 +209,34 @@ single bug:
 
 ## Deploying
 
-`docs/PRODUCTION_DEPLOYMENT.md` is the runbook. In short: Firebase App Hosting
-(`firebase.json` + `hq-dashboard-next/apphosting.yaml`), then `./deploy.sh`.
+`docs/RAILWAY.md` is the runbook and `docs/PRODUCTION_DEPLOYMENT.md` is the wider
+checklist. In short: **Railway**, which builds and deploys on push to the tracked
+branch. `hq-dashboard-next/railway.json` carries the build and deploy config; the
+four settings that live only in the Railway UI are in `docs/RAILWAY.md`, and the
+one that is easy to get wrong is **Root Directory = `hq-dashboard-next`**,
+because this repository holds the Flutter app at its root.
+
+Run `./deploy.sh` before pushing. It no longer deploys — there is nothing to
+deploy to by hand — but it runs the three environment checks, the build exactly
+as Railway runs it, and the client-bundle secret scan, locally, where a failure
+costs seconds instead of a remote build and a rollback.
 
 It must run as a **Node server, never a static export** — the auth guard is
 Next.js middleware, and a static export silently drops middleware, serving every
 page to anonymous visitors with no error anywhere.
 
-Every environment value comes from Secret Manager, including the two public
-ones, so no project configuration is committed to git. `deploy.sh` checks the
-secrets are readable before spending a build, and re-scans the built bundle for
-server secrets before it will deploy.
+Firebase App Hosting was the previous target and its config has been removed
+(`firebase.json`, `.firebaserc`, `apphosting.yaml`). Both were present and both
+documented as live for a month, so "redeploy" was a coin flip between a real
+target and a dead one. `scripts/check_one_deploy_target.py` fails CI if a second
+target reappears.
+
+Moving off App Hosting cost one structural protection: it could mark the service
+role key **RUNTIME only**, so it was absent during `next build`. Railway exposes
+every service variable to the build, so what remains is code-level —
+`server-only` on `supabase-server.ts`, `serverEnv()` throwing where `window`
+exists, and the CI job that greps `.next/static` for key material. That job is
+now the only thing standing between this deployment and finding C-1 recurring.
 
 Mobile release builds need `key.properties` at the repo root, or the release
 artefact is **unsigned** — Gradle does not fall back to the debug key and does
@@ -267,6 +284,7 @@ report:
    `seedMockData` to check — the probe itself writes ten fabricated emergencies.
 2. **Apply the eleven migrations** — dry run first. One of them closes a
    privilege escalation and should not wait.
-3. **First deploy**, which is also the first test of the deploy config.
+3. ~~**First deploy**~~ — done. The console is on **Railway**; Firebase App
+   Hosting was the previous target and its config has been removed.
 4. **Ask GitHub Support** to purge the `refs/pull/*` refs still holding
    pre-purge objects.
