@@ -1045,7 +1045,15 @@ jobs:
       # column that does not exist, was found sitting in every SOS payload.
       - name: Render every screen, then use the app
         run: |
+          # Each step gets a FRESH stand-in, and stops it on the way out.
+          # GitHub Actions does not end a background process when its step
+          # ends, so without this the first step's stand-in held :54321 for
+          # the rest of the job: every later step's stand-in died with
+          # EADDRINUSE and that step ran against the previous step's state.
+          # Hidden for as long as an earlier step always failed first.
           node scripts/local_e2e/fake_supabase.js &
+          FAKE_PID=$!
+          trap 'kill "$FAKE_PID" 2>/dev/null || true' EXIT
           for _ in $(seq 1 30); do
             curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
             sleep 0.5
@@ -1086,7 +1094,15 @@ jobs:
       # answered, while the phone told the person it was broadcasting.
       - name: The live stream, and the citizen settings including the duress PIN
         run: |
+          # Each step gets a FRESH stand-in, and stops it on the way out.
+          # GitHub Actions does not end a background process when its step
+          # ends, so without this the first step's stand-in held :54321 for
+          # the rest of the job: every later step's stand-in died with
+          # EADDRINUSE and that step ran against the previous step's state.
+          # Hidden for as long as an earlier step always failed first.
           node scripts/local_e2e/fake_supabase.js &
+          FAKE_PID=$!
+          trap 'kill "$FAKE_PID" 2>/dev/null || true' EXIT
           for _ in $(seq 1 30); do
             curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
             sleep 0.5
@@ -1095,7 +1111,15 @@ jobs:
 
       - name: A message sent by one person, read by another
         run: |
+          # Each step gets a FRESH stand-in, and stops it on the way out.
+          # GitHub Actions does not end a background process when its step
+          # ends, so without this the first step's stand-in held :54321 for
+          # the rest of the job: every later step's stand-in died with
+          # EADDRINUSE and that step ran against the previous step's state.
+          # Hidden for as long as an earlier step always failed first.
           node scripts/local_e2e/fake_supabase.js &
+          FAKE_PID=$!
+          trap 'kill "$FAKE_PID" 2>/dev/null || true' EXIT
           for _ in $(seq 1 30); do
             curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
             sleep 0.5
@@ -1104,7 +1128,15 @@ jobs:
 
       - name: Press every control, as every tier
         run: |
+          # Each step gets a FRESH stand-in, and stops it on the way out.
+          # GitHub Actions does not end a background process when its step
+          # ends, so without this the first step's stand-in held :54321 for
+          # the rest of the job: every later step's stand-in died with
+          # EADDRINUSE and that step ran against the previous step's state.
+          # Hidden for as long as an earlier step always failed first.
           node scripts/local_e2e/fake_supabase.js &
+          FAKE_PID=$!
+          trap 'kill "$FAKE_PID" 2>/dev/null || true' EXIT
           for _ in $(seq 1 30); do
             curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
             sleep 0.5
@@ -1113,7 +1145,15 @@ jobs:
 
       - name: Drive one incident up the whole command chain
         run: |
+          # Each step gets a FRESH stand-in, and stops it on the way out.
+          # GitHub Actions does not end a background process when its step
+          # ends, so without this the first step's stand-in held :54321 for
+          # the rest of the job: every later step's stand-in died with
+          # EADDRINUSE and that step ran against the previous step's state.
+          # Hidden for as long as an earlier step always failed first.
           node scripts/local_e2e/fake_supabase.js &
+          FAKE_PID=$!
+          trap 'kill "$FAKE_PID" 2>/dev/null || true' EXIT
           for _ in $(seq 1 30); do
             curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null && break
             sleep 0.5
