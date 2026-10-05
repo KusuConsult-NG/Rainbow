@@ -27,7 +27,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
-const { PEOPLE } = require('./fixtures');
+const { PEOPLE, byKey } = require('./fixtures');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -178,7 +178,11 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
     await sleep(6000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1600);
-    await typeInto('08000000000');
+    // The seeded citizen's own number, signed in the real way. This typed
+    // 08000000000, the demo bypass number, which release builds compile
+    // out — so this pass could never sign in. It had never run in CI: the
+    // job always failed at an earlier step.
+    await typeInto(byKey('citizen').phone.replace('+234', '0'));
     await tap('authorize access', { settle: 2600 });
     await typeInto('123456');
     await tap('verify otp', { settle: 7000 });

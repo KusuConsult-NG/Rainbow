@@ -250,7 +250,13 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
             child: Row(
               children: [
                 IconButton(
-                  tooltip: 'Dictate a message',
+                  // The label says what the button will do NOW. Pressing it
+                  // toggles dictation, and the only other sign of that was the
+                  // icon swapping mic_none for mic, which a screen reader does
+                  // not announce and the control sweep cannot see — so the
+                  // sweep reported this button as doing nothing.
+                  tooltip: _isListening ? 'Stop dictating' : 'Dictate a message',
+                  isSelected: _isListening,
                   icon: Icon(
                     _isListening ? Icons.mic : Icons.mic_none,
                     color: _isListening ? AppColors.danger : AppColors.primary,

@@ -46,7 +46,7 @@ export function serverEnv() {
   return {
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
     termiiApiKey: process.env.TERMII_API_KEY ?? '',
-    termiiSenderId: process.env.TERMII_SENDER_ID ?? 'RainbowHQ',
+    termiiSenderId: process.env.TERMII_SENDER_ID ?? 'OE Alert',
     // Destination for citizen SOS escalation SMS. Deliberately server-side and
     // NOT client-supplied: /api/sos/dispatch-sms would otherwise be an
     // authenticated open SMS relay billed to this Termii account.

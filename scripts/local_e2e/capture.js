@@ -326,20 +326,39 @@ async function chooseTactical(page, triggerText, optionText) {
   currentScreen = 'hq:map-marker-popup';
   const popupText = await (async () => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const opened = await page.evaluate(() => {
-        const pins = [...document.querySelectorAll('.leaflet-marker-icon')];
-        // Cluster icons carry a count; incident pins do not. Click the last one,
-        // which is the least likely to be under the filters toolbar.
-        const pin = pins[pins.length - 1];
-        if (!pin) return false;
-        pin.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-        return true;
-      });
-      if (opened) {
+      // WHICH PIN IS AN INCIDENT.
+      //
+      // This clicked "the last .leaflet-marker-icon" and assumed it was an
+      // incident. Field-agent markers are .leaflet-marker-icon too, added
+      // straight to the map from the telemetry feed, so whether the last pin
+      // was an incident or a responder depended on which query answered
+      // first. On CI the telemetry won, the click opened a responder's
+      // five-line status card, and ten checks about the INCIDENT card failed
+      // on a card that was never an incident's.
+      //
+      // So try the pins from the last (least likely to sit under the filters
+      // toolbar) backwards, and keep the first popup that is an incident
+      // dossier — the one carrying the DOSSIER action every incident card
+      // has. The checks below still demand everything of that card.
+      const pinCount = await page.evaluate(
+        () => document.querySelectorAll('.leaflet-marker-icon').length,
+      );
+      for (let i = pinCount - 1; i >= 0; i -= 1) {
+        const opened = await page.evaluate((index) => {
+          document.querySelectorAll('.leaflet-popup-close-button')
+            .forEach((b) => b.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+          const pin = document.querySelectorAll('.leaflet-marker-icon')[index];
+          if (!pin) return false;
+          pin.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+          return true;
+        }, i);
+        if (!opened) continue;
         await sleep(900);
         const text = await page.evaluate(() => {
-          const el = document.querySelector('.leaflet-popup-content');
-          return el ? el.innerText : '';
+          const cards = [...document.querySelectorAll('.leaflet-popup-content')];
+          const incident = cards.find((el) =>
+            [...el.querySelectorAll('button, a')].some((b) => b.textContent.trim() === 'DOSSIER'));
+          return incident ? incident.innerText : '';
         });
         if (text) return text;
       }

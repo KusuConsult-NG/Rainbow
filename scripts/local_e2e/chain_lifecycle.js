@@ -19,7 +19,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
-const { DOMAIN, PASSWORD } = require('./fixtures');
+const { DOMAIN, PASSWORD, byKey } = require('./fixtures');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
