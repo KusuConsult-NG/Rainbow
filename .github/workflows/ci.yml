@@ -677,6 +677,13 @@ jobs:
           fi
           echo "OK: no credential material in tracked files."
 
+      # The repository carried TWO complete deploy configurations for a month —
+      # Firebase App Hosting and Railway — each documented as the live one, with
+      # `deploy.sh` pushing to the abandoned side. A stale console answering
+      # requests looks exactly like a deploy that worked, so nobody would notice.
+      - name: Assert exactly one deploy target, and that it is Railway
+        run: python3 scripts/check_one_deploy_target.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-latest

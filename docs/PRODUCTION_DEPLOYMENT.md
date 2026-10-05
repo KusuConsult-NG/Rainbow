@@ -170,45 +170,46 @@ on `supabase-server.ts`, and the CI job that greps `.next/static` for key
 material. That CI job is now the thing standing between this deployment and
 finding C-1 recurring. Keep it green.
 
-### Firebase App Hosting
-
-`firebase.json` and `hq-dashboard-next/apphosting.yaml` are in the repository,
-and `./deploy.sh` runs `firebase deploy --only apphosting`. App Hosting was
-chosen because the project already exists (`.firebaserc` → `rainbow-97f1e`), so
-it adds no vendor account and no procurement step.
-
 It runs a **Node server, not a static export**. That is not a preference:
 `output: 'export'` was removed because the auth guard is Next.js middleware, and
 a static export silently drops middleware — the console would serve every page
-to anonymous visitors with no error anywhere.
+to anonymous visitors with no error anywhere. `railway.json` sets
+`startCommand: npm run start` for that reason.
 
-**Not deploy-verified.** The config was written from the Next.js deployment
-guide and the App Hosting schema; nothing in the audit container can run
-`firebase deploy`. The first deploy is the test.
+There is **no deploy command**. Railway builds on push to the tracked branch.
+`./deploy.sh` runs before the push and does the three things worth knowing
+early — the environment values the build needs, the build exactly as Railway
+runs it, and the client-bundle secret scan — locally, where a failure costs
+seconds instead of a remote build and a rollback.
 
-First time only — create the three secrets and grant App Hosting access. Every
-value comes from Secret Manager, including the two public ones, so that no
-project configuration is committed to git again (H-6):
+### Firebase App Hosting — removed
 
-```bash
-echo -n "https://xxxx.supabase.co" | gcloud secrets create supabase-url --data-file=-
-echo -n "<anon key>"               | gcloud secrets create supabase-anon-key --data-file=-
-echo -n "<service role key>"       | gcloud secrets create supabase-service-role-key --data-file=-
-firebase apphosting:secrets:grantaccess supabase-url supabase-anon-key \
-  supabase-service-role-key --project rainbow-97f1e
+The previous target. `firebase.json`, `.firebaserc` and
+`hq-dashboard-next/apphosting.yaml` are gone, and `deploy.sh` no longer invokes
+`firebase deploy --only apphosting`.
 
-firebase apphosting:backends:create --project rainbow-97f1e   # once
-./deploy.sh                                                   # thereafter
-```
+Worth recording why, because the failure mode was not obvious: both
+configurations were present at once for a month, and both were documented as
+live — this file said "Railway ← current target" twenty lines above a complete
+App Hosting runbook, while README.md said App Hosting and `deploy.sh`, the script
+named "production deploy", pushed to App Hosting. Anyone told to redeploy had
+even odds of shipping to the abandoned backend, and a stale console answering
+requests looks exactly like a deploy that worked.
 
-`deploy.sh` checks all three secrets are readable before it spends a build, so a
-missing grant fails in seconds with the name of the secret rather than as an
-opaque remote build error.
+Two live configs also mean two sets of variables and two secret stores, so
+"what is running right now?" had no answer in the repository.
+`scripts/check_one_deploy_target.py` now fails CI on a second target, on a
+`firebase deploy`/`vercel deploy`/`netlify deploy` invocation in any script or
+workflow, and on the Railway config going missing.
 
-**If you would rather use Vercel:** connect the repo with root directory
-`hq-dashboard-next` and set the same three variables in project settings;
-`deploy.sh` becomes unnecessary, since Vercel builds on push. Nothing in the
-application code is Firebase-specific — the choice is reversible.
+Prose may still discuss App Hosting — the paragraph above about the RUNTIME-only
+secret is the reason the client-bundle scan is now the only line of defence, and
+that is worth keeping. The check looks at config files and commands, not
+sentences.
+
+**Nothing in the application code is host-specific**, so the choice stays
+reversible: a different provider needs the same three variables, root directory
+`hq-dashboard-next`, and a Node server rather than a static export.
 
 ### Environment
 
@@ -230,8 +231,11 @@ presets are already compiled out (`NODE_ENV !== 'production'`), and CI asserts
 the demo credentials are absent from the production bundle, but leaving a real
 PIN in the environment of a non-production build re-publishes it.
 
-`deploy.sh` re-scans the built client bundle for server secrets before it will
-deploy, the same scan CI runs. Keep that step in whatever replaces it.
+`deploy.sh` also fails if `NEXT_PUBLIC_DEV_DEMO_PIN` is set at all, and scans the
+built client bundle for server secrets — the same scan CI runs. Since Railway
+deploys on push and nothing can gate that from here, those checks are advisory:
+run them before pushing, and keep the CI job green, because on Railway there is
+no second line of defence behind it.
 
 ---
 

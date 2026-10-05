@@ -258,9 +258,25 @@ The one-time SQL is in `docs/PRODUCTION_DEPLOYMENT.md`.
 
 ---
 
-## Not deploy-verified
+## Deployed
 
-`railway.json` was written from the Railway schema and the Next.js self-hosting
-guide, and nothing in the audit container can run `railway up`. The build it
-describes — `npm ci && npm run build` — is the same one CI runs on every commit
-and is known to succeed. The deploy itself is the test.
+The console is on Railway. This was written before the move, as config derived
+from the Railway schema and the Next.js self-hosting guide, with "the deploy
+itself is the test" where this paragraph now is — the deploy has since happened
+and Railway is the live target.
+
+Firebase App Hosting was the previous one and its config has been removed from
+the repository (`firebase.json`, `.firebaserc`,
+`hq-dashboard-next/apphosting.yaml`). Both sets of files were present at once for
+a month, each documented as live, so a "redeploy" was a coin flip between a real
+target and a dead one — and a stale console answering requests is
+indistinguishable from a deploy that worked.
+`scripts/check_one_deploy_target.py` fails CI if a second target reappears.
+
+What still cannot be checked from this repository, and needs a human on the
+Railway side after a deploy:
+
+* the health check on `/login` going green — `railway.json` allows it 60s;
+* `/dashboard` redirecting to `/login` without a verified session;
+* `node scripts/verify_rls.js`, against **staging**, never production — it
+  inserts a row.

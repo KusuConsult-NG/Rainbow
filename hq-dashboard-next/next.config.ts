@@ -29,8 +29,11 @@ const SECURITY_HEADERS = [
 
 const nextConfig: NextConfig = {
   // output: 'export' removed — static export is incompatible with Next.js middleware
-  // (auth guard). The HQ dashboard is served via Firebase App Hosting (Node.js runtime)
-  // which supports SSR and edge middleware for RBAC enforcement (PRD §4).
+  // (auth guard). The HQ dashboard is served by Railway as a Node server
+  // (`npm run start`, see railway.json), which supports SSR and middleware for
+  // RBAC enforcement (PRD §4). This was Firebase App Hosting until the move;
+  // either way the requirement is the same and it is not a preference — a static
+  // export drops middleware silently and serves every page anonymously.
   images: {
     unoptimized: true,
   },

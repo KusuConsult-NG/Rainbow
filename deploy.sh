@@ -1,26 +1,58 @@
 #!/usr/bin/env bash
 # ============================================================
-# Operation Rainbow — production deploy
+# Operation Rainbow — pre-deploy check for the HQ console
 # ============================================================
 #
-# Rewritten during the E2E audit. The previous version could not run anywhere
-# except one developer's laptop, and would have failed even there:
+# This does NOT deploy. Railway builds and deploys on push to the tracked
+# branch, so there is no deploy command to run from here and a script that
+# pretended otherwise would be a second, divergent way to ship.
 #
-#   1. It hardcoded NODE_BIN=/Users/mac/nodejs/... — a macOS path on one machine.
-#   2. It ran `du -sh hq-dashboard-next/out`, but `out/` stopped being produced
-#      when static export was removed from next.config.ts. Under `set -e` the
-#      deploy aborted at that line.
-#   3. It invoked `firebase deploy --only hosting|firestore:rules|functions`
-#      with no firebase.json in the repo, so no target could resolve.
+# What it does is everything that is worth knowing BEFORE the push, locally,
+# where a failure costs seconds instead of a remote build and a rollback:
 #
-# It also deployed Firestore rules and Cloud Functions for a backend the app no
-# longer uses — the mobile app is on Supabase and has no Firebase dependency in
-# pubspec.yaml. Those steps are gone. If the Firebase stack is still live, it
-# needs its own script and its own firebase.json.
+#   1. the three environment values the console cannot start without;
+#   2. the production build, exactly as Railway runs it (`npm ci && npm run
+#      build` — from hq-dashboard-next/railway.json);
+#   3. a scan of the built CLIENT bundle for server secrets.
+#
+# Run it, read it, then `git push`. Railway takes it from there.
+#
+#   ./deploy.sh
+#
+# ## It used to deploy, to somewhere that is no longer the target
+#
+# Until this rewrite it ran `firebase deploy --only apphosting` against the
+# Firebase App Hosting backend `rainbow-hq` in project `rainbow-97f1e`. The
+# deployment has since moved to Railway, and the repository was carrying BOTH
+# configurations — `firebase.json` plus `hq-dashboard-next/apphosting.yaml` on
+# one side, `hq-dashboard-next/railway.json` plus `docs/RAILWAY.md` on the
+# other — each documented as if it were the live one. Anybody told to
+# "redeploy" had even odds of shipping to a dead target and watching a stale
+# console answer requests. The App Hosting files are gone; this is the only
+# deploy path, and `scripts/check_one_deploy_target.py` fails CI if a second
+# one reappears.
+#
+# ## The one protection that moving to Railway cost us
+#
+# Firebase App Hosting can mark a secret RUNTIME-only, so the service role key
+# was not present during `next build` at all. Railway exposes every service
+# variable to the build. A variable being available is not the same as it being
+# referenced from client code — but the structural guarantee is gone, and what
+# remains is code-level:
+#
+#   * `src/lib/supabase-server.ts` opens with `import 'server-only'`, which
+#     makes it a BUILD error for a client component to import it;
+#   * `src/lib/env.ts` reads the key through `serverEnv()`, which throws where
+#     `window` exists;
+#   * and the scan in step 3 below, which is also a CI job.
+#
+# That scan is the thing standing between this deployment and finding C-1
+# recurring — the service role key served to every visitor of /login. It is why
+# this script still exists at all now that it cannot deploy.
+# ============================================================
 
 set -euo pipefail
 
-PROJECT="${FIREBASE_PROJECT:-rainbow-97f1e}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DASHBOARD="$ROOT/hq-dashboard-next"
 
@@ -28,15 +60,17 @@ log()  { printf '\n\033[0;34m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[0;32m✓ %s\033[0m\n' "$*"; }
 fail() { printf '\033[0;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
-# ── Preflight ────────────────────────────────────────────────────────────────
-log "Preflight"
+# ── 1. Environment ───────────────────────────────────────────────────────────
+log "Checking the environment the build needs"
 
 command -v node >/dev/null || fail "node not found on PATH"
 command -v npm  >/dev/null || fail "npm not found on PATH"
 ok "node $(node -v), npm $(npm -v)"
 
-# Fail before building rather than shipping a dashboard that cannot reach its
-# backend. These are read at build time and baked into the bundle.
+# NEXT_PUBLIC_* values are inlined AT BUILD TIME, so a missing one is not a
+# runtime warning — the app crashes on first render and serves
+# <html id="__next_error__">. On Railway these are service variables and must
+# exist before the build, not just at runtime.
 : "${NEXT_PUBLIC_SUPABASE_URL:?must be set (see hq-dashboard-next/.env.example)}"
 : "${NEXT_PUBLIC_SUPABASE_ANON_KEY:?must be set (see hq-dashboard-next/.env.example)}"
 ok "Supabase public env present"
@@ -48,15 +82,25 @@ if [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
 fi
 ok "Service role key present (server-side only)"
 
-# ── Build ────────────────────────────────────────────────────────────────────
-log "Building HQ dashboard"
+# A real PIN left in the environment of a non-production build re-publishes it.
+# The quick-fill login presets are compiled out by NODE_ENV, but this is cheap
+# to state and the failure is silent.
+if [ -n "${NEXT_PUBLIC_DEV_DEMO_PIN:-}" ]; then
+  fail "NEXT_PUBLIC_DEV_DEMO_PIN is set. Unset it: it is a NEXT_PUBLIC_ value and
+       would be inlined into the bundle."
+fi
+ok "No demo PIN in the environment"
+
+# ── 2. The build Railway runs ────────────────────────────────────────────────
+log "Building the HQ console the way railway.json does"
 npm --prefix "$DASHBOARD" ci
 npm --prefix "$DASHBOARD" run build
 ok "Build complete ($(du -sh "$DASHBOARD/.next" | cut -f1))"
 
-# ── Secret scan ──────────────────────────────────────────────────────────────
-# Same guard as CI. A deploy must never ship a server secret in a client chunk.
-log "Scanning client bundle for leaked secrets"
+# ── 3. Secret scan ───────────────────────────────────────────────────────────
+# Same patterns as the CI job. `.next/static` is what the browser is served; a
+# server secret appearing there is the C-1 defect, not a warning.
+log "Scanning the client bundle for server secrets"
 LEAKED=0
 for PATTERN in 'sb_secret_[A-Za-z0-9_-]{16,}' 'eyJhbGciOi[A-Za-z0-9_-]{20,}' 'SUPABASE_SERVICE_ROLE_KEY'; do
   if grep -rlE "$PATTERN" "$DASHBOARD/.next/static/" 2>/dev/null; then
@@ -64,42 +108,32 @@ for PATTERN in 'sb_secret_[A-Za-z0-9_-]{16,}' 'eyJhbGciOi[A-Za-z0-9_-]{20,}' 'SU
     LEAKED=1
   fi
 done
-[ "$LEAKED" -eq 0 ] || fail "ABORTING: a server secret is present in the client bundle."
-ok "No server secrets in client bundle"
-
-# ── Deploy ───────────────────────────────────────────────────────────────────
-log "Deploying HQ dashboard"
-
-# App Hosting, not Hosting. `firebase deploy --only hosting` serves static
-# files; this console must run as a Node server or Next.js middleware — which is
-# the entire auth guard — is dropped and every page is served to anonymous
-# visitors with no error anywhere.
-[ -f "$ROOT/firebase.json" ] || fail "firebase.json is missing; nothing to deploy to."
-[ -f "$DASHBOARD/apphosting.yaml" ] || fail "hq-dashboard-next/apphosting.yaml is missing."
-
-command -v firebase >/dev/null || fail "firebase CLI not found on PATH"
-
-# The build above already proved the public env is present locally. On App
-# Hosting it comes from Secret Manager, and a missing secret fails the remote
-# build with a message about the variable rather than about access — so check
-# the grants are in place before spending a build on it.
-log "Checking Secret Manager access"
-for SECRET in supabase-url supabase-anon-key supabase-service-role-key; do
-  if ! firebase apphosting:secrets:describe "$SECRET" --project "$PROJECT" >/dev/null 2>&1; then
-    fail "Secret '$SECRET' is not readable by App Hosting in $PROJECT.
-       Create it and grant access — see hq-dashboard-next/apphosting.yaml,
-       which lists the exact commands. Deploying without it produces a console
-       that builds and cannot reach its database."
-  fi
-done
-ok "All three required secrets are accessible"
-
-firebase deploy --only apphosting --project "$PROJECT"
-ok "Deploy complete"
+[ "$LEAKED" -eq 0 ] || fail "STOP: a server secret is present in the client bundle.
+       Do not push. This is finding C-1 recurring."
+ok "No server secrets in the client bundle"
 
 cat <<'EOF'
 
-Post-deploy checklist (not automated — these need a human):
-  • Confirm RLS is enforced:  node scripts/verify_rls.js
-  • Confirm no credential in this deploy has been leaked previously; rotate if so.
+────────────────────────────────────────────────────────────────────────────
+Clear to push. Railway builds on push to the tracked branch.
+
+  git push
+
+Then, in Railway: watch the deploy log, and confirm the health check on
+/login goes green (railway.json sets a 60s timeout).
+
+Settings that live in the Railway UI and not in this repository — get these
+wrong and the build fails in a way the repo cannot explain:
+
+  Root Directory          hq-dashboard-next   ← the Flutter app is at the root
+  NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  SUPABASE_SERVICE_ROLE_KEY                   ← needed AT BUILD time
+
+docs/RAILWAY.md is the full runbook, including the URL, custom domains and
+the escalation notification worker.
+
+Still needs a human after the deploy:
+  • node scripts/verify_rls.js            (against STAGING, never production)
+  • confirm /login renders and /dashboard redirects without a session
+────────────────────────────────────────────────────────────────────────────
 EOF
