@@ -92,7 +92,7 @@ each does:
 
 ```
 SMS_GATEWAY_SECRET      inbound SMS from the offline fallback
-MESH_HQ_PRIVATE_KEY     inbound mesh alerts (66 hex characters)
+MESH_HQ_PRIVATE_KEY     inbound mesh alerts (64 hex characters; the 66 is the PUBLIC half)
 TERMII_API_KEY          outbound SOS escalation SMS
 SOS_DISPATCH_PHONE      where that SMS goes
 GEMINI_API_KEY          AI triage (falls back to the rule engine)
