@@ -115,7 +115,7 @@ sign in at all — the code is never sent, so there is nothing to type.
 
 ```
 supabase functions deploy send-sms
-supabase secrets set TERMII_API_KEY=... TERMII_SENDER_ID=RainbowHQ HOOK_SECRET=...
+supabase secrets set TERMII_API_KEY=... TERMII_SENDER_ID="OE Alert" HOOK_SECRET=...
 ```
 
 Then **Authentication → Hooks → Send SMS hook → Edge Function → send-sms**, with

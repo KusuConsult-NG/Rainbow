@@ -6,14 +6,14 @@
 //
 // Required Supabase secrets (supabase secrets set):
 //   TERMII_API_KEY   — your Termii API key
-//   TERMII_SENDER_ID — sender ID (default: RainbowHQ)
+//   TERMII_SENDER_ID — sender ID (default: OE Alert, the ID approved on the Termii workspace)
 //   TERMII_BASE_URL  — optional override (default: https://v4.api.termii.com/api/sms/send)
 //   HOOK_SECRET      — the secret Supabase passes to verify the hook caller
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
 
 const TERMII_API_KEY  = Deno.env.get('TERMII_API_KEY') ?? '';
-const TERMII_SENDER   = Deno.env.get('TERMII_SENDER_ID') ?? 'RainbowHQ';
+const TERMII_SENDER   = Deno.env.get('TERMII_SENDER_ID') ?? 'OE Alert';
 const TERMII_URL      = Deno.env.get('TERMII_BASE_URL') ?? 'https://v4.api.termii.com/api/sms/send';
 const HOOK_SECRET     = Deno.env.get('HOOK_SECRET') ?? '';
 

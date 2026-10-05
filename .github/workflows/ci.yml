@@ -870,11 +870,20 @@ jobs:
                    | grep -oE "from\('[a-z_]+'\)" | grep -oE "'[a-z_]+'" || true)
           TABLES=$(printf '%s\n%s\n' "$CONSOLE" "$MOBILE" | tr -d "'" | grep -v '^$' | sort -u)
           echo "subscribed tables: $(echo $TABLES)"
+          # A table is published either by the original publication
+          # migration, which lists them by name, or by the migration that
+          # created it, with its own ALTER PUBLICATION (sim_channel_events
+          # does this). Only reading the first file reported a correctly
+          # published table as missing. Comment lines are excluded so a
+          # migration that merely talks about publishing does not count.
+          PUBLISHED=$(grep -rhE 'ALTER PUBLICATION supabase_realtime ADD TABLE' supabase/migrations/ \
+                      | grep -vE '^[[:space:]]*--' \
+                      | grep -oE 'ADD TABLE (public\.)?[a-z_]+' | sed -E 's/^ADD TABLE (public\.)?//' || true)
           for T in $TABLES; do
-            grep -q "'$T'" supabase/migrations/20260903000000_realtime_publication.sql || {
-              echo "::error::table '$T' is subscribed to for realtime but is not in the supabase_realtime publication migration."
-              MISSING=1
-            }
+            if grep -q "'$T'" supabase/migrations/20260903000000_realtime_publication.sql; then continue; fi
+            if printf '%s\n' "$PUBLISHED" | grep -qx "$T"; then continue; fi
+            echo "::error::table '$T' is subscribed to for realtime but no migration adds it to the supabase_realtime publication."
+            MISSING=1
           done
           [ "$MISSING" -eq 0 ] || exit 1
           echo "OK: every realtime subscription targets a published table."
@@ -909,7 +918,11 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-16
       - name: Seal with the key the database issued, decode with the HQ codec
-        run: sudo PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_sms_end_to_end.sh
+        # `sudo` resets PATH to secure_path, which does not include the
+        # Flutter that subosito/flutter-action installed, so the script's
+        # Dart encoder step failed with "flutter: command not found".
+        # Pass the runner's PATH through explicitly.
+        run: sudo env "PATH=$PATH" "PUB_CACHE=$PUB_CACHE" "FLUTTER_ROOT=$FLUTTER_ROOT" PGBIN=/usr/lib/postgresql/16/bin ./scripts/verify_sms_end_to_end.sh
 
   dryrun-speaks:
     name: Supabase — the production dry run actually reports something
