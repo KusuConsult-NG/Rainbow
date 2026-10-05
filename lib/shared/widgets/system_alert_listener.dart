@@ -53,6 +53,13 @@ class _SystemAlertListenerState extends ConsumerState<SystemAlertListener> {
               final targetValue = doc['target_value'] as String? ?? '';
               final alertId = doc['id'] as String;
 
+              // Dismissed first. This check used to be the LAST line, after the
+              // early returns for HQ and for target 'ALL' — so a statewide
+              // advisory, the commonest kind, could never be dismissed: the
+              // button recorded the id and the banner came straight back. The
+              // control sweep found it doing nothing.
+              if (_dismissedAlerts.contains(alertId)) return false;
+
               if (userRole == 'HQ_OFFICER' || targetType == 'ALL') return true;
 
               if (targetType == 'LGA') {
