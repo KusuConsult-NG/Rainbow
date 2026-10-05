@@ -353,8 +353,8 @@ difference.
 
 **Needs real devices, and will not be verified by me:**
 
-* discovery, pairing and background behaviour on BLE — and the native halves are
-  not even written yet;
+* discovery, pairing and background behaviour on BLE — the native halves are
+  written (step 4) but have not been run on a handset;
 * whether MTU negotiation succeeds, and what happens on the handsets where it
   does not;
 * battery cost of relaying;
@@ -413,8 +413,11 @@ case it exists for.
 5. **Does a citizen's phone relay strangers' alerts by default, or by opt-in?**
    Battery and storage are the obvious costs. The less obvious one is legal:
    carrying somebody else's emergency traffic is not neutral everywhere.
-   *Recommend: on by default for responders, opt-in with a clear explanation
-   for citizens.*
+   **Built as recommended** in `lib/services/mesh_service.dart`: on by default
+   for responders, opt-in from Settings for citizens. A person's OWN failed
+   report uses the mesh either way, for 30-minute windows while it still holds
+   something — but only on a phone where Bluetooth has already worked, so an
+   SOS never stops for a permission prompt. Revisit if counsel disagrees.
 6. **HQ key rotation cadence**, and who holds the private key.
 
 ## What I would build, in order
@@ -481,7 +484,7 @@ case it exists for.
    * Two new CI gates, both of which caught something before they were
      committed: `check_vectors_synced.py` (the console's copy of the vectors must
      equal the Dart-generated one) and `check_crypto_entropy.py` (see above).
-4. **The BLE transport — everything above the radio is BUILT. The radio is not.**
+4. **The BLE transport — BUILT, including the radio. Not yet run on a handset.**
    The seam is `BleRadio`, four verbs wide: who is in range, what they wrote,
    how much may be written at once, write this. Above it, tested:
    * `mesh_chunking.dart` — the reason this step is not trivial. A frame is 166
@@ -508,15 +511,42 @@ case it exists for.
      with nothing checked and a crash there takes down a relay carrying
      somebody's duress alert.
 
-   **What remains, and it is all native:** an Android implementation (GATT server
-   + scanner, `BLUETOOTH_ADVERTISE` / `BLUETOOTH_CONNECT` / `BLUETOOTH_SCAN` with
-   `neverForLocation`) and an iOS one (`CBPeripheralManager` +
-   `CBCentralManager`). The permissions are deliberately **not** in the manifest
-   yet: declaring a capability the app does not have is noise in a Play review.
-   The four requirements that are easy to miss — an unstable `peerId` that is not
-   an identity, reporting the MTU actually negotiated, advertising no identity at
-   all, and reporting disconnects promptly — are written at the top of
-   `method_channel_ble_radio.dart`.
+   **The radio — WRITTEN, not yet run on a handset.** Both native halves
+   implement the contract above, as both roles at once (every phone is a GATT
+   peripheral and a central, because a mesh has no servers):
+   * `android/.../MeshBleRadio.kt` — GATT server with one writable, notifiable
+     characteristic; an advertisement carrying the service UUID and nothing
+     else; a scanner filtered on it; MTU raised to 517 and the agreed value
+     reported, 23 when the request fails; a link reported only once it is
+     subscribed and therefore writable both ways. A random `peerId` per link,
+     never the device address. Notifications serialised across the server,
+     since Android refuses a second in flight. Long (prepared) writes refused.
+     A watchdog re-arms the scan every five minutes (Android quietly
+     downgrades long scans) and rebuilds the stack when Bluetooth comes back
+     on. **Compiled** against the Android 15 framework (Robolectric
+     `android-all`) and Flutter's embedding jar, with no warnings.
+   * `ios/Runner/MeshBleRadio.swift` — the same shape over
+     `CBPeripheralManager` + `CBCentralManager`. No local name in the
+     advertisement; MTU from `maximumWriteValueLength(for: .withoutResponse)`
+     and `maximumUpdateValueLength`; Bluetooth switched off reports every link
+     as gone, because iOS does not call the per-link callbacks then; scan
+     restarted every minute so a phone that left and returned is seen again.
+     `bluetooth-central` and `bluetooth-peripheral` background modes are
+     declared; state restoration after the system kills the app is **not**
+     implemented. **Not compiled here** — this needs Xcode.
+   * The permissions are now in the manifest (`BLUETOOTH_SCAN` with
+     `neverForLocation`, `BLUETOOTH_ADVERTISE`, `BLUETOOTH_CONNECT`, the legacy
+     pair capped at API 30) and `NSBluetoothAlwaysUsageDescription` in
+     Info.plist.
+   * `lib/services/mesh_service.dart` — starts and stops the node with the
+     session, applies the relaying policy (item 5), offers everything held when
+     a peer arrives, and uploads what it holds to `/api/mesh/ingest` whenever it
+     can, dropping exactly what HQ says it is finished with
+     (`lib/core/mesh/mesh_uplink.dart`). 21 tests, driven by the fake radio.
+     A failed report now reaches `OfflineEscalation` with a live node.
+
+   The two halves share one value the channel does not carry: the
+   characteristic UUID, `6f726e62-6f77-4d65-7368-000000000002`.
 5. **The app actually calls them — BUILT.** Everything above was built, tested
    and **unreachable**: a report raised with no data went into the local queue and
    nothing in the app called the SMS codec, the device key, the sealing, the relay
@@ -589,8 +619,8 @@ message with nowhere to go.
   but the handset side of that is a release. Moving the value to `app_config`
   with the bundled one as a fallback is a small change and the right one before
   the first rotation; it is not done.
-* **A decision on relaying by default**, still open (item 5 below).
-* **The radio**, which is step 4.
+* ~~A decision on relaying by default~~ — made, item 5 above.
+* ~~The radio~~ — written, step 4; needs the field test.
 * **Edge rate limiting**, per the note above.
 
 Until the key is set, `/api/mesh/ingest` refuses every frame — and says nothing

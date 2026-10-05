@@ -3,10 +3,16 @@
 ///
 /// ## Read this before writing the Kotlin or the Swift
 ///
-/// This file is finished. The Android and iOS implementations are **not
-/// written**, and nothing about BLE in this project has been run on a handset.
-/// The contract lives here rather than in a document so that the remaining work
-/// is "implement these five messages" instead of "add Bluetooth".
+/// The native halves implement exactly this: `MeshBleRadio.kt` (Android) and
+/// `ios/Runner/MeshBleRadio.swift`. The Android half compiles against the
+/// Android 15 framework; neither has yet been run on a handset, so everything
+/// below the channel is unverified until the field test.
+///
+/// Besides the service UUID below, the two halves share one fixed value the
+/// channel does not carry: the characteristic inside the service,
+/// `6f726e62-6f77-4d65-7368-000000000002`, writable (central→peripheral) and
+/// notifiable (peripheral→central). A phone of either kind relays for the other
+/// only because both use it.
 ///
 /// **Method channel** `com.operationrainbow.app/mesh_ble`, Dart → native:
 ///

@@ -8,6 +8,7 @@ import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/reentry_lock_provider.dart';
+import 'package:rainbow_app/services/mesh_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -21,10 +22,41 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _language = 'EN';
 
+  /// Whether this phone relays others' sealed alerts over Bluetooth. Null until
+  /// read, so the switch never flashes the wrong position.
+  bool? _meshRelay;
+
   @override
   void initState() {
     super.initState();
     unawaited(_loadLanguage());
+    unawaited(_loadMeshRelay());
+  }
+
+  Future<void> _loadMeshRelay() async {
+    try {
+      final enabled = await MeshService.instance.relayEnabled();
+      if (mounted) setState(() => _meshRelay = enabled);
+    } on Object catch (_) {
+      if (mounted) setState(() => _meshRelay = false);
+    }
+  }
+
+  // ignore: avoid_positional_boolean_parameters, Mirrors a switch's onChanged.
+  Future<void> _setMeshRelay(bool enabled) async {
+    setState(() => _meshRelay = enabled);
+    final running = await MeshService.instance.setRelayEnabled(enabled);
+    if (!mounted || !enabled || running) return;
+    // Switched on, and the radio did not start. Say so rather than leave a
+    // switch that claims something is happening when it is not.
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Bluetooth relay is on, but Bluetooth is off or not allowed. '
+          'Turn on Bluetooth and allow it for Operation Rainbow.',
+        ),
+      ),
+    );
   }
 
   Future<void> _loadLanguage() async {
@@ -212,6 +244,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             tileColor: AppColors.surfaceContainer,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             onChanged: _updatePushEnabled,
+          ),
+          const SizedBox(height: 16),
+
+          // 2b. Bluetooth mesh relaying
+          SwitchListTile(
+            title: Text('Relay emergency alerts', style: GoogleFonts.outfit(color: AppColors.onBackground)),
+            subtitle: Text(
+              'When there is no network, pass sealed SOS alerts between nearby phones over Bluetooth '
+              'until one reaches HQ. Phones that carry an alert cannot read it.',
+              style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12),
+            ),
+            value: _meshRelay ?? false,
+            activeThumbColor: AppColors.primary,
+            tileColor: AppColors.surfaceContainer,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            onChanged: _meshRelay == null ? null : _setMeshRelay,
           ),
           const SizedBox(height: 16),
 
