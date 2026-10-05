@@ -197,7 +197,20 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
           ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : Stack(
               children: [
-                FlutterMap(
+                // THE MAP IS NOT A BUTTON.
+                //
+                // flutter_map registers a tap recognizer for panning and
+                // zooming, so the whole map surface reached the accessibility
+                // tree as an unlabelled button covering the screen — one a
+                // screen reader announced as "button" and that did nothing
+                // when activated. The mobile control sweep found exactly that.
+                // Named as what it is, with its gesture layer kept out of the
+                // tree; the legend below stays readable.
+                Semantics(
+                  container: true,
+                  label: 'Tactical map of incidents and responders',
+                  excludeSemantics: true,
+                  child: FlutterMap(
                   options: MapOptions(
                     initialCenter: _currentPos!,
                     initialZoom: 15,
@@ -266,6 +279,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                       ],
                     ),
                   ],
+                  ),
                 ),
                 // Legend
                 Positioned(
