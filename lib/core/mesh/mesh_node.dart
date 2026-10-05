@@ -30,8 +30,9 @@
 ///
 /// It does not decide whether this phone should relay at all. That is a policy
 /// question with a legal edge — carrying somebody else's emergency traffic is not
-/// neutral everywhere — and it is still open in the design. The node relays when
-/// it is started and does not start itself.
+/// neutral everywhere — so it is decided in one place, `MeshService`
+/// (responders by default, citizens by opt-in). The node relays when it is
+/// started and does not start itself.
 library;
 
 import 'dart:async';

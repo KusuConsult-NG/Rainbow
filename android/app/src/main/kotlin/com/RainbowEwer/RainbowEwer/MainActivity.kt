@@ -21,6 +21,11 @@ class MainActivity : FlutterFragmentActivity() {
     private val SMS_CHANNEL = "com.operationrainbow.app/sms"
     private val SIM_CHANNEL = "com.operationrainbow.app/sim"
 
+    // The Bluetooth mesh radio. Its channels and its whole behaviour live in
+    // MeshBleRadio.kt; it is held here only so it can be released with the
+    // engine rather than outliving it with the radio still on.
+    private var meshRadio: MeshBleRadio? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Enforce modern non-deprecated Edge-to-Edge window inset handling for Android 15+
@@ -30,6 +35,9 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        meshRadio?.dispose()
+        meshRadio = MeshBleRadio(this, flutterEngine.dartExecutor.binaryMessenger)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_CHANNEL).setMethodCallHandler { call, result ->
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -202,6 +210,12 @@ class MainActivity : FlutterFragmentActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        meshRadio?.dispose()
+        meshRadio = null
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     private fun createNotificationChannel() {
