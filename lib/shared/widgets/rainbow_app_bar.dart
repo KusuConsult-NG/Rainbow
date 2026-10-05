@@ -47,6 +47,16 @@ class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
+    void goBack() {
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go(AppRoutes.home);
+      }
+    }
+
+    void openMenu() => _drawerHost(context)?.openDrawer();
+
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.background,
@@ -71,18 +81,17 @@ class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
               // neither button had a name, so a screen reader announced an
               // unlabelled button and the sweep could only call it "(icon)".
               if (showBack || _drawerHost(context) == null)
+                // `onTap` on the Semantics as well as the detector:
+                // excludeSemantics drops the detector's own tap action, and a
+                // labelled button with no action is one a screen reader can
+                // name but never press.
                 Semantics(
                   button: true,
                   label: 'Back',
+                  onTap: goBack,
                   excludeSemantics: true,
                   child: GestureDetector(
-                    onTap: () {
-                      if (context.canPop()) {
-                        context.pop();
-                      } else {
-                        context.go(AppRoutes.home);
-                      }
-                    },
+                    onTap: goBack,
                     child: Container(
                       width: 44,
                       height: 44,
@@ -104,9 +113,10 @@ class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
                 Semantics(
                   button: true,
                   label: 'Open menu',
+                  onTap: openMenu,
                   excludeSemantics: true,
                   child: GestureDetector(
-                    onTap: () => _drawerHost(context)?.openDrawer(),
+                    onTap: openMenu,
                     child: Container(
                       width: 44,
                       height: 44,
