@@ -31,6 +31,20 @@ class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Size get preferredSize => const Size.fromHeight(80);
 
+  /// The nearest scaffold above [context] that has a drawer, or null.
+  ///
+  /// A screen's own scaffold usually has none; the navigation shell around it
+  /// does. Walks outwards rather than checking one parent, so a screen nested
+  /// one level deeper still finds the shell's drawer.
+  static ScaffoldState? _drawerHost(BuildContext context) {
+    var state = Scaffold.maybeOf(context);
+    while (state != null) {
+      if (state.hasDrawer) return state;
+      state = Scaffold.maybeOf(state.context);
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -46,60 +60,69 @@ class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
           child: Row(
             children: [
-              if (showBack)
-                GestureDetector(
-                  onTap: () {
-                    if (context.canPop()) {
-                      context.pop();
-                    } else {
-                      context.go(AppRoutes.home);
-                    }
-                  },
-                  child: Container(
-                    width: 44,
-                    height: 44,
-                    margin: const EdgeInsets.only(right: 16),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceContainer,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.outline),
-                    ),
-                    child: const Icon(
-                      Icons.arrow_back_ios_new_rounded,
-                      color: AppColors.onBackground,
-                      size: 16,
+              // THE LEADING BUTTON: a menu where there is a drawer to open, a
+              // way back where there is not.
+              //
+              // This was always a menu button unless the screen asked for
+              // `showBack`. A screen with no drawer anywhere above it — the
+              // responder's live-tracking map, reached from the agent
+              // dashboard — got a menu button that called openDrawer() on
+              // nothing: the control sweep found it doing nothing at all. And
+              // neither button had a name, so a screen reader announced an
+              // unlabelled button and the sweep could only call it "(icon)".
+              if (showBack || _drawerHost(context) == null)
+                Semantics(
+                  button: true,
+                  label: 'Back',
+                  excludeSemantics: true,
+                  child: GestureDetector(
+                    onTap: () {
+                      if (context.canPop()) {
+                        context.pop();
+                      } else {
+                        context.go(AppRoutes.home);
+                      }
+                    },
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      margin: const EdgeInsets.only(right: 16),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceContainer,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.outline),
+                      ),
+                      child: const Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        color: AppColors.onBackground,
+                        size: 16,
+                      ),
                     ),
                   ),
                 )
               else
-                Builder(
-                  builder: (context) {
-                    return GestureDetector(
-                      onTap: () {
-                        var state = Scaffold.maybeOf(context);
-                        if (state != null && !state.hasDrawer) {
-                          final parent = Scaffold.maybeOf(state.context);
-                          if (parent != null) state = parent;
-                        }
-                        state?.openDrawer();
-                      },
-                      child: Container(
-                        width: 44,
-                        height: 44,
-                        margin: const EdgeInsets.only(right: 16),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceContainer,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppColors.outline),
-                        ),
-                        child: const Icon(
-                          Icons.menu_rounded,
-                          color: AppColors.onBackground,
-                          size: 20,
-                        ),
+                Semantics(
+                  button: true,
+                  label: 'Open menu',
+                  excludeSemantics: true,
+                  child: GestureDetector(
+                    onTap: () => _drawerHost(context)?.openDrawer(),
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      margin: const EdgeInsets.only(right: 16),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceContainer,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.outline),
                       ),
-                    );
-                  },
+                      child: const Icon(
+                        Icons.menu_rounded,
+                        color: AppColors.onBackground,
+                        size: 20,
+                      ),
+                    ),
+                  ),
                 ),
               Container(
                 padding: const EdgeInsets.all(10),
