@@ -6190,6 +6190,12 @@ COMMIT;
 
 WITH checks(ord, name, ok) AS (
   VALUES
+    -- Not a check: the stamp that says WHICH version of this script produced
+    -- the output below. A pasted result used to carry nothing identifying its
+    -- version, so a run from a stale working copy read exactly like a current
+    -- one. Compare with: python3 scripts/migration_sets.py --fingerprint
+    (0, 'script version: 35 migrations, '
+        'fingerprint 357dfe26db00', true),
     (1, 'core tables exist (9)',
         (SELECT count(*) = 9 FROM information_schema.tables
           WHERE table_schema = 'public'

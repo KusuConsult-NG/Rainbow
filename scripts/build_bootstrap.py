@@ -26,6 +26,7 @@ import re
 import sys
 
 import migration_sets
+from label_guard import check_labels
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "scripts/bootstrap_staging.sql"
@@ -116,7 +117,7 @@ def strip_transaction_control(sql: str) -> tuple[str, int]:
     stripped, n = TXN.subn("", sql)
     return stripped, n
 
-VERIFY = """
+VERIFY = f"""
 COMMIT;
 
 -- ============================================================================
@@ -128,6 +129,12 @@ COMMIT;
 
 WITH checks(ord, name, ok) AS (
   VALUES
+    -- Not a check: the stamp that says WHICH version of this script produced
+    -- the output below. A pasted result used to carry nothing identifying its
+    -- version, so a run from a stale working copy read exactly like a current
+    -- one. Compare with: python3 scripts/migration_sets.py --fingerprint
+    (0, 'script version: {len(migration_sets.from_zero())} migrations, '
+        'fingerprint {migration_sets.fingerprint(migration_sets.from_zero())}', true),
     (1, 'core tables exist (9)',
         (SELECT count(*) = 9 FROM information_schema.tables
           WHERE table_schema = 'public'
@@ -257,6 +264,12 @@ def main() -> int:
             removed += n
             parts.append(body.rstrip() + "\n\n")
     parts.append(VERIFY)
+
+    # This file is pasted into the same Supabase SQL editor as
+    # apply_all_migrations.sql, and had no label guard at all — see
+    # scripts/label_guard.py for what a label containing `into`/`from`/`join`/
+    # `table` does to the editor's pre-run lint.
+    check_labels(VERIFY, OUT.name)
 
     OUT.write_text("".join(parts))
     total = len(HISTORICAL) + len(OUTSTANDING)

@@ -90,12 +90,20 @@ fi
 printf '%s\n' "$OUT" | grep -E '^\s*(PASS|\*\*\* FAIL)' || true
 FAILED=$(printf '%s\n' "$OUT" | grep -c '\*\*\* FAIL \*\*\*' || true)
 PASSED=$(printf '%s\n' "$OUT" | grep -c '^ PASS' || true)
-echo "  checks passed: $PASSED   failed: $FAILED"
+# Counted out of the generated file rather than against a hand-written number.
+# The floor below used to double as the denominator, so adding one check printed
+# "20/19 PASS" — a ratio above one, which reads as a defect in the thing being
+# verified rather than in the message. 19 stays as a FLOOR only: it is the point
+# below which the verdict table has lost rows, which is what a rolled-back or
+# truncated run looks like.
+EXPECTED=$(grep -cE "^    \([0-9]+, '" "$REPO/scripts/bootstrap_staging.sql" || true)
+[ "${EXPECTED:-0}" -gt 0 ] || EXPECTED=$PASSED
+echo "  checks passed: $PASSED / $EXPECTED   failed: $FAILED"
 # Zero passes is not "no failures". It is the shape of a file that rolled back,
 # and it used to satisfy FAILED -eq 0.
 [ "$PASSED" -gt 0 ] || {
   echo "::error::the bootstrap's verification produced NO rows — it rolled back"; exit 1; }
-[ "$FAILED" -eq 0 ] && [ "$PASSED" -ge 19 ] || {
+[ "$FAILED" -eq 0 ] && [ "$PASSED" -ge 19 ] && [ "$PASSED" -eq "$EXPECTED" ] || {
   echo "::error::the bootstrap's own verification reported a failure"; exit 1; }
 
 # ── 2. The guard must refuse a database that already holds data ──────────────
@@ -189,7 +197,7 @@ echo "  ok: identical policy sets ($(printf '%s\n' "$A" | wc -l) policies)"
 
 cat <<EOF
 
-✓ bootstrap_staging.sql builds a correct project from zero ($PASSED/19 PASS),
+✓ bootstrap_staging.sql builds a correct project from zero ($PASSED/$EXPECTED PASS),
   refuses a database that already holds data, and produces exactly the schema
   the migration replay produces.
 EOF

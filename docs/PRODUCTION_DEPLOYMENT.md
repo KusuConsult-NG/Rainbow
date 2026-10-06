@@ -32,12 +32,27 @@ emergencies. The full instructions are in `E2E_AUDIT_REPORT.md`.
 for a new project — staging, DR, or a second deployment — and as the record of what
 each file does.
 
-Fourteen migrations, in filename order. The fastest route is one paste of
-`scripts/apply_all_migrations.sql`, which contains all fourteen in order and ends
-in a 25-row PASS/FAIL table; `scripts/apply_in_parts/` is the same SQL split into
-numbered files for an editor that will not take 2,300 lines at once.
+Thirty-one migrations, in filename order. The fastest route is one paste of
+`scripts/apply_all_migrations.sql`, which contains all thirty-one in order and
+ends in a 34-row PASS/FAIL table; `scripts/apply_in_parts/` is the same SQL split
+into 32 numbered files for an editor that will not take 5,900 lines at once.
 `docs/APPLYING_THE_MIGRATIONS.md` is the step-by-step runbook, including the
 mandatory read-only dry run; do not apply the RLS migration without it.
+
+**Check the first row of the verdict table before you read the rest.** It is not
+a check — it is the script's own version:
+
+```
+ PASS   | script version: 31 outstanding migrations, fingerprint f57e16f5be90
+```
+
+Compare it with `python3 scripts/migration_sets.py --fingerprint`. If they
+differ, the file you pasted is from a working copy behind the repository and
+every row below it describes a different set of migrations. This exists because
+it has already happened twice — a pasted inventory three migrations stale that
+reported "nothing to apply" (T-21), and a pasted verdict table from before the
+anon/public check learned to name the policy it objects to, which read
+`*** FAIL *** | no policy grants anon or public anything` and named nothing.
 
 | Order | File | What it does |
 |---|---|---|
@@ -55,6 +70,23 @@ mandatory read-only dry run; do not apply the RLS migration without it.
 | 12 | `20260929000000_telemetry_is_not_a_standing_feed.sql` | A citizen's live position stops being readable by every staff account and starts being deleted. Also scopes chat writes to a thread you are part of. |
 | 13 | `20260930000000_sms_device_keys.sql` | The per-device key the encrypted SMS fallback authenticates with, plus `alerts.arrived_via`. |
 | 14 | `20261001000000_mesh_ingest.sql` | The mesh envelope-dedup table, so one alert flooded by several relays is one incident. |
+| 15 | `20261002000000_sim_channel_events.sql` | Lets a handset report that its SMS channel died. The phone number is the identity here — it is what the account was made with, what HQ rings back, and what the encrypted SMS fallback rides on. Reports go to command only, and carry no position. |
+| 16 | `20261003000000_liaisons_are_not_staff.sql` | An agency liaison is an officer of another organisation, not Operation Rainbow staff. Until it runs, the statewide alert policies rest on `is_staff()` alone and a liaison sees every incident in Plateau State. |
+| 17 | `20261004000000_incident_tracks.sql` | Keeps the route somebody took during one emergency. Before it, the trail existed only while an operator was watching live; after the incident there was nothing to review. |
+| 18 | `20261005000000_alert_category.sql` | Adds the generated `alerts.category`. Note this is the column a bad INSERT names in a 428C9 error — see C-4 and `scripts/why_did_my_insert_fail.sql`. |
+| 19 | `20261006000000_alerts_scoped_to_posting.sql` | An officer's authority ends at their command. The chain had real structure for routing and none for authority: every tier rule lived in a Dart function or a console dropdown. |
+| 20 | `20261007000000_notification_outbox.sql` | The automatic escalation moved incidents and told nobody. `escalate_overdue_alerts()` runs under pg_cron — it cannot live in an app that only runs when somebody has it open. |
+| 21 | `20261008000000_escalation_push_targets.sql` | Decides in the database who a queued escalation is for. Nothing wrote PUSH/SMS/WEBHOOK rows, and `drain-outbox` marked unknown kinds delivered. |
+| 22 | `20261009000000_ward_names_compared_by_key.sql` | `GINDIRI  I` and `GINDIRI  1` are the same ward. Four Mangu wards were spelled differently in the app's geo assets and the console's map, so officers and incidents did not match. |
+| 23 | `20261010000000_append_alert_media_atomically.sql` | Appends evidence URLs in the database. Three code paths did read-modify-write on `alerts.media_urls`, so simultaneous uploads lost each other's media. |
+| 24 | `20261011000000_ussd_reports_are_unconfirmed.sql` | A stranger's keystrokes must not become armed officers at a chosen place. USSD is the cheapest possible way to lure responders into an ambush, so USSD-filed reports start unconfirmed. |
+| 25 | `20261012000000_ussd_filing.sql` | Files a USSD report exactly once. A gateway that gets no reply in its window re-POSTs the same session — normal on a congested network, which is when people report emergencies. |
+| 26 | `20261013000000_ussd_landmark.sql` | The nearest landmark, typed by a caller with no GPS. USSD cannot carry coordinates, so without it the console can only draw a circle the size of the ward — 16km across in parts of Wase. |
+| 27 | `20261014000000_ai_reports_are_kept.sql` | Stores the AI forensic debrief. It lived in React state only: close the dossier and it was gone, reopen it and the console billed another Gemini call. |
+| 28 | `20261015000000_oversight_and_debrief.sql` | A complaint about an officer must not be delivered to that officer. The app offers **Police brutality** as a category, and those reports were routed down the normal chain. |
+| 29 | `20261016000000_telemetry_policy_is_not_public.sql` | Recreates `telemetry_select_geo_lga_scoped` as `TO authenticated`. It sat on production as `TO PUBLIC` for weeks. **This is the migration behind a `*** FAIL *** \| no policy grants anon or public anything` row.** Policy-only, so no object-existence check can see it — confirm with `scripts/rls_inventory.sql`. |
+| 30 | `20261017000000_the_hand_applied_era_is_in_the_history.sql` | Writes the v2–v5 era down as a migration. A no-op on production, which already has those objects; it exists so a database built from zero matches. |
+| 31 | `20261018000000_the_mirrors_and_two_dead_functions_are_gone.sql` | Drops the five generated `geo_*` mirrors and two uncalled v5 functions, converging production downward. Every drop is `RESTRICT`, in its own sub-transaction. Confirm with the `7 of 7 removed` row in `scripts/which_migrations_are_applied.sql`. |
 
 Every one of them is proven on a real PostgreSQL by the `rls-migration` CI job
 before it reaches you.

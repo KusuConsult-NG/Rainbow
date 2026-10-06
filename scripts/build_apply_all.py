@@ -115,6 +115,12 @@ VERIFY = f"""
 
 WITH checks(ord, name, ok) AS (
   VALUES
+    -- Not a check: the stamp that says WHICH version of this script produced
+    -- the output below. A pasted result used to carry nothing identifying its
+    -- version, so a run from a stale working copy read exactly like a current
+    -- one. Compare with: python3 scripts/migration_sets.py --fingerprint
+    (0, 'script version: {len(MIGRATIONS)} outstanding migrations, '
+        'fingerprint {migration_sets.fingerprint(MIGRATIONS)}', true),
     (1, 'agency tables exist (4)',
         (SELECT count(*) = 4 FROM information_schema.tables
           WHERE table_schema = 'public'
@@ -324,41 +330,10 @@ ORDER BY ok, ord;
 """
 
 
-# ── Labels must not read as DDL to a linter ─────────────────────────────────
-#
-# Supabase's SQL editor lints the buffer BEFORE running it, and its parser reads
-# words out of quoted strings as identifiers. A check labelled
-# "...written into your own channel" made it warn
-#
-#   This query creates a table without enabling Row Level Security. Clients
-#   using anon or authenticated keys may be able to access `your`.
-#
-# about a table that does not exist, and made another path fail with
-# `42P01: relation "your" does not exist`. Renaming the word moved the warning to
-# the new word — `into somebody` became `somebody` — which is how the mechanism
-# became clear: it takes whatever follows `INTO`.
-#
-# These four are the keywords a relation name follows in real SQL, so they are
-# the ones a naive parser reads a table name after. An operator cannot tell a
-# parser quirk from a real finding on a file they are about to paste into
-# production, and the safe response to not knowing is to stop — so the trigger is
-# banned rather than explained.
-FORBIDDEN_IN_LABELS = ("into", "from", "join", "table")
-
-
-def check_labels(text: str) -> None:
-    import re as _re
-    bad = []
-    for m in _re.finditer(r"^    \(\d+, '([^']+)'", text, _re.M):
-        label = m.group(1)
-        for word in FORBIDDEN_IN_LABELS:
-            if _re.search(rf"\b{word}\b", label, _re.I):
-                bad.append((word, label))
-    if bad:
-        for word, label in bad:
-            print(f"label contains '{word}', which Supabase's linter reads as "
-                  f"DDL: {label!r}", file=sys.stderr)
-        raise SystemExit(1)
+# The rule and the reasoning now live in scripts/label_guard.py, because
+# bootstrap_staging.sql and scripts/apply_in_parts/ are pasted into the same
+# editor and this guard covered only this one file.
+from label_guard import check_labels  # noqa: E402
 
 
 def main() -> int:
