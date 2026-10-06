@@ -287,7 +287,43 @@ has to be attached the other way:
 The hook is written and in the repository: `supabase/functions/send-sms`. What
 is left is four dashboard settings and one deploy flag.
 
-1. **Authentication → Providers → Phone** — enable it.
+### Do it with one command
+
+```bash
+SUPABASE_PROJECT_REF=<your 20-char ref> \
+SUPABASE_ACCESS_TOKEN=<personal access token, auth_config_write> \
+TERMII_API_KEY=<key> TERMII_SENDER_ID='OE Alert' \
+  ./scripts/wire_up_sms_provider.sh --commit
+```
+
+It generates the signing secret, stores the three function secrets, deploys with
+`--no-verify-jwt`, enables the hook pointed at the function, turns
+`sms_autoconfirm` off, reads the configuration back and asserts it, then probes
+the live endpoint. No secret value is printed — only its length and first few
+characters.
+
+**Diagnosing it needs no credentials and sends no SMS:**
+
+```bash
+SUPABASE_PROJECT_REF=<ref> ./scripts/wire_up_sms_provider.sh --check
+```
+
+Two unauthenticated requests separate the four failure modes, because this
+function's error bodies are distinguishable from the platform's. The one that
+matters is the pair of 401s: a 401 with no `error.http_code` field is the
+**platform** refusing the call because the function was deployed with JWT
+verification on — the hook can then never work — while a 401 carrying that field
+is **our own code** rejecting a bad signature, which is the healthy state.
+`scripts/wire_up_sms_provider_test.sh` asserts that distinction, and the other
+twelve response shapes, with no network.
+
+### Or by hand
+
+1. **Authentication → Providers → Phone** — enable it, and make sure
+   **automatic phone confirmation is OFF** (`sms_autoconfirm` in the API). With
+   it on, Auth confirms the number without ever sending a code: the hook never
+   fires, every other step here silently achieves nothing, and no error appears
+   anywhere.
 2. **Authentication → Hooks → Send SMS** — set it to **Supabase Edge Function**
    → `send-sms`. Copy the **signing secret** the page shows; it looks like
    `v1,whsec_<base64>`.
@@ -319,7 +355,9 @@ is left is four dashboard settings and one deploy flag.
    cannot be typed in full.
 
 6. **Send yourself one.** A provider that is configured but not working looks
-   identical to one that is not configured, from every screen in the app.
+   identical to one that is not configured, from every screen in the app. Run
+   `--check` first: it rules out everything except delivery, which is the only
+   part a real handset is needed for.
 
 ### The hook as committed could never have worked
 
