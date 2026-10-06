@@ -150,7 +150,7 @@ class AuthService {
       debugPrint('[AUTH] a code was sent');
       return true;
     } catch (e) {
-      _lastAuthError = _describeOtpSendFailure(e);
+      _lastAuthError = describeOtpSendFailure(e);
       debugPrint('[AUTH] the code could not be sent: $e');
       return false;
     }
@@ -165,7 +165,12 @@ class AuthService {
   /// Send SMS auth hook. Until that is done, EVERY citizen sign-in fails here.
   /// Saying "try again" to that is telling someone to keep pulling a lever that
   /// is not connected to anything. See docs/PRODUCTION_DEPLOYMENT.md.
-  String _describeOtpSendFailure(Object e) {
+  /// Static, and public for the same reason `isDemoNumber` is: it is pure
+  /// string work that touches no storage and no session, and the messages it
+  /// produces are the only thing a citizen ever sees when a code does not
+  /// arrive. Constructing an AuthService to test them would mean supplying a
+  /// SecureStorageService this method never uses.
+  static String describeOtpSendFailure(Object e) {
     final text = e.toString().toLowerCase();
     if (text.contains('sms provider') ||
         text.contains('phone provider') ||
@@ -175,7 +180,29 @@ class AuthService {
       return 'SMS SIGN-IN IS NOT SWITCHED ON FOR THIS SERVICE YET. '
           'REPORT THIS TO HQ — IT IS NOT YOUR PHONE.';
     }
-    if (text.contains('rate') || text.contains('too many')) {
+    // The provider IS switched on and the Send SMS hook answered with a
+    // failure. These are the hook's own messages — "hook is not configured",
+    // "TERMII_API_KEY is not set", "Termii refused the message", "could not
+    // reach Termii" — matched on strings this repository controls rather than
+    // on Supabase's wording, which would be guessing at somebody else's
+    // contract.
+    //
+    // It needs its own branch because the fallback below says TRY AGAIN, and
+    // none of these clears by trying again. Telling a person to retry a
+    // deployment fault is the lever-not-connected-to-anything problem described
+    // above, which is the thing this whole method exists to avoid.
+    if (text.contains('hook') ||
+        text.contains('termii') ||
+        text.contains('not configured')) {
+      return 'SMS SIGN-IN IS MISCONFIGURED FOR THIS SERVICE. '
+          'REPORT THIS TO HQ — IT IS NOT YOUR PHONE.';
+    }
+    // 'rate limit', not 'rate': the bare substring also matches "generated",
+    // "accurate" and "operate", any of which would send somebody away to wait a
+    // minute for a fault that waiting does not fix.
+    if (text.contains('rate limit') ||
+        text.contains('rate_limit') ||
+        text.contains('too many')) {
       return 'TOO MANY CODES REQUESTED. WAIT A MINUTE AND TRY AGAIN.';
     }
     if (text.contains('socket') ||
