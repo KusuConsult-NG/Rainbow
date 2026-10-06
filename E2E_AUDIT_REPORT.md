@@ -1078,7 +1078,7 @@ injection point. Bundle these locally (`leaflet` is already a dependency).
     dashboard → dispatch → resolve (M-3).
 12. Repo cleanup: M-5 deploy script, M-6 committed `node_modules`, M-7 dead Firebase stack.
 
-## Status as of PR #63 (2026-10-06)
+## Status as of PR #64 (2026-10-06)
 
 > Was "as of PR #1" until 2026-10-06, fifty-three merges later. Four rows below
 > were materially wrong by then — C-3 read **NOT RUN** after it had been applied
@@ -1331,6 +1331,60 @@ that probe is for. `DROPPED_BY_LATER` now lives in one module, and the
 generator refuses to emit anything if an entry names a migration that does not
 exist or an object no migration creates — either of which would make the
 assertion vacuous while looking like a check.
+
+### T-22. A pasted script carried nothing saying which version it was
+
+Found on 2026-10-06 from a pasted verdict table whose only failing row read
+`*** FAIL *** | no policy grants anon or public anything` — naming no policy.
+That check has named the offender since PR #50; the paste came from a working
+copy predating it, which cost a round trip to establish what the output already
+knew. Verified on PostgreSQL 16.13: against a clean schema the current check
+returns `PASS`, and with the policy live as `TO PUBLIC` it returns
+`*** FAIL *** ... — telemetry.telemetry_select_geo_lga_scoped`.
+
+That is the second stale paste in two turns — T-21 was an inventory three
+migrations behind that reported "nothing to apply" — and in both cases nothing
+in the output identified its own version. The verdict table of
+`apply_all_migrations.sql`, `bootstrap_staging.sql` and
+`scripts/apply_in_parts/32_VERIFY.sql` now opens with a row that is not a check:
+
+```
+ PASS   | script version: 31 outstanding migrations, fingerprint f57e16f5be90
+```
+
+Compared against `python3 scripts/migration_sets.py --fingerprint`. Hashed over
+the migration file names and contents, never the clock — a timestamp would
+change on every regeneration and make CI's generated-file diff fail for no
+reason. Confirmed idempotent across a re-run of all six generators, and
+confirmed to move when a migration's bytes change.
+
+Four related gaps closed while doing it:
+
+* **The label guard covered one of three paste scripts.** `build_apply_all.py`
+  forbids `into`/`from`/`join`/`table` in a label because Supabase's editor
+  lints the buffer before running it and reads a relation name after those
+  keywords — a label saying "written into your own channel" made it warn about
+  a table called `your` and made another path fail `42P01`. My first draft of
+  the stamp said "generated from N migrations" and that guard caught it, which
+  is the guard working. `bootstrap_staging.sql` and `apply_in_parts/` are pasted
+  into the same editor and had no guard at all. It now lives in
+  `scripts/label_guard.py` and both builders call it.
+* **`scripts/apply_in_parts/` — 32 tracked files — was outside CI's
+  generated-file diff**, so a stale set of parts could be committed unnoticed.
+* **`verify_bootstrap.sh` printed a floor as a denominator.** Adding one check
+  made it report `20/19 PASS`, a ratio above one, which reads as a defect in the
+  thing being verified. The count is derived from the generated file now; 19
+  stays as a floor only.
+* **The deployment runbook's migration table stopped at `20261001000000`** while
+  thirty-one were outstanding — seventeen missing — and its prose still said
+  "Fourteen migrations ... a 25-row PASS/FAIL table ... 2,300 lines" for a file
+  of 5,935 lines ending in 34 rows. The seventeen rows are written, and
+  `scripts/check_runbook_covers_migrations.py` derives the coverage, the order
+  and the row-count claim from the migrations while leaving the descriptions
+  hand-written, because those say what breaks until each file runs and the SQL
+  does not. Five mutations were each caught: a dropped row, a stale row count,
+  two files transposed, an emptied description, and a listed file that does not
+  exist.
 
 ### Open, and not closeable from the repository
 

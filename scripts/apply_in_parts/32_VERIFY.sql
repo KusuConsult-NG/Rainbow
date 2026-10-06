@@ -75,6 +75,12 @@ END $precheck$;
 
 WITH checks(ord, name, ok) AS (
   VALUES
+    -- Not a check: the stamp that says WHICH version of this script produced
+    -- the output below. A pasted result used to carry nothing identifying its
+    -- version, so a run from a stale working copy read exactly like a current
+    -- one. Compare with: python3 scripts/migration_sets.py --fingerprint
+    (0, 'script version: 31 outstanding migrations, '
+        'fingerprint f57e16f5be90', true),
     (1, 'agency tables exist (4)',
         (SELECT count(*) = 4 FROM information_schema.tables
           WHERE table_schema = 'public'

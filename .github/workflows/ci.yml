@@ -725,7 +725,12 @@ jobs:
           python3 scripts/build_apply_in_parts.py
           python3 scripts/build_bootstrap.py
           python3 scripts/sync_migration_inventory.py
-          GEN="scripts/rls_production_dryrun.sql scripts/rls_inventory.sql scripts/apply_all_migrations.sql scripts/bootstrap_staging.sql scripts/which_migrations_are_applied.sql"
+          # scripts/apply_in_parts/ is 32 tracked files split out of
+          # apply_all_migrations.sql, and it was outside this gate: a stale set
+          # of parts could be committed and nothing would notice, which is the
+          # same gap that let the migration inventory go three migrations
+          # behind. The directory is listed, so git diff covers every part.
+          GEN="scripts/rls_production_dryrun.sql scripts/rls_inventory.sql scripts/apply_all_migrations.sql scripts/bootstrap_staging.sql scripts/which_migrations_are_applied.sql scripts/apply_in_parts"
           if ! git diff --quiet -- $GEN; then
             echo "::error::A generated SQL script is stale. Re-run the generators in this step."
             git diff -- $GEN | head -60
@@ -743,6 +748,17 @@ jobs:
       # names the fix.
       - name: Assert the migration inventory covers every migration
         run: python3 scripts/sync_migration_inventory.py --check
+
+      # docs/PRODUCTION_DEPLOYMENT.md's numbered table is the operator's map of
+      # the paste. It stopped at 20261001000000 while thirty-one migrations were
+      # outstanding — seventeen short — and still described "Fourteen
+      # migrations ... a 25-row PASS/FAIL table ... 2,300 lines" for a file of
+      # 5,935 lines ending in 34 rows. The descriptions stay hand-written
+      # because they say what BREAKS until each file runs, which the SQL does
+      # not; the COVERAGE is derived, so adding a migration fails here until the
+      # runbook describes it.
+      - name: Assert the deployment runbook describes every outstanding migration
+        run: python3 scripts/check_runbook_covers_migrations.py
 
       # A stale script and an INCOMPLETE one fail differently, and only the
       # first was checked. The two apply-scripts used to carry a hand-written

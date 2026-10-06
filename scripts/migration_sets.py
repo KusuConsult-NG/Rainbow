@@ -38,6 +38,8 @@ EXCLUDE, which is closed: no new file will ever join the already-applied era.
 """
 from __future__ import annotations
 
+import hashlib
+import os
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -227,9 +229,54 @@ def from_zero() -> list[str]:
     return ORIGINAL_SCHEMA + outstanding()
 
 
+def fingerprint(files: list[str]) -> str:
+    """A short content hash of a migration set, for stamping paste scripts.
+
+    Why this exists: twice an operator pasted a script from a working copy days
+    behind the repository, and both times the output was reassuring rather than
+    obviously stale.
+
+      * scripts/which_migrations_are_applied.sql ran three migrations out of
+        date and reported `every object in every migration exists — nothing to
+        apply` (T-21);
+      * apply_all_migrations.sql's anon/public check came back
+        `*** FAIL *** | no policy grants anon or public anything` naming no
+        policy at all — a version from before the check learned to name the
+        offender, which cost a round trip to find out which policy it meant.
+
+    Nothing in either output said which version produced it. Stamping the set's
+    fingerprint into the verdict table means any pasted result identifies itself,
+    and `--fingerprint` prints what the repository currently expects.
+
+    Hashed over the file NAMES and CONTENTS, never the clock: a timestamp would
+    change on every regeneration and make CI's generated-file diff fail for no
+    reason. Identical migrations give an identical stamp.
+    """
+    h = hashlib.sha256()
+    for name in files:
+        h.update(name.encode('utf-8'))
+        h.update(b'\0')
+        h.update((MIGRATIONS / name).read_bytes())
+        h.update(b'\0')
+    return h.hexdigest()[:12]
+
+
 if __name__ == '__main__':
     import sys
     if '--assert-coverage' in sys.argv:
         sys.exit(assert_coverage())
+    if '--fingerprint' in sys.argv:
+        # Two lines, so `| head -1` is a natural thing for an operator to type
+        # — and Python's default response to a closed pipe is a traceback on
+        # stderr after the line they asked for.
+        try:
+            print(f'outstanding ({len(outstanding())} migrations): '
+                  f'{fingerprint(outstanding())}')
+            print(f'from zero   ({len(from_zero())} migrations): '
+                  f'{fingerprint(from_zero())}')
+            sys.stdout.flush()
+        except BrokenPipeError:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        sys.exit(0)
     print(f'{len(all_files())} migration files; {len(outstanding())} outstanding; '
           f'{len(from_zero())} from zero')
