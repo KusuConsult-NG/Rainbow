@@ -63,6 +63,28 @@ jobs:
             echo "::error::A server-side secret is referenced by mobile code or its env template. Secrets belong behind an authenticated backend endpoint (H-3)."
             FAIL=1
           fi
+          # A SHARED CREDENTIAL in the bundled .env is the same defect as a
+          # server secret, and this gate missed it for a month because the list
+          # above is names rather than shapes.
+          #
+          # AGENT_DEFAULT_PASS was one password for every staff account, read by
+          # AuthService.signInWithAccessCode out of a `.env` that pubspec.yaml
+          # declares as a Flutter ASSET — so it shipped verbatim in the APK and
+          # extracted with `unzip`. The access code was only the email
+          # local-part, i.e. a username. Anybody with the APK and any officer's
+          # code could sign in as that officer.
+          # No exclusions. DURESS_PIN and SAFE_PIN were the two that used to need
+          # one and they are gone — replaced by per-user PINs in the
+          # `emergency_pins` table, which nobody can read. So the rule is
+          # absolute: no credential-shaped name in the mobile template at all.
+          if scan '[A-Z_]*(PASS|PASSWORD|PIN|SECRET|TOKEN)[A-Z_]*[[:space:]]*=' '.env.example'; then
+            echo "::error::.env.example declares a credential. The mobile .env is a Flutter asset: it ships inside the APK and extracts with unzip, so anything in it is published. Per-user credentials only, obtained at sign-in (H-3)."
+            FAIL=1
+          fi
+          if scan 'AGENT_DEFAULT_PASS|agentDefaultPass' 'lib/ .env.example'; then
+            echo "::error::AGENT_DEFAULT_PASS is back. It was one shared staff password published inside the APK; staff sign in with their own password via signInWithBadge."
+            FAIL=1
+          fi
           if [ "$FAIL" -ne 0 ]; then exit 1; fi
           echo "OK: no SMS provider credential is reachable from the handset."
 

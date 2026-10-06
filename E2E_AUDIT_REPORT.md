@@ -1210,6 +1210,69 @@ only thing that distinguishes a defect from a preference.
 | T-15 | **Adding a Dart comment above a ward's `id:` silently removed that ward from the generated tactical map.** The sync script's regex was not comment-tolerant and reported no error. | ✅ regexes fixed and a 207-ward count assertion added |
 | T-16 | **The demonstration seed used invented geography** — "Bokkos Central", "Mangu Central" — which exist in no INEC ward list and in neither of the project's own files. Rows that look right and behave wrong: unselectable by the ward filter, refused by RLS to the commander whose area they were in. | ✅ real INEC names; `sync_tactical_map.py --check` fails CI on any place the seed names that the map lacks. The three genuinely orphaned wards (BWALL, DAMWAI, KADUNU) were resolved against INEC sources, not guessed |
 
+### T-20. One published password for every staff account — LIVE, not legacy
+
+Found on 2026-10-06 while answering "rotate the access codes". It is the most
+serious thing in this document that was still live when it was found, and it is
+in the **current Supabase system**, not the orphaned Firebase stack.
+
+`AuthService.signInWithAccessCode(code)` did this:
+
+```dart
+final agentPass = dotenv.env['AGENT_DEFAULT_PASS'] ?? '';
+return signInWithBadge('$code@operationrainbow.plateau.gov.ng', agentPass);
+```
+
+Three facts, each individually known and documented, which had not been put
+together:
+
+1. `pubspec.yaml` declares `.env` as a **Flutter asset** (line 80). H-3 already
+   established what that means: the file ships verbatim inside the APK and
+   extracts with `unzip`.
+2. `.env` carried `AGENT_DEFAULT_PASS` — **one password, shared by every staff
+   account**.
+3. The "access code" was only the email local-part. It is a **username**.
+
+So the access code was never the secret. Anyone with the APK — which is to say
+anyone who has been given the app — could read the shared password, and sign in
+as any officer whose badge or code they knew or could guess. `login_screen.dart`
+routed every non-phone input straight down that path, and **there was no
+password field on the login screen at all**.
+
+This is why "rotate the access codes" does not fix it. Rotating them changes the
+usernames and leaves the one password readable in every copy of the app ever
+distributed.
+
+**Fixed:**
+
+* `signInWithAccessCode` is deleted. Staff authenticate with
+  `signInWithBadge(badgeOrEmail, password)` and their own password.
+* The login screen has a password step — a non-phone identifier now reveals an
+  obscured field and signs in only when it is filled. 7 widget tests, with the
+  first one mutation-checked: restoring the old one-shared-password behaviour
+  fails it.
+* `AGENT_DEFAULT_PASS` is gone from `app_config.dart` and from `.env.example`,
+  and so is `DEMO_CITIZEN_PASS`.
+* A failed sign-in says `BADGE OR PASSWORD NOT RECOGNISED` rather than naming
+  which half was wrong — otherwise the screen is a roster of who works here.
+
+**The CI gate that existed for this class did not cover it.** The H-3 guard
+scanned `lib/` and `.env.example` for a *list of names* —
+`TERMII_API_KEY|CLOUDINARY_API_SECRET|HMAC_SECRET` — so a shared credential
+under a different name passed. It now fails on any name in the mobile template
+matching `PASS|PASSWORD|PIN|SECRET|TOKEN`, with **no exclusions**: the two that
+used to need one, `DURESS_PIN` and `SAFE_PIN`, are already gone, replaced by the
+per-user `emergency_pins` table. Naming the shapes instead of the names is the
+difference between a gate and a list.
+
+**Still to do, and it needs doing:** every existing staff password must be
+rotated, because the one they shared is in every copy of the app.
+`scripts/rotate_staff_passwords.js` does it through the Supabase admin API —
+dry-run by default, 24 random bytes per account, touches only profiles whose
+role is staff, and continues past a failure while naming every account it could
+not rotate, because stopping early leaves the rest on the published password.
+Officers then need their new passwords out of band.
+
 ### Open, and not closeable from the repository
 
 | # | Finding | Status |

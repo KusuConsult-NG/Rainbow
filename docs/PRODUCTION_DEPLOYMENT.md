@@ -342,6 +342,37 @@ whoever owns the Termii account before launch, not after the first bill:
 * a rate limit, in Supabase, so a script cannot drain the account by asking for
   codes for a list of numbers.
 
+### Staff passwords must be rotated before launch — one was published
+
+`AGENT_DEFAULT_PASS` was a single password shared by every staff account, read
+by the app out of a `.env` that `pubspec.yaml` declares as a Flutter **asset** —
+so it shipped verbatim inside the APK and extracts with `unzip`. The "access
+code" officers typed was only the email local-part, i.e. a username. Anyone with
+the app could sign in as any officer whose badge they knew or could guess.
+
+The code path is gone and CI fails if it returns, but **that does not change the
+passwords already set on those accounts**:
+
+```bash
+# Dry run first. Nothing is written.
+NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  node scripts/rotate_staff_passwords.js
+
+# Then, with the roster in front of you:
+NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  node scripts/rotate_staff_passwords.js --commit --out passwords.txt
+```
+
+24 random bytes per account, different for every one — the defect was a single
+shared value. It touches only profiles whose role is staff, and if an account
+fails it continues and names it, because stopping early leaves the rest on the
+published password.
+
+Do it with the roster to hand, not at the end of a shift: until an officer has
+their new password they cannot sign in, which is the correct state for an
+account whose password was published, but it is not a surprise to spring on a
+night shift. Hand them out of band and delete `passwords.txt`.
+
 ### The demo account must not ship
 
 `DEMO_CITIZEN_EMAIL` and `DEMO_CITIZEN_PASS` in `.env` are a **real account with

@@ -68,18 +68,30 @@ class AuthService {
     }
   }
 
-  Future<bool> signInWithAccessCode(String code) async {
-    final cleanCode = code.trim().toLowerCase();
-    final agentPass = dotenv.env['AGENT_DEFAULT_PASS'] ?? '';
-    if (agentPass.isEmpty) {
-      _lastAuthError = 'AGENT_DEFAULT_PASS not configured in .env';
-      return false;
-    }
-    if (cleanCode.contains('@')) {
-      return signInWithBadge(cleanCode, agentPass);
-    }
-    return signInWithBadge('$cleanCode@operationrainbow.plateau.gov.ng', agentPass);
-  }
+  /// REMOVED: signInWithAccessCode(String code).
+  ///
+  /// It read `AGENT_DEFAULT_PASS` out of the bundled `.env` and signed in as
+  /// `<code>@operationrainbow.plateau.gov.ng` with it. Three facts together
+  /// made that a published credential for every staff account at once:
+  ///
+  ///   * `pubspec.yaml` declares `.env` as a Flutter ASSET, so it ships
+  ///     verbatim inside the APK and extracts with `unzip` (E2E_AUDIT_REPORT.md
+  ///     H-3);
+  ///   * every officer shared the one password in it;
+  ///   * the "access code" was only the email local-part — a USERNAME, not a
+  ///     secret.
+  ///
+  /// So rotating the access codes would have changed the usernames while the
+  /// single password stayed readable in the shipped binary. The code was never
+  /// the secret; the password was, and it was published.
+  ///
+  /// Staff sign in through `signInWithBadge(badgeOrEmail, password)` with their
+  /// own password. `login_screen.dart` asks for one instead of signing in on a
+  /// code alone.
+  ///
+  /// Every existing staff password must be rotated server-side, because the one
+  /// they shared is in every copy of the app ever shipped:
+  /// `node scripts/rotate_staff_passwords.js`.
 
   /// The demo number that skips the SMS, and which does NOT exist in a
   /// released build.
