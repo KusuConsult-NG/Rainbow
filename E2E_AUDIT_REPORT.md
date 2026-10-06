@@ -13,7 +13,7 @@ and writable by anyone on the internet, with no credentials required. C-5 is not
 security hole but a safety-of-life one: an SOS with no GPS fix is reported to
 dispatch at a fabricated location. C-6 was found last and is the only one that
 cannot be settled from inside this repository: the abandoned Firebase backend
-exposes two **unauthenticated** public HTTP endpoints running with admin
+exposes **unauthenticated** public HTTP endpoints running with admin
 privileges, one of which injects `DURESS`-flagged emergencies. Whether that is a
 live hole or a non-issue depends entirely on whether those functions are still
 deployed — a two-minute check that needs the Firebase console.
@@ -454,7 +454,7 @@ fabrication this finding is about. That needs a real gazetteer.
 *real* coordinates through a column-name mismatch — see the offline queue fix
 and `test/offline_queue_test.dart`.
 
-### C-6. Two unauthenticated Cloud Functions can inject false emergencies — **if they are still deployed**
+### C-6. A whole second backend may still be deployed — unauthenticated, admin-privileged, and writing to a database nothing reads
 
 **Files:** `functions/index.js:582` (`smsWebhook`), `functions/index.js:958` (`seedMockData`),
 `.firebaserc` (project `rainbow-97f1e`)
@@ -503,14 +503,45 @@ and dispatch, both attacker-controlled, with no credential.
 It also carries the C-5 defect independently: `parseFloat(...) || 9.9167` /
 `|| 8.8917`. The Jos fallback again, in a third layer nobody was looking at.
 
-**The part that makes this a live finding rather than a cleanup task.**
+**Deleting `functions/` does not undeploy anything.**
 
-Deleting `functions/` **does not undeploy anything.** If these were ever pushed
-to `rainbow-97f1e`, they are serving right now, and the watchdog is running every
-five minutes — a second unmonitored backend with admin rights, invisible because
-everyone reasonably believes "the app runs on Supabase". `pubspec.yaml` has no
-Firebase dependency and no file under `lib/` or `hq-dashboard-next/src/` imports
-Firebase, which is exactly why nobody would think to look.
+If these were ever pushed to `rainbow-97f1e` they are serving right now, and the
+watchdog is running every five minutes. `pubspec.yaml` has no Firebase
+dependency and no file under `lib/` or `hq-dashboard-next/src/` imports Firebase,
+which is exactly why nobody would think to look.
+
+**Correction, 2026-10-06 — the severity above is overstated, and the reason
+matters.** This section describes `seedMockData` as "a one-request
+false-emergency injector" and `smsWebhook` as giving "attribution and dispatch,
+both attacker-controlled". Both write to **Firestore**. A sweep of the shipping
+code on 2026-10-06 found **thirteen** mentions of Firebase or Firestore across
+all of `lib/` and `hq-dashboard-next/src/`, every one of them a comment, and
+**no `import` of Firebase anywhere**. Neither manifest declares the dependency.
+
+So nothing reads the database these functions write to. Fabricated alerts would
+land in a collection no app and no console queries: no responder is dispatched,
+no operator sees them, nothing appears on the board. The same applies to
+`validateAgentAccessCode` — it mints accounts in *Firebase Auth*, which nothing
+authenticates against any more. The attacker-controlled dispatch described above
+dispatches into a void.
+
+What is still genuinely true, and is the actual reason to finish this:
+
+* **Cost.** Publicly invokable endpoints in a billed project, plus a `pubsub`
+  watchdog on `every 5 minutes` running forever. `seedMockData` writes ten
+  documents per request to anyone who asks.
+* **Data at rest.** If these functions ever ran against real traffic, Firestore
+  holds a copy of citizen reports — locations, and possibly duress events —
+  under rules `admin.initializeApp()` bypasses entirely. That exposure does not
+  depend on anyone reading it.
+* **It is unmonitored.** Nobody is watching logs for a backend everyone believes
+  is gone.
+
+That makes this **cleanup with a privacy and billing tail, not a live hole in
+the running system**. It was ranked alongside the published staff password
+(T-20) and the SMS blocker (T-18); it does not belong there. One
+`gcloud functions list` and, if anything is listed, one `gcloud functions
+delete` closes it whenever someone is next at a terminal.
 
 H-3 closed the loop on this. `HmacService.generateSignature` had zero callers on
 the device; `functions/index.js:442` is the **server half of that same scheme**,
@@ -996,7 +1027,7 @@ it validates nothing about the current system.
 authoritative. Ambiguity here caused the split-brain security model (Firestore rules are
 carefully written while the live Supabase RLS is wide open).
 
-> **⚠️ Escalated — see [C-6](#c-6-two-unauthenticated-cloud-functions-can-inject-false-emergencies--if-they-are-still-deployed).**
+> **⚠️ Escalated — see [C-6](#c-6-a-whole-second-backend-may-still-be-deployed--unauthenticated-admin-privileged-and-writing-to-a-database-nothing-reads).**
 > Calling this "dead code" was wrong. It is dead *in this repository*; whether it is
 > dead *in production* is a separate question nobody has asked. `functions/index.js`
 > exposes two unauthenticated public HTTP endpoints running with admin privileges,
@@ -1078,7 +1109,7 @@ injection point. Bundle these locally (`leaflet` is already a dependency).
     dashboard → dispatch → resolve (M-3).
 12. Repo cleanup: M-5 deploy script, M-6 committed `node_modules`, M-7 dead Firebase stack.
 
-## Status as of PR #68 (2026-10-06)
+## Status as of PR #69 (2026-10-06)
 
 > Was "as of PR #1" until 2026-10-06, fifty-three merges later. Four rows below
 > were materially wrong by then — C-3 read **NOT RUN** after it had been applied
@@ -1170,7 +1201,7 @@ The original claim that the mobile suite could not be run is **superseded**.
 | — | notification tap navigated nowhere | ✅ **fixed 2026-09-02** — see the post-audit findings; was dead in three independent ways |
 | M-7 | dead Firebase stack | ⏳ **partially closed.** The repository no longer carries any Firebase config: `firebase.json`, `.firebaserc` and `apphosting.yaml` were removed with the move to Railway (PR #53), the `firebase` npm dependency is gone, and `functions/` is not in the tree. The **deployment** is still unconfirmed — `firebase functions:list --project rainbow-97f1e` is the one command that settles it. Do not `curl` `seedMockData`: the probe writes ten fabricated emergencies |
 | — | CSP `script-src` carried `'unsafe-inline'` | ✅ **fixed 2026-09-02** — nonce-based via `proxy.ts`; injected script now provably blocked, and the authenticated map page finally exercised under the policy |
-| **C-6** | **unauthenticated Cloud Functions** | 🔴 **still unknown, and the scope was wrong: FOUR unauthenticated endpoints, not two.** `b2df3fd` hardened the two that had been enumerated and never touched `validateAgentAccessCode` — an unauthenticated staff-account factory that returns working credentials and derives the password from the access code — or `triggerSLASweep`. Deployment state remains unverifiable from here (egress 403, no credentials). See the 2026-10-06 enumeration. |
+| **C-6** | **unauthenticated Cloud Functions** | 🔴 **still unknown, and the scope was wrong: FOUR unauthenticated endpoints, not two.** `b2df3fd` hardened the two that had been enumerated and never touched `validateAgentAccessCode` — an unauthenticated staff-account factory that returns working credentials and derives the password from the access code — or `triggerSLASweep`. Deployment state remains unverifiable from here: no Google credential, neither CLI installed, and the environment's network policy denies `us-central1-rainbow-97f1e.cloudfunctions.net` (403 on CONNECT), which blocks even the unauthenticated existence probe. **Downgraded to 🟠 on 2026-10-06**: every one of these writes to Firestore, and nothing in the shipping code reads it, so the fabricated dispatch lands in a void. See the correction under C-6. |
 | — | per-user server-verified duress PIN | ✅ **fixed 2026-09-02** — `emergency_pins` table nobody can read, bcrypt via pgcrypto, lockout after 5, `resolve_emergency` RPC records who resolved; no PIN material on the device at all |
 
 ## What the next fifty merges found
@@ -1561,12 +1592,58 @@ thirteen response shapes with no network, and asserts directly that the two
 401s do not collapse into one verdict — the distinction the whole diagnostic
 rests on. It runs in CI as an ordinary gate.
 
+### T-26. C-6 was ranked as a live security hole. It writes to a database nothing reads.
+
+Found on 2026-10-06 by being asked the obvious question — *why are we still
+checking Firebase when we are on Supabase?* — which this report had never
+answered properly.
+
+The factual half of C-6 is right: deleting `functions/` does not undeploy
+anything, and if those 26 functions were ever pushed to `rainbow-97f1e` they are
+serving now with admin credentials. That remains unverified, and the reason is
+now precise: no Google credential in the audit container, neither CLI installed,
+and the environment's network policy denies
+`us-central1-rainbow-97f1e.cloudfunctions.net` with a 403 on CONNECT — which
+blocks even the unauthenticated existence probe that needs no credentials at all.
+
+**The severity was wrong.** C-6 described `seedMockData` as "a one-request
+false-emergency injector" and `smsWebhook` as giving "attribution and dispatch,
+both attacker-controlled". Both write to **Firestore**. Sweeping the shipping
+code found **thirteen** mentions of Firebase or Firestore across all of `lib/`
+and `hq-dashboard-next/src/` — every one a comment — and **no `import` of
+Firebase anywhere**; neither manifest declares the dependency.
+
+Nothing reads that database. Fabricated alerts land in a collection no app and
+no console queries: no responder is dispatched, no operator sees them, nothing
+reaches the board. `validateAgentAccessCode` mints accounts in Firebase Auth,
+which nothing authenticates against. The attacker-controlled dispatch dispatches
+into a void.
+
+What survives the correction, and is the real reason to finish it: **cost**
+(publicly invokable endpoints in a billed project, plus a `pubsub` watchdog on
+`every 5 minutes` forever), **data at rest** (if those functions ever ran against
+real traffic, Firestore holds citizen reports, locations and possibly duress
+events under rules `admin.initializeApp()` bypasses — an exposure that does not
+depend on anyone reading it), and the fact that nobody watches logs for a
+backend everyone believes is gone.
+
+So it is cleanup with a privacy and billing tail, not a live hole in the running
+system. It had been sitting beside the published staff password (T-20) and the
+SMS blocker (T-18), which are different in kind. C-6's heading, its summary rows
+and the status table now say so, and the anchor link that pointed at the old
+heading was repaired.
+
+The lesson is narrower than "check severity". Every fact in C-6 was correct and
+independently verified; the error was in never asking what *reads* the thing
+being written to. A finding about a write path is only as severe as its readers,
+and nothing in the original analysis looked for them.
+
 ### Open, and not closeable from the repository
 
 | # | Finding | Status |
 |---|---|---|
 | T-17 | **GitHub Actions has not run since 2026-09-29.** Every job in every run completes in about two seconds with `runner_id: 0`, no runner name and no logs — nothing picks the jobs up. Not a failing test: an Actions or billing condition on the account. | 🔴 **open, and now load-bearing.** Moving to Railway removed the one structural protection App Hosting gave (a secret marked RUNTIME-only, absent during `next build`). The CI job that greps `.next/static` for key material is what remains between this deployment and C-1 recurring, and it is switched off. Fifty merges landed with every gate unexercised, which is how T-10, T-11, T-12 and T-13 survived |
-| C-6 | unauthenticated Cloud Functions, if still deployed | 🔴 unchanged — `firebase functions:list --project rainbow-97f1e` settles it |
+| C-6 | an abandoned second backend, if still deployed | 🟠 unchanged, and **downgraded 2026-10-06**: it writes to Firestore, which nothing in the shipping code reads (13 mentions across `lib/` and `hq-dashboard-next/src/`, all comments, no imports). Cleanup with a billing and data-at-rest tail, not a live hole. `gcloud functions list --project rainbow-97f1e` settles it |
 | T-18 | **Citizen sign-in has no SMS provider.** `signInWithOtp` is refused outright unless the Supabase project has one, so every citizen sign-in fails. | 🔴 open — a blocker, not a checklist item. `docs/PRODUCTION_DEPLOYMENT.md` §2b |
 | T-19 | **One staff account exists**, so dispatch has nobody to send. The nine unacknowledged incidents on the live board are an empty roster, not a broken pipeline. | 🔴 open |
 
