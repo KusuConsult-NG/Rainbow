@@ -78,15 +78,44 @@ EXPECTED_POLICY_COUNTS = {
 # Era objects that are allowed to exist on production and not in the schema this
 # repository builds. Each needs a reason, and "it is only on production" is not
 # one.
+# Era objects a later migration removes with a plpgsql `EXECUTE format(...)`
+# rather than literal SQL, so the regexes above cannot see them. Listed here
+# because the alternative is a regex that parses plpgsql, which would be a worse
+# bet than a short explicit list next to the migration that owns it.
+#
+# 20261018000000 drops all seven: the five generated mirrors of geo_*, which hold
+# no information of their own, and the two v5 functions whose only callers were
+# the v5-era policies that 20260813 drops by name.
+DROPPED_BY_LATER: dict[str, str] = {
+    'column:alerts.lga': '20261018000000',
+    'column:alerts.ward': '20261018000000',
+    'column:alerts.pu': '20261018000000',
+    'column:profiles.lga': '20261018000000',
+    'column:profiles.ward': '20261018000000',
+    'function:is_hq_or_admin': '20261018000000',
+    'function:is_responder': '20261018000000',
+}
+
+# Each entry must name a migration that actually contains the drop, or this list
+# becomes a way to silence the check by assertion.
+def _verify_dropped_by_later() -> list[str]:
+    problems = []
+    for key, mig in DROPPED_BY_LATER.items():
+        kind, obj = key.split(':', 1)
+        matches = sorted(MIGRATIONS.glob(f'{mig}*.sql'))
+        if not matches:
+            problems.append(f'{key} names migration {mig}, which does not exist')
+            continue
+        body = matches[0].read_text(encoding='utf-8')
+        needle = obj.split('.')[-1]
+        if needle not in body:
+            problems.append(
+                f'{key} is listed as dropped by {mig}, but {matches[0].name} '
+                f'does not mention {needle}')
+    return problems
+
+
 KNOWN_DIFFERENCES: dict[str, str] = {
-    'function:is_hq_or_admin':
-        'v5. Referenced by nothing: its only callers were the v5-era policies, '
-        'and 20260813 drops all of those by name. Dead on production. Adding a '
-        'dead SECURITY DEFINER function to the canonical schema to match a dead '
-        'one is propagation, not convergence. Safe to DROP on production once '
-        'somebody can say nothing outside this repo calls it.',
-    'function:is_responder':
-        'v5. Same as is_hq_or_admin — no callers survive 20260813.',
 }
 
 
@@ -160,7 +189,28 @@ def repo_objects() -> tuple[dict[str, set[str]], set[str]]:
             out['policy'].add(f'{table.lower()}.{policy}')
         for m in re.finditer(
                 r'(?is)DROP\s+POLICY\s+(?:IF\s+EXISTS\s+)?"?([^"\s;]+)"?', sql):
-            dropped.add(m.group(1))
+            dropped.add(f'policy:{m.group(1)}')
+        # A later migration may also REMOVE an era object, which is a decision
+        # and not a divergence. 20261018000000 drops the five generated mirrors
+        # and the two uncalled v5 functions; without this the check would demand
+        # them back and the only way to satisfy it would be to undo the drop.
+        #
+        # ALTER TABLE ... DROP COLUMN is matched per statement so the table name
+        # comes from the same statement, and the drops inside 20261018's plpgsql
+        # are EXECUTE format(...) with %I rather than literal SQL, so they are
+        # matched from the VALUES list instead — see DROPPED_BY_LATER below.
+        for stmt in sql.split(';'):
+            a = re.search(r'(?is)\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?'
+                          r'(?:public\.)?"?(\w+)"?', stmt)
+            if a:
+                for c in re.finditer(
+                        r'(?is)\bDROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?"?(\w+)"?',
+                        stmt):
+                    dropped.add(f'column:{a.group(1).lower()}.{c.group(1).lower()}')
+        for m in re.finditer(
+                r'(?is)DROP\s+FUNCTION\s+(?:IF\s+EXISTS\s+)?(?:public\.)?"?(\w+)"?',
+                sql):
+            dropped.add(f'function:{m.group(1).lower()}')
         for stmt in sql.split(';'):
             a = re.search(r'(?is)\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?'
                           r'(?:public\.)?"?(\w+)"?', stmt)
@@ -181,17 +231,27 @@ def main() -> int:
     diverged: list[str] = []
     for kind in ('table', 'column', 'function', 'policy'):
         for obj in sorted(era[kind] - repo[kind]):
-            # A policy a later migration drops by name is gone on both sides.
-            if kind == 'policy' and obj.split('.', 1)[1] in dropped:
+            # An era object a later migration drops by name is gone on both
+            # sides, so it is not a divergence.
+            if kind == 'policy' and f'policy:{obj.split(".", 1)[1]}' in dropped:
+                continue
+            if f'{kind}:{obj}' in dropped or f'{kind}:{obj}' in DROPPED_BY_LATER:
                 continue
             if f'{kind}:{obj}' in KNOWN_DIFFERENCES:
                 continue
             diverged.append(f'{kind} {obj}')
 
+    bad_list = _verify_dropped_by_later()
+
     stale = [k for k in KNOWN_DIFFERENCES
              if k.split(':', 1)[0] in era
              and k.split(':', 1)[1] in repo[k.split(':', 1)[0]]]
 
+    # Printed with their own wording. An earlier version appended these to
+    # `diverged`, so a DROPPED_BY_LATER error came out glued to the
+    # "exists on production" template and read as two sentences run together.
+    for b in bad_list:
+        print(f'✗ {b}', file=sys.stderr)
     for d in diverged:
         print(f'✗ {d} exists on production and in no migration this repository '
               f'applies. Add it to 20261017000000, or record it in '
@@ -200,8 +260,9 @@ def main() -> int:
         print(f'✗ {s} is listed as a known difference but the repository now '
               f'creates it — remove the entry.', file=sys.stderr)
 
-    if diverged or stale:
-        print(f'\n{len(diverged) + len(stale)} divergence(s).', file=sys.stderr)
+    if diverged or stale or bad_list:
+        print(f'\n{len(diverged) + len(stale) + len(bad_list)} problem(s).',
+              file=sys.stderr)
         return 1
 
     counted = sum(len(v) for v in era.values())

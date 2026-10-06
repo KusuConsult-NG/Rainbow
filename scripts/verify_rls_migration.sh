@@ -416,6 +416,13 @@ echo "▶ Applying 20261017000000_the_hand_applied_era_is_in_the_history.sql"
 psql_run "-f $PGROOT/20261017000000_the_hand_applied_era_is_in_the_history.sql" >/dev/null
 psql_run "-f $PGROOT/20261017000000_the_hand_applied_era_is_in_the_history.sql" >/dev/null
 
+# And then converge DOWNWARD, as asked: the five generated mirrors hold no
+# information of their own and the two v5 functions have no callers. Every drop
+# is RESTRICT, so a dependent makes this fail rather than be silently deleted.
+echo "▶ Applying 20261018000000_the_mirrors_and_two_dead_functions_are_gone.sql"
+psql_run "-f $PGROOT/20261018000000_the_mirrors_and_two_dead_functions_are_gone.sql" >/dev/null
+psql_run "-f $PGROOT/20261018000000_the_mirrors_and_two_dead_functions_are_gone.sql" >/dev/null
+
 echo "▶ Asserting the schema now behaves the way production's does"
 CONV_OUT=$(psql_run "-f $PGROOT/schema_convergence_behaviour_test.sql" 2>&1) && CONV_RC=0 || CONV_RC=$?
 echo "$CONV_OUT" | grep -E "PASS|FAIL|NOTE|ERROR" || true

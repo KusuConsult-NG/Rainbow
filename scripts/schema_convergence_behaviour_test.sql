@@ -73,11 +73,35 @@ BEGIN
   RAISE NOTICE 'PASS: updated_at is stamped by the database, not by the caller';
 END $$;
 
--- ── 2. The generated mirrors track geo_* ────────────────────────────────────
+-- ── 2. The generated mirrors are GONE ───────────────────────────────────────
 --
--- Not "the column exists": that it is GENERATED and follows its source. A plain
--- TEXT column of the same name would satisfy a catalogue check and then drift
--- the first time geo_lga changed.
+-- This section used to assert the opposite: that alerts.lga/ward/pu exist,
+-- mirror geo_*, and are unwritable. 20261018000000 drops them — converging
+-- DOWNWARD on the decision that geo_lga/geo_ward/geo_pu are the only place the
+-- geography should live, which is what every app already reads.
+--
+-- Asserted as absence rather than deleted, because a mirror quietly coming back
+-- is exactly the shape of the problem these sections were written for.
+DO $$
+DECLARE still_here TEXT;
+BEGIN
+  SELECT string_agg(c.relname || '.' || a.attname, ', ') INTO still_here
+    FROM pg_attribute a
+    JOIN pg_class c     ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public'
+     AND ((c.relname = 'alerts'   AND a.attname IN ('lga', 'ward', 'pu'))
+       OR (c.relname = 'profiles' AND a.attname IN ('lga', 'ward')))
+     AND a.attnum > 0 AND NOT a.attisdropped;
+
+  IF still_here IS NOT NULL THEN
+    RAISE EXCEPTION 'FAIL: the generated mirrors are back (%). 20261018000000 '
+                    'drops them; something re-added them after it ran.', still_here;
+  END IF;
+  RAISE NOTICE 'PASS: no generated mirrors on alerts or profiles';
+END $$;
+
+-- The geography itself must of course still be there and still readable.
 DO $$
 DECLARE got TEXT;
 BEGIN
@@ -85,91 +109,80 @@ BEGIN
      SET geo_lga = 'JOS NORTH', geo_ward = 'ABBA NA SHEHU', geo_pu = 'BAUCHI ROAD I'
    WHERE id = 'eeee0000-0000-4000-8000-00000000e001';
 
-  SELECT lga || '/' || ward || '/' || pu INTO got FROM public.alerts
+  SELECT geo_lga || '/' || geo_ward || '/' || geo_pu INTO got FROM public.alerts
    WHERE id = 'eeee0000-0000-4000-8000-00000000e001';
   IF got <> 'JOS NORTH/ABBA NA SHEHU/BAUCHI ROAD I' THEN
-    RAISE EXCEPTION 'FAIL: the mirrors do not follow geo_* — got %', got;
+    RAISE EXCEPTION 'FAIL: the geo_* columns do not hold what was written — %', got;
   END IF;
-
-  -- And they must be unwritable, which is what GENERATED buys over a trigger.
-  BEGIN
-    EXECUTE 'UPDATE public.alerts SET lga = ''LAGOS'' WHERE id = '
-            '''eeee0000-0000-4000-8000-00000000e001''';
-    RAISE EXCEPTION 'FAIL: alerts.lga was writable, so it can contradict geo_lga';
-  EXCEPTION
-    WHEN generated_always THEN NULL;
-    WHEN others THEN
-      IF SQLSTATE <> '428C9' AND SQLERRM NOT ILIKE '%generated%' THEN RAISE; END IF;
-  END;
-  RAISE NOTICE 'PASS: alerts.lga/ward/pu mirror geo_* and cannot be written';
+  RAISE NOTICE 'PASS: geo_lga/geo_ward/geo_pu are the single place the geography lives';
 END $$;
 
--- ── 3. `category` is no longer the first generated column ───────────────────
+-- ── 3. `category` is the only generated column on alerts ────────────────────
 --
--- An INSERT with no column list is refused at the FIRST generated column in
--- ordinal order. Production reported `lga`; a repo-built database reported
--- `category`; the same statement, two different diagnoses.
+-- Which settles the 428C9 ordinal question by removing it rather than by
+-- matching it. With the mirrors gone there is exactly one generated column on
+-- alerts, so the error names `category` on production and here — not because the
+-- ordinals were made to agree, which is impossible (attribute numbers are
+-- assigned when a column is added), but because there is nothing else it could
+-- name.
 --
--- This asserts the SET, and prints the ORDER without asserting it, because the
--- order does not converge and cannot: attribute numbers are assigned when a
--- column is added, so the mirrors land after `category` here (33) and before it
--- on production (28–30). Asserting `lga` here would fail; asserting `category`
--- would encode a difference from production as if it were correct.
---
--- The defect itself is closed elsewhere, by
+-- The defect is still closed primarily by
 -- scripts/check_generated_column_inserts.py refusing a column-list-less insert
--- outright — so the error is unreachable and the name it would report is moot.
+-- outright. This is the belt to that braces.
 DO $$
-DECLARE first_generated TEXT;
+DECLARE gen TEXT;
 BEGIN
-  SELECT a.attname INTO first_generated
+  SELECT string_agg(a.attname, ', ' ORDER BY a.attnum) INTO gen
     FROM pg_attribute a
     JOIN pg_class c     ON c.oid = a.attrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
    WHERE n.nspname = 'public' AND c.relname = 'alerts'
-     AND a.attgenerated <> '' AND a.attnum > 0 AND NOT a.attisdropped
-   ORDER BY a.attnum
-   LIMIT 1;
+     AND a.attgenerated <> '' AND a.attnum > 0 AND NOT a.attisdropped;
 
-  IF first_generated IS NULL THEN
-    RAISE EXCEPTION 'FAIL: alerts has no generated column at all';
+  IF gen <> 'category' THEN
+    RAISE EXCEPTION 'FAIL: expected `category` to be the only generated column '
+                    'on alerts, found: %', coalesce(gen, '(none)');
   END IF;
-  RAISE NOTICE 'NOTE: the first generated column on alerts is %, which is the '
-               'name a 428C9 error will report here and on production',
-               first_generated;
-
-  -- Four, not one: category plus the three mirrors.
-  IF (SELECT count(*) FROM pg_attribute a
-        JOIN pg_class c     ON c.oid = a.attrelid
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-       WHERE n.nspname = 'public' AND c.relname = 'alerts'
-         AND a.attgenerated <> '' AND a.attnum > 0 AND NOT a.attisdropped) <> 4 THEN
-    RAISE EXCEPTION 'FAIL: expected 4 generated columns on alerts '
-                    '(category, lga, ward, pu)';
-  END IF;
-  RAISE NOTICE 'PASS: alerts carries all four generated columns production has';
+  RAISE NOTICE 'PASS: category is the only generated column on alerts';
 END $$;
 
--- ── 4. profiles.lga / ward / sector_id exist ────────────────────────────────
+-- ── 4. The two uncalled functions are gone ──────────────────────────────────
 --
--- The console carried a comment saying these are not columns, and that
--- PostgREST rejected a query naming them. They exist on production; the
--- conclusion was checked against the repository instead of the database.
+-- is_hq_or_admin() and is_responder() came from v5 and lost their only callers
+-- when 20260813 dropped the v5-era policies. 20261017000000 recorded them as
+-- known differences rather than copying dead SECURITY DEFINER functions into the
+-- canonical schema; 20261018000000 removes them from production instead.
 DO $$
-DECLARE missing TEXT;
+DECLARE still_here TEXT;
 BEGIN
-  SELECT string_agg(want, ', ') INTO missing
-    FROM (VALUES ('lga'), ('ward'), ('sector_id')) AS v(want)
-   WHERE NOT EXISTS (
-     SELECT 1 FROM pg_attribute a
-       JOIN pg_class c     ON c.oid = a.attrelid
-       JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public' AND c.relname = 'profiles'
-        AND a.attname = v.want AND a.attnum > 0 AND NOT a.attisdropped);
-  IF missing IS NOT NULL THEN
-    RAISE EXCEPTION 'FAIL: profiles is missing %', missing;
+  SELECT string_agg(fn, ', ') INTO still_here
+    FROM (VALUES ('is_hq_or_admin'), ('is_responder')) AS v(fn)
+   WHERE to_regprocedure('public.' || fn || '()') IS NOT NULL;
+
+  IF still_here IS NOT NULL THEN
+    RAISE EXCEPTION 'FAIL: % still exists', still_here;
   END IF;
-  RAISE NOTICE 'PASS: profiles.lga, ward and sector_id exist, as on production';
+  RAISE NOTICE 'PASS: is_hq_or_admin() and is_responder() are gone';
+END $$;
+
+-- ── 4b. profiles keeps the columns that are NOT mirrors ─────────────────────
+--
+-- sector_id is a plain column from the same era, and the console carried a
+-- comment claiming it is not a column at all. It stays: unlike the mirrors it
+-- can hold a value nothing else holds.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_attribute a
+      JOIN pg_class c     ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relname = 'profiles'
+       AND a.attname = 'sector_id' AND a.attnum > 0 AND NOT a.attisdropped
+  ) THEN
+    RAISE EXCEPTION 'FAIL: profiles.sector_id was dropped — only the generated '
+                    'mirrors were meant to go';
+  END IF;
+  RAISE NOTICE 'PASS: profiles.sector_id survives; only the mirrors were dropped';
 END $$;
 
 -- ── 5. normalise_lga compares the way production compares ───────────────────
