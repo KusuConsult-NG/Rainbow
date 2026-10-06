@@ -621,6 +621,105 @@ the finding. `firebase functions:delete` closes the finding.
 
 ## HIGH
 
+
+#### Enumeration, 2026-10-06 — it is FOUR unauthenticated endpoints, not two, and the C-6 fix closed the wrong two
+
+The deployment state is still unknown; both routes above are still closed
+(re-checked today: the proxy answers `403` to the `CONNECT` for
+`cloudfunctions.net`, and there is no Firebase or gcloud CLI and no credential
+in the container). What changed is the source analysis. `functions/index.js` was
+recovered from git — it is deleted from the working tree but intact at
+`c66fc0f^` — and every export enumerated rather than only the two that were
+originally read.
+
+**25 exports.** 3 `https.onRequest`, 15 `https.onCall`, 2 `pubsub.schedule`,
+4 `firestore` triggers, 1 `tasks.taskQueue`. The original write-up looked at
+`onRequest` only. That was the mistake: **a callable is also a public HTTPS
+endpoint.** `functions.https.onCall` does not authenticate anything by itself —
+it decodes a Firebase Auth token *if one is sent* and leaves `context.auth`
+undefined if not. Unless the handler checks it, the function is open.
+
+Four do not check it:
+
+| export | kind | what it does with no credential |
+|---|---|---|
+| `smsWebhook` | onRequest | hardened by `b2df3fd` — now requires `X-Rainbow-Gateway-Auth` |
+| `seedMockData` | onRequest | hardened by `b2df3fd` — now requires `RAINBOW_ALLOW_SEED=true` **and** `X-Rainbow-Seed-Auth` |
+| **`validateAgentAccessCode`** | **onCall** | **never hardened — see below** |
+| **`triggerSLASweep`** | **onCall** | **never hardened** — iterates every alert with status OPEN or ACTIVE and escalates each one a tier. Anyone who can reach the endpoint can force a mass escalation of every open incident in the state, notifying responders for all of them. Its default thresholds are 2/4/6 minutes, commented "for rapid testing" |
+
+`b2df3fd` is the commit titled *"C-6: make the legacy Firebase endpoints fail
+closed, and prove it"*. It touched `smsWebhook` and `seedMockData` and **zero
+lines** of the other two — verified by diff. The remediation was scoped to the
+finding instead of to the class, and the finding had enumerated one trigger type.
+
+#### `validateAgentAccessCode` is an unauthenticated staff-account factory
+
+This is the worst thing in the file and it was not in the original write-up.
+Unauthenticated — `context` is never consulted. Given an access code it:
+
+* creates or updates a Firebase Auth user `agent_<badgeId>`;
+* sets its password to **`${accessCode.toUpperCase()}_sec_${new Date().getFullYear()}`**;
+* sets custom claims `role`, `lga`, `ward`, `pu`, `badgeId` and **`isStaff: true`**;
+* writes a `users` document with `isVerified: true`;
+* and **returns the email and password to the caller** —
+  `return { success: true, fallbackAuth: true, email, password }`.
+
+Three consequences, none of which need a credential:
+
+1. **The password is derivable without calling anything.** Anyone who sees an
+   access code — on paper, in a screenshot, forwarded in a chat — can compute
+   `CODE_sec_2026` and sign in as that agent. The code *is* the password.
+2. **It is account takeover, repeatedly.** For a uid that already exists it calls
+   `updateUser(uid, { password })`, so holding an agent's code lets you reset
+   that agent's password at will, including after they change it.
+3. **It is a brute-force oracle.** Invalid, already-used and expired codes each
+   throw a *different* message, with no `context.auth`, no App Check and no rate
+   limit — so the endpoint grades guesses for you.
+
+`createAlert`, by contrast, calls `verifyRequestAuthenticity(data, context)` and
+then checks `context.auth` explicitly. The protection existed in the file; these
+four exports simply never got it.
+
+#### What to run, and what the answer means
+
+Still two minutes with credentials. The full export list is needed because the
+original one named eight:
+
+```bash
+firebase functions:list --project rainbow-97f1e
+# or, without the Firebase CLI:
+gcloud functions list --project rainbow-97f1e
+```
+
+Being *listed* is not the same as being *reachable*. This is the check that
+distinguishes them — a Cloud Function is public only if `allUsers` holds the
+invoker role:
+
+```bash
+gcloud functions get-iam-policy validateAgentAccessCode \
+  --project rainbow-97f1e --region us-central1
+# allUsers + roles/cloudfunctions.invoker  =  reachable by anyone on the internet
+```
+
+And if anything is listed, the deployed code is **whatever was last pushed**,
+which may predate `b2df3fd` — hardening the source no more changes a deployment
+than deleting it does. Assume the unhardened `smsWebhook` and `seedMockData`
+until the deployed version is known.
+
+The remedy is deletion, not hardening: there is no `functions/` directory left
+to patch, and nothing in either app has called any of this since the move to
+Supabase.
+
+```bash
+firebase functions:delete smsWebhook seedMockData validateAgentAccessCode \
+  triggerSLASweep escalationWatchdog --project rainbow-97f1e
+```
+
+`escalationWatchdog` is in that list because it is the `every 5 minutes`
+schedule: it is not reachable from outside, but it is the one that keeps running
+on its own and writing to a datastore nothing backs.
+
 ### H-1. Production build fails — release blocker
 
 `next build` exits 1 on a clean checkout:
@@ -1071,7 +1170,7 @@ The original claim that the mobile suite could not be run is **superseded**.
 | — | notification tap navigated nowhere | ✅ **fixed 2026-09-02** — see the post-audit findings; was dead in three independent ways |
 | M-7 | dead Firebase stack | ⏳ **partially closed.** The repository no longer carries any Firebase config: `firebase.json`, `.firebaserc` and `apphosting.yaml` were removed with the move to Railway (PR #53), the `firebase` npm dependency is gone, and `functions/` is not in the tree. The **deployment** is still unconfirmed — `firebase functions:list --project rainbow-97f1e` is the one command that settles it. Do not `curl` `seedMockData`: the probe writes ten fabricated emergencies |
 | — | CSP `script-src` carried `'unsafe-inline'` | ✅ **fixed 2026-09-02** — nonce-based via `proxy.ts`; injected script now provably blocked, and the authenticated map page finally exercised under the policy |
-| **C-6** | **unauthenticated Cloud Functions** | 🔴 **still unknown — both probe routes blocked from the audit container; stack confirmed orphaned and the guards undeployable. See the investigation note.** |
+| **C-6** | **unauthenticated Cloud Functions** | 🔴 **still unknown, and the scope was wrong: FOUR unauthenticated endpoints, not two.** `b2df3fd` hardened the two that had been enumerated and never touched `validateAgentAccessCode` — an unauthenticated staff-account factory that returns working credentials and derives the password from the access code — or `triggerSLASweep`. Deployment state remains unverifiable from here (egress 403, no credentials). See the 2026-10-06 enumeration. |
 | — | per-user server-verified duress PIN | ✅ **fixed 2026-09-02** — `emergency_pins` table nobody can read, bcrypt via pgcrypto, lockout after 5, `resolve_emergency` RPC records who resolved; no PIN material on the device at all |
 
 ## What the next fifty merges found
