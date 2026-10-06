@@ -124,7 +124,25 @@ select table_name from information_schema.tables
 
 Paste the whole of `supabase/migrations/20260813000000_rls_least_privilege.sql`
 and run it. It carries its own `BEGIN` … `COMMIT`: it applies completely or not
-at all. A few `NOTICE: skipping …: table not present` lines are expected.
+at all. It raises a few `NOTICE: skipping …: table not present` lines, which are
+expected — but **you will not see them in the Supabase SQL editor**, which
+discards `NOTICE` output and reports only `Success. No rows returned`. That is
+the same reason the dry run above has to signal its verdict by raising an error.
+Run it through `psql` if you want to read the notices.
+
+**A migration whose only output is a notice therefore looks identical to one
+that did nothing.** Three of them are exactly that shape — `20261016000000`,
+`20261017000000` and `20261018000000` — so there is a read-only query that
+answers the question in rows instead:
+
+```
+scripts/did_the_convergence_land.sql
+```
+
+One statement, three verdicts, safe on production. The 34-row verdict table
+cannot replace it: not one of its checks looks for the ABSENCE of the five
+generated mirrors or the two dropped functions, and absence is the only evidence
+a drop-only migration can leave.
 
 Then verify, read-only:
 

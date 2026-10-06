@@ -1078,7 +1078,7 @@ injection point. Bundle these locally (`leaflet` is already a dependency).
     dashboard → dispatch → resolve (M-3).
 12. Repo cleanup: M-5 deploy script, M-6 committed `node_modules`, M-7 dead Firebase stack.
 
-## Status as of PR #65 (2026-10-06)
+## Status as of PR #67 (2026-10-06)
 
 > Was "as of PR #1" until 2026-10-06, fifty-three merges later. Four rows below
 > were materially wrong by then — C-3 read **NOT RUN** after it had been applied
@@ -1448,6 +1448,57 @@ it cannot tell you — whether the object is in your database, which is
 Both verdict tables in that paste were also still the 33-row version, with no
 `script version:` row and a FAIL naming no policy — so T-22's stamp would have
 flagged them as stale before any of this was read.
+
+### T-24. Three migrations applied to production and reported nothing an operator could read
+
+Found on 2026-10-06, immediately after `20261016000000`, `20261017000000` and
+`20261018000000` were applied to production. All three report what they did with
+`RAISE NOTICE`. The Supabase SQL editor discards `NOTICE` output, so the
+operator saw three identical `Success. No rows returned` results and had no
+evidence any of them had done anything.
+
+`docs/APPLYING_THE_MIGRATIONS.md` had already recorded this — the RLS dry run
+signals its verdict by raising an error **because** the editor hides notices —
+and I handed over these three telling the operator which notices to watch for.
+The same document then contradicted itself twenty lines later by calling a few
+`NOTICE: skipping …` lines "expected". Both are fixed: the limitation is stated
+where it bites, with `psql` named as the way to read notices.
+
+The 34-row verdict table only half-closes the gap:
+
+* it **does** prove `20261016` landed — the telemetry policy was the only thing
+  failing its anon/public check, which turned PASS;
+* it **cannot see `20261018` at all**. Not one of its 34 checks looks for the
+  absence of the five generated mirrors or the two dropped functions, and
+  absence is the only evidence a drop-only migration can leave;
+* `20261017` is a no-op on a database that already holds the era objects, which
+  production does, so nothing observable changes there by design.
+
+`scripts/did_the_convergence_land.sql` answers it in rows: one statement, three
+verdicts plus the generated columns `alerts` now has, which is the column a
+428C9 error would name on that database. Each failing row says what the
+consequence is rather than only that a check failed.
+
+It is proven able to fail, inside the resume rehearsal added to
+`verify_apply_in_parts.sh` the same day (PR #66): asked before the three parts
+are applied it must report `20261016` and `20261018` as not applied, and after
+them all three as applied.
+
+**Building that exposed a defect in my own rehearsal.** The first version of the
+check passed trivially: the fixture replays parts 1–28, the mirrors are created
+by part 30, so "all 5 generated mirrors are gone" was already true before
+`20261018` ran — true of a database that never had them. The assertion was
+therefore testing a condition that could not fail. Production *does* carry those
+mirrors, from the hand-applied era, at ordinals 28–30 on `alerts` — which is why
+a 428C9 there names `lga` where the harness names `category`. The fixture now
+plants the full era residue (five generated mirrors and both v5 functions), and
+the before-state correctly reports `20261018` as unapplied. I fixed the fixture
+rather than weakening the assertion, because the fixture was the thing that was
+wrong.
+
+The honest limit, stated in the file: the `20261017` row cannot distinguish
+"applied" from "was already true", because on production it is a no-op. Nothing
+can, from the schema alone.
 
 ### Open, and not closeable from the repository
 
