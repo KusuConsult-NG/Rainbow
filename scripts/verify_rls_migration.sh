@@ -28,6 +28,9 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # accident — `INSERT INTO public.alerts SELECT * FROM <copy>` — never mentions
 # the generated column at all, so the error arrives from a statement that looks
 # unrelated to it.
+echo "▶ Checking nothing from the hand-applied era is production-only"
+python3 "$REPO/scripts/check_schema_convergence.py"
+
 echo "▶ Checking no INSERT targets a generated column"
 python3 "$REPO/scripts/check_generated_column_inserts.py"
 
@@ -71,6 +74,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/ussd_filing_behaviour_test.sql \
    "$REPO"/scripts/ai_reports_behaviour_test.sql \
    "$REPO"/scripts/oversight_behaviour_test.sql \
+   "$REPO"/scripts/schema_convergence_behaviour_test.sql \
    "$REPO"/scripts/why_is_the_board_empty.sql \
    "$REPO"/scripts/why_did_my_insert_fail.sql \
    "$REPO"/scripts/which_migrations_are_applied.sql \
@@ -403,6 +407,21 @@ TELEM_ROLES=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U post
   echo "✗ telemetry_select_geo_lga_scoped is $TELEM_ROLES, expected {authenticated}"
   exit 1; }
 echo "  PASS  telemetry_select_geo_lga_scoped is scoped TO authenticated"
+
+# The v2–v6 era was applied to production by hand and cannot be replayed from
+# zero, so the live database had objects no database this repository could build.
+# That difference decided a 428C9 column name, hid a TO PUBLIC policy from a
+# passing assertion, and put a wrong conclusion into a code comment.
+echo "▶ Applying 20261017000000_the_hand_applied_era_is_in_the_history.sql"
+psql_run "-f $PGROOT/20261017000000_the_hand_applied_era_is_in_the_history.sql" >/dev/null
+psql_run "-f $PGROOT/20261017000000_the_hand_applied_era_is_in_the_history.sql" >/dev/null
+
+echo "▶ Asserting the schema now behaves the way production's does"
+CONV_OUT=$(psql_run "-f $PGROOT/schema_convergence_behaviour_test.sql" 2>&1) && CONV_RC=0 || CONV_RC=$?
+echo "$CONV_OUT" | grep -E "PASS|FAIL|NOTE|ERROR" || true
+if [ "$CONV_RC" -ne 0 ]; then
+  echo "$CONV_OUT"; echo "✗ schema convergence assertions failed"; exit 1
+fi
 
 echo "▶ Asserting a complaint about an officer does not reach that officer"
 OVS_OUT=$(psql_run "-f $PGROOT/oversight_behaviour_test.sql" 2>&1) && OVS_RC=0 || OVS_RC=$?
