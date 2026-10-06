@@ -24,6 +24,7 @@ const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
 const { DOMAIN } = require('./fixtures');
+const { signInMobile } = require('./mobile_login');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -179,22 +180,10 @@ const DRAWER = [
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(
-      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 120000 });
-    await sleep(6000);
-    await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
-    await sleep(1600);
-    await page.evaluate(() => { const el = document.querySelector('input'); if (el) el.focus(); });
-    await page.keyboard.type(`${role}@${DOMAIN}`, { delay: 20 });
-    await sleep(400);
-    await page.evaluate(() => {
-      for (const n of document.querySelectorAll('flt-semantics[role="button"]')) {
-        const t = `${n.textContent || ''} ${n.getAttribute('aria-label') || ''}`;
-        if (/authorize access/i.test(t)) { n.click(); return; }
-      }
-    });
-    await sleep(8500);
-    return page.evaluate(() => window.location.hash);
+    // The flow itself lives in mobile_login.js. It used to live here, in six
+    // copies across six harnesses, and when the login screen grew a password
+    // step not one of them was updated. See that file.
+    return signInMobile(page, role);
   }
 
   /** Press the control whose accessible name matches, and say what changed. */
@@ -354,8 +343,37 @@ const DRAWER = [
     for (const item of DRAWER) {
       await page.evaluate(() => { window.location.hash = '#/agent-dashboard'; });
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 60000 });
+      // This wait is where CI run #396 died: 60 seconds exceeded, reported as a
+      // bare puppeteer stack at a line number, with nothing saying which tier
+      // or which drawer item was in flight. The loop reboots the whole
+      // CanvasKit app once per item per tier — tens of cold boots in a run —
+      // so a slow one is the likeliest cause, but the message made that
+      // impossible to tell from a genuine hang.
+      //
+      // One retry, and a failure that names the tier, the item and how long it
+      // waited. The retry is NOT a verified fix: CI cannot run while the
+      // account's Actions billing is unresolved, so this has not been confirmed
+      // against it. It is here so the next real run says what happened instead
+      // of pointing at a line number.
+      const bootedAt = Date.now();
+      const bootWait = () => page.waitForFunction(
+        () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
+        { timeout: 60000 });
+      try {
+        await bootWait();
+      } catch {
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        try {
+          await bootWait();
+        } catch {
+          throw new Error(
+            `${tier.banner}: the app did not boot after reloading for drawer `
+            + `item "${item.label}" — waited `
+            + `${Math.round((Date.now() - bootedAt) / 1000)}s across two `
+            + 'attempts. Every drawer item reboots the app from scratch, so '
+            + 'this is where a slow cold start shows up first.');
+        }
+      }
       await sleep(5000);
       await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
       await sleep(1500);

@@ -20,6 +20,7 @@ const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
 const { DOMAIN, PASSWORD, byKey } = require('./fixtures');
+const { signInMobile } = require('./mobile_login');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -270,25 +271,10 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(
-      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 120000 });
-    await sleep(6000);
-    await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
-    await sleep(1600);
-    if (role === 'citizen') {
-      // The citizen's own number — the demo bypass is compiled out of release
-      // builds, so this is the real sign-in path. See fake_supabase.js.
-      await typeInto(byKey('citizen').phone.replace('+234', '0'));
-      await tap('authorize access', { role: 'button' });
-      await sleep(2600);
-      await typeInto('123456');
-      await tap('verify otp', { role: 'button' });
-    } else {
-      await typeInto(`${role}@${DOMAIN}`);
-      await tap('authorize access', { role: 'button' });
-    }
-    await sleep(6500);
-    return page.evaluate(() => window.location.hash);
+    // One shared flow — see mobile_login.js. The staff branch here typed the
+    // badge, tapped AUTHORIZE ACCESS and returned the hash, which stopped being
+    // a sign-in when the screen grew a password step.
+    return signInMobile(page, role);
   }
 
   // =========================================================================

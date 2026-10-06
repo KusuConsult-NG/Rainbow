@@ -18,7 +18,7 @@ concurrency:
 jobs:
   mobile:
     name: Flutter — analyze & test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -319,7 +319,7 @@ jobs:
 
   web:
     name: HQ dashboard — typecheck, lint, build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: hq-dashboard-next
@@ -663,7 +663,7 @@ jobs:
 
   tracked-secrets:
     name: Repo — no credential material in tracked files
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Added after an audit pass found `android/GoogleService-Info1.plist` still
     # tracked, carrying a Firebase API key, MONTHS after H-6 supposedly removed
     # the committed secrets. The H-6 fix deleted one plist at the repo root and
@@ -728,9 +728,19 @@ jobs:
       - name: Assert every configuration key has a documented consequence
         run: python3 scripts/what_is_not_configured.py --check
 
+      # Six harnesses under scripts/local_e2e/ carried their own copy of "type
+      # the identifier, tap AUTHORIZE ACCESS, read the hash". When the login
+      # screen grew a password step, none was updated: tier_controls.js
+      # returned the login screen's hash as though it had signed in and died 60
+      # seconds later in an unrelated wait, and chat_thread.js — which signs in
+      # as `unit` and `hq` — never got past the login screen and still reported
+      # PASS. A harness that passes without signing in tests nothing.
+      - name: Assert the mobile sign-in flow exists in one place
+        run: python3 scripts/check_one_mobile_login.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # scripts/rls_production_dryrun.sql is GENERATED from the migration, with the
     # migration's own BEGIN/COMMIT stripped. A stale copy is dangerous rather than
     # merely wrong: it is pasted straight into a production SQL editor, and a
@@ -842,7 +852,7 @@ jobs:
 
   apply-all:
     name: Supabase — the one-paste apply script actually applies
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # scripts/apply_all_migrations.sql is what somebody pastes into a production
     # SQL editor, so "it contains the right text" is the wrong test. This runs
     # the whole buffer top to bottom against a production-shaped database, twice
@@ -867,7 +877,7 @@ jobs:
 
   bootstrap:
     name: Supabase — the staging bootstrap builds a correct project from zero
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # scripts/bootstrap_staging.sql is pasted into a brand-new Supabase project,
     # and unlike apply_all it starts from the ORIGINAL schema — whose policies
     # are open to anon until a later migration removes them. So three things
@@ -887,7 +897,7 @@ jobs:
 
   rls-migration:
     name: Supabase — RLS migration correctness
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Needs no credentials and touches no real data: it replays the migration
     # history into a throwaway PostgreSQL and asserts behaviour. This is the
     # gate that says the migration is CORRECT; the probe below says a live
@@ -962,7 +972,7 @@ jobs:
 
   sms-end-to-end:
     name: Supabase — the SMS channel, from the issued key to the decoded alert
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Every piece of the SMS channel was tested against material a test invented:
     # the Dart encoder seals with a key it made up, the TypeScript decoder reads
     # vectors from a fixture, and the SQL test checks that register_sms_device()
@@ -998,7 +1008,7 @@ jobs:
 
   dryrun-speaks:
     name: Supabase — the production dry run actually reports something
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The dry run is the ONLY way to find out whether the RLS migration is safe
     # to apply to the real database, because that database holds policies created
     # by hand in the dashboard which no replica can reproduce.
@@ -1025,7 +1035,7 @@ jobs:
 
   console-e2e:
     name: HQ console — every screen and every control, in a real browser
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -1065,7 +1075,7 @@ jobs:
 
   mobile-screens:
     name: Mobile app — every screen and every control, at phone size
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -1242,7 +1252,7 @@ jobs:
 
   rls:
     name: Supabase — RLS anon-access probe
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Only runs where the staging credentials are available. Fails the build if
     # anon can read or write any sensitive table (finding C-3).
     if: ${{ github.event_name == 'workflow_dispatch' }}

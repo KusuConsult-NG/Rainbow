@@ -28,6 +28,7 @@ const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
 const { DOMAIN, byKey } = require('./fixtures');
+const { signInMobile } = require('./mobile_login');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -239,13 +240,8 @@ async function logMark() {
   await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
   await sleep(2000);
 
-  // The real citizen sign-in — see the note in mobile_capture.js.
-  await typeInto(byKey('citizen').phone.replace('+234', '0'));
-  await tap('authorize access', { role: 'button' });
-  await sleep(2500);
-  await typeInto('123456');
-  await tap('verify otp', { role: 'button' });
-  await sleep(6000);
+  // The real citizen sign-in — one shared flow, see mobile_login.js.
+  await signInMobile(page, 'citizen');
 
   const home = await page.evaluate(() => window.location.hash);
   check('signed in as the seeded citizen', /home/.test(home), `on ${home}`);
@@ -569,10 +565,9 @@ async function logMark() {
     afterSignOut || '(no hash)',
   );
 
-  await typeInto(byKey('citizen').phone.replace('+234', '0'));
-  await tap('authorize access', { role: 'button', settle: 2800 });
-  await typeInto('123456');
-  await tap('verify otp', { role: 'button', settle: 6000 });
+  // Signing back in after the lock screen, through the same shared flow. It
+  // throws if it does not actually land, which is what the check below reads.
+  try { await signInMobile(page, 'citizen'); } catch { /* asserted below */ }
   await sleep(3000);
 
   // A completed phone+OTP sign-in is more proof than the lock screen asks for,
@@ -971,10 +966,16 @@ async function logMark() {
   await sleep(6000);
   await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
   await sleep(1500);
-  // Staff sign in with an access code, not a phone: one step, no OTP.
-  await typeInto(`responder@${DOMAIN}`);
-  await tap('authorize access', { role: 'button', settle: 6500 });
-  const responderLanded = await page.evaluate(() => window.location.hash);
+  // Staff sign in with a badge AND a password, in TWO steps. This comment used
+  // to say "one step, no OTP", and it was true until the password step landed:
+  // the access code was only ever the email local-part, and the one password
+  // every officer shared was readable in the APK (T-20). See mobile_login.js.
+  let responderLanded = '';
+  try {
+    responderLanded = await signInMobile(page, 'responder');
+  } catch (err) {
+    responderLanded = `(${err.message})`;
+  }
   check(
     'the responder signs in and lands on the agent dashboard',
     /agent-dashboard/.test(responderLanded),

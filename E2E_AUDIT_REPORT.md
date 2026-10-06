@@ -1109,7 +1109,7 @@ injection point. Bundle these locally (`leaflet` is already a dependency).
     dashboard → dispatch → resolve (M-3).
 12. Repo cleanup: M-5 deploy script, M-6 committed `node_modules`, M-7 dead Firebase stack.
 
-## Status as of PR #69 (2026-10-06)
+## Status as of PR #71 (2026-10-06)
 
 > Was "as of PR #1" until 2026-10-06, fifty-three merges later. Four rows below
 > were materially wrong by then — C-3 read **NOT RUN** after it had been applied
@@ -1638,11 +1638,84 @@ independently verified; the error was in never asking what *reads* the thing
 being written to. A finding about a write path is only as severe as its readers,
 and nothing in the original analysis looked for them.
 
+### T-27. CI was not dead since September. It broke mid-session, and I kept saying otherwise.
+
+T-17 said GitHub Actions had not run since 2026-09-29, and I repeated it in
+every summary for the rest of the session: "every gate is exercised only by my
+local runs". It was wrong, and one API call would have shown it.
+
+**What is actually true.** Run **#392 passed at 2026-10-06 16:30**, on this
+branch. Runs have been created constantly since — including from my own pushes —
+and from **#417 (22:24)** they fail instantly with no runner assigned,
+`runner_id: 0`, zero steps, about two seconds. The reason is one annotation I
+never fetched, verbatim from GitHub:
+
+> The job was not started because recent account payments have failed or your
+> spending limit needs to be increased. Please check the 'Billing & plans'
+> section in your settings
+
+The repository is private and owned by a user account, so Actions minutes are
+metered. Nothing in the repository can fix that. I had described the symptom
+correctly — instant completion, no logs — then asserted a cause and a date
+without checking either. "No logs" was also misleading: annotations are not
+logs, and the annotation carried the answer.
+
+**A second wrong conclusion on the way.** Run #396 (16:42) was the last to reach
+real runners: ten of its eleven jobs passed, and one failed for a genuine reason
+— the mobile UI job, at `Press every control, as every tier`. I attributed that
+to my own login change in PR #61. The timestamps refuse it: the password step
+landed at **21:42**, five hours later. #396 failed on something else, in the
+drawer loop, and I had reached for the most recent thing I had touched.
+
+**What the investigation did find, which is real.** Six harnesses under
+`scripts/local_e2e/` carried their own copy of "type the identifier, tap
+AUTHORIZE ACCESS, read the hash". Five typed a staff badge. After 21:42 none
+could sign in, because `AUTHORIZE ACCESS` now only reveals a password field and
+its own label becomes `SIGN IN`. The two shapes of failure are the point:
+
+* `tier_controls.js` returned the login screen's hash as though it had signed
+  in, carried on, and died sixty seconds later inside an unrelated
+  `waitForFunction(... canvas ...)`;
+* `chat_thread.js` signs in as `unit` and `hq`, never got past the login screen,
+  and **still reported PASS**. A harness that passes without signing in is
+  testing nothing, and nothing would have told us.
+
+The flow now lives once, in `scripts/local_e2e/mobile_login.js`, and it asserts
+each step: that AUTHORIZE ACCESS revealed the password field, that a field
+existed to type into, that SIGN IN was there afterwards, and that the resulting
+route is not the login screen. Every failure names its step.
+`scripts/check_one_mobile_login.py` fails if a harness grows its own copy again,
+scoped to the Flutter harnesses — its first version flagged `capture.js` and
+`interact.js`, which drive the Next.js console, a different login screen.
+
+**Verified by running it against a build of the current app.** That also meant
+finding that this container's egress blocks `gstatic.com`, so a release build
+cannot fetch CanvasKit: `--no-web-resources-cdn`, which the CI build step
+already passes, is the answer — and I spent three rebuilds guessing at
+dart-defines before reading that step.
+
+| harness | result |
+|---|---|
+| `tier_controls.js` | **83 PASS, 0 FAIL** — all four tiers sign in |
+| `chat_thread.js` | **17 PASS, 0 FAIL** — and now genuinely signs in first |
+| `chain_lifecycle.js` | **51 PASS, 0 FAIL** — it never reached a runner in #396 |
+
+The drawer loop that actually failed #396 reboots the whole CanvasKit app once
+per item per tier. It now retries a slow boot once and, if it still fails, names
+the tier, the item and the seconds waited instead of pointing at a line number.
+That retry carried the local run from a hang to 83/83, which is suggestive but
+**not proof** for CI, which cannot run until the billing is resolved.
+
+Also pinned `runs-on` from `ubuntu-latest` to `ubuntu-24.04` across all twelve
+jobs: the runner notice in these same annotations says `ubuntu-latest` migrates
+to Ubuntu 26 on 2026-10-19, and a silent environment change under a suite nobody
+can currently run is the last thing this project needs.
+
 ### Open, and not closeable from the repository
 
 | # | Finding | Status |
 |---|---|---|
-| T-17 | **GitHub Actions has not run since 2026-09-29.** Every job in every run completes in about two seconds with `runner_id: 0`, no runner name and no logs — nothing picks the jobs up. Not a failing test: an Actions or billing condition on the account. | 🔴 **open, and now load-bearing.** Moving to Railway removed the one structural protection App Hosting gave (a secret marked RUNTIME-only, absent during `next build`). The CI job that greps `.next/static` for key material is what remains between this deployment and C-1 recurring, and it is switched off. Fifty merges landed with every gate unexercised, which is how T-10, T-11, T-12 and T-13 survived |
+| T-17 | **GitHub Actions jobs are refused before a runner is assigned — an account billing condition.** (This row said "has not run since 2026-09-29"; wrong — see T-27. Run #392 passed at 16:30 on 2026-10-06, and runs have been created continuously since.) Every job in every run completes in about two seconds with `runner_id: 0`, no runner name and no logs — nothing picks the jobs up. Not a failing test: an Actions or billing condition on the account. | 🔴 **open, and now load-bearing.** Moving to Railway removed the one structural protection App Hosting gave (a secret marked RUNTIME-only, absent during `next build`). The CI job that greps `.next/static` for key material is what remains between this deployment and C-1 recurring, and it is switched off. Fifty merges landed with every gate unexercised, which is how T-10, T-11, T-12 and T-13 survived |
 | C-6 | an abandoned second backend, if still deployed | 🟠 unchanged, and **downgraded 2026-10-06**: it writes to Firestore, which nothing in the shipping code reads (13 mentions across `lib/` and `hq-dashboard-next/src/`, all comments, no imports). Cleanup with a billing and data-at-rest tail, not a live hole. `gcloud functions list --project rainbow-97f1e` settles it |
 | T-18 | **Citizen sign-in has no SMS provider.** `signInWithOtp` is refused outright unless the Supabase project has one, so every citizen sign-in fails. | 🔴 open — a blocker, not a checklist item. `docs/PRODUCTION_DEPLOYMENT.md` §2b |
 | T-19 | **One staff account exists**, so dispatch has nobody to send. The nine unacknowledged incidents on the live board are an empty roster, not a broken pipeline. | 🔴 open |

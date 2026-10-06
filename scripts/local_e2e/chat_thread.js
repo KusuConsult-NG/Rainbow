@@ -23,6 +23,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
+const { signInMobile } = require('./mobile_login');
 const { DOMAIN, PEOPLE } = require('./fixtures');
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -110,22 +111,10 @@ const HQ_SAYS = 'Acknowledged. Holding the ward team until you confirm.';
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(
-      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 120000 });
-    await sleep(6000);
-    await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
-    await sleep(1600);
-    await page.evaluate(() => { const el = document.querySelector('input'); if (el) el.focus(); });
-    await page.keyboard.type(`${role}@${DOMAIN}`, { delay: 20 });
-    await sleep(400);
-    await page.evaluate(() => {
-      for (const n of document.querySelectorAll('flt-semantics[role="button"]')) {
-        const t = `${n.textContent || ''} ${n.getAttribute('aria-label') || ''}`;
-        if (/authorize access/i.test(t)) { n.click(); return; }
-      }
-    });
-    await sleep(8500);
-    return page.evaluate(() => window.location.hash);
+    // One shared flow — see mobile_login.js. This harness signs in as `unit`
+    // and `hq`, both STAFF, and its own copy never learned the password step:
+    // it never got past the login screen and still reported PASS.
+    return signInMobile(page, role);
   }
 
   const waitForFeed = async ({ timeout = 40000 } = {}) => {
