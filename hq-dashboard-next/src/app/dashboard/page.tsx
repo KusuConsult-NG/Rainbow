@@ -904,12 +904,23 @@ export default function DashboardPage() {
     const fetchProfiles = async () => {
       const { data } = await supabase
         .from('profiles')
-        // This asked for `lga, ward, sector_id`. None of the three is a column
-        // — the schema has `geo_lga`/`geo_ward`/`geo_pu`, and `sector_id`
-        // appears nowhere else in either app — so PostgREST rejected the query
-        // in full and `usersMap` stayed empty. Nothing errored: every officer
-        // then rendered as `TACTICAL SQUAD #A1B2C3` and every reporter as
-        // "Registered Citizen / No Phone Registered".
+        // This asked for `lga, ward, sector_id`, and `usersMap` stayed empty —
+        // every officer rendered as `TACTICAL SQUAD #A1B2C3` and every reporter
+        // as "Registered Citizen / No Phone Registered", with nothing errored.
+        //
+        // CORRECTION. This comment used to say none of those three is a column.
+        // All three are, on production: 20260721000000_v2_agency_tables adds
+        // `profiles.sector_id`, plus `lga` and `ward` as generated mirrors of
+        // `geo_lga`/`geo_ward`. That file was applied to the live database by
+        // hand, and no database this repository could build had those columns —
+        // so the claim was true of the repository and false of the database it
+        // talks to, and the reason the query failed is not recorded anywhere.
+        //
+        // 20261017000000 brings that era into the migration history, so the two
+        // schemas agree and `scripts/check_schema_convergence.py` keeps them
+        // agreeing. Selecting the real `geo_*` names is still right — they are
+        // what the rest of this file reads — but the diagnosis above was reached
+        // by checking the migrations instead of the database.
         //
         // It was also missing the fields its consumers actually read.
         // `badge_number` is what formatOfficerBadge() and

@@ -979,7 +979,14 @@ injection point. Bundle these locally (`leaflet` is already a dependency).
     dashboard → dispatch → resolve (M-3).
 12. Repo cleanup: M-5 deploy script, M-6 committed `node_modules`, M-7 dead Firebase stack.
 
-## Status as of PR #1
+## Status as of PR #54 (2026-10-06)
+
+> Was "as of PR #1" until 2026-10-06, fifty-three merges later. Four rows below
+> were materially wrong by then — C-3 read **NOT RUN** after it had been applied
+> to production, and C-4 and H-7 read as waiting on it. Anyone reading this
+> document for the system's security posture got a picture a month out of date,
+> which is worse than no document. The newer findings are in
+> [What the next fifty merges found](#what-the-next-fifty-merges-found).
 
 Everything below was executed, not asserted. Flutter 3.47.0 — the version CI
 uses — is installed locally, so the Dart results are reproducible with
@@ -990,8 +997,10 @@ uses — is installed locally, so the Dart results are reproducible with
 | Check | Result |
 |---|---|
 | `flutter analyze` | ✅ **0 errors, 0 warnings** (was 39 errors / 54 warnings) — **warnings now blocking**; 9 info rules promoted to `error`; 551 infos remain behind three documented exemptions |
-| `flutter test` | ✅ **77 passed, 0 skipped** (was 51 passed, 1 skipped) |
+| `flutter test` | ✅ **571 passed** as of 2026-10-06 (was 77 at PR #1; 51 passed / 1 skipped at audit) |
 | `tsc --noEmit` | ✅ pass |
+| `vitest` (HQ console) | ✅ **654 passed**, 5 skipped — the console had no test suite at audit |
+| SQL behaviour harness | ✅ green against real PostgreSQL 16 — `scripts/verify_rls_migration.sh`, 238+ assertions |
 | `eslint` | ✅ **0 errors**, 15 warnings (was 21 errors) |
 | `next build` | ✅ pass (previously failed outright) |
 | Client bundle secret scan | ✅ no service_role key, no demo password |
@@ -1038,8 +1047,8 @@ The original claim that the mobile suite could not be run is **superseded**.
 |---|---|---|
 | C-1 | service_role key in public bundle | ✅ fixed + CI regression guard |
 | C-2 | forged `__session` cookie bypass | ✅ fixed, verified by probe |
-| C-3 | RLS `USING (true)` | ⚠️ **migration written, NOT RUN** — step-by-step in `docs/APPLYING_THE_MIGRATIONS.md` |
-| C-4 | unauthenticated API routes | ⚠️ fixed in code, **depends on C-3** |
+| C-3 | RLS `USING (true)` | ✅ **applied to production** (2026-09-28, 25/25 PASS; re-verified 2026-10-05 — the dry run reports SAFE TO APPLY and anon is refused on profiles, telemetry and alerts). One policy escaped it: see T-1 below |
+| C-4 | unauthenticated API routes | ✅ fixed in code, and C-3 is now applied, so no longer conditional |
 | C-5 | SOS reported at fabricated location | ✅ fixed, both layers + schema migration |
 | H-1 | `next build` failed | ✅ fixed |
 | H-2 | demo password on public login page | ✅ fixed |
@@ -1055,15 +1064,61 @@ The original claim that the mobile suite could not be run is **superseded**.
 | M-6 | committed `node_modules` | ✅ untracked; 19,000 → 378 tracked files |
 | M-10 | Leaflet from a CDN | ✅ bundled locally (it was fetching JS, not just CSS) |
 | H-6 | committed secrets | ✅ **history purged 2026-09-02** — every leaked value redacted from every commit, secret files and all `node_modules` removed; a normal clone now carries **0** credential-shaped blobs. Residual: GitHub's own `refs/pull/*` still hold the old commits until Support purges them — and **rotation is still required** |
-| H-7 | role source user-writable | ⚠️ fixed by the C-3 migration's trigger — **lands when C-3 is run** |
+| H-7 | role source user-writable | ✅ landed — C-3 is applied and the live verdict table reports `PASS role-escalation trigger installed` |
 | H-3 | `.env` bundled into the APK | ✅ server secrets removed + 2 CI gates; **shared PIN constants remain** |
 | H-9 | Gemini key inlined into the client bundle | ✅ moved to `/api/ai/analyze`; `AIza…` added to the bundle scan |
 | M-3 | shallow tier E2E | ✅ replaced with mutation-tested tier assertions |
 | — | notification tap navigated nowhere | ✅ **fixed 2026-09-02** — see the post-audit findings; was dead in three independent ways |
-| M-7 | dead Firebase stack | ⏳ open — confirmed dead (zero callers in either client); **still do not delete `functions/` before the deployment is checked** |
+| M-7 | dead Firebase stack | ⏳ **partially closed.** The repository no longer carries any Firebase config: `firebase.json`, `.firebaserc` and `apphosting.yaml` were removed with the move to Railway (PR #53), the `firebase` npm dependency is gone, and `functions/` is not in the tree. The **deployment** is still unconfirmed — `firebase functions:list --project rainbow-97f1e` is the one command that settles it. Do not `curl` `seedMockData`: the probe writes ten fabricated emergencies |
 | — | CSP `script-src` carried `'unsafe-inline'` | ✅ **fixed 2026-09-02** — nonce-based via `proxy.ts`; injected script now provably blocked, and the authenticated map page finally exercised under the policy |
 | **C-6** | **unauthenticated Cloud Functions** | 🔴 **still unknown — both probe routes blocked from the audit container; stack confirmed orphaned and the guards undeployable. See the investigation note.** |
 | — | per-user server-verified duress PIN | ✅ **fixed 2026-09-02** — `emergency_pins` table nobody can read, bcrypt via pgcrypto, lockout after 5, `resolve_emergency` RPC records who resolved; no PIN material on the device at all |
+
+## What the next fifty merges found
+
+Everything above is the audit and the work to PR #1. What follows was found
+between PR #2 and PR #54, almost all of it by **running the system against a
+real PostgreSQL and a real browser** rather than by reading it. They are
+numbered separately (T-n, "after the audit") so the original findings keep their
+identifiers.
+
+Each one is recorded with what it would have done in use, because that is the
+only thing that distinguishes a defect from a preference.
+
+### Safety and truthfulness of what the console says
+
+| # | Finding | Status |
+|---|---|---|
+| T-1 | **`telemetry_select_geo_lga_scoped` was `TO PUBLIC` on production.** `20260725` created it with no `TO` clause; PostgreSQL records that as `TO PUBLIC`, and PUBLIC includes `anon`. `20260813` drops prior policies by exact name and could not drop this one — it predates the file. `telemetry` is where citizens' positions are written. Nothing leaked: the policy's own qualifier requires `authenticated` and `20260813` separately revokes anon's table privileges — but the policy layer was relying on the layer beneath it, one `GRANT` away. | ✅ fixed, `20261016000000`; the harness now also asserts this **after the full replay**, and plants a `TO PUBLIC` policy to prove the assertion can fail |
+| T-2 | **The console reported "ALL SECTORS CLEAR" when the read had been refused.** `fetchAlertsData` destructured `{ data, count }` and never looked at `error`. A refused read returns `data: null`, which skipped the mapping block and left `alerts` empty — rendering an affirmative claim about the safety of Plateau State. An empty table and a refusal were indistinguishable. Two more paths made the same claim: filters hiding every loaded row, and the situational feed's "NO ACTIVE THREATS". | ✅ fixed — three distinct states (`FEED UNAVAILABLE`, `NO MATCH FOR THESE FILTERS`, genuine all-clear), 18 tests, and an exhaustive check that all-clear is unreachable for any state carrying an error or a loaded row |
+| T-3 | **Four Mangu wards had no supervision.** The app writes `GINDIRI  I` from the GPS asset; officers are posted from the tactical map as `GINDIRI  1`. Compared as raw strings, so for every incident in those wards RLS refused it to the ward commander whose command it was in — read *and* write — the ward filter could not select it, and `escalation_push_targets()` found nobody. Nothing errored; the ward simply had no supervision. | ✅ fixed with a comparison key (`public.geo_key()` plus mirrors in TS and Dart), not a rename — both spellings are already in the database |
+| T-4 | **An SOS with no GPS appeared in the list and nowhere on the map.** The C-5 fix correctly stopped fabricating a location, but left USSD and no-fix reports undrawable. | ✅ `locateIncident()` draws GPS / ward / LGA at the precision actually known, and `isSendable()` is true only for a real fix — a circle is not a destination |
+| T-5 | **The map's info card blinked on every refresh.** `Marker.setIcon` replaces the DOM element and re-binds the popup; `Popup.setContent` reuses the node but destroys its children. Both fired on data the operator had not changed. | ✅ fixed by tracking what each marker and area was drawn from; the regression tests watch `firstElementChild` identity, because node identity cannot see `setContent` |
+| T-6 | **Evidence captured after a report was filed could be lost.** The media append was read-modify-write, so two concurrent attachments dropped one. | ✅ `append_alert_media()` — one locked statement, `FOR UPDATE`, dedupe by `min(ord)`; plus a single-flight pending-evidence flush that drops a path only on confirmation |
+| T-7 | **`APPLY AI CLASSIFICATION` applied no classification** and marked the incident `DISPATCHED` with no assignee. The forensic AI summary lived only in React state and was never persisted, so there was nowhere for an admin to see a report that had been generated. | ✅ `applyTriage()` applies it; `incident_ai_reports` keeps it, readable by command and **not** by the reporter — an early version admitted the reporter via `alert_is_ours()`, which would have shown a citizen the forensic debrief of their own kidnapping |
+| T-8 | **A complaint against security personnel routed to the officer complained about.** `Police brutality` is a reportable category and escalated like a flood: to the local ward, the local LGA, and every responder posted there, with the complainant's number on the dossier. | ✅ `route_oversight_to_hq()` sends it to HQ on arrival and clears any assignment; it is held out of the escalation ladder entirely, because every rung is closer to the accused |
+
+### Things that were green and should not have been
+
+| # | Finding | Status |
+|---|---|---|
+| T-9 | **Push notifications sent the same credential under two different schemes** across three call sites — `Basic` twice, `Key` once — so at least one had never authenticated. The one most likely to be broken reported `success: true` without looking at `response.ok`, so a 401 read as *N* notifications delivered. A CI gate added for it found a **fourth** call site on its first run. | ✅ one module, retries the other scheme once on 401/403, and never reports ok for a non-2xx |
+| T-10 | **All five generated operator SQL scripts were a day stale**, including the one a person pastes into a production SQL editor — missing eleven migrations. Regenerating produced a script that *did not work*: the generators had silently absorbed the hand-applied v2–v5 era, one of which calls `auth.jwt()` before it exists. | ✅ one exclusion list (`scripts/migration_sets.py`) instead of four copies, asserted in both directions |
+| T-11 | **Two complete deploy configurations, both documented as live**, for a month: Firebase App Hosting and Railway. `deploy.sh` pushed to the one that had been abandoned. A stale console answering requests is indistinguishable from a deploy that worked. | ✅ Railway only; `scripts/check_one_deploy_target.py` fails CI on a second target |
+| T-12 | **`verify_apply_all.sh` and `verify_bootstrap.sh` reported success over SQL errors.** psql runs without `ON_ERROR_STOP` and the files are not single transactions, so a statement could fail, the rest succeed, the verdict print 33/33 PASS, and the process exit 0. Both scripts only looked for `ERROR` when the exit code was non-zero. | ✅ both now fail on an error anywhere in the buffer; the bootstrap also fails on zero passes, which is the shape of a rolled-back run |
+| T-13 | **`supabase/rainbow_full_migration.sql` applied `phase1_foundation` twenty-one sections after the least-privilege migration**, re-creating seven `TO PUBLIC` policies on `chat_messages`, `telemetry`, `safe_zones` and `uninstall_requests`. | ✅ reordered; `migration_sets.py --assert-coverage` refuses any bundle that applies phase1 after `20260813`, and fired on the real file before the fix |
+| T-14 | **The repository and production had different schemas.** The v2–v6 era was applied by hand and cannot be replayed, so no database this repository could build had `alerts.lga/ward/pu`, `profiles.lga/ward/sector_id`, `normalise_lga()`, the `updated_at` trigger, or the telemetry policy. It decided a 428C9 column name, hid T-1 from a passing assertion, and put a **wrong conclusion into a code comment** in `dashboard/page.tsx` — which stated three columns do not exist when all three do on production. | ✅ `20261017000000` brings the behaviour-affecting objects into the history; `scripts/check_schema_convergence.py` keeps them there, with two unreferenced v5 functions recorded as known differences rather than propagated |
+| T-15 | **Adding a Dart comment above a ward's `id:` silently removed that ward from the generated tactical map.** The sync script's regex was not comment-tolerant and reported no error. | ✅ regexes fixed and a 207-ward count assertion added |
+| T-16 | **The demonstration seed used invented geography** — "Bokkos Central", "Mangu Central" — which exist in no INEC ward list and in neither of the project's own files. Rows that look right and behave wrong: unselectable by the ward filter, refused by RLS to the commander whose area they were in. | ✅ real INEC names; `sync_tactical_map.py --check` fails CI on any place the seed names that the map lacks. The three genuinely orphaned wards (BWALL, DAMWAI, KADUNU) were resolved against INEC sources, not guessed |
+
+### Open, and not closeable from the repository
+
+| # | Finding | Status |
+|---|---|---|
+| T-17 | **GitHub Actions has not run since 2026-09-29.** Every job in every run completes in about two seconds with `runner_id: 0`, no runner name and no logs — nothing picks the jobs up. Not a failing test: an Actions or billing condition on the account. | 🔴 **open, and now load-bearing.** Moving to Railway removed the one structural protection App Hosting gave (a secret marked RUNTIME-only, absent during `next build`). The CI job that greps `.next/static` for key material is what remains between this deployment and C-1 recurring, and it is switched off. Fifty merges landed with every gate unexercised, which is how T-10, T-11, T-12 and T-13 survived |
+| C-6 | unauthenticated Cloud Functions, if still deployed | 🔴 unchanged — `firebase functions:list --project rainbow-97f1e` settles it |
+| T-18 | **Citizen sign-in has no SMS provider.** `signInWithOtp` is refused outright unless the Supabase project has one, so every citizen sign-in fails. | 🔴 open — a blocker, not a checklist item. `docs/PRODUCTION_DEPLOYMENT.md` §2b |
+| T-19 | **One staff account exists**, so dispatch has nobody to send. The nine unacknowledged incidents on the live board are an empty roster, not a broken pipeline. | 🔴 open |
 
 ### Found only after the audit, by adding coverage
 
