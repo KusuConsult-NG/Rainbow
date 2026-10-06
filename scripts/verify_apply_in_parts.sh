@@ -46,7 +46,8 @@ su postgres -s /bin/bash -c \
 sleep 2
 
 cp "$REPO"/supabase/migrations/*.sql "$REPO"/scripts/test_rls_migration.sql \
-   "$REPO"/scripts/which_migrations_are_applied.sql "$PGROOT/"
+   "$REPO"/scripts/which_migrations_are_applied.sql \
+   "$REPO"/scripts/did_the_convergence_land.sql "$PGROOT/"
 cp "$PARTS_DIR"/*.sql "$PGROOT/parts/"
 chown -R postgres:postgres "$PGROOT"
 
@@ -176,6 +177,27 @@ $fn$;
 -- No TO clause, exactly as production has it.
 CREATE POLICY "telemetry_select_geo_lga_scoped"
   ON public.telemetry FOR SELECT USING (true);
+
+-- And the rest of the era residue production carries, which the parts alone do
+-- not create: the five generated mirrors of geo_* and the two v5 functions whose
+-- only callers were policies 20260813 drops by name.
+--
+-- Planting these is what makes the 20261018 row of
+-- did_the_convergence_land.sql mean anything on this fixture. Without them its
+-- "all 5 generated mirrors and both functions are gone" was trivially true
+-- BEFORE that migration ran — true of a database that never had them — and the
+-- rehearsal happily asserted a check that could not fail. Production has them
+-- at ordinals 28-30 on alerts, which is why a 428C9 error there names `lga`
+-- where this harness names `category`.
+ALTER TABLE public.alerts
+  ADD COLUMN lga  TEXT GENERATED ALWAYS AS (geo_lga)  STORED,
+  ADD COLUMN ward TEXT GENERATED ALWAYS AS (geo_ward) STORED,
+  ADD COLUMN pu   TEXT GENERATED ALWAYS AS (geo_pu)   STORED;
+ALTER TABLE public.profiles
+  ADD COLUMN lga  TEXT GENERATED ALWAYS AS (geo_lga)  STORED,
+  ADD COLUMN ward TEXT GENERATED ALWAYS AS (geo_ward) STORED;
+CREATE FUNCTION public.is_hq_or_admin() RETURNS boolean LANGUAGE sql AS $f1$ SELECT true $f1$;
+CREATE FUNCTION public.is_responder()   RETURNS boolean LANGUAGE sql AS $f2$ SELECT true $f2$;
 PLANT
 chown postgres:postgres "$PGROOT/plant_live_symptom.sql"
 psql_db "-q -v ON_ERROR_STOP=1 -f $PGROOT/plant_live_symptom.sql" >/dev/null || {
@@ -189,6 +211,20 @@ printf '%s\n' "$BEFORE" \
   echo "::error::the fixture does not reproduce the live FAIL, so clearing it proves nothing"
   exit 1; }
 echo "  reproduced: *** FAIL *** naming telemetry.telemetry_select_geo_lga_scoped"
+
+# The three migrations announce themselves with RAISE NOTICE, which the Supabase
+# SQL editor does not display — an operator who pastes them sees three identical
+# `Success. No rows returned` results. scripts/did_the_convergence_land.sql is
+# the readable answer, and it is only worth anything if it can say FAIL, so it is
+# asked here BEFORE the parts are applied.
+LANDED_BEFORE=$(psql_db "-f $PGROOT/did_the_convergence_land.sql")
+for needle in '20261016' '20261018'; do
+  printf '%s\n' "$LANDED_BEFORE" | grep -F "$needle" | grep -q 'FAIL' || {
+    printf '%s\n' "$LANDED_BEFORE" | sed 's/^/    /'
+    echo "::error::did_the_convergence_land.sql does not report $needle as unapplied on a database that lacks it"
+    exit 1; }
+done
+echo "  and did_the_convergence_land.sql reports 20261016 and 20261018 as NOT applied"
 
 echo "▶ Applying only the last $HOLD_BACK parts, as an operator would"
 RESUME_OUT=""
@@ -239,6 +275,22 @@ printf '%s\n' "$INV" | grep -q 'still present' && {
   printf '%s\n' "$INV" | grep 'still present' | sed 's/^/    /'
   echo "::error::objects the last part removes are still in the schema"; exit 1; }
 echo "  and the inventory reports 7 of 7 removed, with nothing still present"
+
+LANDED_AFTER=$(psql_db "-f $PGROOT/did_the_convergence_land.sql")
+printf '%s\n' "$LANDED_AFTER" | grep -q 'FAIL' && {
+  printf '%s\n' "$LANDED_AFTER" | sed 's/^/    /'
+  echo "::error::did_the_convergence_land.sql still reports a failure after all three applied"
+  exit 1; }
+for needle in '20261016' '20261017' '20261018'; do
+  printf '%s\n' "$LANDED_AFTER" | grep -F "$needle" | grep -q 'PASS' || {
+    printf '%s\n' "$LANDED_AFTER" | sed 's/^/    /'
+    echo "::error::did_the_convergence_land.sql does not report $needle as applied"
+    exit 1; }
+done
+# It must also name the generated column a 428C9 would report here.
+printf '%s\n' "$LANDED_AFTER" | grep -q 'alerts generated columns now' || {
+  echo "::error::did_the_convergence_land.sql dropped its generated-column row"; exit 1; }
+echo "  and did_the_convergence_land.sql reports all three applied"
 
 echo
 echo "✓ the $COUNT parts apply in order and report $PASSED/$EXPECTED PASS — the same"
