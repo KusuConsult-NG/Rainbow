@@ -1078,7 +1078,7 @@ injection point. Bundle these locally (`leaflet` is already a dependency).
     dashboard → dispatch → resolve (M-3).
 12. Repo cleanup: M-5 deploy script, M-6 committed `node_modules`, M-7 dead Firebase stack.
 
-## Status as of PR #64 (2026-10-06)
+## Status as of PR #65 (2026-10-06)
 
 > Was "as of PR #1" until 2026-10-06, fifty-three merges later. Four rows below
 > were materially wrong by then — C-3 read **NOT RUN** after it had been applied
@@ -1385,6 +1385,69 @@ Four related gaps closed while doing it:
   does not. Five mutations were each caught: a dropped row, a stale row count,
   two files transposed, an emptied description, and a listed file that does not
   exist.
+
+### T-23. A diagnostic from outside the repository reported 24 objects missing. None of them exist.
+
+Found on 2026-10-06 from a pasted migration-status table reporting twenty-four
+objects `MISSING from public schema` — among them the three mesh tables, the
+emergency-PIN functions and the SMS device-key functions — and concluding that
+nine migrations were `NOT APPLIED` or `PARTIAL`.
+
+A verdict table from the same database, pasted beside it, said the opposite:
+`emergency PIN functions exist (4)`, `SMS device keys exist and are unreadable
+through the API`, `the mesh can recognise the same envelope arriving twice`,
+`mesh traffic is not readable through the API`, `a handset can report that its
+SMS channel changed`, `a liaison is recognised as an outside agency` — PASS,
+every one.
+
+**All twenty-four names appear in no migration in this repository.** They are
+near-misses for the real objects:
+
+| it reported missing | what this project actually creates |
+|---|---|
+| `set_emergency_pin` | `set_emergency_pins` |
+| `provision_default_pins_for_existing_users` | — (`has_emergency_pins`, `_check_emergency_pin`, `verify_emergency_pin`, `resolve_emergency`) |
+| `profiles.pin_salt`, `.safe_pin_hash`, `.duress_pin_hash`, `.pins_configured` | the `emergency_pins` **table** |
+| `mesh_messages`, `mesh_nodes`, `mesh_sync_log` | one table, `mesh_envelopes_seen` |
+| `ingest_mesh_message`, `ingest_mesh_batch`, `purge_stale_mesh_data` | `mesh_note_envelope`, `purge_stale_mesh_envelopes` |
+| `register_sms_device_key`, `verify_sms_report_signature`, `cleanup_expired_sms_nonces` | `register_sms_device`, `has_sms_device_key`, `revoke_sms_device_keys`, `sms_key_for_ingest` |
+| `ingest_sim_event`, `archive_old_sim_events` | `purge_stale_sim_events` + table `sim_channel_events` |
+| `is_agency_liaison`, `user_agency_code` | `is_liaison`, `alert_is_ours`, `liaison_agency` |
+| `tier_timeout` | `tier_timeout_minutes` |
+| `audit_log_authenticated_action` | — (`auth_role`, `is_staff`, `is_command`, `prevent_profile_privilege_escalation`) |
+| `handle_new_user_role_safely` | — (the trigger is `profiles_no_privilege_escalation`) |
+| `append_alert_media_url`, attributed to `20260903000001_incident_media_storage` | `append_alert_media`, from `20261010000000` — `20260903000001` creates a bucket and policies, no function |
+| `alerts.escalated_at`, attributed to `20260903000003` | that migration adds `escalated_to_agency` and `escalation_log`; the timestamps are `tier_assigned_at` / `acknowledged_at` from `20260928000000` |
+
+The PIN row is the giveaway. Those hashes were deliberately moved **off**
+`profiles` into their own table precisely so the API roles cannot read them —
+that is the `PIN hashes unreadable by the API roles` check. A diagnostic looking
+for them as `profiles` columns is describing a schema this project considered
+and rejected.
+
+It is also structurally incomplete: it covers 25 of 35 migrations, omitting
+`20260812000000`, `20260903000000`, `20260903000002` and every migration from
+`20261010000000` onward.
+
+No script in this repository emits that wording, so it was written from memory
+of what the schema probably contains rather than extracted from the files —
+the same failure recorded inside `check_schema_convergence.py`, whose first
+hand-written policy list "invented names and missed real ones". Acting on it
+meant re-applying nine already-applied migrations: the T-21 trap arriving from
+outside.
+
+`scripts/is_this_object_real.py` is the cheap rebuttal — no database, no
+credentials, no network. It takes object names in any of the shapes a pasted
+diagnostic uses (`function foo`, `column alerts.bar`, `public.baz`), says which
+migration creates each, and for one that does not exist offers the closest real
+name. It also distinguishes a third case the claim did not consider: an object a
+later migration **drops**, which *should* be absent. It is explicit about what
+it cannot tell you — whether the object is in your database, which is
+`which_migrations_are_applied.sql`'s job, run against the database.
+
+Both verdict tables in that paste were also still the 33-row version, with no
+`script version:` row and a FAIL naming no policy — so T-22's stamp would have
+flagged them as stale before any of this was read.
 
 ### Open, and not closeable from the repository
 
