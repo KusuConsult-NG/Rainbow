@@ -78,23 +78,14 @@ EXPECTED_POLICY_COUNTS = {
 # Era objects that are allowed to exist on production and not in the schema this
 # repository builds. Each needs a reason, and "it is only on production" is not
 # one.
-# Era objects a later migration removes with a plpgsql `EXECUTE format(...)`
-# rather than literal SQL, so the regexes above cannot see them. Listed here
-# because the alternative is a regex that parses plpgsql, which would be a worse
-# bet than a short explicit list next to the migration that owns it.
-#
-# 20261018000000 drops all seven: the five generated mirrors of geo_*, which hold
-# no information of their own, and the two v5 functions whose only callers were
-# the v5-era policies that 20260813 drops by name.
-DROPPED_BY_LATER: dict[str, str] = {
-    'column:alerts.lga': '20261018000000',
-    'column:alerts.ward': '20261018000000',
-    'column:alerts.pu': '20261018000000',
-    'column:profiles.lga': '20261018000000',
-    'column:profiles.ward': '20261018000000',
-    'function:is_hq_or_admin': '20261018000000',
-    'function:is_responder': '20261018000000',
-}
+# The authoritative list of era objects a later migration removes lives in
+# sync_migration_inventory.py, because that module generates the operator
+# diagnostic which has to assert those objects are ABSENT, and this module
+# already imports it for strip_noise — so the dependency runs one way.
+# Re-exported here under its original name: check_generated_column_inserts.py
+# reads `csc.DROPPED_BY_LATER`, and _verify_dropped_by_later() below is what
+# checks each entry against the migration that claims to drop it.
+DROPPED_BY_LATER: dict[str, str] = _smi.DROPPED_BY_LATER
 
 # Each entry must name a migration that actually contains the drop, or this list
 # becomes a way to silence the check by assertion.
