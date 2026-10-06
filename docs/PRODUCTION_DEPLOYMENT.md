@@ -252,15 +252,79 @@ Termii, which this deployment already uses for outbound alerts, is **not** one
 of Supabase's built-in providers (Twilio, MessageBird, Vonage, TextLocal). So it
 has to be attached the other way:
 
-1. **Authentication → Providers → Phone**: enable it.
-2. Either pick a built-in provider and enter its credentials, **or** attach
-   Termii through **Authentication → Hooks → Send SMS**: a Postgres function or
-   an Edge Function that receives the message and delivers it through Termii's
-   API. The hook is the option that keeps one SMS account and one bill.
-3. Set the OTP length and expiry. The app's code field takes **6 digits**
-   (`maxLength: 6`), so a shorter code cannot be typed in full.
-4. **Send yourself one.** A provider that is configured but not working looks
+The hook is written and in the repository: `supabase/functions/send-sms`. What
+is left is four dashboard settings and one deploy flag.
+
+1. **Authentication → Providers → Phone** — enable it.
+2. **Authentication → Hooks → Send SMS** — set it to **Supabase Edge Function**
+   → `send-sms`. Copy the **signing secret** the page shows; it looks like
+   `v1,whsec_<base64>`.
+3. **Secrets** — the hook needs three:
+
+   ```bash
+   supabase secrets set SEND_SMS_HOOK_SECRET='v1,whsec_…'   # from step 2
+   supabase secrets set TERMII_API_KEY='…'
+   supabase secrets set TERMII_SENDER_ID='OE Alert'          # as approved by Termii
+   ```
+
+   `ALLOW_UNSENT_OTP` must stay **unset**. It lets auth proceed when SMS cannot
+   be sent, which means the app tells the person a code was sent when none was.
+
+4. **Deploy with JWT verification off.** This is not optional and it is not
+   obvious:
+
+   ```bash
+   supabase functions deploy send-sms --no-verify-jwt
+   ```
+
+   The hook fires *before* any JWT exists. Deployed normally, the platform
+   answers **401 before the function runs** — no logs, nothing in the function's
+   own output, and from the app it looks exactly like a provider that is not
+   configured. The Standard Webhooks signature is what protects the endpoint
+   instead, and the hook refuses to run at all if its secret is unset.
+
+5. **OTP length 6.** The app's code field is `maxLength: 6`, so a shorter code
+   cannot be typed in full.
+
+6. **Send yourself one.** A provider that is configured but not working looks
    identical to one that is not configured, from every screen in the app.
+
+### The hook as committed could never have worked
+
+Worth knowing, because the symptom was indistinguishable from "not configured
+yet" and it is why this stayed a blocker. Three independent faults, each enough
+on its own:
+
+| | |
+|---|---|
+| It read the code from `payload.otp` | Supabase sends it at `payload.sms.otp`, so the code was always `undefined` and the hook answered `400 Missing phone or OTP` to every real request |
+| It authenticated with a bearer secret | These requests carry no `Authorization` header — they are signed per Standard Webhooks (`webhook-id`, `webhook-timestamp`, `webhook-signature`, HMAC-SHA256) — so every real call was refused `401` before it reached the payload fault |
+| Nothing could test it | The logic was inline in a Deno `serve()` call, unreachable from any test suite |
+
+Both contracts are now taken from the Supabase documentation source and the
+Standard Webhooks specification rather than from memory, and the logic lives in
+`supabase/functions/send-sms/hook.ts` with 25 tests in
+`hq-dashboard-next/src/lib/send-sms-hook.test.ts` — including one per fault,
+each mutation-checked to confirm it fails against the old behaviour.
+
+### If a code still does not arrive
+
+The hook never answers 200 for a message it did not send. An earlier version
+did, commented "so sign-in is NOT blocked" — which unblocks nothing, since a
+citizen with no code has nothing to type; it only decides whether they are told
+or left watching a timer. So a failure is visible, and the app says which kind
+it is:
+
+| the app says | means |
+|---|---|
+| `SMS SIGN-IN IS NOT SWITCHED ON` | step 1 is not done — Supabase refused `signInWithOtp` outright |
+| `SMS SIGN-IN IS MISCONFIGURED` | the hook ran and failed — a missing secret, or Termii refused or was unreachable |
+| `TOO MANY CODES REQUESTED` | a real rate limit |
+| `NO CONNECTION` | the handset's own network |
+
+Check the function's logs in **Edge Functions → send-sms**. It logs the reason
+and a masked number, and never the code — a one-time code in a log line is a
+one-time code in the hands of whoever can read logs.
 
 The app tells the person the truth when this is missing rather than "try again":
 `AuthService._describeOtpSendFailure` recognises the provider-disabled refusals
