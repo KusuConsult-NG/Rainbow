@@ -22,8 +22,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     with SingleTickerProviderStateMixin {
   final _inputController = TextEditingController();
   final _otpController = TextEditingController();
+  final _passwordController = TextEditingController();
 
   bool _otpSent = false;
+
+  /// A badge or access code was typed, so a PASSWORD is now required.
+  ///
+  /// There was no password field on this screen at all. A non-phone input
+  /// signed straight in with `AGENT_DEFAULT_PASS` out of the bundled `.env` —
+  /// one password shared by every officer, shipping inside the APK as a Flutter
+  /// asset and extracting with `unzip`. The access code was the username; the
+  /// password was published. See AuthService.
+  bool _needPassword = false;
+  /// The badge or code being signed in with, kept while the password is typed.
+  String? _staffIdentifier;
   /// The number the code went to, in the form the person wrote it.
   String? _sentTo;
   bool _loading = false;
@@ -43,6 +55,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   void dispose() {
     _inputController.dispose();
     _otpController.dispose();
+    _passwordController.dispose();
     _pulseController.dispose();
     super.dispose();
   }
@@ -53,22 +66,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       return;
     }
 
+    // Second step for staff: the password for the badge already entered.
+    if (_needPassword) {
+      final password = _passwordController.text;
+      if (password.isEmpty) return;
+      setState(() => _loading = true);
+      await _submitStaffPassword(_staffIdentifier!, password);
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+
     final input = _inputController.text.trim();
     if (input.isEmpty) return;
 
-    setState(() => _loading = true);
-
     // Heuristic: Detection of Phone vs Access Code
     // Phones usually start with + or are long numeric strings (8+ digits)
-    final isPhone = _isLikelyPhone(input);
-
-    if (isPhone) {
+    if (_isLikelyPhone(input)) {
+      setState(() => _loading = true);
       await _submitPhone(input);
-    } else {
-      await _submitAccessCode(input);
+      if (mounted) setState(() => _loading = false);
+      return;
     }
 
-    if (mounted) setState(() => _loading = false);
+    // A badge or access code. Ask for the password rather than signing in —
+    // this is the step that did not exist, and its absence meant one published
+    // password let anybody in as any officer whose code they knew or guessed.
+    setState(() {
+      _staffIdentifier = input;
+      _needPassword = true;
+    });
   }
 
   /// One field takes both a citizen's phone number and an officer's badge, so
@@ -113,15 +139,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     }
   }
 
-  Future<void> _submitAccessCode(String code) async {
-    final success =
-        await ref.read(authServiceProvider).signInWithAccessCode(code);
+  Future<void> _submitStaffPassword(String identifier, String password) async {
+    final success = await ref
+        .read(authServiceProvider)
+        .signInWithBadge(identifier, password);
     final error = ref.read(authServiceProvider).lastAuthError;
 
-    if (mounted) {
-      if (!success) {
-        _showTacticalError(error ?? 'INVALID ACCESS CODE');
-      }
+    if (mounted && !success) {
+      // Deliberately does not say which of the two was wrong. Saying "no such
+      // badge" would turn this screen into a roster of who works here.
+      _showTacticalError(error ?? 'BADGE OR PASSWORD NOT RECOGNISED');
     }
   }
 
@@ -171,7 +198,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
                 // ── Unified Input Section ────────────────────────
                 Text(
-                  _otpSent ? 'IDENTITY VERIFICATION' : 'SECURE IDENTIFIER',
+                  _otpSent
+                      ? 'IDENTITY VERIFICATION'
+                      : _needPassword
+                          ? 'STAFF PASSWORD'
+                          : 'SECURE IDENTIFIER',
                   style: GoogleFonts.outfit(
                     color: AppColors.textDim,
                     fontWeight: FontWeight.w800,
@@ -199,20 +230,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 300),
-                  child: _otpSent ? _buildOtpField() : _buildUnifiedField(),
+                  child: _otpSent
+                      ? _buildOtpField()
+                      : _needPassword
+                          ? _buildPasswordField()
+                          : _buildUnifiedField(),
                 ),
 
                 const SizedBox(height: 32),
 
                 _buildActionButton(),
 
-                if (_otpSent) ...[
+                if (_otpSent || _needPassword) ...[
                   const SizedBox(height: 24),
                   TextButton(
                     onPressed: () => setState(() {
                       _otpSent = false;
                       _sentTo = null;
                       _otpController.clear();
+                      _needPassword = false;
+                      _staffIdentifier = null;
+                      _passwordController.clear();
                     }),
                     child: Text(
                       'BACK TO IDENTIFIER',
@@ -299,6 +337,44 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     );
   }
 
+  /// The staff password. There was no such field on this screen.
+  ///
+  /// `obscureText` and `autocorrect: false` matter on a shared handset; so does
+  /// NOT offering to remember it, because these devices are passed between
+  /// shifts.
+  Widget _buildPasswordField() {
+    return TextField(
+      key: const ValueKey('staff_password_field'),
+      controller: _passwordController,
+      obscureText: true,
+      autocorrect: false,
+      enableSuggestions: false,
+      textAlign: TextAlign.center,
+      onSubmitted: (_) => _handlePrimaryAction(),
+      style: GoogleFonts.outfit(
+        color: Colors.black,
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 2,
+      ),
+      cursorColor: AppColors.primary,
+      decoration: InputDecoration(
+        hintText: 'PASSWORD FOR ${_staffIdentifier?.toUpperCase() ?? 'BADGE'}',
+        hintStyle: GoogleFonts.outfit(color: AppColors.textDim, fontSize: 12),
+        filled: true,
+        fillColor: AppColors.surfaceContainer,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppColors.primary, width: 2),
+        ),
+      ),
+    );
+  }
+
   Widget _buildOtpField() {
     return TextField(
       key: const ValueKey('otp_field'),
@@ -356,7 +432,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                 ),
               )
             : Text(
-                _otpSent ? 'VERIFY OTP' : 'AUTHORIZE ACCESS',
+                _otpSent
+                    ? 'VERIFY OTP'
+                    : _needPassword
+                        ? 'SIGN IN'
+                        : 'AUTHORIZE ACCESS',
                 style: GoogleFonts.outfit(
                   fontWeight: FontWeight.w900,
                   fontSize: 16,

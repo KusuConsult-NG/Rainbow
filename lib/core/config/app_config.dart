@@ -88,7 +88,9 @@ class AppConfig {
   static String? get cloudinaryUploadPreset => _read('CLOUDINARY_UPLOAD_PRESET');
   static String? get demoCitizenEmail => _read('DEMO_CITIZEN_EMAIL');
   static String? get demoCitizenPass => _read('DEMO_CITIZEN_PASS');
-  static String? get agentDefaultPass => _read('AGENT_DEFAULT_PASS');
+  // REMOVED: agentDefaultPass. One shared staff password, read from a `.env`
+  // that ships inside the APK as a Flutter asset. See AuthService for the
+  // full note; the replacement is a per-officer password.
 
   /// Keys whose absence disables a safety-critical feature.
   ///
