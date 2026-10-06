@@ -10,6 +10,7 @@ import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
+import 'package:rainbow_app/services/mesh_service.dart';
 import 'package:rainbow_app/core/geo/jurisdiction_resolver.dart';
 import 'package:rainbow_app/services/sqlite_service.dart';
 
@@ -341,9 +342,11 @@ class AlertService {
         );
         return;
       }
-      // `mesh` is null until the BLE radio's native halves exist, so today this
-      // is the SMS path only. Said out loud rather than left to be assumed.
-      await OfflineEscalation().escalate(
+      // The Bluetooth mesh is offered when this phone can use it without asking
+      // for anything mid-emergency; otherwise `mesh` is null and this is the
+      // SMS path only. See MeshService.nodeForEmergency.
+      final mesh = await MeshService.instance.nodeForEmergency();
+      await OfflineEscalation(mesh: mesh).escalate(
         localId: localId,
         type: type,
         severity: severity,

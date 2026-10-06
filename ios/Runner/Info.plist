@@ -74,6 +74,10 @@
 	<string>Operation Rainbow uses speech recognition to transcribe your spoken voice reports and chat messages into text.</string>
 
 	<!-- Camera & Photo Library — Required for adding incident evidence -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Operation Rainbow uses Bluetooth to pass sealed emergency alerts between nearby phones when there is no mobile network, so an SOS can still reach HQ. Phones that carry an alert cannot read it.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Operation Rainbow uses Bluetooth to pass sealed emergency alerts between nearby phones when there is no mobile network, so an SOS can still reach HQ. Phones that carry an alert cannot read it.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Operation Rainbow needs access to your camera so you can take photos or videos of incidents to submit as evidence.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
@@ -89,6 +93,8 @@
 		<string>location</string>
 		<string>fetch</string>
 		<string>remote-notification</string>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>

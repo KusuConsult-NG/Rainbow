@@ -129,9 +129,8 @@ class OfflineEscalation {
 
   /// This phone's participation in the mesh, or null when there is none.
   ///
-  /// Null today in production: the BLE radio's native halves are not written, so
-  /// nothing constructs a node. The path is here, tested, and switches on the
-  /// moment a radio exists — which is deliberately visible rather than hidden,
+  /// Supplied by `MeshService.nodeForEmergency`, and null whenever the mesh
+  /// cannot be used without asking the person for something mid-emergency —
   /// so nobody believes the mesh is carrying traffic when it is not.
   final MeshNode? mesh;
 

@@ -92,7 +92,7 @@ each does:
 
 ```
 SMS_GATEWAY_SECRET      inbound SMS from the offline fallback
-MESH_HQ_PRIVATE_KEY     inbound mesh alerts (66 hex characters)
+MESH_HQ_PRIVATE_KEY     inbound mesh alerts (64 hex characters; the 66 is the PUBLIC half)
 TERMII_API_KEY          outbound SOS escalation SMS
 SOS_DISPATCH_PHONE      where that SMS goes
 GEMINI_API_KEY          AI triage (falls back to the rule engine)
@@ -115,7 +115,7 @@ sign in at all — the code is never sent, so there is nothing to type.
 
 ```
 supabase functions deploy send-sms
-supabase secrets set TERMII_API_KEY=... TERMII_SENDER_ID=RainbowHQ HOOK_SECRET=...
+supabase secrets set TERMII_API_KEY=... TERMII_SENDER_ID="OE Alert" HOOK_SECRET=...
 ```
 
 Then **Authentication → Hooks → Send SMS hook → Edge Function → send-sms**, with

@@ -8,6 +8,7 @@ import 'package:rainbow_app/core/auth/phone_number.dart';
 import 'package:rainbow_app/core/offline/sms_device_key.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
+import 'package:rainbow_app/services/mesh_service.dart';
 import 'package:rainbow_app/services/secure_storage_service.dart';
 import 'package:rainbow_app/services/sim_watch_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -348,6 +349,10 @@ class AuthService {
   @visibleForTesting
   static Future<void> Function()? forgetSimBaselineOverride;
 
+  /// Test seam: the mesh reaches a platform channel.
+  @visibleForTesting
+  static Future<void> Function()? stopMeshOverride;
+
   /// Sign out user session.
   ///
   /// STOPPING LOCATION IS PART OF SIGNING OUT.
@@ -384,6 +389,14 @@ class AuthService {
       await (forgetSimBaselineOverride ?? SimWatchService().forget)();
     } catch (e) {
       debugPrint('[SIGNOUT_SIM_ERR] could not clear the SIM baseline: $e');
+    }
+    // And leave the Bluetooth mesh, dropping whatever it was carrying: a phone
+    // should not keep relaying strangers' emergencies, on its owner's battery,
+    // for somebody who has signed out.
+    try {
+      await (stopMeshOverride ?? MeshService.instance.onSignedOut)();
+    } catch (e) {
+      debugPrint('[SIGNOUT_MESH_ERR] could not stop the mesh: $e');
     }
     await SupabaseConfig.client.auth.signOut();
     await _secureStorage.deleteAll();

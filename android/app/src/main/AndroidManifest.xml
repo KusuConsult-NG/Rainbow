@@ -65,6 +65,30 @@
     -->
     <uses-permission android:name="android.permission.SEND_SMS" />
 
+    <!--
+      THE BLUETOOTH MESH.
+
+      Carries a sealed emergency alert from phone to phone when there is no
+      network at all, until one of them reaches HQ. See MeshBleRadio.kt and
+      docs/OFFLINE_CHANNELS_DESIGN.md.
+
+      BLUETOOTH_SCAN carries neverForLocation: the mesh never derives a
+      position from what it hears, and without the flag Android 12+ would
+      demand location permission for a feature that has nothing to do with
+      location. Before Android 12 a BLE scan needs ACCESS_FINE_LOCATION, which
+      the app already holds for SOS tracking, plus the legacy BLUETOOTH pair.
+    -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Optional: a phone without BLE still installs and uses every other channel. -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+
     <!-- Camera & Audio for WebRTC Live Stream -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />

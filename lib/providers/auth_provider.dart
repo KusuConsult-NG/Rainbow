@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
+import 'package:rainbow_app/services/mesh_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -172,6 +173,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final user = session?.user;
       if (user == null) {
         state = AuthState(isLoading: false, sessionEpoch: state.sessionEpoch);
+        // A session that ended without signOut() — expiry, revocation — must
+        // stop the Bluetooth mesh just as signing out does.
+        unawaited(MeshService.instance.onSignedOut());
       } else {
         // Only a real sign-in advances the epoch. A token refresh also arrives
         // here carrying a session, and treating that as a new sign-in would
@@ -247,6 +251,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
         hasOnboarded: hasOnboarded,
         isLoading: false,
       );
+      // The mesh needs the role: responders relay by default, citizens opt
+      // in. Runs on every resolution, including token refreshes; starting an
+      // already-running mesh is a no-op.
+      unawaited(MeshService.instance.onSignedIn(isResponder: role == UserRole.responder));
     } catch (e, st) {
       // Do NOT default to citizen here. This previously demoted an HQ/LGA
       // commander to the citizen UI whenever the profile query failed (flaky

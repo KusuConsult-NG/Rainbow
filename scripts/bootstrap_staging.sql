@@ -5708,9 +5708,22 @@ DO $b$ BEGIN RAISE NOTICE 'applying 20261017000000_the_hand_applied_era_is_in_th
 --
 -- 1. A 428C9 error. `INSERT INTO alerts` with no column list is refused at the
 --    FIRST generated column in ordinal order. On production that is `lga` at
---    28; on a repo-built database `category` at 33 is the only one. The same
+--    28; on a repo-built database `category` at 33 was the only one. The same
 --    statement reports a different column name on each, which is a diagnosis
 --    sent in the wrong direction.
+--
+--    This migration does NOT fix that, and an earlier draft of this comment
+--    claimed it did. It converges the column SET, not the ordinal ORDER:
+--    attribute numbers are assigned when a column is added, so the mirrors land
+--    after `category` here and before it on production. The behaviour test
+--    prints which column comes first precisely so nobody re-derives the wrong
+--    expectation — it still reads `category` on a fresh database.
+--
+--    What actually closes that defect is
+--    scripts/check_generated_column_inserts.py, which refuses any insert into a
+--    table with a generated column that has no explicit column list. The error
+--    cannot be reached from this repository at all, so which name it would have
+--    reported stops mattering.
 --
 -- 2. `telemetry_select_geo_lga_scoped` sat on production as TO PUBLIC for weeks
 --    while verify_rls_migration.sh asserted no policy reaches anon or public —
