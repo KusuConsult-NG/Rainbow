@@ -633,6 +633,104 @@ printf '%s\n' "$MIG_OUT" | grep -q "absence is not a fault" || {
   echo "✗ the inventory did not mark the hand-made v2–v5 migrations"; exit 1; }
 echo "  PASS  every object from every replayed migration is present"
 
+# ── And the objects a migration REMOVES are actually gone ────────────────────
+#
+# The inventory used to assert existence only, which made it actively misleading
+# about the one migration that drops things. All seven objects 20261018000000
+# removes were must-be-present rows inherited from v2 and v5, so the moment an
+# operator applied it the diagnostic would report seven MISSING objects and name
+# 20260721000000_v2_agency_tables / 20260724000000_v5_rls_security as the files
+# to apply — and applying those would recreate the generated mirrors that
+# migration exists to remove, restoring the ordinal difference that made one
+# 428C9 error name `lga` on production and `category` in this harness.
+#
+# A drop-only migration was also invisible, because it creates nothing to count.
+# Now it reads `0 of N removed — NEVER APPLIED` before and `N of N removed`
+# after, which is the only signal this script can give that it landed.
+read -r DROP_MIG DROP_N < <(python3 "$REPO/scripts/sync_migration_inventory.py" --drops)
+[ -n "$DROP_MIG" ] && [ -n "$DROP_N" ] || {
+  echo "✗ could not read the dropping migration from sync_migration_inventory.py"
+  exit 1; }
+
+check_drops_reported_gone() {
+  # $1 = inventory output, $2 = context for the failure message
+  local out="$1" context="$2" still
+  still=$(printf '%s\n' "$out" | awk -F'|' '
+    { for (i = 1; i <= NF; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i) }
+    $2 == "still present" { print "    " $3 }')
+  if [ -n "$still" ]; then
+    echo "$still"
+    echo "✗ $context: objects $DROP_MIG removes are still in the schema"
+    return 1
+  fi
+  printf '%s\n' "$out" | awk -F'|' -v m="$DROP_MIG" -v n="$DROP_N" '
+    { for (i = 1; i <= NF; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i) }
+    $2 == "summary" && $3 == m { found = 1; if ($4 != n " of " n " removed") bad = $4 }
+    END { exit (found && bad == "") ? 0 : 1 }' || {
+    printf '%s\n' "$out" | grep -F "$DROP_MIG" | sed 's/^/    /'
+    echo "✗ $context: expected \"$DROP_N of $DROP_N removed\" for $DROP_MIG"
+    return 1; }
+  return 0
+}
+
+check_drops_reported_gone "$MIG_OUT" "after the replay" || exit 1
+echo "  PASS  the $DROP_N objects $DROP_MIG removes are gone, and it says so"
+
+# Prove the assertion can fail. Without this the two checks above pass on any
+# database that never had the mirrors in the first place — including one where
+# the must-be-absent rows were dropped from the generated file by a bug, which
+# is exactly the failure mode that produced the misleading version.
+cat > "$PGROOT/zz_replant_mirrors.sql" <<'PLANT'
+ALTER TABLE public.alerts
+  ADD COLUMN lga  TEXT GENERATED ALWAYS AS (geo_lga)  STORED,
+  ADD COLUMN ward TEXT GENERATED ALWAYS AS (geo_ward) STORED,
+  ADD COLUMN pu   TEXT GENERATED ALWAYS AS (geo_pu)   STORED;
+ALTER TABLE public.profiles
+  ADD COLUMN lga  TEXT GENERATED ALWAYS AS (geo_lga)  STORED,
+  ADD COLUMN ward TEXT GENERATED ALWAYS AS (geo_ward) STORED;
+CREATE FUNCTION public.is_hq_or_admin() RETURNS boolean LANGUAGE sql AS $fn$ SELECT true $fn$;
+CREATE FUNCTION public.is_responder()   RETURNS boolean LANGUAGE sql AS $fn$ SELECT true $fn$;
+PLANT
+cat > "$PGROOT/zz_unplant_mirrors.sql" <<'UNPLANT'
+ALTER TABLE public.alerts   DROP COLUMN lga, DROP COLUMN ward, DROP COLUMN pu;
+ALTER TABLE public.profiles DROP COLUMN lga, DROP COLUMN ward;
+DROP FUNCTION public.is_hq_or_admin();
+DROP FUNCTION public.is_responder();
+UNPLANT
+chown postgres:postgres "$PGROOT/zz_replant_mirrors.sql" "$PGROOT/zz_unplant_mirrors.sql"
+
+psql_run "-f $PGROOT/zz_replant_mirrors.sql" >/dev/null || {
+  echo "✗ could not plant the mirrors back — the probe cannot run"; exit 1; }
+REPLANT_OUT=$(psql_run "-f $PGROOT/which_migrations_are_applied.sql" 2>&1)
+# Must now FAIL, and name all of them.
+if check_drops_reported_gone "$REPLANT_OUT" "with the mirrors planted" >/dev/null 2>&1; then
+  echo "✗ the inventory reported the mirrors gone while they were in the schema"
+  echo "  — the must-be-absent rows are not reaching the generated file"
+  psql_run "-f $PGROOT/zz_unplant_mirrors.sql" >/dev/null 2>&1 || true
+  exit 1
+fi
+PLANTED=$(printf '%s\n' "$REPLANT_OUT" | awk -F'|' '
+  { for (i = 1; i <= NF; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i) }
+  $2 == "still present" { n++ } END { print n + 0 }')
+[ "$PLANTED" = "$DROP_N" ] || {
+  echo "✗ planted $DROP_N objects back but the inventory named $PLANTED"
+  psql_run "-f $PGROOT/zz_unplant_mirrors.sql" >/dev/null 2>&1 || true
+  exit 1; }
+printf '%s\n' "$REPLANT_OUT" | grep -q "0 of $DROP_N removed — NEVER APPLIED" || {
+  printf '%s\n' "$REPLANT_OUT" | grep -F "$DROP_MIG" | sed 's/^/    /'
+  echo "✗ the summary did not read \"0 of $DROP_N removed — NEVER APPLIED\""
+  psql_run "-f $PGROOT/zz_unplant_mirrors.sql" >/dev/null 2>&1 || true
+  exit 1; }
+
+# And put the schema back, or every later check runs against a database that
+# has the mirrors — the state this migration exists to prevent.
+psql_run "-f $PGROOT/zz_unplant_mirrors.sql" >/dev/null || {
+  echo "✗ could not remove the planted mirrors; the rest of this run is invalid"
+  exit 1; }
+RESTORED=$(psql_run "-f $PGROOT/which_migrations_are_applied.sql" 2>&1)
+check_drops_reported_gone "$RESTORED" "after removing the planted mirrors" || exit 1
+echo "  PASS  and it names all $DROP_N when they are planted back, so it checks something"
+
 # ── No policy reaches anon or public — asked at the END this time ─────────────
 #
 # This is already asserted earlier, immediately after

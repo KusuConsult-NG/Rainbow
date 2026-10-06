@@ -8,14 +8,23 @@
 -- fails if it drifts from supabase/migrations/.
 --
 -- Read the `summary` rows first: one per migration, with how many of its
--- objects exist. A migration reading `0 of N` was never applied; `N of N` was.
--- Anything in between is a migration that failed partway, which is the worst
--- case and the one worth looking at first.
+-- objects are as that migration leaves them. A migration reading `0 of N` was
+-- never applied; `N of N` was. Anything in between is a migration that failed
+-- partway, which is the worst case and the one worth looking at first.
+--
+-- Most migrations CREATE, and read `N of N present`. One REMOVES, and reads
+-- `N of N removed` — for those the assertion is that the object is gone, so
+-- `0 of 7 removed` means that migration has not been applied yet, not that
+-- something is broken.
 --
 -- Then the `missing` rows name each absent table, column and function. These
 -- are not cosmetic: the console calls these functions by name over PostgREST,
 -- so a missing one is a failed RPC at the moment somebody opens a screen, and a
--- missing column is an insert the database rejects in full.
+-- missing column is an insert the database rejects in full. The `still present`
+-- rows are the mirror image: an object a migration should have removed.
+--
+-- The `not detectable` rows name migrations this diagnostic CANNOT see, with
+-- the reason. A clean report is not evidence that those were applied.
 --
 -- One migration is expected to be absent on some databases: the agency tables
 -- were created by hand in production before they had a migration, so
@@ -23,133 +32,133 @@
 -- fault either way.
 -- ============================================================================
 
-WITH expected(migration, kind, obj) AS (VALUES
-  ('20260720000000_initial_schema', 'table', 'profiles'),
-  ('20260720000000_initial_schema', 'table', 'alerts'),
-  ('20260720000000_initial_schema', 'table', 'telemetry'),
-  ('20260720000000_initial_schema', 'table', 'chat_messages'),
-  ('20260720000000_initial_schema', 'table', 'system_alerts'),
-  ('20260720000000_initial_schema', 'function', 'handle_new_user'),
-  ('20260721000000_v2_agency_tables', 'function', 'set_updated_at'),
-  ('20260721000000_v2_agency_tables', 'column', 'alerts.assigned_responders'),
-  ('20260721000000_v2_agency_tables', 'column', 'alerts.escalated_to_agency'),
-  ('20260721000000_v2_agency_tables', 'column', 'alerts.media_urls'),
-  ('20260721000000_v2_agency_tables', 'column', 'alerts.resolved_by'),
-  ('20260721000000_v2_agency_tables', 'column', 'alerts.resolved_at'),
-  ('20260721000000_v2_agency_tables', 'column', 'alerts.post_sos_status'),
-  ('20260721000000_v2_agency_tables', 'column', 'alerts.lga'),
-  ('20260721000000_v2_agency_tables', 'column', 'alerts.ward'),
-  ('20260721000000_v2_agency_tables', 'column', 'alerts.pu'),
-  ('20260721000000_v2_agency_tables', 'column', 'system_alerts.expires_at'),
-  ('20260721000000_v2_agency_tables', 'column', 'profiles.sector_id'),
-  ('20260721000000_v2_agency_tables', 'column', 'profiles.push_enabled'),
-  ('20260721000000_v2_agency_tables', 'column', 'profiles.emergency_contacts'),
-  ('20260721000000_v2_agency_tables', 'column', 'profiles.lga'),
-  ('20260721000000_v2_agency_tables', 'column', 'profiles.ward'),
-  ('20260722000000_v3_telemetry_geofence', 'table', 'agency_notifications'),
-  ('20260722000000_v3_telemetry_geofence', 'column', 'alerts.escalation_log'),
-  ('20260723000000_v4_mesh_broadcast', 'table', 'agency_personnel'),
-  ('20260723000000_v4_mesh_broadcast', 'table', 'agency_deployments'),
-  ('20260723000000_v4_mesh_broadcast', 'table', 'agency_action_reports'),
-  ('20260723000000_v4_mesh_broadcast', 'column', 'profiles.agency'),
-  ('20260724000000_v5_rls_security', 'function', 'is_responder'),
-  ('20260724000000_v5_rls_security', 'function', 'is_hq_or_admin'),
-  ('20260724000000_v5_rls_security', 'column', 'alerts.assigned_to_uid'),
-  ('20260725000000_v6_geo_lga_scoping_staging', 'function', 'normalise_lga'),
-  ('20260813000000_rls_least_privilege', 'function', 'auth_role'),
-  ('20260813000000_rls_least_privilege', 'function', 'is_staff'),
-  ('20260813000000_rls_least_privilege', 'function', 'is_command'),
-  ('20260813000000_rls_least_privilege', 'function', 'liaison_agency'),
-  ('20260813000000_rls_least_privilege', 'function', 'prevent_profile_privilege_escalation'),
-  ('20260902000000_per_user_emergency_pins', 'table', 'emergency_pins'),
-  ('20260902000000_per_user_emergency_pins', 'function', 'set_emergency_pins'),
-  ('20260902000000_per_user_emergency_pins', 'function', 'has_emergency_pins'),
-  ('20260902000000_per_user_emergency_pins', 'function', '_check_emergency_pin'),
-  ('20260902000000_per_user_emergency_pins', 'function', 'verify_emergency_pin'),
-  ('20260902000000_per_user_emergency_pins', 'function', 'resolve_emergency'),
-  ('20260903000002_system_alerts_broadcast', 'column', 'system_alerts.target_audience'),
-  ('20260903000002_system_alerts_broadcast', 'column', 'system_alerts.target_agency'),
-  ('20260903000002_system_alerts_broadcast', 'column', 'system_alerts.target_lga'),
-  ('20260903000002_system_alerts_broadcast', 'column', 'system_alerts.target_ward'),
-  ('20260903000002_system_alerts_broadcast', 'column', 'system_alerts.target_pu'),
-  ('20260903000004_profiles_badge_number', 'column', 'profiles.badge_number'),
-  ('20260903000005_alerts_assigned_tier', 'column', 'alerts.assigned_tier'),
-  ('20260928000000_command_chain_escalation', 'function', 'next_tier'),
-  ('20260928000000_command_chain_escalation', 'function', 'tier_timeout_minutes'),
-  ('20260928000000_command_chain_escalation', 'function', 'escalate_overdue_alerts'),
-  ('20260928000000_command_chain_escalation', 'column', 'alerts.tier_assigned_at'),
-  ('20260928000000_command_chain_escalation', 'column', 'alerts.acknowledged_at'),
-  ('20260928000000_command_chain_escalation', 'column', 'alerts.acknowledged_by'),
-  ('20260929000000_telemetry_is_not_a_standing_feed', 'function', 'purge_stale_telemetry'),
-  ('20260930000000_sms_device_keys', 'table', 'sms_device_keys'),
-  ('20260930000000_sms_device_keys', 'function', 'register_sms_device'),
-  ('20260930000000_sms_device_keys', 'function', 'has_sms_device_key'),
-  ('20260930000000_sms_device_keys', 'function', 'revoke_sms_device_keys'),
-  ('20260930000000_sms_device_keys', 'function', 'sms_key_for_ingest'),
-  ('20260930000000_sms_device_keys', 'column', 'alerts.arrived_via'),
-  ('20261001000000_mesh_ingest', 'table', 'mesh_envelopes_seen'),
-  ('20261001000000_mesh_ingest', 'function', 'mesh_note_envelope'),
-  ('20261001000000_mesh_ingest', 'function', 'purge_stale_mesh_envelopes'),
-  ('20261002000000_sim_channel_events', 'table', 'sim_channel_events'),
-  ('20261002000000_sim_channel_events', 'function', 'purge_stale_sim_events'),
-  ('20261003000000_liaisons_are_not_staff', 'function', 'is_liaison'),
-  ('20261003000000_liaisons_are_not_staff', 'function', 'alert_is_ours'),
-  ('20261004000000_incident_tracks', 'table', 'incident_tracks'),
-  ('20261004000000_incident_tracks', 'function', 'purge_stale_incident_tracks'),
-  ('20261005000000_alert_category', 'column', 'alerts.category'),
-  ('20261006000000_alerts_scoped_to_posting', 'function', 'commands_whole_state'),
-  ('20261006000000_alerts_scoped_to_posting', 'function', 'alert_in_my_area'),
-  ('20261006000000_alerts_scoped_to_posting', 'function', 'alert_delegated_to_my_lga'),
-  ('20261007000000_notification_outbox', 'table', 'notification_outbox'),
-  ('20261007000000_notification_outbox', 'function', 'claim_notifications'),
-  ('20261007000000_notification_outbox', 'function', 'mark_notification_sent'),
-  ('20261007000000_notification_outbox', 'function', 'mark_notification_failed'),
-  ('20261007000000_notification_outbox', 'function', 'escalation_automation_status'),
-  ('20261008000000_escalation_push_targets', 'function', 'escalation_push_targets'),
-  ('20261009000000_ward_names_compared_by_key', 'function', 'geo_key'),
-  ('20261010000000_append_alert_media_atomically', 'function', 'append_alert_media'),
-  ('20261011000000_ussd_reports_are_unconfirmed', 'table', 'ussd_sessions'),
-  ('20261011000000_ussd_reports_are_unconfirmed', 'function', 'awaiting_human_confirmation'),
-  ('20261011000000_ussd_reports_are_unconfirmed', 'function', 'confirm_ussd_report'),
-  ('20261011000000_ussd_reports_are_unconfirmed', 'function', 'mark_false_report'),
-  ('20261011000000_ussd_reports_are_unconfirmed', 'function', 'ussd_report_credibility'),
-  ('20261011000000_ussd_reports_are_unconfirmed', 'column', 'alerts.reporter_msisdn'),
-  ('20261011000000_ussd_reports_are_unconfirmed', 'column', 'alerts.caller_may_be_called'),
-  ('20261011000000_ussd_reports_are_unconfirmed', 'column', 'alerts.ussd_confirmed_at'),
-  ('20261011000000_ussd_reports_are_unconfirmed', 'column', 'alerts.ussd_confirmed_by'),
-  ('20261011000000_ussd_reports_are_unconfirmed', 'column', 'alerts.public_reference'),
-  ('20261012000000_ussd_filing', 'function', 'ussd_reference'),
-  ('20261012000000_ussd_filing', 'function', 'ussd_caller'),
-  ('20261012000000_ussd_filing', 'function', 'ussd_file_report'),
-  ('20261012000000_ussd_filing', 'function', 'ussd_last_report'),
-  ('20261012000000_ussd_filing', 'function', 'sweep_ussd_sessions'),
-  ('20261013000000_ussd_landmark', 'function', 'ussd_add_landmark'),
-  ('20261013000000_ussd_landmark', 'column', 'alerts.reporter_landmark'),
-  ('20261014000000_ai_reports_are_kept', 'table', 'incident_ai_reports'),
-  ('20261014000000_ai_reports_are_kept', 'function', 'latest_ai_report'),
-  ('20261015000000_oversight_and_debrief', 'function', 'is_oversight_matter'),
-  ('20261015000000_oversight_and_debrief', 'function', 'route_oversight_to_hq'),
-  ('20261015000000_oversight_and_debrief', 'function', 'audit_trail'),
-  ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief'),
-  ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief_by'),
-  ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief_at'),
-  ('phase1_foundation', 'table', 'safe_zones'),
-  ('phase1_foundation', 'table', 'uninstall_requests'),
-  ('phase1_foundation', 'table', 'app_config'),
-  ('phase1_foundation', 'column', 'alerts.geo_siec_ward'),
-  ('phase1_foundation', 'column', 'profiles.fcm_token'),
-  ('phase1_foundation', 'column', 'profiles.onesignal_player_id'),
-  ('phase2_assigned_responders', 'column', 'alerts.ai_triage'),
-  ('phase3_profile_columns_and_config', 'column', 'profiles.last_device_id'),
-  ('phase3_profile_columns_and_config', 'column', 'profiles.last_login_at'),
-  ('phase3_profile_columns_and_config', 'column', 'uninstall_requests.status'),
-  ('phase3_profile_columns_and_config', 'column', 'uninstall_requests.reviewed_at'),
-  ('phase3_profile_columns_and_config', 'column', 'app_config.description'),
-  ('phase3_profile_columns_and_config', 'column', 'app_config.updated_at'),
-  ('phase3_profile_columns_and_config', 'column', 'app_config.updated_by')
+WITH expected(migration, kind, obj, want) AS (VALUES
+  ('20260720000000_initial_schema', 'table', 'profiles', true),
+  ('20260720000000_initial_schema', 'table', 'alerts', true),
+  ('20260720000000_initial_schema', 'table', 'telemetry', true),
+  ('20260720000000_initial_schema', 'table', 'chat_messages', true),
+  ('20260720000000_initial_schema', 'table', 'system_alerts', true),
+  ('20260720000000_initial_schema', 'function', 'handle_new_user', true),
+  ('20260721000000_v2_agency_tables', 'function', 'set_updated_at', true),
+  ('20260721000000_v2_agency_tables', 'column', 'alerts.assigned_responders', true),
+  ('20260721000000_v2_agency_tables', 'column', 'alerts.escalated_to_agency', true),
+  ('20260721000000_v2_agency_tables', 'column', 'alerts.media_urls', true),
+  ('20260721000000_v2_agency_tables', 'column', 'alerts.resolved_by', true),
+  ('20260721000000_v2_agency_tables', 'column', 'alerts.resolved_at', true),
+  ('20260721000000_v2_agency_tables', 'column', 'alerts.post_sos_status', true),
+  ('20260721000000_v2_agency_tables', 'column', 'system_alerts.expires_at', true),
+  ('20260721000000_v2_agency_tables', 'column', 'profiles.sector_id', true),
+  ('20260721000000_v2_agency_tables', 'column', 'profiles.push_enabled', true),
+  ('20260721000000_v2_agency_tables', 'column', 'profiles.emergency_contacts', true),
+  ('20260722000000_v3_telemetry_geofence', 'table', 'agency_notifications', true),
+  ('20260722000000_v3_telemetry_geofence', 'column', 'alerts.escalation_log', true),
+  ('20260723000000_v4_mesh_broadcast', 'table', 'agency_personnel', true),
+  ('20260723000000_v4_mesh_broadcast', 'table', 'agency_deployments', true),
+  ('20260723000000_v4_mesh_broadcast', 'table', 'agency_action_reports', true),
+  ('20260723000000_v4_mesh_broadcast', 'column', 'profiles.agency', true),
+  ('20260724000000_v5_rls_security', 'column', 'alerts.assigned_to_uid', true),
+  ('20260725000000_v6_geo_lga_scoping_staging', 'function', 'normalise_lga', true),
+  ('20260813000000_rls_least_privilege', 'function', 'auth_role', true),
+  ('20260813000000_rls_least_privilege', 'function', 'is_staff', true),
+  ('20260813000000_rls_least_privilege', 'function', 'is_command', true),
+  ('20260813000000_rls_least_privilege', 'function', 'liaison_agency', true),
+  ('20260813000000_rls_least_privilege', 'function', 'prevent_profile_privilege_escalation', true),
+  ('20260902000000_per_user_emergency_pins', 'table', 'emergency_pins', true),
+  ('20260902000000_per_user_emergency_pins', 'function', 'set_emergency_pins', true),
+  ('20260902000000_per_user_emergency_pins', 'function', 'has_emergency_pins', true),
+  ('20260902000000_per_user_emergency_pins', 'function', '_check_emergency_pin', true),
+  ('20260902000000_per_user_emergency_pins', 'function', 'verify_emergency_pin', true),
+  ('20260902000000_per_user_emergency_pins', 'function', 'resolve_emergency', true),
+  ('20260903000002_system_alerts_broadcast', 'column', 'system_alerts.target_audience', true),
+  ('20260903000002_system_alerts_broadcast', 'column', 'system_alerts.target_agency', true),
+  ('20260903000002_system_alerts_broadcast', 'column', 'system_alerts.target_lga', true),
+  ('20260903000002_system_alerts_broadcast', 'column', 'system_alerts.target_ward', true),
+  ('20260903000002_system_alerts_broadcast', 'column', 'system_alerts.target_pu', true),
+  ('20260903000004_profiles_badge_number', 'column', 'profiles.badge_number', true),
+  ('20260903000005_alerts_assigned_tier', 'column', 'alerts.assigned_tier', true),
+  ('20260928000000_command_chain_escalation', 'function', 'next_tier', true),
+  ('20260928000000_command_chain_escalation', 'function', 'tier_timeout_minutes', true),
+  ('20260928000000_command_chain_escalation', 'function', 'escalate_overdue_alerts', true),
+  ('20260928000000_command_chain_escalation', 'column', 'alerts.tier_assigned_at', true),
+  ('20260928000000_command_chain_escalation', 'column', 'alerts.acknowledged_at', true),
+  ('20260928000000_command_chain_escalation', 'column', 'alerts.acknowledged_by', true),
+  ('20260929000000_telemetry_is_not_a_standing_feed', 'function', 'purge_stale_telemetry', true),
+  ('20260930000000_sms_device_keys', 'table', 'sms_device_keys', true),
+  ('20260930000000_sms_device_keys', 'function', 'register_sms_device', true),
+  ('20260930000000_sms_device_keys', 'function', 'has_sms_device_key', true),
+  ('20260930000000_sms_device_keys', 'function', 'revoke_sms_device_keys', true),
+  ('20260930000000_sms_device_keys', 'function', 'sms_key_for_ingest', true),
+  ('20260930000000_sms_device_keys', 'column', 'alerts.arrived_via', true),
+  ('20261001000000_mesh_ingest', 'table', 'mesh_envelopes_seen', true),
+  ('20261001000000_mesh_ingest', 'function', 'mesh_note_envelope', true),
+  ('20261001000000_mesh_ingest', 'function', 'purge_stale_mesh_envelopes', true),
+  ('20261002000000_sim_channel_events', 'table', 'sim_channel_events', true),
+  ('20261002000000_sim_channel_events', 'function', 'purge_stale_sim_events', true),
+  ('20261003000000_liaisons_are_not_staff', 'function', 'is_liaison', true),
+  ('20261003000000_liaisons_are_not_staff', 'function', 'alert_is_ours', true),
+  ('20261004000000_incident_tracks', 'table', 'incident_tracks', true),
+  ('20261004000000_incident_tracks', 'function', 'purge_stale_incident_tracks', true),
+  ('20261005000000_alert_category', 'column', 'alerts.category', true),
+  ('20261006000000_alerts_scoped_to_posting', 'function', 'commands_whole_state', true),
+  ('20261006000000_alerts_scoped_to_posting', 'function', 'alert_in_my_area', true),
+  ('20261006000000_alerts_scoped_to_posting', 'function', 'alert_delegated_to_my_lga', true),
+  ('20261007000000_notification_outbox', 'table', 'notification_outbox', true),
+  ('20261007000000_notification_outbox', 'function', 'claim_notifications', true),
+  ('20261007000000_notification_outbox', 'function', 'mark_notification_sent', true),
+  ('20261007000000_notification_outbox', 'function', 'mark_notification_failed', true),
+  ('20261007000000_notification_outbox', 'function', 'escalation_automation_status', true),
+  ('20261008000000_escalation_push_targets', 'function', 'escalation_push_targets', true),
+  ('20261009000000_ward_names_compared_by_key', 'function', 'geo_key', true),
+  ('20261010000000_append_alert_media_atomically', 'function', 'append_alert_media', true),
+  ('20261011000000_ussd_reports_are_unconfirmed', 'table', 'ussd_sessions', true),
+  ('20261011000000_ussd_reports_are_unconfirmed', 'function', 'awaiting_human_confirmation', true),
+  ('20261011000000_ussd_reports_are_unconfirmed', 'function', 'confirm_ussd_report', true),
+  ('20261011000000_ussd_reports_are_unconfirmed', 'function', 'mark_false_report', true),
+  ('20261011000000_ussd_reports_are_unconfirmed', 'function', 'ussd_report_credibility', true),
+  ('20261011000000_ussd_reports_are_unconfirmed', 'column', 'alerts.reporter_msisdn', true),
+  ('20261011000000_ussd_reports_are_unconfirmed', 'column', 'alerts.caller_may_be_called', true),
+  ('20261011000000_ussd_reports_are_unconfirmed', 'column', 'alerts.ussd_confirmed_at', true),
+  ('20261011000000_ussd_reports_are_unconfirmed', 'column', 'alerts.ussd_confirmed_by', true),
+  ('20261011000000_ussd_reports_are_unconfirmed', 'column', 'alerts.public_reference', true),
+  ('20261012000000_ussd_filing', 'function', 'ussd_reference', true),
+  ('20261012000000_ussd_filing', 'function', 'ussd_caller', true),
+  ('20261012000000_ussd_filing', 'function', 'ussd_file_report', true),
+  ('20261012000000_ussd_filing', 'function', 'ussd_last_report', true),
+  ('20261012000000_ussd_filing', 'function', 'sweep_ussd_sessions', true),
+  ('20261013000000_ussd_landmark', 'function', 'ussd_add_landmark', true),
+  ('20261013000000_ussd_landmark', 'column', 'alerts.reporter_landmark', true),
+  ('20261014000000_ai_reports_are_kept', 'table', 'incident_ai_reports', true),
+  ('20261014000000_ai_reports_are_kept', 'function', 'latest_ai_report', true),
+  ('20261015000000_oversight_and_debrief', 'function', 'is_oversight_matter', true),
+  ('20261015000000_oversight_and_debrief', 'function', 'route_oversight_to_hq', true),
+  ('20261015000000_oversight_and_debrief', 'function', 'audit_trail', true),
+  ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief', true),
+  ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief_by', true),
+  ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief_at', true),
+  ('phase1_foundation', 'table', 'safe_zones', true),
+  ('phase1_foundation', 'table', 'uninstall_requests', true),
+  ('phase1_foundation', 'table', 'app_config', true),
+  ('phase1_foundation', 'column', 'alerts.geo_siec_ward', true),
+  ('phase1_foundation', 'column', 'profiles.fcm_token', true),
+  ('phase1_foundation', 'column', 'profiles.onesignal_player_id', true),
+  ('phase2_assigned_responders', 'column', 'alerts.ai_triage', true),
+  ('phase3_profile_columns_and_config', 'column', 'profiles.last_device_id', true),
+  ('phase3_profile_columns_and_config', 'column', 'profiles.last_login_at', true),
+  ('phase3_profile_columns_and_config', 'column', 'uninstall_requests.status', true),
+  ('phase3_profile_columns_and_config', 'column', 'uninstall_requests.reviewed_at', true),
+  ('phase3_profile_columns_and_config', 'column', 'app_config.description', true),
+  ('phase3_profile_columns_and_config', 'column', 'app_config.updated_at', true),
+  ('phase3_profile_columns_and_config', 'column', 'app_config.updated_by', true),
+  ('20261018000000_the_mirrors_and_two_dead_functions_are_gone', 'column', 'alerts.lga', false),
+  ('20261018000000_the_mirrors_and_two_dead_functions_are_gone', 'column', 'alerts.pu', false),
+  ('20261018000000_the_mirrors_and_two_dead_functions_are_gone', 'column', 'alerts.ward', false),
+  ('20261018000000_the_mirrors_and_two_dead_functions_are_gone', 'column', 'profiles.lga', false),
+  ('20261018000000_the_mirrors_and_two_dead_functions_are_gone', 'column', 'profiles.ward', false),
+  ('20261018000000_the_mirrors_and_two_dead_functions_are_gone', 'function', 'is_hq_or_admin', false),
+  ('20261018000000_the_mirrors_and_two_dead_functions_are_gone', 'function', 'is_responder', false)
 ),
 resolved AS (
-  SELECT e.migration, e.kind, e.obj,
+  SELECT e.migration, e.kind, e.obj, e.want,
          CASE e.kind
            WHEN 'table' THEN
              to_regclass('public.' || quote_ident(e.obj)) IS NOT NULL
@@ -169,11 +178,17 @@ resolved AS (
     FROM expected e
 )
 SELECT 1 AS ord, 'summary' AS section, migration AS name,
-       format('%s of %s present%s', count(*) FILTER (WHERE present), count(*),
+       format('%s of %s %s%s',
+              count(*) FILTER (WHERE present = want), count(*),
+              CASE
+                WHEN bool_and(want)     THEN 'present'
+                WHEN bool_and(NOT want) THEN 'removed'
+                ELSE 'as expected'
+              END,
               CASE
                 WHEN migration IN ('20260721000000_v2_agency_tables', '20260722000000_v3_telemetry_geofence', '20260723000000_v4_mesh_broadcast', '20260724000000_v5_rls_security') THEN ' — by hand in production, absence is not a fault'
-                WHEN count(*) FILTER (WHERE present) = 0 THEN ' — NEVER APPLIED'
-                WHEN count(*) FILTER (WHERE present) < count(*) THEN ' — APPLIED PARTWAY, look here first'
+                WHEN count(*) FILTER (WHERE present = want) = 0 THEN ' — NEVER APPLIED'
+                WHEN count(*) FILTER (WHERE present = want) < count(*) THEN ' — APPLIED PARTWAY, look here first'
                 ELSE ''
               END) AS detail
   FROM resolved
@@ -181,8 +196,25 @@ SELECT 1 AS ord, 'summary' AS section, migration AS name,
 UNION ALL
 SELECT 2, 'missing', format('%s %s', kind, obj), migration
   FROM resolved
- WHERE NOT present
+ WHERE want AND NOT present
 UNION ALL
-SELECT 3, 'all present', 'every object in every migration exists', 'nothing to apply'
- WHERE NOT EXISTS (SELECT 1 FROM resolved WHERE NOT present)
+SELECT 2, 'still present', format('%s %s', kind, obj),
+       format('%s removes this and has not been applied', migration)
+  FROM resolved
+ WHERE present AND NOT want
+UNION ALL
+SELECT 3, 'not detectable', name, detail
+  FROM (VALUES
+         ('20260812000000_agency_tables', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
+         ('20260903000000_realtime_publication', 'it declares no table, column or function'),
+         ('20260903000001_incident_media_storage', 'it only creates policies, which object existence cannot see — use scripts/rls_inventory.sql'),
+         ('20260903000003_alert_escalation_columns', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
+         ('20260927000000_signup_cannot_choose_role', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
+         ('20261016000000_telemetry_policy_is_not_public', 'it only creates policies, which object existence cannot see — use scripts/rls_inventory.sql'),
+         ('20261017000000_the_hand_applied_era_is_in_the_history', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them')
+       ) AS u(name, detail)
+UNION ALL
+SELECT 4, 'as expected', 'every object in every migration is as it should be',
+       'nothing to apply — but read the `not detectable` rows'
+ WHERE NOT EXISTS (SELECT 1 FROM resolved WHERE present <> want)
  ORDER BY ord, name;

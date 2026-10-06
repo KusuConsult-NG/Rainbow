@@ -724,13 +724,25 @@ jobs:
           python3 scripts/build_apply_all.py
           python3 scripts/build_apply_in_parts.py
           python3 scripts/build_bootstrap.py
-          GEN="scripts/rls_production_dryrun.sql scripts/rls_inventory.sql scripts/apply_all_migrations.sql scripts/bootstrap_staging.sql"
+          python3 scripts/sync_migration_inventory.py
+          GEN="scripts/rls_production_dryrun.sql scripts/rls_inventory.sql scripts/apply_all_migrations.sql scripts/bootstrap_staging.sql scripts/which_migrations_are_applied.sql"
           if ! git diff --quiet -- $GEN; then
-            echo "::error::A generated SQL script is stale. Re-run the four build_*.py generators."
+            echo "::error::A generated SQL script is stale. Re-run the generators in this step."
             git diff -- $GEN | head -60
             exit 1
           fi
-          echo "OK: all four generated scripts match the migrations."
+          echo "OK: all generated scripts match the migrations."
+
+      # scripts/which_migrations_are_applied.sql was left out of the list above
+      # for its whole life, while its own docstring said "--check in CI is what
+      # keeps it honest". It was not in CI at all. It went three migrations
+      # stale, and because it reports "every object in every migration exists"
+      # it read as a clean bill of health for a repository it had never seen —
+      # the one failure mode a staleness check exists to catch. The diff above
+      # now covers it; this is the second door, with the error message that
+      # names the fix.
+      - name: Assert the migration inventory covers every migration
+        run: python3 scripts/sync_migration_inventory.py --check
 
       # A stale script and an INCOMPLETE one fail differently, and only the
       # first was checked. The two apply-scripts used to carry a hand-written

@@ -36,12 +36,30 @@ Columns declared inside a CREATE TABLE body are deliberately not listed: if the
 table is there, they came with it, and listing them would triple the output for
 no new information.
 
-Known limitation: a migration that only creates or replaces a POLICY contributes
-nothing, so it cannot be detected as missing here —
-20261016000000_telemetry_policy_is_not_public.sql is exactly that shape. Policies
-are covered instead by the end-of-replay sweep in verify_rls_migration.sh, which
-fails if any policy in `public` reaches anon or public, and by
-scripts/rls_inventory.sql against a live database.
+A migration that REMOVES an object is handled the other way round: the object
+becomes a must-be-ABSENT assertion attributed to the migration that drops it.
+Without that this diagnostic actively misleads. Before this change all seven
+objects 20261018000000 drops were must-be-present rows inherited from v2 and v5,
+so the moment an operator applied 20261018 the output would report seven missing
+objects and point them at
+`20260721000000_v2_agency_tables` / `20260724000000_v5_rls_security` — files
+whose re-application would recreate the generated mirrors that migration exists
+to remove, putting back the ordinal divergence behind the 428C9 difference. A
+drop-only migration was also invisible here, since it creates nothing; now it
+reads `0 of 7 removed — NEVER APPLIED` before and `7 of 7 removed` after, which
+is the only way this script can answer "did it land?" for such a file.
+
+Known limitation: object existence cannot see every migration. One that only
+creates or replaces a POLICY contributes nothing
+(20261016000000_telemetry_policy_is_not_public.sql is exactly that shape), and
+neither does one whose every object an earlier migration already created
+(20261017000000, whose purpose is to put the hand-applied era into the history,
+is a no-op on the production database that already has it). Those files are no
+longer silently missing from the output: they are listed under `not detectable`
+with the reason, so nobody reads a clean report as proof they were applied.
+Policies are covered instead by the end-of-replay sweep in
+verify_rls_migration.sh, which fails if any policy in `public` reaches anon or
+public, and by scripts/rls_inventory.sql against a live database.
 """
 from __future__ import annotations
 
@@ -71,6 +89,32 @@ HAND_MADE = {
     '20260722000000_v3_telemetry_geofence',
     '20260723000000_v4_mesh_broadcast',
     '20260724000000_v5_rls_security',
+}
+
+# Era objects a later migration removes with a plpgsql `EXECUTE format(...)`
+# rather than literal SQL, so no regex over the migration text can see them.
+# Listed explicitly because the alternative is a regex that parses plpgsql,
+# which would be a worse bet than a short list kept next to the migration that
+# owns it.
+#
+# 20261018000000 drops all seven: the five generated mirrors of geo_*, which
+# hold no information of their own, and the two v5 functions whose only callers
+# were the v5-era policies that 20260813 drops by name.
+#
+# This is the one definition. check_schema_convergence.py re-exports it and
+# verifies every entry against the migration that claims to drop it, and
+# check_generated_column_inserts.py reads it from there — so one list is checked
+# and the others cannot drift from it. It lives HERE rather than there because
+# check_schema_convergence.py already imports this module for strip_noise, and
+# the dependency has to run one way.
+DROPPED_BY_LATER: dict[str, str] = {
+    'column:alerts.lga': '20261018000000',
+    'column:alerts.ward': '20261018000000',
+    'column:alerts.pu': '20261018000000',
+    'column:profiles.lga': '20261018000000',
+    'column:profiles.ward': '20261018000000',
+    'function:is_hq_or_admin': '20261018000000',
+    'function:is_responder': '20261018000000',
 }
 
 
@@ -111,27 +155,65 @@ ADD_COLUMN = re.compile(
     r'(?is)\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?')
 
 
-def inventory() -> list[tuple[str, str, str]]:
-    """[(migration stem, kind, object), ...] in migration order."""
-    rows: list[tuple[str, str, str]] = []
+POLICY = re.compile(r'(?is)\bCREATE\s+POLICY\b')
+
+
+def extract(sql: str) -> list[tuple[str, str]]:
+    """[(kind, object), ...] created by one migration's text."""
+    found: list[tuple[str, str]] = []
+    for m in TABLE.finditer(sql):
+        found.append(('table', m.group(1).lower()))
+    for m in FUNCTION.finditer(sql):
+        found.append(('function', m.group(1).lower()))
+    # ADD COLUMN belongs to whichever ALTER TABLE precedes it, and one ALTER
+    # can add several — so walk the statement, not the file.
+    for stmt in sql.split(';'):
+        a = ALTER.search(stmt)
+        if not a:
+            continue
+        table = a.group(1).lower()
+        for c in ADD_COLUMN.finditer(stmt):
+            found.append(('column', f'{table}.{c.group(1).lower()}'))
+    return found
+
+
+def dropping_stems() -> dict[str, str]:
+    """{'column:alerts.lga': '20261018000000_the_mirrors_...'}
+
+    Resolves each DROPPED_BY_LATER prefix to the real file stem, and refuses to
+    generate anything if one names a migration that does not exist — otherwise a
+    typo would quietly drop the object from BOTH halves of the output: no
+    must-be-present row, and a must-be-absent row filed under a migration nobody
+    can apply.
+    """
+    out: dict[str, str] = {}
+    for key, prefix in sorted(DROPPED_BY_LATER.items()):
+        matches = sorted(MIGRATIONS.glob(f'{prefix}*.sql'))
+        if not matches:
+            raise SystemExit(
+                f'✗ DROPPED_BY_LATER says {key} is dropped by migration '
+                f'{prefix}, and no such file exists in supabase/migrations/.')
+        out[key] = matches[0].stem
+    return out
+
+
+def inventory() -> tuple[list[tuple[str, str, str, bool]], list[tuple[str, str]]]:
+    """(rows, undetectable).
+
+    rows is [(migration stem, kind, object, must_be_present), ...]; undetectable
+    is [(migration stem, why object existence cannot see it), ...].
+    """
+    drops = dropping_stems()
+    rows: list[tuple[str, str, str, bool]] = []
     seen: set[tuple[str, str]] = set()
+    undetectable: list[tuple[str, str]] = []
+    dropped_were_created: set[str] = set()
+
     for path in sorted(MIGRATIONS.glob('*.sql')):
         stem = path.stem
         sql = strip_noise(path.read_text(encoding='utf-8'))
-        found: list[tuple[str, str]] = []
-        for m in TABLE.finditer(sql):
-            found.append(('table', m.group(1).lower()))
-        for m in FUNCTION.finditer(sql):
-            found.append(('function', m.group(1).lower()))
-        # ADD COLUMN belongs to whichever ALTER TABLE precedes it, and one ALTER
-        # can add several — so walk the statement, not the file.
-        for stmt in sql.split(';'):
-            a = ALTER.search(stmt)
-            if not a:
-                continue
-            table = a.group(1).lower()
-            for c in ADD_COLUMN.finditer(stmt):
-                found.append(('column', f'{table}.{c.group(1).lower()}'))
+        found = extract(sql)
+        contributed = 0
         for kind, obj in found:
             # An object created in one migration and replaced in a later one is
             # listed against the FIRST, which is the migration whose absence
@@ -139,8 +221,43 @@ def inventory() -> list[tuple[str, str, str]]:
             if (kind, obj) in seen:
                 continue
             seen.add((kind, obj))
-            rows.append((stem, kind, obj))
-    return rows
+            key = f'{kind}:{obj}'
+            if key in drops:
+                # Emitted below as a must-be-ABSENT row against the migration
+                # that removes it, instead of a must-be-present row here.
+                dropped_were_created.add(key)
+                continue
+            rows.append((stem, kind, obj, True))
+            contributed += 1
+        if contributed:
+            continue
+        if stem in drops.values():
+            continue   # it gets its must-be-absent rows below
+        undetectable.append((stem, _why_invisible(path, sql, found)))
+
+    missing_creator = sorted(set(drops) - dropped_were_created)
+    if missing_creator:
+        raise SystemExit(
+            '✗ DROPPED_BY_LATER lists object(s) that no migration in '
+            'supabase/migrations/ creates, so the must-be-absent assertion is '
+            'vacuous and the name is probably a typo:\n  '
+            + '\n  '.join(missing_creator))
+
+    for key, stem in sorted(drops.items(), key=lambda kv: (kv[1], kv[0])):
+        kind, obj = key.split(':', 1)
+        rows.append((stem, kind, obj, False))
+    return rows, undetectable
+
+
+def _why_invisible(path: Path, sql: str, found: list[tuple[str, str]]) -> str:
+    """Why a migration contributes no row, in the operator's terms."""
+    if found:
+        return ('every object it declares is already created by an earlier '
+                'migration, so it is a no-op on a database that has them')
+    if POLICY.search(sql):
+        return ('it only creates policies, which object existence cannot see — '
+                'use scripts/rls_inventory.sql')
+    return 'it declares no table, column or function'
 
 
 HEADER = """\
@@ -154,14 +271,23 @@ HEADER = """\
 -- fails if it drifts from supabase/migrations/.
 --
 -- Read the `summary` rows first: one per migration, with how many of its
--- objects exist. A migration reading `0 of N` was never applied; `N of N` was.
--- Anything in between is a migration that failed partway, which is the worst
--- case and the one worth looking at first.
+-- objects are as that migration leaves them. A migration reading `0 of N` was
+-- never applied; `N of N` was. Anything in between is a migration that failed
+-- partway, which is the worst case and the one worth looking at first.
+--
+-- Most migrations CREATE, and read `N of N present`. One REMOVES, and reads
+-- `N of N removed` — for those the assertion is that the object is gone, so
+-- `0 of 7 removed` means that migration has not been applied yet, not that
+-- something is broken.
 --
 -- Then the `missing` rows name each absent table, column and function. These
 -- are not cosmetic: the console calls these functions by name over PostgREST,
 -- so a missing one is a failed RPC at the moment somebody opens a screen, and a
--- missing column is an insert the database rejects in full.
+-- missing column is an insert the database rejects in full. The `still present`
+-- rows are the mirror image: an object a migration should have removed.
+--
+-- The `not detectable` rows name migrations this diagnostic CANNOT see, with
+-- the reason. A clean report is not evidence that those were applied.
 --
 -- One migration is expected to be absent on some databases: the agency tables
 -- were created by hand in production before they had a migration, so
@@ -169,11 +295,11 @@ HEADER = """\
 -- fault either way.
 -- ============================================================================
 
-WITH expected(migration, kind, obj) AS (VALUES
+WITH expected(migration, kind, obj, want) AS (VALUES
 {values}
 ),
 resolved AS (
-  SELECT e.migration, e.kind, e.obj,
+  SELECT e.migration, e.kind, e.obj, e.want,
          CASE e.kind
            WHEN 'table' THEN
              to_regclass('public.' || quote_ident(e.obj)) IS NOT NULL
@@ -193,11 +319,17 @@ resolved AS (
     FROM expected e
 )
 SELECT 1 AS ord, 'summary' AS section, migration AS name,
-       format('%s of %s present%s', count(*) FILTER (WHERE present), count(*),
+       format('%s of %s %s%s',
+              count(*) FILTER (WHERE present = want), count(*),
+              CASE
+                WHEN bool_and(want)     THEN 'present'
+                WHEN bool_and(NOT want) THEN 'removed'
+                ELSE 'as expected'
+              END,
               CASE
                 WHEN migration IN ({hand_made}) THEN ' — by hand in production, absence is not a fault'
-                WHEN count(*) FILTER (WHERE present) = 0 THEN ' — NEVER APPLIED'
-                WHEN count(*) FILTER (WHERE present) < count(*) THEN ' — APPLIED PARTWAY, look here first'
+                WHEN count(*) FILTER (WHERE present = want) = 0 THEN ' — NEVER APPLIED'
+                WHEN count(*) FILTER (WHERE present = want) < count(*) THEN ' — APPLIED PARTWAY, look here first'
                 ELSE ''
               END) AS detail
   FROM resolved
@@ -205,27 +337,83 @@ SELECT 1 AS ord, 'summary' AS section, migration AS name,
 UNION ALL
 SELECT 2, 'missing', format('%s %s', kind, obj), migration
   FROM resolved
- WHERE NOT present
+ WHERE want AND NOT present
 UNION ALL
-SELECT 3, 'all present', 'every object in every migration exists', 'nothing to apply'
- WHERE NOT EXISTS (SELECT 1 FROM resolved WHERE NOT present)
+SELECT 2, 'still present', format('%s %s', kind, obj),
+       format('%s removes this and has not been applied', migration)
+  FROM resolved
+ WHERE present AND NOT want
+{undetectable}UNION ALL
+SELECT 4, 'as expected', 'every object in every migration is as it should be',
+       '{nothing_to_apply}'
+ WHERE NOT EXISTS (SELECT 1 FROM resolved WHERE present <> want)
  ORDER BY ord, name;
 """
 
+# Rendered only when there is at least one such migration: `VALUES` with no
+# rows is a syntax error, and a hard-coded empty block would make the whole
+# diagnostic fail to parse on a repository where every migration is visible.
+UNDETECTABLE_BLOCK = """\
+UNION ALL
+SELECT 3, 'not detectable', name, detail
+  FROM (VALUES
+{values}
+       ) AS u(name, detail)
+"""
 
-def render(rows: list[tuple[str, str, str]]) -> str:
+
+def render(rows: list[tuple[str, str, str, bool]],
+           undetectable: list[tuple[str, str]]) -> str:
     values = ',\n'.join(
-        f"  ('{m}', '{k}', '{o}')" for m, k, o in rows)
+        f"  ('{m}', '{k}', '{o}', {'true' if w else 'false'})"
+        for m, k, o, w in rows)
     hand = ', '.join(f"'{h}'" for h in sorted(HAND_MADE))
-    return HEADER.format(values=values, hand_made=hand)
+    block = ''
+    if undetectable:
+        block = UNDETECTABLE_BLOCK.format(values=',\n'.join(
+            f"         ('{m}', '{d}')" for m, d in sorted(undetectable)))
+    note = ('nothing to apply — but read the `not detectable` rows'
+            if undetectable else 'nothing to apply')
+    return HEADER.format(values=values, hand_made=hand, undetectable=block,
+                         nothing_to_apply=note)
 
 
 def main() -> int:
-    rows = inventory()
+    if '--drops' in sys.argv:
+        # For verify_rls_migration.sh, so the shell gate asserting "N of N
+        # removed" reads the count from this list instead of hard-coding it and
+        # silently checking the wrong number the next time one is added.
+        stems = sorted(set(dropping_stems().values()))
+        if len(stems) != 1:
+            print(f'✗ expected one dropping migration, found {len(stems)}: '
+                  f'{stems}. --drops has to grow a row per migration.',
+                  file=sys.stderr)
+            return 2
+        print(f'{stems[0]} {len(DROPPED_BY_LATER)}')
+        return 0
+
+    rows, undetectable = inventory()
     if not rows:
         print('✗ no objects extracted from supabase/migrations/', file=sys.stderr)
         return 2
-    want = render(rows)
+
+    # Every literal is interpolated into single-quoted SQL. Nothing extracted
+    # from a migration name or written in _why_invisible has a quote in it
+    # today, and this is here so that stops being a thing anyone has to
+    # remember: a quote would close the literal early and the diagnostic would
+    # fail to parse against a live database, which is where it is read.
+    for literal in ([r[0] for r in rows] + [r[2] for r in rows]
+                    + [u for pair in undetectable for u in pair]):
+        if "'" in literal or '\\' in literal:
+            print(f'✗ {literal!r} would break the generated SQL literal.',
+                  file=sys.stderr)
+            return 2
+
+    want = render(rows, undetectable)
+    counts = (f'{sum(1 for r in rows if r[3])} objects that must exist, '
+              f'{sum(1 for r in rows if not r[3])} that must be gone, across '
+              f'{len({r[0] for r in rows})} migrations; '
+              f'{len(undetectable)} not detectable')
     if '--check' in sys.argv:
         have = OUT.read_text(encoding='utf-8') if OUT.exists() else ''
         if have != want:
@@ -233,12 +421,12 @@ def main() -> int:
                   '  Run: python3 scripts/sync_migration_inventory.py',
                   file=sys.stderr)
             return 1
-        print(f'✓ the migration inventory matches: {len(rows)} objects across '
-              f'{len({r[0] for r in rows})} migrations')
+        print(f'✓ the migration inventory matches: {counts}')
         return 0
     OUT.write_text(want, encoding='utf-8')
-    print(f'✓ wrote {OUT.relative_to(REPO)}: {len(rows)} objects across '
-          f'{len({r[0] for r in rows})} migrations')
+    print(f'✓ wrote {OUT.relative_to(REPO)}: {counts}')
+    for stem, why in sorted(undetectable):
+        print(f'  not detectable: {stem} — {why}')
     return 0
 
 
