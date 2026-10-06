@@ -706,6 +706,17 @@ jobs:
       - name: Assert exactly one deploy target, and that it is Railway
         run: python3 scripts/check_one_deploy_target.py
 
+      # Citizen sign-in is refused outright by a project with no SMS provider,
+      # so `wire_up_sms_provider.sh --check` is the first thing anyone runs when
+      # sign-in fails. Its entire value is telling two 401s apart: the platform
+      # refusing the call because the function was deployed with JWT
+      # verification on (the hook can then never work), versus our own code
+      # rejecting a bad signature (healthy). Both are JSON with a 401 status.
+      # Read the wrong way round it sends an operator to redeploy a working
+      # function, or declares a broken one fine. No network, no credentials.
+      - name: Assert the SMS probe classifier reads every response shape
+        run: ./scripts/wire_up_sms_provider_test.sh
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-latest

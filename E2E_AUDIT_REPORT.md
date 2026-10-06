@@ -1078,7 +1078,7 @@ injection point. Bundle these locally (`leaflet` is already a dependency).
     dashboard → dispatch → resolve (M-3).
 12. Repo cleanup: M-5 deploy script, M-6 committed `node_modules`, M-7 dead Firebase stack.
 
-## Status as of PR #67 (2026-10-06)
+## Status as of PR #68 (2026-10-06)
 
 > Was "as of PR #1" until 2026-10-06, fifty-three merges later. Four rows below
 > were materially wrong by then — C-3 read **NOT RUN** after it had been applied
@@ -1499,6 +1499,67 @@ wrong.
 The honest limit, stated in the file: the `20261017` row cannot distinguish
 "applied" from "was already true", because on production it is a no-op. Nothing
 can, from the schema alone.
+
+### T-25. The SMS blocker was five dashboard steps with no way to check them
+
+T-18 records the blocker: `signInWithOtp` is refused outright by a project with
+no SMS provider, so until one is attached **no citizen can sign in**. PR #59 put
+the hook in the repository with 25 unit tests. What was left was five dashboard
+settings performed by hand, described in prose, with no way to verify the result
+short of asking a real person to request a real code — and a provider that is
+configured but broken looks identical to one that is not configured, from every
+screen in the app.
+
+`scripts/wire_up_sms_provider.sh` closes both halves.
+
+**`--check` needs no credentials and sends no SMS.** Two unauthenticated
+requests to the function's public URL separate the four failure modes, because
+this function's own error bodies carry `error.http_code` and the platform's do
+not:
+
+| request | answer | meaning |
+|---|---|---|
+| `GET` | 401 **without** `error.http_code` | the platform refused it: deployed with JWT verification on, so the hook can never reach it |
+| `GET` | 405 **with** `error.http_code` | our code answered — deployed correctly |
+| `GET` | 404 | not deployed |
+| `POST`, bad signature | 503 `hook is not configured` | deployed, secret unset |
+| `POST`, bad signature | 503 `old name` | only the legacy `HOOK_SECRET` is set |
+| `POST`, bad signature | 401 | secret set and verification works — healthy |
+| `POST`, bad signature | 200 | it accepts unsigned requests, which is a hole |
+
+Neither request can send a message: the 405 path returns before reading a body,
+and the 401 path fails verification before Termii is called.
+
+**`--commit`** generates the signing secret, stores the three function secrets,
+deploys with `--no-verify-jwt`, enables the hook pointed at the function, reads
+the configuration back and asserts it, then runs the probes. No secret value is
+printed — only length and first characters.
+
+**A step nobody had written down.** `sms_autoconfirm` must be OFF. With it on,
+Auth confirms the phone without ever sending a code: the hook never fires, every
+other step achieves nothing, and no error appears anywhere. §2b said "enable the
+Phone provider" and stopped. `--commit` now sets it false explicitly and the
+read-back fails if it is still true.
+
+**What is asserted, and what is honestly not.** The Management API shapes were
+checked against the Supabase documentation on 2026-10-06 rather than written
+from memory — `hook_send_sms_enabled`, `hook_send_sms_uri`,
+`hook_send_sms_secrets`, `sms_autoconfirm` on
+`PATCH /v1/projects/{ref}/config/auth`; `POST /v1/projects/{ref}/secrets`
+taking `[{name,value}]`; the `v1,whsec_<base64>` secret format; an empty JSON
+200 as success. `external_phone_enabled` appears in no documentation I could
+confirm, so it is **not** asserted — a guessed field name would fail against a
+correctly configured project. The read-back prints every phone/sms/hook field
+the API returns, so the real names are visible.
+
+The script also cannot prove Termii will deliver. That needs a real handset and
+credit on an approved sender ID, and the file says so rather than implying the
+green run means messages arrive.
+
+`scripts/wire_up_sms_provider_test.sh` asserts the classifier against all
+thirteen response shapes with no network, and asserts directly that the two
+401s do not collapse into one verdict — the distinction the whole diagnostic
+rests on. It runs in CI as an ordinary gate.
 
 ### Open, and not closeable from the repository
 
