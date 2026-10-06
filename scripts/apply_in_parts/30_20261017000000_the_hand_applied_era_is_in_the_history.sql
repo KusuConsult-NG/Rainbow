@@ -292,5 +292,3 @@ BEGIN
   END IF;
 END $$;
 
-
-

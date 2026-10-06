@@ -34,6 +34,7 @@ Exit 0 = every insert in the repository is safe. Non-zero = the file and line.
 """
 from __future__ import annotations
 
+import importlib.util
 import re
 import sys
 from pathlib import Path
@@ -178,12 +179,37 @@ def count_statements(path: Path) -> int:
     return strip_noise(path.read_text(encoding='utf-8')).count(';')
 
 
+def dropped_generated() -> set[str]:
+    """`table.column` pairs a later migration removes.
+
+    20261018000000 drops the five generated mirrors of geo_*, so after it runs
+    `category` is the only generated column on alerts. Without this the rule
+    below would still forbid an insert naming `alerts.lga` — harmless, since
+    nothing names it, but the message would tell a developer the column is
+    generated when it does not exist at all.
+
+    Read from check_schema_convergence.py rather than restated here: that module
+    verifies each entry against the migration that claims to drop it, so one
+    list is checked and this one cannot drift from it.
+    """
+    spec = importlib.util.spec_from_file_location(
+        'csc', REPO / 'scripts' / 'check_schema_convergence.py')
+    csc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(csc)
+    return {key.split(':', 1)[1] for key in csc.DROPPED_BY_LATER
+            if key.startswith('column:')}
+
+
 def main() -> int:
     if len(sys.argv) > 2 and sys.argv[1] == '--statements':
         print(count_statements(Path(sys.argv[2])))
         return 0
 
     gen = generated_columns()
+    for pair in dropped_generated():
+        table, _, column = pair.partition('.')
+        gen.get(table, set()).discard(column)
+    gen = {t: cols for t, cols in gen.items() if cols}
     if 'alerts' not in gen or 'category' not in gen.get('alerts', set()):
         # The check is only meaningful if it can still see the column it was
         # written for. A rename that quietly empties the rule would otherwise
