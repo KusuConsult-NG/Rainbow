@@ -498,23 +498,47 @@ if [ "$DIAG_RC" -ne 0 ]; then
   echo "✗ scripts/why_is_the_board_empty.sql does not run against this schema"
   exit 1
 fi
+# It must be ONE statement. The Supabase editor shows only the last result set of
+# a multi-statement run, so six SELECTs meant an operator ran it a section at a
+# time and reported one table per message — and on one of those runs a bare
+# "0 rows" came back with nothing to say which section produced it.
+DIAG_STMTS=$(python3 "$REPO/scripts/check_generated_column_inserts.py" --statements \
+               "$REPO/scripts/why_is_the_board_empty.sql")
+[ "$DIAG_STMTS" -eq 1 ] || {
+  echo "✗ why_is_the_board_empty.sql is $DIAG_STMTS statements; the Supabase editor"
+  echo "  would show only the last result. It must be exactly one."
+  exit 1
+}
+
 # It must also actually SEE the seeded rows, or it is reassuring about nothing.
 #
-# Read the `demo` column of the diagnostic's own first query, by position under
-# its header — not with a grep for the number. The first attempt looked for
-# "^ *13 *|" anywhere in the output and passed against section 5's
-# open_incidents, which happened to be 13 too: a gate that agreed for a reason
-# unrelated to what it claimed to check.
-DIAG_DEMO=$(printf '%s\n' "$DIAG_OUT" | awk -F'|' '
-  /^ *total *\| *demo *\|/ { hdr = NR }
-  hdr && NR == hdr + 2 { gsub(/ /, "", $2); print $2; exit }
-')
+# Read the `incidents / counts` row and pull [DEMO] out of it. An earlier gate
+# grepped for "^ *13 *|" anywhere in the output and passed against section 5's
+# open_incidents, which happened to be 13 too — a gate that agreed for a reason
+# unrelated to what it claimed to check. Anchoring on the row's own name is what
+# stops that.
+DIAG_DEMO=$(printf '%s\n' "$DIAG_OUT" \
+  | grep -E '\| *incidents *\| *counts *\|' \
+  | sed -nE 's/.*\[DEMO\] ([0-9]+).*/\1/p' | head -1)
 if [ "$DIAG_DEMO" != "13" ]; then
   echo "$DIAG_OUT"
-  echo "✗ the diagnostic ran but reported demo=${DIAG_DEMO:-<nothing>}, expected 13"
+  echo "✗ the diagnostic ran but reported [DEMO]=${DIAG_DEMO:-<nothing>}, expected 13"
   exit 1
 fi
-echo "  PASS  the diagnostic runs and counts the seeded incidents"
+
+# And the computed verdict must fire. The whole point of folding six sections
+# into one query was that it can name the first cause itself; a verdict section
+# that never produces a row would be decoration.
+printf '%s\n' "$DIAG_OUT" | grep -qE '\| *verdict *\|' || {
+  echo "$DIAG_OUT"
+  echo "✗ the diagnostic produced no verdict row — it cannot name a cause"
+  exit 1
+}
+echo "  PASS  the diagnostic is one statement, counts the seeded incidents, and reaches a verdict"
+# Print what it concluded. A diagnostic that always reaches the same verdict is
+# how one degrades into decoration, and the only way to notice is to see the
+# answer in the log rather than just that there was one.
+printf '%s\n' "$DIAG_OUT" | grep -E '\| *verdict *\|' | sed 's/^/        /' || true
 
 # The second diagnostic, for the failure the first one cannot explain: an insert
 # refused with 428C9. It reads the catalog, so it has to be run against a real
