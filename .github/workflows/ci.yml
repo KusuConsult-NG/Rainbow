@@ -717,6 +717,17 @@ jobs:
       - name: Assert the SMS probe classifier reads every response shape
         run: ./scripts/wire_up_sms_provider_test.sh
 
+      # "What is left?" was asked three times and answered three times from
+      # prose written by hand, which went stale the moment a key was added. The
+      # key list is derived from both .env.example files now, and this fails if
+      # one appears that scripts/what_is_not_configured.py cannot say what
+      # breaks without — so adding a setting forces someone to write down the
+      # consequence, which is the only part a reader needs. It caught 18 keys
+      # the first hand-written map had missed, including all twelve inter-agency
+      # webhook and liaison settings.
+      - name: Assert every configuration key has a documented consequence
+        run: python3 scripts/what_is_not_configured.py --check
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-latest
