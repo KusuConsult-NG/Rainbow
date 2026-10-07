@@ -28,6 +28,7 @@ const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
 const { PEOPLE, byKey } = require('./fixtures');
+const { signInMobile } = require('./mobile_login');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -182,11 +183,7 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
     // 08000000000, the demo bypass number, which release builds compile
     // out — so this pass could never sign in. It had never run in CI: the
     // job always failed at an earlier step.
-    await typeInto(byKey('citizen').phone.replace('+234', '0'));
-    await tap('authorize access', { settle: 2600 });
-    await typeInto('123456');
-    await tap('verify otp', { settle: 7000 });
-    return page.evaluate(() => window.location.hash);
+    return signInMobile(page, 'citizen');
   }
 
   // =========================================================================

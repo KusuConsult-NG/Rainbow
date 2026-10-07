@@ -28,6 +28,7 @@ const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
 const { DOMAIN, PASSWORD, byKey } = require('./fixtures');
+const { signInMobile } = require('./mobile_login');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -285,17 +286,12 @@ async function semanticsText(page) {
       // travelling through a door production does not have. The stand-in
       // answers /auth/v1/otp and /auth/v1/verify now, so this is the path a
       // citizen actually takes.
-      await typeInto(byKey('citizen').phone.replace('+234', '0'));
-      await tapLabelled('authorize access');
-      await sleep(2800);
-      await typeInto('123456');
-      await tapLabelled('verify otp');
-    } else {
-      await typeInto(`${role}@${DOMAIN}`);
-      await tapLabelled('authorize access');
+      return signInMobile(page, 'citizen');
     }
-    await sleep(6500);
-    return page.evaluate(() => window.location.hash);
+    // Staff: a badge AND a password, in two steps. The branch here typed the
+    // badge, tapped AUTHORIZE ACCESS and returned the hash — which stopped
+    // being a sign-in the day the password step arrived. See mobile_login.js.
+    return signInMobile(page, role);
   }
 
   // Every route in AppRoutes, paired with the screen widget it must render.
