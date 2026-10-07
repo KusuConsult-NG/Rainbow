@@ -263,10 +263,7 @@ async function semanticsText(page) {
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(
-      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-      { timeout: 120000 },
-    );
+    await waitForPaint(state.screen || 'boot');
     await sleep(6000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1800);
@@ -349,6 +346,42 @@ async function semanticsText(page) {
   // Every account type that can sign in. The command chain bottom to top,
   // the untiered responder, and both agency liaisons — all of them land in the
   // responder app, and only three of the eight had ever been rendered.
+  /**
+   * Wait for the Flutter app to paint, retrying one cold boot.
+   *
+   * Every screen in this harness reboots the whole CanvasKit app — a fresh page
+   * per route per role, tens of cold boots in a run — and in a constrained
+   * container one of them legitimately exceeds 120 seconds. That is
+   * infrastructure, not an app defect: the first version threw a bare puppeteer
+   * TimeoutError naming a line number, after three PASSes, with nothing saying
+   * which screen was loading.
+   *
+   * One retry, then a failure that names the screen and the seconds waited. The
+   * same treatment tier_controls.js needed for its drawer loop, where it took a
+   * run from a hang to 83/83.
+   */
+  async function waitForPaint(label) {
+    const began = Date.now();
+    const once = () => page.waitForFunction(
+      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
+      { timeout: 120000 },
+    );
+    try {
+      await once();
+    } catch {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      try {
+        await once();
+      } catch {
+        throw new Error(
+          `${label}: the app did not paint after two attempts — waited `
+          + `${Math.round((Date.now() - began) / 1000)}s. Every screen here `
+          + 'reboots the app from scratch, so this is where a slow cold start '
+          + 'shows up first.');
+      }
+    }
+  }
+
   const ROLES = ['citizen', 'responder', 'unit', 'ward', 'lga', 'hq', 'police', 'army'];
   const coverage = new Map();   // route -> the roles that reached it
   const roleReport = {};
@@ -366,10 +399,7 @@ async function semanticsText(page) {
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
     });
     await page.goto(`${origin}/#${route}`, { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(
-      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-      { timeout: 120000 },
-    );
+    await waitForPaint(state.screen || 'boot');
     await sleep(6000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1500);
