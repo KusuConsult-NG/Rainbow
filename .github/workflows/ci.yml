@@ -1139,6 +1139,36 @@ jobs:
       # refuses looks identical to one that succeeded. Only watching the
       # database can tell them apart — which is how `alerts.reportedBy`, a
       # column that does not exist, was found sitting in every SOS payload.
+      # THE FILE THAT SHIPS, NOT THE TEMPLATE IT CAME FROM.
+      #
+      # The `mobile` job scans `.env.example` for credential-shaped names and
+      # finds none. But `.env` is the Flutter ASSET — it is bundled verbatim and
+      # extracts with `unzip` — and this job WRITES it before building. A real
+      # release build made here carried `AGENT_DEFAULT_PASS=staging-only-password`
+      # in `build/web/assets/.env`: the one name T-20 removed, that two other
+      # gates exist to keep out, put back by the harness's own provisioning
+      # script. Read out of the artefact, not inferred. The template was clean
+      # the whole time, which is exactly why nothing caught it.
+      #
+      # So this scans what was actually bundled, and allows one name: the seeded
+      # demo citizen password, which the app reads to offer the demo login and
+      # which exists only in a throwaway project.
+      - name: Assert the bundled .env carries nothing but the accounted-for demo login
+        run: |
+          set -uo pipefail
+          BUNDLED=build/web/assets/.env
+          test -f "$BUNDLED" || {
+            echo "::error::no $BUNDLED — this job builds WITH the asset on purpose, so its absence means the build changed and this gate is now blind"
+            exit 1; }
+          UNEXPECTED=$(grep -oE '^[A-Z0-9_]*(PASS|PASSWORD|PIN|SECRET|TOKEN)[A-Z0-9_]*=' "$BUNDLED" \
+            | sed 's/=$//' | grep -vxE 'DEMO_CITIZEN_PASS' || true)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "::error::the bundled .env carries credential-shaped keys nobody has accounted for: $(echo $UNEXPECTED | tr '\n' ' ')"
+            echo "::error::that file ships inside the APK. Either the app does not need it, or it does not belong in an asset."
+            exit 1
+          fi
+          echo "OK: the only credential in the bundled asset is the seeded demo citizen password."
+
       - name: Render every screen, then use the app
         run: |
           # Each step gets a FRESH stand-in, and stops it on the way out.

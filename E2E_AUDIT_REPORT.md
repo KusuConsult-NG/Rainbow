@@ -1242,6 +1242,7 @@ only thing that distinguishes a defect from a preference.
 | T-16 | **The demonstration seed used invented geography** — "Bokkos Central", "Mangu Central" — which exist in no INEC ward list and in neither of the project's own files. Rows that look right and behave wrong: unselectable by the ward filter, refused by RLS to the commander whose area they were in. | ✅ real INEC names; `sync_tactical_map.py --check` fails CI on any place the seed names that the map lacks. The three genuinely orphaned wards (BWALL, DAMWAI, KADUNU) were resolved against INEC sources, not guessed |
 | T-28 | **The HQ escalation menu wrote agency codes nothing answers to.** Four of its six destinations — `NPF`, `MILITARY`, `RAINBOW`, `VGN` — came from the list that badges Operation Rainbow's own staff, not from the six codes the liaison roles, the agency portal and the contact variables all use. Handing an incident to the Police stored `'NPF'`: the Police portal asks for `'POLICE'` and never showed it, `/api/notify-agency` answered `400 Unknown agency`, and the operator was told "Escalation Sent". `FRSC` and `OPSH`, the only two this deployment has contacts for, were not on the menu. Separately, the notification route counted `SKIPPED` as success, so with nothing configured it answered `200 {"success":true}` having told nobody. | ✅ one list in `agencies.ts`; a delivery verdict that only counts a send; the operator is told when an agency was not reached; `scripts/check_one_agency_vocabulary.py` in CI, run against the old menu and failing on it by name |
 | T-29 | **Every mass advisory reached every user.** `SystemAlertListener`, which wraps every screen in the app, filtered on `target_type` / `target_value` — columns the console does not write — so its `'ALL'` default let everything through. An advisory for citizens of one ward appeared on every officer's handset, while `BroadcastHud` on the same phone correctly did not show it. Expiry was never checked either. | ✅ the banner now calls `broadcastReaches()`, the same tested function the HUD uses; 17 widget tests, 6 of which fail against the old filter |
+| T-30 | **Every mobile credential gate scanned `.env.example`; the file that ships is `.env`.** `pubspec.yaml` declares `.env` as a Flutter asset, so it is bundled verbatim and extracts with `unzip`. The template declared zero credential-shaped keys and all three gates passed, while a release build made by this repository's own harness carried `AGENT_DEFAULT_PASS=staging-only-password` in `build/web/assets/.env` — the T-20 name, removed in PR #61, that two of those gates exist to keep out. `scripts/local_e2e/provision_env.sh` wrote it back, and asserted it was non-empty: a liveness check on a key nothing has read since. No real credential leaked; the shape did. | ✅ the script deletes it rather than writing it, marks the file as harness-provisioned, and CI now scans the BUNDLED asset instead of the template — run against the artefact as built (fails, naming it) and against the fixed file (passes) |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -1959,6 +1960,114 @@ need a decision this audit should not make silently:
 The composer's list is currently the second. `scripts/check_one_agency_vocabulary.py`
 exempts `MassBroadcast.tsx` by name with that reason recorded, and the exemption
 is written to be removed when this is settled.
+
+### T-30. The gate watched the template; the shipped artefact carried the name
+
+With a Flutter SDK installed in this container for the first time, the mobile
+half of `scripts/local_e2e/run.sh` could be run here — a release web build of the
+app, driven in a real browser. Having the build, the obvious thing to do with it
+is read it, because every mobile credential gate in this repository checks
+**source**:
+
+```
+scan 'TERMII_API_KEY|CLOUDINARY_API_SECRET|HMAC_SECRET'            lib/ .env.example
+scan '[A-Z_]*(PASS|PASSWORD|PIN|SECRET|TOKEN)[A-Z_]*[[:space:]]*=' .env.example
+scan 'AGENT_DEFAULT_PASS|agentDefaultPass'                         lib/ .env.example
+```
+
+All three pass. `.env.example` declares **zero** credential-shaped keys. Then,
+out of `build/web/assets/.env` in a build this repository's own harness had just
+made:
+
+```
+DEMO_CITIZEN_PASS=<set>
+AGENT_DEFAULT_PASS=<set>
+```
+
+`pubspec.yaml` declares `.env` as a Flutter **asset**, so that file is what
+ships: bundled verbatim, extractable with `unzip`. `AGENT_DEFAULT_PASS` is the
+name from T-20 — one password shared by every staff account, read out of the
+bundled `.env`, published inside the APK. It was removed in PR #61, and **two
+gates exist specifically to stop it coming back**.
+
+It came back through the gap between the two files. `.env.example` is the
+template; `.env` is the asset; the gates read the template. And the thing writing
+the asset was `scripts/local_e2e/provision_env.sh` — the harness's own
+provisioning script — which still did
+
+```bash
+set_key AGENT_DEFAULT_PASS "staging-only-password"
+...
+for key in DEMO_CITIZEN_EMAIL DEMO_CITIZEN_PASS AGENT_DEFAULT_PASS; do   # assert non-empty
+```
+
+so it not only wrote the dead name, it **failed the run if the value was
+missing** — a liveness assertion on a key nothing has read since PR #61.
+Confirmed by listing every `.env` key the app actually reads: eight, and that is
+not one of them.
+
+**What this is and is not.** The value is `staging-only-password`, and it
+authenticates nothing: the account exists only in `scripts/local_e2e/fixtures.js`
+and a throwaway staging project. No real credential leaked. What leaked is the
+*shape*: a checkout that has run the harness — which is the normal state of a
+developer's checkout — bundles a working demo credential and a name the project
+has spent a commit removing, into the artefact that goes to a handset. T-20 is
+what that looks like when the value is real.
+
+**Three changes, smallest first.**
+
+* `provision_env.sh` no longer writes `AGENT_DEFAULT_PASS`, and **deletes** it
+  if present rather than refusing to run: every checkout that has run the old
+  script still has the line, and a `.env` is never regenerated from the template
+  once it exists, so refusing would have stranded exactly the checkouts this is
+  meant to clean. The non-empty assertions drop with it, and a post-condition
+  fails only if the delete stops working.
+* It writes a marker line into `.env` — *"PROVISIONED FOR THE LOCAL END-TO-END
+  RUN — do not build a release from this file"* — so the next person to read the
+  artefact knows why a demo password is in it.
+* CI now scans **what was bundled**, not the template: a step in the
+  `mobile-screens` job reads `build/web/assets/.env` after the build and fails on
+  any credential-shaped key other than `DEMO_CITIZEN_PASS`, which the app reads
+  to offer the demo login. It is the only job that builds the app with the asset,
+  so it is the only place the real file exists.
+
+**Proven both ways.** The new gate was run against the artefact as it was
+actually built — it fails, naming `AGENT_DEFAULT_PASS` — and against the file the
+fixed script produces, where it passes. The template, which is all the old gates
+ever saw, is identical in both cases.
+
+#### Swept for more of the same shape, and found none
+
+T-28 and T-29 are both "two sides of one name disagreed", so the obvious
+question is how many more there are. Three mechanical sweeps, run against the
+whole repository:
+
+* **A column an app writes that nothing reads.** Three candidates, all false:
+  `agency_action_reports.hq_acknowledged_at`, `agency_deployments.deployment_note`
+  and `agency_notifications.sent_at` are read through `select('*')`, which the
+  sweep could not see. (`system_alerts.target_agency` is the one real instance,
+  recorded under T-29.)
+* **A column an app reads that nothing writes** — the T-29 signature exactly,
+  since `target_type` exists in the schema and so passes
+  `check_schema_drift.py`. One hit: `profiles.badge_number`, read in four
+  places and written only by `scripts/seed_staging.js` and the browser
+  fixtures, never by `/api/admin/provision` or the liaison form. Chased and
+  **dismissed**: the console's "Badge ID" field resolves to an email local part
+  (`${badgeId}@operationrainbow.plateau.gov.ng`), not to this column, so
+  sign-in does not depend on it, and all four readers fall back to
+  `full_name || email`. The column is decorative for any account created
+  through the console.
+* **A realtime subscription on a table that is not in the publication**, which
+  fires nothing and reports no error — the fault behind "three realtime
+  subscriptions were never going to fire". All six console channels and all
+  five mobile `.stream()` tables are members: `alerts`, `telemetry`,
+  `chat_messages`, `system_alerts`, `profiles`, `agency_action_reports`,
+  `agency_deployments`, `sim_channel_events`, `agency_notifications`.
+
+None of the three was worth a new CI gate — the first two would have cost three
+false positives and one dismissal for one real finding, and the third has
+nothing to catch. Recorded because the next person to ask the same question
+should not have to re-run them.
 
 ### Open, and not closeable from the repository
 
