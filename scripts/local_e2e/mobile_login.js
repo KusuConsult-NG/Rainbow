@@ -69,25 +69,58 @@ async function screenText(page) {
  * `document.querySelector('input')` would otherwise keep hitting the first.
  */
 async function typeIntoLastField(page, text) {
+  // Focus through the SEMANTICS node and type with the keyboard only.
+  //
+  // The first version of this also did `el.value = ''` on the DOM input, to be
+  // sure the field was empty. Flutter owns that element: it mirrors its own
+  // EditingState into it, and writing to `value` behind Flutter's back made the
+  // engine throw `Cannot read properties of null (reading 'toString')` on the
+  // login screen. Only mobile_capture.js noticed — it fails on console errors
+  // matching /cannot read/, while tier_controls.js and chat_thread.js collect
+  // `pageerror` only, so the same error was almost certainly present in their
+  // "clean" runs and went unreported. Nothing here touches the DOM input now.
   const focused = await page.evaluate(() => {
     const boxes = [...document.querySelectorAll(
       'flt-semantics[role="textbox"], flt-semantics[role="text"]')];
     const box = boxes[boxes.length - 1];
     if (box) { box.click(); return true; }
-    const el = document.querySelector('input');
+    // The semantics node for a field that has only just appeared — the OTP box
+    // is the usual case — may not be in the tree yet. Focusing the DOM input is
+    // safe: FOCUS does not disturb Flutter's editing state, only ASSIGNING to
+    // `value` did. Dropping this fallback along with that assignment is what
+    // made the citizen path fail with "no OTP field appeared".
+    const els = document.querySelectorAll('input');
+    const el = els[els.length - 1];
     if (el) { el.focus(); return true; }
     return false;
   });
   if (!focused) return false;
   await sleep(1200);
-  await page.evaluate(() => {
-    const els = document.querySelectorAll('input');
-    const el = els[els.length - 1];
-    if (el) { el.focus(); el.value = ''; }
-  });
+  // Clear whatever is there the way a person would, so Flutter stays the only
+  // writer of its own editing state.
+  await page.keyboard.down('Control');
+  await page.keyboard.press('KeyA');
+  await page.keyboard.up('Control');
   await page.keyboard.type(text, { delay: 20 });
   await sleep(400);
   return true;
+}
+
+/** Focus the first field without writing to the DOM input Flutter owns. */
+async function focusFirstField(page) {
+  const viaSemantics = await page.evaluate(() => {
+    const box = document.querySelector(
+      'flt-semantics[role="textbox"], flt-semantics[role="text"]');
+    if (box) { box.click(); return true; }
+    return false;
+  });
+  if (!viaSemantics) {
+    // Before the semantics tree is up there is nothing to click, so fall back to
+    // focusing the input — focus alone does not disturb Flutter's editing state;
+    // assigning to `value` is what did.
+    await page.evaluate(() => { document.querySelector('input')?.focus(); });
+  }
+  await sleep(600);
 }
 
 /**
@@ -109,10 +142,7 @@ async function signInMobile(page, role) {
   if (role === 'citizen') {
     const person = byKey('citizen');
     if (!person) throw new Error('signInMobile: no citizen in fixtures');
-    await page.evaluate(() => {
-      const el = document.querySelector('input');
-      if (el) { el.focus(); el.value = ''; }
-    });
+    await focusFirstField(page);
     await page.keyboard.type(person.phone.replace('+234', '0'), { delay: 20 });
     await sleep(400);
     if (!await clickButton(page, 'authorize access')) {
@@ -126,10 +156,7 @@ async function signInMobile(page, role) {
       throw new Error('signInMobile(citizen): no VERIFY OTP control');
     }
   } else {
-    await page.evaluate(() => {
-      const el = document.querySelector('input');
-      if (el) { el.focus(); el.value = ''; }
-    });
+    await focusFirstField(page);
     await page.keyboard.type(`${role}@${DOMAIN}`, { delay: 20 });
     await sleep(400);
     if (!await clickButton(page, 'authorize access')) {

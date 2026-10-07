@@ -155,7 +155,12 @@ for _code, _name in (
 # cannot be satisfied by a blanket skip.
 NOT_SETTINGS = {
     'AGENT_DEFAULT_PASS': 'removed in PR #61 — it was one shared staff password, published in the APK (T-20)',
-    'DEMO_CITIZEN_PASS': 'removed in PR #61 for the same reason',
+    'DEMO_CITIZEN_PASS': (
+        'NOT removed, despite what this entry said until 2026-10-07: '
+        'AuthService reads it directly from dotenv for the demo-number '
+        'bypass, which isDemoNumber compiles out of release builds. It is '
+        'absent from .env.example on purpose and written by '
+        'scripts/local_e2e/provision_env.sh for debug and E2E runs'),
     'HOOK_SECRET': 'the legacy name; the hook refuses to run if only this is set',
     'MESH_KEYGEN': 'a test-only flag for printing a fresh mesh keypair',
     'TERMII_BASE_URL': 'optional override of the Termii endpoint; the default is correct',

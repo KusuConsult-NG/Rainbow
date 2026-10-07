@@ -36,11 +36,14 @@ set_key() {
 
 set_key DEMO_CITIZEN_EMAIL "citizen@staging.operationrainbow.test"
 set_key DEMO_CITIZEN_PASS  "staging-only-password"
-set_key AGENT_DEFAULT_PASS "staging-only-password"
+# AGENT_DEFAULT_PASS is deliberately NOT written. It was one password shared
+# by every staff account, read out of the bundled .env, and nothing reads it
+# any more: staff sign in with their own password through signInWithBadge
+# (T-20). CI fails if the name reappears in lib/ or .env.example.
 
 # Prove it, rather than trusting the edit: an empty value here is the exact
 # failure this script exists to prevent, and it is silent everywhere else.
-for key in DEMO_CITIZEN_EMAIL DEMO_CITIZEN_PASS AGENT_DEFAULT_PASS; do
+for key in DEMO_CITIZEN_EMAIL DEMO_CITIZEN_PASS; do
   value="$(grep "^${key}=" "$ENV_FILE" | head -1 | cut -d= -f2-)"
   if [ -z "$value" ]; then
     echo "::error::${key} is empty in .env after provisioning — the demo login cannot work" >&2
@@ -49,7 +52,7 @@ for key in DEMO_CITIZEN_EMAIL DEMO_CITIZEN_PASS AGENT_DEFAULT_PASS; do
 done
 
 # Exactly one declaration of each, or a later empty one could still shadow it.
-for key in DEMO_CITIZEN_EMAIL DEMO_CITIZEN_PASS AGENT_DEFAULT_PASS; do
+for key in DEMO_CITIZEN_EMAIL DEMO_CITIZEN_PASS; do
   count="$(grep -c "^${key}=" "$ENV_FILE" || true)"
   if [ "$count" != "1" ]; then
     echo "::error::${key} appears ${count} times in .env; exactly one is required" >&2

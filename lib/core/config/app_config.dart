@@ -86,8 +86,13 @@ class AppConfig {
 
   static String? get cloudinaryCloudName => _read('CLOUDINARY_CLOUD_NAME');
   static String? get cloudinaryUploadPreset => _read('CLOUDINARY_UPLOAD_PRESET');
-  static String? get demoCitizenEmail => _read('DEMO_CITIZEN_EMAIL');
-  static String? get demoCitizenPass => _read('DEMO_CITIZEN_PASS');
+  // REMOVED: demoCitizenEmail / demoCitizenPass. Both had ZERO callers —
+  // AuthService reads `dotenv.env['DEMO_CITIZEN_EMAIL']` and
+  // `dotenv.env['DEMO_CITIZEN_PASS']` directly for the demo bypass, which
+  // `isDemoNumber` compiles out of release builds. Two credential-shaped
+  // getters that nothing called are worth deleting rather than leaving for
+  // someone to reach for. The KEYS are still live in debug builds, which is why
+  // scripts/local_e2e/provision_env.sh still writes them.
   // REMOVED: agentDefaultPass. One shared staff password, read from a `.env`
   // that ships inside the APK as a Flutter asset. See AuthService for the
   // full note; the replacement is a per-officer password.
