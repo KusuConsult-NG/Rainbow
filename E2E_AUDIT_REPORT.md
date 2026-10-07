@@ -1842,7 +1842,13 @@ Two further faults in the same file, found while fixing it:
   `.env.example` and `what_is_not_configured.py` must cover exactly those six
   codes and no others. It separates the two concepts explicitly — three files
   are exempted **by name, with a reason**, because they own the staff-badge list
-  and a blanket skip is what let the menu drift.
+  and a blanket skip is what let the menu drift. Tightened once after writing it:
+  the dashboard was exempted as a whole file, which left 3,500 lines in which a
+  retired code could sit outside the menu, so it is scanned line by line with
+  only the visibly staff-badge lines allowed; and "a new copy anywhere" was
+  `>= 4` of the six, a round number picked to clear the lists it was imagining,
+  where the evidence says no legitimate file names more than **one** — so it is
+  `> 1`, the same rule the consumers are held to. Both mutation-tested.
 * The browser harness now asserts the stored code is one the portal and the
   notifier both know, names it when it is not, and asserts the console says
   the agency was **not** notified rather than claiming it was.

@@ -135,16 +135,21 @@ def main() -> int:
                 f'({", ".join(sorted(found))}). The list lives in '
                 f'src/lib/agencies.ts — import AGENCY_LIST or AGENCY_CODES.')
 
-    # A whole new copy, anywhere in the console. Four or more of the six in one
-    # file is a declaration of the set, whatever it is called; the two files that
-    # legitimately name a couple of agencies never reach four.
+    # A whole new copy, anywhere in the console. TWO of the six in one file is a
+    # list — the same rule the consumers above are held to, and the threshold the
+    # evidence supports rather than a round number: outside `agencies.ts`, the
+    # tests, and the two files that own the staff-badge concept, no file in this
+    # console names more than ONE agency code. (It was 4, picked to be safely
+    # below the six-item lists it was imagining. A new file declaring three would
+    # have passed, and three is just as wrong.)
     for path in sorted((CONSOLE / 'src').rglob('*.ts*')):
         rel = path.relative_to(CONSOLE).as_posix()
-        if rel == 'src/lib/agencies.ts' or '.test.' in rel or rel in CONSUMERS:
+        if (rel == 'src/lib/agencies.ts' or '.test.' in rel
+                or rel in CONSUMERS or rel in OWNS_STAFF_BADGES):
             continue
         text = strip_comments(path.read_text())
         found = {c for c in codes if re.search(rf"['\"]{c}['\"]", text)}
-        if len(found) >= 4:
+        if len(found) > 1:
             problems.append(
                 f'{rel} declares its own list of agencies '
                 f'({", ".join(sorted(found))}). That is what the escalation menu '
@@ -160,9 +165,19 @@ def main() -> int:
             continue
         # The dashboard holds both concepts: the escalation menu AND the staff
         # directory, where `p.agency || 'RAINBOW'` is a badge for an officer with
-        # no organisation recorded. Its escalation menu is covered exactly, and
-        # more strictly, by check 5 below: no hand-written option value at all.
+        # no organisation recorded. Skipping the whole file was too coarse —
+        # check 5 below only reads the escalation menu, so a retired code written
+        # anywhere ELSE in these 3,500 lines would have passed both. Scanned line
+        # by line instead, allowing only the lines that are visibly about the
+        # staff-badge list.
         if rel == 'src/app/dashboard/page.tsx':
+            for lineno, line in enumerate(text.splitlines(), 1):
+                if 'STATE_SECURITY_AGENCIES' in line:
+                    continue
+                for retired, why in RETIRED.items():
+                    if re.search(rf"['\"]{retired}['\"]", line):
+                        problems.append(
+                            f'{rel}:{lineno} uses {retired!r} as an agency: {why}.')
             continue
         for retired, why in RETIRED.items():
             if re.search(rf"['\"]{retired}['\"]", text):
