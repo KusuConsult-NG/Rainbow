@@ -192,6 +192,8 @@ const system_alerts = [
   },
 ];
 
+const sms_device_keys = [];
+
 const chat_messages = [
   {
     id: 'dddd4444-0000-4000-8000-00000000d001',
@@ -311,6 +313,14 @@ module.exports = {
     profiles,
     alerts,
     system_alerts,
+    // Empty on purpose, and DECLARED on purpose. `register_sms_device()` writes
+    // here on every sign-in, and a table the fake creates at runtime has no
+    // entry in PRISTINE — so the next /reset-data pushed `fresh[name]` for a
+    // name that snapshot has never heard of, threw inside the control server's
+    // request handler, and killed the stand-in mid-run. Forty-five minutes of
+    // run, lost after the fifth harness. The reset loop is hardened too; this
+    // is the half that makes the table real.
+    sms_device_keys,
     chat_messages,
     telemetry,
     app_config,

@@ -1048,7 +1048,22 @@ const control = http.createServer((req, res) => {
       const fresh = JSON.parse(JSON.stringify(PRISTINE));
       for (const name of Object.keys(tables)) {
         tables[name].length = 0;
-        tables[name].push(...fresh[name]);
+        // `?? []` BECAUSE A TABLE CAN APPEAR AFTER PRISTINE WAS TAKEN.
+        //
+        // PRISTINE is snapshotted at startup. `register_sms_device()` wrote to a
+        // table the fixtures had not declared, so the key existed in `tables`
+        // and not in the snapshot — and `push(...undefined)` threw INSIDE this
+        // request handler, which is an uncaught exception in an http server, so
+        // the whole stand-in died. The harness that was mid-run got
+        // `UND_ERR_SOCKET: other side closed` from the control plane and the
+        // suite aborted after its fifth pass, forty-five minutes in, pointing
+        // at a fetch in user_features.js that had nothing to do with it.
+        //
+        // The fixtures declare that table now, which is the real fix. This is
+        // the second one: resetting an unknown table empties it instead of
+        // killing the process, because the cost of being wrong here is every
+        // result after the mistake.
+        tables[name].push(...(fresh[name] ?? []));
       }
     }
     res.writeHead(200, { 'content-type': 'application/json' });

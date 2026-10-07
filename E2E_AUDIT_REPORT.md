@@ -2188,6 +2188,35 @@ signature for "the sign-in flow is here" was the typing CALL, so changing the
 mechanism read as the flow having been deleted. Mutation-tested after the change:
 actually removing the flow is still caught.
 
+#### What the fixed run reports
+
+| pass | before | after |
+|---|---|---|
+| console screens | 46/46, with the audit screen refused and photographed empty | **49/49** — the refusal, the audit rows and the actor all asserted |
+| console controls | 33/33 | **35/35** |
+| mobile screens | 14/15, fourteen page errors | **16/16**, clean, `register_sms_device` answered for all eight roles |
+
+`2 function(s) answered` on the mobile pass is `register_sms_device` and
+`revoke_sms_device_keys` — the two the app calls, both previously refused.
+
+And a fourth harness fault, which was mine and cost the run it was introduced in.
+`register_sms_device()` writes to `sms_device_keys`, a table the fixtures had
+never declared, so the key existed in `tables` and not in the startup snapshot
+`PRISTINE`. The next `/reset-data` did `push(...fresh[name])` on a name the
+snapshot had never heard of — an uncaught exception **inside the control
+server's request handler**, which kills the whole stand-in. The harness that was
+mid-run got `UND_ERR_SOCKET: other side closed`, and the suite aborted after its
+fifth pass, forty-five minutes in, with a stack trace pointing at a `fetch` in
+`user_features.js` that had nothing to do with the cause. Four passes had
+already reported **136 assertions and no failures** by then, so the aborted run
+was still evidence — but of the four passes it reached, not of the suite.
+
+Fixed twice over, deliberately: the fixtures declare the table, which is the
+real fix; and the reset loop empties an unknown table instead of throwing,
+because the cost of being wrong in that handler is every result after the
+mistake. Reproduced first — register a key, reset, watch it die — then verified
+the same sequence leaves it alive and still answering.
+
 ### T-32. The audit trail attributed every human action to the system
 
 Found immediately after T-31, because fixing the stand-in made the Forensic Audit
