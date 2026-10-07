@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
 import { supabase } from '@/lib/supabase';
+import { AGENCY_LIST } from '@/lib/agencies';
 import LiveFeedViewer from '@/components/LiveFeedViewer';
 
 import {
@@ -66,18 +67,11 @@ interface AgencyActionReport {
   hq_acknowledged_at?: string;
 }
 
-const AGENCIES = [
-  { code: 'POLICE',   label: 'Nigeria Police Force',        color: '#3b82f6', icon: '🚔' },
-  { code: 'ARMY',     label: 'Nigerian Army',               color: '#22c55e', icon: '🪖' },
-  { code: 'DSS',      label: 'Dept. of State Services',     color: '#8b5cf6', icon: '🕵️' },
-  { code: 'NSCDC',    label: 'NSCDC',                       color: '#f59e0b', icon: '🛡️' },
-  { code: 'FRSC',     label: 'Federal Road Safety Corps',   color: '#ef4444', icon: '🚨' },
-  // Operation Safe Haven, not Amotekun. Amotekun is a SOUTH-WEST outfit —
-  // Ondo, Ekiti, Oyo, Ogun, Osun — with no presence in Plateau. OPSH is the
-  // military joint task force that actually covers Plateau, Bauchi and
-  // Kaduna, and is who an incident here would be handed to.
-  { code: 'OPSH',     label: 'Operation Safe Haven',        color: '#14b8a6', icon: '🛰️' },
-];
+// One list, shared with the escalation menu and the contact lookup. It used
+// to be declared here, and the escalation menu was built from a different one:
+// an incident handed to the "NIGERIA POLICE FORCE (NPF)" was stored as 'NPF'
+// and this feed asks for 'POLICE', so it never arrived on the liaison's desk.
+const AGENCIES = AGENCY_LIST;
 
 const STATUS_COLORS: Record<string, string> = {
   AVAILABLE:   '#1B5E20',

@@ -49,30 +49,15 @@ export type ConsoleTab =
   | 'agency'
   | 'sim';
 
-/** The six agencies that send liaison officers. */
-export const AGENCY_CODES = [
-  'POLICE',
-  'ARMY',
-  'DSS',
-  'NSCDC',
-  'FRSC',
-  'OPSH',
-] as const;
+// The agency vocabulary itself lives in `agencies.ts`, which owns it for the
+// whole console — the escalation menu, the portal, the liaison form and the
+// contact lookup. Re-exported here because this file is where callers already
+// reach for "which agency is this account", and a second declaration of the
+// codes is the exact defect that file exists to prevent.
+export { AGENCY_CODES, AGENCY_NAMES } from './agencies';
+export type { AgencyCode } from './agencies';
 
-export type AgencyCode = (typeof AGENCY_CODES)[number];
-
-/** Full names, for chrome that should say who the person is. */
-export const AGENCY_NAMES: Record<AgencyCode, string> = {
-  POLICE: 'Nigeria Police Force',
-  ARMY: 'Nigerian Army',
-  DSS: 'Department of State Services',
-  NSCDC: 'Nigeria Security & Civil Defence Corps',
-  FRSC: 'Federal Road Safety Corps',
-  // Operation Safe Haven: the military joint task force that covers Plateau,
-  // Bauchi and Kaduna. NOT Amotekun, which is a South-West outfit with no
-  // presence in this state.
-  OPSH: 'Operation Safe Haven',
-};
+import { AGENCY_CODES, AGENCY_NAMES, type AgencyCode } from './agencies';
 
 /** Roles that hold command of the whole state. */
 const HQ_ROLES = ['HQ_COMMAND', 'HQ_OFFICER', 'ADMIN'];

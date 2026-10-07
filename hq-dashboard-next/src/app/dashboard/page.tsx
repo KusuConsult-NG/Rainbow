@@ -21,6 +21,7 @@ import { usePersistedTheme } from '@/hooks/usePersistedTheme';
 
 import { useToast } from '@/components/ToastProvider';
 import { plateauTacticalMap, TacticalJurisdiction, TacticalWard, STATE_SECURITY_AGENCIES } from '@/lib/tactical_mapping';
+import { AGENCY_LIST, AGENCY_TARGET_ALL } from '@/lib/agencies';
 import {
   ShieldAlert, Shield, Map as MapIcon, Users, Radio, Settings,
   LogOut, AlertTriangle, CheckCircle, ChevronUp, Phone,
@@ -967,7 +968,21 @@ export default function DashboardPage() {
       { id: user?.id, email: user?.email },
     );
     if (res.ok) {
-      toast.update(toastId, 'success', 'Escalation Sent', `Handed off to ${res.value.commanderName} (${res.value.agency})`);
+      // "RECORDED", not "SENT".
+      //
+      // This said `Escalation Sent`, and the only thing it knew about was the
+      // write to `alerts`. Whether the agency was reached was decided by a POST
+      // whose answer nobody read — and for four of the six destinations the
+      // menu used to offer, that POST was refused outright. The handover is now
+      // two statements because it is two facts: the incident has changed hands
+      // in the record, and the agency has (or has not) been told.
+      toast.update(toastId, 'success', 'Escalation Recorded', `Handed off to ${res.value.commanderName} (${res.value.agency})`);
+      const notified = res.value.notified;
+      if (notified && !notified.delivered) {
+        // A warning, not an error: the escalation itself stands. What this
+        // needs from the operator is a phone call, not a second escalation.
+        toast.warning(`${res.value.agency} NOT NOTIFIED`, notified.detail);
+      }
     } else {
       toast.update(toastId, 'error', 'Escalation Failed', res.error);
     }
@@ -3301,13 +3316,26 @@ Respond ONLY with a JSON object with this exact shape:
                   fontFamily: 'inherit'
                 }}
               >
-                <option value="ALL">🌐 ALL JOINT COMMANDS (Broad Inter-Agency Escalation)</option>
-                <option value="MILITARY">🎖️ OPERATION ENDURING PEACE / MILITARY STF</option>
-                <option value="NPF">👮‍♂️ NIGERIA POLICE FORCE (NPF TACTICAL CELL)</option>
-                <option value="NSCDC">🛡️ CIVIL DEFENCE CORPS (NSCDC RAPID UNIT)</option>
-                <option value="DSS">🕶️ DEPT OF STATE SERVICES (DSS HIGH-THREAT)</option>
-                <option value="RAINBOW">🌈 OPERATION RAINBOW TACTICAL HQ</option>
-                <option value="VGN">🛡️ VIGILANTE GROUP (VGN COMMUNITY DEFENSE)</option>
+                {/*
+                  BUILT FROM THE SHARED LIST, NOT WRITTEN OUT HERE.
+
+                  These were seven hand-written options taken from
+                  `STATE_SECURITY_AGENCIES`, which badges Operation Rainbow's
+                  own staff. Four of them — NPF, MILITARY, RAINBOW, VGN — are
+                  not agency codes: the value chosen here is written to
+                  `alerts.escalated_to_agency`, and the liaison's portal, the
+                  liaison's role and the liaison's phone number are all keyed
+                  on POLICE / ARMY / DSS / NSCDC / FRSC / OPSH. So escalating
+                  to the Police stored 'NPF', the Police portal asked for
+                  'POLICE' and never showed it, /api/notify-agency answered
+                  400 Unknown agency, and the operator was told it was sent.
+                  FRSC and OPSH, the two this deployment has contacts for,
+                  were not on the menu at all.
+                */}
+                <option value={AGENCY_TARGET_ALL}>🌐 ALL JOINT COMMANDS (Broad Inter-Agency Escalation)</option>
+                {AGENCY_LIST.map(a => (
+                  <option key={a.code} value={a.code}>{a.icon} {a.label.toUpperCase()}</option>
+                ))}
               </select>
             </div>
 

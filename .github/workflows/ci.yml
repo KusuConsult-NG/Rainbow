@@ -738,6 +738,20 @@ jobs:
       - name: Assert the mobile sign-in flow exists in one place
         run: python3 scripts/check_one_mobile_login.py
 
+      # Five files declared the list of outside agencies and four of them
+      # agreed. The fifth was the HQ escalation menu — the only one an operator
+      # touches — and it offered NPF, MILITARY, RAINBOW and VGN, taken from the
+      # list that badges Operation Rainbow's own staff. So handing an incident
+      # to the Police stored 'NPF'; the Police liaison's portal asks for
+      # 'POLICE' and never showed it, /api/notify-agency answered 400 Unknown
+      # agency, and the operator was told "Escalation Sent". FRSC and OPSH, the
+      # only two codes this deployment has contact variables for, were not on
+      # the menu. 679 unit tests and 79 browser assertions passed over it,
+      # because every one of them was written in the vocabulary of the four
+      # sides that agreed.
+      - name: Assert one agency vocabulary, built from one list
+        run: python3 scripts/check_one_agency_vocabulary.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

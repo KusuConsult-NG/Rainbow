@@ -29,6 +29,19 @@ const path = require('path');
 const { launch, tileToLatLon } = require('./browser');
 const { DOMAIN, PASSWORD } = require('./fixtures');
 
+// Read out of the console's own source rather than written here: a harness with
+// its own copy of this list is how the escalation menu drifted in the first
+// place. src/lib/agencies.ts owns it.
+const AGENCY_CODES = (() => {
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'hq-dashboard-next', 'src', 'lib', 'agencies.ts'),
+    'utf8',
+  );
+  const block = /export const AGENCY_CODES = \[([^\]]*)\] as const;/.exec(src);
+  if (!block) throw new Error('agencies.ts: AGENCY_CODES not found');
+  return [...block[1].matchAll(/'([A-Z]+)'/g)].map((m) => m[1]);
+})();
+
 const BASE = process.env.CONSOLE_URL || 'http://127.0.0.1:3000';
 const CONTROL = 'http://127.0.0.1:54322/';
 const OUT = process.env.E2E_OUT || path.join(__dirname, '..', '..', 'local_e2e_screenshots');
@@ -324,6 +337,41 @@ async function writeMark() {
       'ESCALATE writes an escalation to alerts',
       !!got && (got.rows[0]?.escalated_to_agency || got.rows[0]?.assigned_tier || got.rows[0]?.status),
       got ? JSON.stringify(got.rows[0]).slice(0, 200) : 'no PATCH reached the database',
+    );
+
+    // AND THAT IT WROTE A CODE AN AGENCY ANSWERS TO.
+    //
+    // The check above passed for a year on `escalated_to_agency: 'NPF'`, because
+    // it only asked whether SOMETHING was written. 'NPF' is not a code anything
+    // in this system knows: the Police liaison's portal loads its whole desk
+    // with `.eq('escalated_to_agency', 'POLICE')`, so the incident never
+    // appeared on it, and /api/notify-agency answered 400 Unknown agency, so no
+    // SMS and no webhook were sent. The console said "Escalation Sent".
+    const stored = got?.rows[0]?.escalated_to_agency;
+    check(
+      'the escalation names an agency the portal and the notifier both know',
+      AGENCY_CODES.includes(stored),
+      stored
+        ? `escalated_to_agency = ${JSON.stringify(stored)}`
+          + (AGENCY_CODES.includes(stored)
+            ? ''
+            : ` — not one of ${AGENCY_CODES.join(', ')}, so no liaison portal`
+              + ' can find it and /api/notify-agency refuses it')
+        : 'nothing was written to escalated_to_agency',
+    );
+
+    // AND THAT THE OPERATOR IS TOLD WHEN THE AGENCY WAS NOT REACHED.
+    //
+    // This run configures no liaison phone and no webhook URL — which is also
+    // true of the deployment — so the honest answer is that the agency was not
+    // notified. The toast used to read "Escalation Sent" either way.
+    const toast = await text(page);
+    check(
+      'the console says the agency was NOT notified, rather than claiming it was',
+      /NOT NOTIFIED/i.test(toast) && !/Escalation Sent/i.test(toast),
+      /NOT NOTIFIED/i.test(toast)
+        ? 'the handover is recorded and the operator is told nobody was reached'
+        : `no "not notified" warning on screen: ${toast.replace(/\s+/g, ' ').slice(0, 200)}`,
     );
     await shot(page, '55-action-escalate-after');
   } else {

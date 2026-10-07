@@ -1127,9 +1127,9 @@ uses — is installed locally, so the Dart results are reproducible with
 | Check | Result |
 |---|---|
 | `flutter analyze` | ✅ **0 errors, 0 warnings** (was 39 errors / 54 warnings) — **warnings now blocking**; 9 info rules promoted to `error`; 551 infos remain behind three documented exemptions |
-| `flutter test` | ✅ **571 passed** as of 2026-10-06 (was 77 at PR #1; 51 passed / 1 skipped at audit) |
+| `flutter test` | ✅ **638 passed** as of 2026-10-07 (was 571 on 2026-10-06, 77 at PR #1; 51 passed / 1 skipped at audit) |
 | `tsc --noEmit` | ✅ pass |
-| `vitest` (HQ console) | ✅ **654 passed**, 5 skipped — the console had no test suite at audit |
+| `vitest` (HQ console) | ✅ **732 passed**, 5 skipped as of 2026-10-07 (654 on 2026-10-06) — the console had no test suite at audit |
 | SQL behaviour harness | ✅ green against real PostgreSQL 16 — `scripts/verify_rls_migration.sh`, 238+ assertions |
 | `eslint` | ✅ **0 errors**, 15 warnings (was 21 errors) |
 | `next build` | ✅ pass (previously failed outright) |
@@ -1240,6 +1240,8 @@ only thing that distinguishes a defect from a preference.
 | T-14 | **The repository and production had different schemas.** The v2–v6 era was applied by hand and cannot be replayed, so no database this repository could build had `alerts.lga/ward/pu`, `profiles.lga/ward/sector_id`, `normalise_lga()`, the `updated_at` trigger, or the telemetry policy. It decided a 428C9 column name, hid T-1 from a passing assertion, and put a **wrong conclusion into a code comment** in `dashboard/page.tsx` — which stated three columns do not exist when all three do on production. | ✅ `20261017000000` brings the behaviour-affecting objects into the history; `scripts/check_schema_convergence.py` keeps them there, with two unreferenced v5 functions recorded as known differences rather than propagated |
 | T-15 | **Adding a Dart comment above a ward's `id:` silently removed that ward from the generated tactical map.** The sync script's regex was not comment-tolerant and reported no error. | ✅ regexes fixed and a 207-ward count assertion added |
 | T-16 | **The demonstration seed used invented geography** — "Bokkos Central", "Mangu Central" — which exist in no INEC ward list and in neither of the project's own files. Rows that look right and behave wrong: unselectable by the ward filter, refused by RLS to the commander whose area they were in. | ✅ real INEC names; `sync_tactical_map.py --check` fails CI on any place the seed names that the map lacks. The three genuinely orphaned wards (BWALL, DAMWAI, KADUNU) were resolved against INEC sources, not guessed |
+| T-28 | **The HQ escalation menu wrote agency codes nothing answers to.** Four of its six destinations — `NPF`, `MILITARY`, `RAINBOW`, `VGN` — came from the list that badges Operation Rainbow's own staff, not from the six codes the liaison roles, the agency portal and the contact variables all use. Handing an incident to the Police stored `'NPF'`: the Police portal asks for `'POLICE'` and never showed it, `/api/notify-agency` answered `400 Unknown agency`, and the operator was told "Escalation Sent". `FRSC` and `OPSH`, the only two this deployment has contacts for, were not on the menu. Separately, the notification route counted `SKIPPED` as success, so with nothing configured it answered `200 {"success":true}` having told nobody. | ✅ one list in `agencies.ts`; a delivery verdict that only counts a send; the operator is told when an agency was not reached; `scripts/check_one_agency_vocabulary.py` in CI, run against the old menu and failing on it by name |
+| T-29 | **Every mass advisory reached every user.** `SystemAlertListener`, which wraps every screen in the app, filtered on `target_type` / `target_value` — columns the console does not write — so its `'ALL'` default let everything through. An advisory for citizens of one ward appeared on every officer's handset, while `BroadcastHud` on the same phone correctly did not show it. Expiry was never checked either. | ✅ the banner now calls `broadcastReaches()`, the same tested function the HUD uses; 17 widget tests, 6 of which fail against the old filter |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -1710,6 +1712,253 @@ Also pinned `runs-on` from `ubuntu-latest` to `ubuntu-24.04` across all twelve
 jobs: the runner notice in these same annotations says `ubuntu-latest` migrates
 to Ubuntu 26 on 2026-10-19, and a silent environment change under a suite nobody
 can currently run is the last thing this project needs.
+
+### T-28. Escalating an incident to the Police reached nobody, by three paths at once
+
+Found on 2026-10-07, in a passing run. The browser harness escalates an
+incident, asserts the write, and prints what it wrote:
+
+```
+PASS  ESCALATE writes an escalation to alerts
+      — {"severity":"CRITICAL","status":"ESCALATED","escalated_to_agency":"NPF", …
+```
+
+`NPF` is not a code anything in this system answers to.
+
+**An agency code is a value in `alerts.escalated_to_agency`.** Five files
+declared the set and four agreed:
+
+| file | name | values |
+|---|---|---|
+| `console-access.ts` | `AGENCY_CODES` | POLICE ARMY DSS NSCDC FRSC OPSH |
+| `AgencyPortal.tsx` | `AGENCIES` | POLICE ARMY DSS NSCDC FRSC OPSH |
+| `AgencyAccessManager.tsx` | `AGENCIES` | POLICE ARMY DSS NSCDC FRSC OPSH |
+| `notify-agency/route.ts` | `AGENCY_CONTACTS` | POLICE ARMY DSS NSCDC FRSC OPSH |
+| **`dashboard/page.tsx`** | **seven `<option>` literals** | **NPF MILITARY NSCDC DSS RAINBOW VGN** |
+
+The fifth is the escalation menu — the only one of the five an operator ever
+touches. It had been written from `STATE_SECURITY_AGENCIES`, which is the list
+that badges **Operation Rainbow's own staff** with their parent organisation,
+and is a different question: a liaison account, a portal and a phone number
+exist for the six codes, and for `RAINBOW` (us) and `VGN` (vigilante outfits)
+none of the three does.
+
+So HQ hands a kidnapping to "👮‍♂️ NIGERIA POLICE FORCE (NPF TACTICAL CELL)" and
+`escalated_to_agency` is set to `'NPF'`. Then, in the same action:
+
+1. **The Police liaison never sees it.** `AgencyPortal` loads a liaison's whole
+   desk with `.eq('escalated_to_agency', agency)` where `agency` comes from
+   their role — `POLICE_LIAISON` → `POLICE`. The incident is filed under `NPF`,
+   so their incident list, their deployments and their action-report form are all
+   about a different value. Nothing errors; the desk is simply empty.
+2. **No SMS and no webhook leave the building.** `/api/notify-agency` answers
+   `400 Unknown agency 'NPF'`.
+3. **The operator is told it worked.** The POST was fired and discarded with
+   `.catch(console.warn)`, and the toast read **"Escalation Sent — Handed off to
+   NPF Command (ALL)"**.
+
+Four of the menu's six destinations behaved that way. `DSS` and `NSCDC` happened
+to spell the same in both lists and worked. `FRSC` and `OPSH` — the two the
+`.env.example`, the configuration report and the liaison roles are all built
+around — **could not be chosen at all**.
+
+#### Why 679 unit tests and 79 browser assertions passed over it
+
+Every test was written in the vocabulary of the four sides that agreed.
+`alert-actions.test.ts` escalates to `'DSS'`, `'NSCDC'` and `'POLICE'`;
+`AgencyPortal.test.tsx` and the browser fixtures use `'ARMY'` and `'POLICE'`.
+The one assertion that touched the real control asked only whether *something*
+was written:
+
+```js
+check('ESCALATE writes an escalation to alerts',
+      !!got && (got.rows[0]?.escalated_to_agency || …));
+```
+
+A value being present is not the same as a value being meaningful, which is the
+same shape as the panel that was present and invisible in PR #71.
+
+#### And the notification endpoint called nothing a success
+
+Separately, and worse because it is what a correctly-named escalation hits on
+this deployment today:
+
+```ts
+const allSent = results.every(r => r.status === 'SENT' || r.status === 'SKIPPED');
+return NextResponse.json({ success: allSent, … }, { status: allSent ? 200 : 207 });
+```
+
+`SKIPPED` is what the SMS leg records when there is no Termii key or no liaison
+phone. With neither configured — and `scripts/what_is_not_configured.py` reports
+all twelve agency contact variables and `TERMII_API_KEY` blank — the whole
+results array is `[{SMS, SKIPPED}]`, and `every()` over it is `true`. The
+endpoint answered **`200 {"success": true}`** to a request that notified nobody.
+
+The webhook leg made that harder to see rather than wrong: with no URL
+configured it pushed **no result at all**, so neither the response nor the
+`agency_notifications` audit row recorded that the channel existed and was not
+used. An operator reading the table later could not tell a webhook that was
+never attempted from one that was never configured.
+
+Two further faults in the same file, found while fixing it:
+
+* **An unsigned webhook was sent.** With `RAINBOW_WEBHOOK_SECRET` unset,
+  `X-Rainbow-Auth` went out as the empty string. Either the agency refuses it —
+  and we have just reported `SENT` for a request that was thrown away — or it
+  accepts it, and the endpoint accepts forged escalations from anyone who knows
+  the URL. It now refuses to send, and says why.
+* **The contact table was a module-level `const`**, so it captured
+  `process.env` when the server started. A liaison number added in the Railway
+  variables appeared to take effect and did not until the next deploy.
+
+#### What changed
+
+* `src/lib/agencies.ts` owns the vocabulary — codes, names, colours, icons, a
+  type guard — and the escalation menu, the liaison form, the portal and the
+  contact lookup are all built from it. `console-access.ts` re-exports it so
+  existing callers are unchanged.
+* `deliveryVerdict()` in the notification route distinguishes four outcomes, and
+  only a `SENT` counts as delivery: **200** delivered, **207** partially,
+  **502** a configured channel refused, **503** nothing is configured for that
+  agency. Each detail line names the agency and the variables to set.
+* `escalateAlert` **awaits** the notification and returns the outcome beside the
+  escalation's own. It still never fails the escalation on a notification
+  failure — an operator told "Escalation Failed" escalates again and the
+  incident collects duplicate handovers — but the two facts are now reported
+  separately. The toast says **"Escalation Recorded"**, and a second,
+  warning-level toast says **"POLICE NOT NOTIFIED"** with the reason when the
+  agency was not reached.
+* All three fetches are **bounded** — 20s from the browser, 8s each to Termii
+  and to the agency's own webhook endpoint. Awaiting the notification is what
+  makes the console able to tell the truth about it, and it is also what would
+  otherwise leave a dispatcher watching a spinner during an escalation while a
+  third party's endpoint hangs. A timeout reports "could not tell whether they
+  were notified", which is the honest answer and the one that gets somebody to
+  pick up the phone.
+* `scripts/check_one_agency_vocabulary.py`, in CI: `agencies.ts` is the only
+  file that may spell the list out; no retired code may be used as an agency;
+  the escalation menu may not hard-code an option value at all; and
+  `.env.example` and `what_is_not_configured.py` must cover exactly those six
+  codes and no others. It separates the two concepts explicitly — three files
+  are exempted **by name, with a reason**, because they own the staff-badge list
+  and a blanket skip is what let the menu drift.
+* The browser harness now asserts the stored code is one the portal and the
+  notifier both know, names it when it is not, and asserts the console says
+  the agency was **not** notified rather than claiming it was.
+
+#### Proven, not asserted
+
+* 26 new tests on the route, 6 on `escalateAlert`, 21 on the vocabulary.
+  Mutation-tested: restoring `SKIPPED`-counts-as-success fails two of them, and
+  dropping the webhook's skipped audit row fails a third.
+* The guard was run against the original menu and fails on `NPF` and `MILITARY`
+  by name.
+* Console suite **732 passed**, 5 skipped (was 679); `tsc --noEmit`, `eslint`
+  (0 errors, 0 warnings) and `next build` all pass; all eleven `check_*.py`
+  gates pass.
+
+#### A harness fault found while proving it, which cost more than the fix
+
+The browser run passed, then failed 30 of 46 checks twice, then passed again,
+over code that never changed in between. `run.sh` started the console with
+`npm start`, which forks `sh -c next start`, so the PID it killed on exit was
+the **wrapper** and `next-server` kept :3000. The next run could not bind,
+exited, and the health check two lines down was answered by the server still
+running from before — while `npm run build` had replaced its `.next` directory
+underneath it. Every screen rendered blank, no page error was logged, and the
+cause was invisible from the output.
+
+Next is now started directly, so the PID is the server's own, and the script
+**refuses to start** if either port is already in use, naming what to kill. A
+run that silently exercises a different build is worse than no run, which is the
+same reason `verify_apply_all.sh` was made to fail on an error anywhere in the
+buffer (T-12).
+
+One thing this does **not** prove: that a real agency webhook endpoint accepts
+what we send it. There is no agency endpoint to send to — all twelve contact
+variables are blank on this deployment, which is the condition the 503 exists to
+report honestly instead of hiding.
+
+### T-29. Every advisory went to everyone, from the one surface nobody had looked at
+
+Found in the same sweep, by asking the reverse question: the console's broadcast
+composer offers five targeting controls — audience, agency, LGA, ward, polling
+unit — so who reads them?
+
+There are **two** readers of `system_alerts` in the app, and only one of them
+had been fixed:
+
+| surface | where | targeting |
+|---|---|---|
+| `BroadcastHud` | the citizen home screen and the responder dashboard | `broadcastProvider` → `broadcastReaches()` — audience, LGA, ward, PU, expiry |
+| `SystemAlertListener` | **every screen in the app**, from `MaterialApp.router`'s builder in `app.dart` | its own filter |
+
+The second one read `target_type` and `target_value`. The console writes neither
+— it writes `target_audience`, `target_lga`, `target_ward`, `target_pu` — so:
+
+```dart
+final targetType = doc['target_type'] as String? ?? 'ALL';   // always 'ALL'
+if (userRole == 'HQ_OFFICER' || targetType == 'ALL') return true;
+```
+
+…returned `true` for **every advisory the console has ever sent**, to every user,
+on every screen. An advisory composed for *citizens of Gindiri ward* appeared as
+a full-width banner on every officer's handset in Plateau State, while the HUD on
+the same phone's dashboard correctly did not show it.
+
+Three more faults in the same twelve lines:
+
+* `geo_lgas` and `geo_wards` — plural — are read from the profile and no
+  migration defines either, so both lists were always empty. The `LGA` and
+  `WARD` branches below the fail-open line could only ever have refused.
+* **Expiry was never checked.** The stream filters `is_active` only, so a
+  withdrawn-by-time advisory stayed on screen indefinitely. `broadcastReaches`
+  drops it.
+* Agency targeting is read by neither surface. `target_agency` is written by the
+  composer and by nothing else, and read nowhere — see below.
+
+**This is the same defect `broadcast_targeting.dart` was created to fix.** Its
+own header says so: *"only ever checked audience and expiry — reading
+`target_type`, which the HQ console never wrote … Geographic scope was not
+checked at all, so an advisory for one ward went to the whole state."* That fix
+landed in `broadcastProvider` and this second reader of the same table was
+missed, which is why the file now has one caller fewer and a pure function with
+two.
+
+**Fixed** by deleting the second filter: the banner calls `broadcastReaches()`
+with a `BroadcastRecipient` built from the profile's singular geo columns, keeps
+the dismissed-first rule, and keeps HQ's deliberate see-everything pass-through.
+`isResponder` follows the same rule `resolveRole` applies — anything that is not
+`CITIZEN` or `USER`.
+
+**Proven** by `test/system_alert_targeting_test.dart`: 17 widget tests, every
+fixture shaped the way `MassBroadcast.tsx` actually inserts a row. A CITIZENS
+advisory is refused to a responder, a JOS NORTH advisory is refused in MANGU, a
+ward advisory is refused in the neighbouring ward, an expired and a withdrawn
+advisory are both refused, a recipient with no place recorded still receives a
+scoped warning (deliberate — see `broadcastReaches`), HQ still sees an advisory
+addressed elsewhere, and a legacy row carrying only `target_type` still arrives.
+The existing dismiss tests were written against `target_type` and still pass,
+which is the back-compatibility path rather than a coincidence.
+
+#### Still open: `target_agency` is written and read by nothing
+
+`MassBroadcast.tsx` offers "transmit to one agency" and writes
+`system_alerts.target_agency`. Nothing in the app or the console reads that
+column — confirmed across `lib/` and `hq-dashboard-next/src/` — so an advisory
+addressed to one agency reaches everyone the other four controls allow.
+
+It is left as a finding rather than fixed, because the two candidate meanings
+need a decision this audit should not make silently:
+
+* the **liaison** vocabulary (`POLICE`…`OPSH`, T-28), which would send the
+  advisory to an outside agency's liaison accounts; or
+* the **staff badge** vocabulary (`RAINBOW`, `NPF`, `MILITARY`, `VGN`), which
+  would send it to Operation Rainbow's own officers drawn from that organisation.
+
+The composer's list is currently the second. `scripts/check_one_agency_vocabulary.py`
+exempts `MassBroadcast.tsx` by name with that reason recorded, and the exemption
+is written to be removed when this is settled.
 
 ### Open, and not closeable from the repository
 

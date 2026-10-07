@@ -26,11 +26,48 @@ OUT="${E2E_OUT:-$ROOT/local_e2e_screenshots}"
 export NO_PROXY="127.0.0.1,localhost"
 export no_proxy="127.0.0.1,localhost"
 
+# Is anything listening? No curl, no lsof: a bare TCP connect, which cannot be
+# fooled by a server that answers 404.
+port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && exec 3<&- || return 1; }
+
+# A SECOND RUN USED TO TEST THE FIRST RUN'S BUILD.
+#
+# `npm start` forks `sh -c next start`, so $NEXT_PID below was the WRAPPER and
+# killing it left `next-server` holding :3000. On the next run `npm start` could
+# not bind, exited, and the health check two lines down was satisfied by the
+# server still running from last time — while `npm run build` had meanwhile
+# replaced the `.next` directory underneath it. Every screen then rendered blank
+# and 30 of 46 checks failed, against code that was fine. Diagnosing that cost
+# more than the run.
+#
+# Two changes. Next is started DIRECTLY so the PID is the server's own, and this
+# script refuses to start at all if either port is taken, because a run that
+# silently exercises the wrong build is worse than no run.
 cleanup() {
   [[ -n "${FAKE_PID:-}" ]] && kill "$FAKE_PID" 2>/dev/null || true
   [[ -n "${NEXT_PID:-}" ]] && kill "$NEXT_PID" 2>/dev/null || true
+  # Next spawns workers; give the group a moment, then say so rather than
+  # leaving the next run to discover it.
+  for _ in $(seq 1 20); do
+    port_busy "$PORT" || port_busy "$FAKE_PORT" || return 0
+    sleep 0.5
+  done
+  port_busy "$PORT" && echo "WARNING: something is still listening on :$PORT — kill it before the next run" >&2
+  port_busy "$FAKE_PORT" && echo "WARNING: something is still listening on :$FAKE_PORT" >&2
+  return 0
 }
 trap cleanup EXIT
+
+for occupied in "$PORT" "$FAKE_PORT"; do
+  if port_busy "$occupied"; then
+    echo "127.0.0.1:$occupied is already in use." >&2
+    echo "This run would not be able to bind it, and the health checks below" >&2
+    echo "would be answered by whatever is there — most likely a server left" >&2
+    echo "over from an earlier run, serving a build this one has replaced." >&2
+    echo "Stop it first:  pkill -f next-server ; pkill -f fake_supabase.js" >&2
+    exit 1
+  fi
+done
 
 echo "==> Supabase stand-in on :$FAKE_PORT"
 node "$ROOT/scripts/local_e2e/fake_supabase.js" &
@@ -59,7 +96,10 @@ npm run build
 echo "==> serving it on :$PORT"
 # A production build, not `next dev`. The guard is Next's proxy, and the thing
 # being tested is what a deployed server does.
-PORT="$PORT" npm start &
+#
+# `next` directly rather than `npm start`: npm forks a shell, and killing the
+# shell leaves the server running on the port — see cleanup() above.
+./node_modules/.bin/next start -p "$PORT" &
 NEXT_PID=$!
 
 for _ in $(seq 1 60); do

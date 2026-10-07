@@ -63,13 +63,21 @@ DO $apply$ BEGIN RAISE NOTICE 'applying 20260903000003_alert_escalation_columns.
 --
 -- A NOTE ON WHAT GOES IN escalated_to_agency
 --
--- The two writers disagree. The console writes an agency ('POLICE', 'ARMY'),
--- which is what AgencyPortal filters on. The mobile agent dashboard writes a
--- TIER ('HQ', 'LGA') — its own comment says "tier label for filtering". A
--- mobile escalation is therefore invisible to every agency portal, though it
--- still shows as ESCALATED on the HQ board. That is a semantic collision in one
--- column, not a schema fault, and it is left alone here: narrowing it belongs
--- with whoever owns the escalation model. Recorded in E2E_AUDIT_REPORT.md.
+-- The two writers disagree. The mobile agent dashboard wrote a TIER ('HQ',
+-- 'LGA') here — its own comment said "tier label for filtering" — so a mobile
+-- escalation was invisible to every agency portal while still showing as
+-- ESCALATED on the HQ board. That has since been given its own column,
+-- `assigned_tier`, and the mobile side writes it there.
+--
+-- CORRECTION, 2026-10-07. This comment used to say the console writes an agency
+-- code, 'POLICE' or 'ARMY', "which is what AgencyPortal filters on". It did not.
+-- The console's escalation menu was built from the list that badges Operation
+-- Rainbow's own staff, so it wrote 'NPF', 'MILITARY', 'RAINBOW' or 'VGN' —
+-- codes no liaison role, portal or contact variable knows. An incident handed
+-- to the Police was stored as 'NPF' and the Police portal, which asks for
+-- 'POLICE', never showed it. Fixed on the console side; the column stays free
+-- text because production holds rows written before any of this was settled.
+-- Recorded in E2E_AUDIT_REPORT.md.
 --
 -- Idempotent: safe to re-run.
 -- ============================================================================
