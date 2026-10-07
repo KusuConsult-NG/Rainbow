@@ -27,6 +27,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
+const { waitForPaint } = require('./wait_for_paint');
 const { DOMAIN, byKey } = require('./fixtures');
 const { signInMobile } = require('./mobile_login');
 
@@ -235,7 +236,7 @@ async function logMark() {
   // ---- boot + sign in -------------------------------------------------------
   state.screen = 'mobile:boot';
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 90000 });
+  await waitForPaint(page, 'mobile_interact: first boot');
   await sleep(6500);
   await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
   await sleep(2000);
@@ -327,7 +328,7 @@ async function logMark() {
     // category list stopped appearing at all — which looked like nine broken
     // categories and was one dirty starting point.
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 60000 });
+    await waitForPaint(page, 'mobile_interact: reload before the category list');
     await sleep(5000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1500);
@@ -959,10 +960,7 @@ async function logMark() {
     try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ }
   });
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(
-    () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-    { timeout: 90000 },
-  );
+  await waitForPaint(page, 'mobile_interact: responder sign-in boot');
   await sleep(6000);
   await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
   await sleep(1500);

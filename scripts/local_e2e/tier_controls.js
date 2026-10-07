@@ -25,6 +25,7 @@ const path = require('path');
 const { launch } = require('./browser');
 const { DOMAIN } = require('./fixtures');
 const { signInMobile } = require('./mobile_login');
+const { waitForPaint } = require('./wait_for_paint');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -355,25 +356,7 @@ const DRAWER = [
       // account's Actions billing is unresolved, so this has not been confirmed
       // against it. It is here so the next real run says what happened instead
       // of pointing at a line number.
-      const bootedAt = Date.now();
-      const bootWait = () => page.waitForFunction(
-        () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-        { timeout: 60000 });
-      try {
-        await bootWait();
-      } catch {
-        await page.reload({ waitUntil: 'domcontentloaded' });
-        try {
-          await bootWait();
-        } catch {
-          throw new Error(
-            `${tier.banner}: the app did not boot after reloading for drawer `
-            + `item "${item.label}" — waited `
-            + `${Math.round((Date.now() - bootedAt) / 1000)}s across two `
-            + 'attempts. Every drawer item reboots the app from scratch, so '
-            + 'this is where a slow cold start shows up first.');
-        }
-      }
+      await waitForPaint(page, `${tier.banner}: drawer item "${item.label}"`, { timeout: 60000 });
       await sleep(5000);
       await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
       await sleep(1500);
@@ -397,8 +380,7 @@ const DRAWER = [
     // which made every control after this loop report as missing.
     await page.evaluate(() => { window.location.hash = '#/agent-dashboard'; });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(
-      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 60000 });
+    await waitForPaint(page, 'tier_controls: boot');
     await sleep(5000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1500);

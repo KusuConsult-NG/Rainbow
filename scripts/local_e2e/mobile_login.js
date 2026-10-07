@@ -36,6 +36,7 @@
  */
 
 const { DOMAIN, PASSWORD, byKey } = require('./fixtures');
+const { waitForPaint } = require('./wait_for_paint');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -129,9 +130,7 @@ async function focusFirstField(page) {
  * and THROWS naming the step if any part of it did not happen.
  */
 async function signInMobile(page, role) {
-  await page.waitForFunction(
-    () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-    { timeout: 120000 });
+  await waitForPaint(page, 'sign-in: app boot');
   await sleep(6000);
   await page.evaluate(
     () => document.querySelector('flt-semantics-placeholder')?.click());
