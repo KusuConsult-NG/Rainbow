@@ -35,7 +35,10 @@ set_key() {
 }
 
 set_key DEMO_CITIZEN_EMAIL "citizen@staging.operationrainbow.test"
-set_key DEMO_CITIZEN_PASS  "staging-only-password"
+# Same value as fixtures.js PASSWORD, and hyphen-free for the same reason
+# (a Puppeteer layout bug makes `-` throw inside Flutter's engine — see
+# scripts/local_e2e/fixtures.js).
+set_key DEMO_CITIZEN_PASS  "stagingOnlyPassword77"
 # AGENT_DEFAULT_PASS is deliberately NOT written. It was one password shared
 # by every staff account, read out of the bundled .env, and nothing reads it
 # any more: staff sign in with their own password through signInWithBadge

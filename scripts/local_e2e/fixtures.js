@@ -20,7 +20,32 @@
  */
 
 const DOMAIN = 'staging.operationrainbow.test';
-const PASSWORD = 'staging-only-password';
+// No HYPHEN in this, deliberately, and it cost six wrong theories to learn why.
+//
+// Puppeteer's US keyboard layout maps `-` to `NumpadSubtract` and then emits an
+// INCONSISTENT location for it: keydown arrives with location 3 (numpad) and
+// keyup with location 1 (left modifier). Flutter's web engine looks up
+// `kWebLogicalLocationMap['-'][1]`, finds no entry for a left-modifier hyphen,
+// and the unmappable-location path in KeyboardConverter._handleEvent throws
+// `Cannot read properties of null (reading 'toString')`. A real keyboard never
+// sends that pair, so no user can hit it.
+//
+// With `staging-only-password` the two hyphens produced exactly two engine
+// errors per run, which failed mobile_capture.js and mobile_interact.js — both
+// of which fail on console errors matching /cannot read/ — on the staff
+// sign-in screens only. The citizen phone, the OTP `123456` and the badge
+// `responder@staging.operationrainbow.test` contain no hyphen and never threw,
+// which is why only the password step looked cursed.
+//
+// Resolved by building with --source-maps and mapping the frames: every one
+// landed in lib/_engine/engine/keyboard_binding.dart, none in this repository.
+// See scripts/local_e2e/resolve_dart_frames.js.
+//
+// The fixture password is arbitrary test data, so removing the character that
+// trips a known automation bug costs nothing and keeps the harnesses' error
+// detection fully armed — unlike widening their filters, which would have hidden
+// every future engine error too.
+const PASSWORD = 'stagingOnlyPassword77';
 
 /**
  * One account per role the console and the app actually branch on.

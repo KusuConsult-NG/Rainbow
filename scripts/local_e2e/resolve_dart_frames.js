@@ -97,14 +97,25 @@ async function main() {
         console.log(`${frame}  → no mapping`);
         continue;
       }
-      const where = /packages\/flutter\/|dart-sdk\/|packages\/flutter_web/.test(pos.source)
-        ? 'FRAMEWORK/ENGINE'
-        : (/\/lib\/|^lib\//.test(pos.source) ? 'THIS APP' : 'other package');
+      // Order matters, and getting it wrong is not cosmetic. The first version
+      // tested for `/lib/` before excluding the SDK, so every frame in
+      // `org-dartlang-sdk:///lib/_engine/engine/...` — Flutter's OWN web engine
+      // — was labelled THIS APP. That is the exact opposite of the answer this
+      // script exists to give, and it would have sent me back to editing the
+      // login screen for a defect in the engine.
+      const where = /^org-dartlang-sdk:/.test(pos.source)
+        ? (/\/_engine\//.test(pos.source) ? 'FLUTTER WEB ENGINE' : 'DART SDK')
+        : /packages\/flutter[/_]/.test(pos.source)
+          ? 'FLUTTER FRAMEWORK'
+          : /(^|\/)lib\//.test(pos.source) ? 'THIS APP' : 'other package';
       console.log(`${frame}  → ${pos.source}:${pos.line}:${pos.column ?? 0}`
                   + `${pos.name ? `  (${pos.name})` : ''}   [${where}]`);
     }
   } finally {
-    consumer.destroy();
+    // `destroy()` exists only on some versions of this package; calling it
+    // unconditionally threw `consumer.destroy is not a function` AFTER the
+    // results had printed, so the script exited 1 on a successful run.
+    if (typeof consumer.destroy === 'function') consumer.destroy();
   }
   return 0;
 }
