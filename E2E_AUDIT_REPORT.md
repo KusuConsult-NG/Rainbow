@@ -2190,14 +2190,35 @@ actually removing the flow is still caught.
 
 #### What the fixed run reports
 
+The whole suite, end to end, for the first time in this container: **305
+assertions, no failures**, and `run.sh` exits 0.
+
 | pass | before | after |
 |---|---|---|
 | console screens | 46/46, with the audit screen refused and photographed empty | **49/49** — the refusal, the audit rows and the actor all asserted |
-| console controls | 33/33 | **35/35** |
+| console controls | 33/33 | **36/36** |
 | mobile screens | 14/15, fourteen page errors | **16/16**, clean, `register_sms_device` answered for all eight roles |
+| mobile controls | never run in this container | **36/36**, 225 controls exercised |
+| camera and microphone | never run in this container | **17/17** |
+| messaging round trip | never run in this container | **17/17** |
+| per-tier controls | never run in this container | **83/83** |
+| the whole command chain | never run in this container | **51/51** |
 
-`2 function(s) answered` on the mobile pass is `register_sms_device` and
-`revoke_sms_device_keys` — the two the app calls, both previously refused.
+`2 function(s) answered` on the mobile passes is `register_sms_device` and
+`revoke_sms_device_keys`; `1 function(s) answered` on the console's control sweep
+is `mark_false_report`. All three were refused before this.
+
+The bottom five rows are the part no CI run has ever reached either — Actions has
+been refused for billing since 2026-10-06 (T-17, T-27) — so until this run, the
+only evidence that the mobile app's controls, its live stream, its messaging and
+the command chain worked in a browser was a previous session's local run of an
+earlier build.
+
+One caveat from the first attempt is now settled rather than left standing: the
+same assertion added to the console's control sweep had not run, because I edited
+`interact.js` after `run.sh` had already launched it. It ran this time, and the
+sweep reports 36/36 with `every database function a control called was answered,
+not refused`.
 
 And a fourth harness fault, which was mine and cost the run it was introduced in.
 `register_sms_device()` writes to `sms_device_keys`, a table the fixtures had
