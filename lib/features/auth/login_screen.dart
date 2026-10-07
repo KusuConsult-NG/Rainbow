@@ -346,6 +346,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     return TextField(
       key: const ValueKey('staff_password_field'),
       controller: _passwordController,
+      // Focused the moment it appears, for the officer's sake: this field is
+      // REVEALED by pressing AUTHORIZE ACCESS, so without autofocus they press
+      // a button, a field appears, and they have to reach up and tap it before
+      // they can type — on a phone, mid-incident.
+      //
+      // It is NOT a fix for the engine error described in
+      // scripts/local_e2e/mobile_login.js. I added this believing it was, and
+      // measured afterwards that the error survives it. Kept because it is
+      // right on its own merits, not because it repairs anything.
+      autofocus: true,
       obscureText: true,
       autocorrect: false,
       enableSuggestions: false,
@@ -379,6 +389,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     return TextField(
       key: const ValueKey('otp_field'),
       controller: _otpController,
+      // Same reason as the password field: this one is revealed after the code
+      // is sent, so autofocus saves a tap when somebody is waiting on an SMS.
+      // (This field has never produced the engine error the password field
+      // does, with or without autofocus.)
+      autofocus: true,
       keyboardType: TextInputType.number,
       maxLength: 6,
       textAlign: TextAlign.center,

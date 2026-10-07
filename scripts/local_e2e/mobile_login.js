@@ -68,39 +68,37 @@ async function screenText(page) {
  * second field has to be focused through its semantics node before typing —
  * `document.querySelector('input')` would otherwise keep hitting the first.
  */
-async function typeIntoLastField(page, text) {
-  // Focus through the SEMANTICS node and type with the keyboard only.
+async function typeIntoRevealedField(page, text) {
+  // No focusing. Both revealed fields — the staff password and the citizen OTP
+  // — carry `autofocus: true`, so Flutter has already moved focus by the time
+  // they are on screen, and reaching in to focus them achieved nothing good:
+  // Flutter exposes NO `flt-semantics[role="textbox"]` node for a TextField in
+  // this version (a probe measured zero, with semantics fully on), so every
+  // attempt fell through to the single DOM <input> Flutter maintains.
   //
-  // The first version of this also did `el.value = ''` on the DOM input, to be
-  // sure the field was empty. Flutter owns that element: it mirrors its own
-  // EditingState into it, and writing to `value` behind Flutter's back made the
-  // engine throw `Cannot read properties of null (reading 'toString')` on the
-  // login screen. Only mobile_capture.js noticed — it fails on console errors
-  // matching /cannot read/, while tier_controls.js and chat_thread.js collect
-  // `pageerror` only, so the same error was almost certainly present in their
-  // "clean" runs and went unreported. Nothing here touches the DOM input now.
-  const focused = await page.evaluate(() => {
-    const boxes = [...document.querySelectorAll(
-      'flt-semantics[role="textbox"], flt-semantics[role="text"]')];
-    const box = boxes[boxes.length - 1];
-    if (box) { box.click(); return true; }
-    // The semantics node for a field that has only just appeared — the OTP box
-    // is the usual case — may not be in the tree yet. Focusing the DOM input is
-    // safe: FOCUS does not disturb Flutter's editing state, only ASSIGNING to
-    // `value` did. Dropping this fallback along with that assignment is what
-    // made the citizen path fail with "no OTP field appeared".
-    const els = document.querySelectorAll('input');
-    const el = els[els.length - 1];
-    if (el) { el.focus(); return true; }
-    return false;
-  });
-  if (!focused) return false;
-  await sleep(1200);
-  // Clear whatever is there the way a person would, so Flutter stays the only
-  // writer of its own editing state.
-  await page.keyboard.down('Control');
-  await page.keyboard.press('KeyA');
-  await page.keyboard.up('Control');
+  // ## An open defect this helper does NOT cause and does NOT fix
+  //
+  // Typing into the staff password field makes the Flutter engine throw
+  // `Cannot read properties of null (reading 'toString')` — twice, from engine
+  // frames only (`q.toString` on null), while the sign-in itself still reaches
+  // #/agent-dashboard. mobile_capture.js fails on it; tier_controls.js and
+  // chat_thread.js collect `pageerror` only and so pass regardless.
+  //
+  // Six theories were tested with a build and a probe each, and every one was
+  // wrong: writing `el.value = ''` (my first and most confident guess), this
+  // helper focusing the field, missing `autofillHints`, `obscureText: true`,
+  // `autocorrect`/`enableSuggestions: false`, and the accessibility tree being
+  // enabled. The reveal on its own is clean — zero errors with no typing. The
+  // citizen OTP field, same reveal-then-type shape, never throws.
+  //
+  // It survives with semantics OFF, so it is not a harness artifact: ordinary
+  // users hit it. The release build is minified with no source map, so the next
+  // step is a profile build to resolve the frame. Left RED in mobile_capture.js
+  // deliberately — that harness is the only one that detects it, and widening
+  // its filter to go green would throw away the detector.
+  const ready = await page.evaluate(
+    () => document.querySelectorAll('input').length > 0);
+  if (!ready) return false;
   await page.keyboard.type(text, { delay: 20 });
   await sleep(400);
   return true;
@@ -149,7 +147,7 @@ async function signInMobile(page, role) {
       throw new Error('signInMobile(citizen): no AUTHORIZE ACCESS control');
     }
     await sleep(2600);
-    if (!await typeIntoLastField(page, '123456')) {
+    if (!await typeIntoRevealedField(page, '123456')) {
       throw new Error('signInMobile(citizen): no OTP field appeared');
     }
     if (!await clickButton(page, 'verify otp')) {
@@ -173,7 +171,7 @@ async function signInMobile(page, role) {
         + 'step — the button never became SIGN IN. If the login flow changed '
         + 'again, this module is what has to change with it.');
     }
-    if (!await typeIntoLastField(page, PASSWORD)) {
+    if (!await typeIntoRevealedField(page, PASSWORD)) {
       throw new Error(`signInMobile(${role}): no password field to type into`);
     }
     if (!await clickButton(page, 'sign in')) {
@@ -193,4 +191,4 @@ async function signInMobile(page, role) {
   return hash;
 }
 
-module.exports = { signInMobile, clickButton, screenText, typeIntoLastField };
+module.exports = { signInMobile, clickButton, screenText, typeIntoRevealedField };
