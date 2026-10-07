@@ -68,6 +68,32 @@ async function screenText(page) {
  * second field has to be focused through its semantics node before typing —
  * `document.querySelector('input')` would otherwise keep hitting the first.
  */
+/**
+ * Put text into the focused field WITHOUT synthesising key events.
+ *
+ * `page.keyboard.type` presses and releases a key per character. For `-` it
+ * sends `code: NumpadSubtract` with `location: 3` on keydown and
+ * **`location: 1` on keyup** — and location 1 means "the left-hand one of a
+ * pair", which no minus key has. Flutter's web keyboard engine looks
+ * `(key, location)` up in `kWebLogicalLocationMap`, where `-` exists at
+ * locations 0 and 3 only, and null-asserts on the miss. So every staff sign-in
+ * threw a TypeError inside the Flutter engine, twice — once per hyphen in
+ * `staging-only-password` — while the citizen, who types only digits, threw
+ * nothing. Fourteen page errors across seven roles, and the app was not
+ * involved: no real keyboard produces that event.
+ *
+ * `Input.insertText`, which is what `sendCharacter` sends, inserts the text and
+ * fires the `input` event Flutter's text field listens to, with no key events at
+ * all. Same text arrives; nothing is synthesised.
+ *
+ * Verified by instrumenting every key event during a real sign-in and matching
+ * the error to the keyup that preceded it, after a wrong first guess (Shift for
+ * the `@`, which turned out to be synthesised correctly).
+ */
+async function typeText(page, text) {
+  for (const ch of text) await page.keyboard.sendCharacter(ch);
+}
+
 async function typeIntoLastField(page, text) {
   const focused = await page.evaluate(() => {
     const boxes = [...document.querySelectorAll(
@@ -85,7 +111,7 @@ async function typeIntoLastField(page, text) {
     const el = els[els.length - 1];
     if (el) { el.focus(); el.value = ''; }
   });
-  await page.keyboard.type(text, { delay: 20 });
+  await typeText(page, text);
   await sleep(400);
   return true;
 }
@@ -113,7 +139,7 @@ async function signInMobile(page, role) {
       const el = document.querySelector('input');
       if (el) { el.focus(); el.value = ''; }
     });
-    await page.keyboard.type(person.phone.replace('+234', '0'), { delay: 20 });
+    await typeText(page, person.phone.replace('+234', '0'));
     await sleep(400);
     if (!await clickButton(page, 'authorize access')) {
       throw new Error('signInMobile(citizen): no AUTHORIZE ACCESS control');
@@ -130,7 +156,7 @@ async function signInMobile(page, role) {
       const el = document.querySelector('input');
       if (el) { el.focus(); el.value = ''; }
     });
-    await page.keyboard.type(`${role}@${DOMAIN}`, { delay: 20 });
+    await typeText(page, `${role}@${DOMAIN}`);
     await sleep(400);
     if (!await clickButton(page, 'authorize access')) {
       throw new Error(`signInMobile(${role}): no AUTHORIZE ACCESS control`);
@@ -166,4 +192,6 @@ async function signInMobile(page, role) {
   return hash;
 }
 
-module.exports = { signInMobile, clickButton, screenText, typeIntoLastField };
+module.exports = {
+  signInMobile, clickButton, screenText, typeIntoLastField, typeText,
+};

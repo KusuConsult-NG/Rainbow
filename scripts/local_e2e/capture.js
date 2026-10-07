@@ -255,6 +255,35 @@ async function chooseTactical(page, triggerText, optionText) {
       n += 1;
       seen.push(slug);
       await shot(page, `20-${role}-${String(n).padStart(2, '0')}-${slug}`);
+
+      // THE AUDIT SCREEN HAS TO SAY WHO DID IT.
+      //
+      // Photographing this screen was all that was ever asked of it, and the
+      // photograph was of an empty panel: the stand-in answered
+      // `audit_trail()` with a 400 (it implemented no RPC at all), and no
+      // fixture incident carried an escalation_log for it to flatten even if
+      // it had. Both are fixed, so the screen now has rows — and the rows are
+      // worth asserting on, because `audit_trail()` read the actor from `by`
+      // while BOTH apps write `by_email`, so every escalation a person
+      // performed was attributed to SYSTEM. An audit trail that cannot name
+      // the officer who escalated an incident is the one thing this screen
+      // must not be.
+      if (slug === 'audit' && role === 'hq') {
+        const audit = await textOf(page);
+        check(
+          'the audit screen lists the actions taken on an incident',
+          /ESCALATED/.test(audit) && /UNIT|WARD|LGA/.test(audit),
+          audit.replace(/\s+/g, ' ').slice(0, 140),
+        );
+        check(
+          'the audit screen names the officer who escalated it, not SYSTEM',
+          /hq@staging\.operationrainbow\.test/.test(audit),
+          /hq@staging\.operationrainbow\.test/.test(audit)
+            ? 'the HQ operator is named on their own escalation'
+            : 'the escalation performed by the HQ operator is attributed to '
+              + `${/SYSTEM/.test(audit) ? 'SYSTEM' : 'nobody'}`,
+        );
+      }
     }
     // The agency portal's nav label is built from the liaison's own agency.
     currentScreen = `${role}:agency`;
@@ -636,6 +665,29 @@ async function chooseTactical(page, triggerText, optionText) {
     ctl.unknownColumns.join('; ') || 'none',
   );
 
+  // AND NO FUNCTION THE STAND-IN COULD NOT ANSWER.
+  //
+  // The sibling of the check above, and it was missing for the same reason that
+  // one exists. The stand-in had no RPC router at all, so every `.rpc()` fell
+  // through to the table router and came back
+  // `400 relation "public.rpc/<fn>" does not exist`. The Audit Logs screen is
+  // built on `audit_trail()`: it rendered empty, logged `[AUDIT_TRAIL_ERR]` into
+  // `browserProblems`, and this run reported 46/46 and photographed the empty
+  // screen as evidence that it works.
+  //
+  // `rpcMisses` is now the record of "the app asked for a function the stand-in
+  // does not implement", and any entry fails the run — because an unimplemented
+  // function and a working screen look identical in a screenshot.
+  check(
+    'every database function the app called was answered, not refused',
+    (ctl.rpcMisses || []).length === 0,
+    (ctl.rpcMisses || []).length
+      ? `refused: ${[...new Set(ctl.rpcMisses)].join(', ')}`
+        + ' — implement it in RPCS in scripts/local_e2e/fake_supabase.js'
+      : `none refused; ${new Set((ctl.rpcCalls || []).map((c) => c.fn)).size}`
+        + ' function(s) answered',
+  );
+
   // A basemap refused by our OWN policy is invisible from the map code and
   // from the header: the map simply renders grey with the markers floating on
   // it, and the only evidence is a console message nobody reads during an
@@ -686,6 +738,8 @@ async function chooseTactical(page, triggerText, optionText) {
     roles: roleReport,
     checks,
     unknownColumns: ctl.unknownColumns,
+    rpcMisses: ctl.rpcMisses || [],
+    rpcCalls: ctl.rpcCalls || [],
     writesObserved: ctl.writes.map((w) => ({ table: w.table, method: w.method })),
     browserProblems,
     requestCount: ctl.log.length,

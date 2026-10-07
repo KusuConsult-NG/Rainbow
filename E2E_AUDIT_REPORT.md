@@ -1243,6 +1243,8 @@ only thing that distinguishes a defect from a preference.
 | T-28 | **The HQ escalation menu wrote agency codes nothing answers to.** Four of its six destinations — `NPF`, `MILITARY`, `RAINBOW`, `VGN` — came from the list that badges Operation Rainbow's own staff, not from the six codes the liaison roles, the agency portal and the contact variables all use. Handing an incident to the Police stored `'NPF'`: the Police portal asks for `'POLICE'` and never showed it, `/api/notify-agency` answered `400 Unknown agency`, and the operator was told "Escalation Sent". `FRSC` and `OPSH`, the only two this deployment has contacts for, were not on the menu. Separately, the notification route counted `SKIPPED` as success, so with nothing configured it answered `200 {"success":true}` having told nobody. | ✅ one list in `agencies.ts`; a delivery verdict that only counts a send; the operator is told when an agency was not reached; `scripts/check_one_agency_vocabulary.py` in CI, run against the old menu and failing on it by name |
 | T-29 | **Every mass advisory reached every user.** `SystemAlertListener`, which wraps every screen in the app, filtered on `target_type` / `target_value` — columns the console does not write — so its `'ALL'` default let everything through. An advisory for citizens of one ward appeared on every officer's handset, while `BroadcastHud` on the same phone correctly did not show it. Expiry was never checked either. | ✅ the banner now calls `broadcastReaches()`, the same tested function the HUD uses; 17 widget tests, 6 of which fail against the old filter |
 | T-30 | **Every mobile credential gate scanned `.env.example`; the file that ships is `.env`.** `pubspec.yaml` declares `.env` as a Flutter asset, so it is bundled verbatim and extracts with `unzip`. The template declared zero credential-shaped keys and all three gates passed, while a release build made by this repository's own harness carried `AGENT_DEFAULT_PASS=staging-only-password` in `build/web/assets/.env` — the T-20 name, removed in PR #61, that two of those gates exist to keep out. `scripts/local_e2e/provision_env.sh` wrote it back, and asserted it was non-empty: a liveness check on a key nothing has read since. No real credential leaked; the shape did. | ✅ the script deletes it rather than writing it, marks the file as harness-provisioned, and CI now scans the BUNDLED asset instead of the template — run against the artefact as built (fails, naming it) and against the fixed file (passes) |
+| T-31 | **The local stand-in implemented no database functions, and the run was green over it.** It routed `/rest/v1/<table>` and had no route for `/rest/v1/rpc/<fn>`, so every `.rpc()` came back `400 relation "public.rpc/<fn>" does not exist` — seven browser-reachable functions, including the one the Forensic Audit screen is built on and the one that issues a handset's SMS fallback key on every sign-in. The console's own `report.json` recorded `[AUDIT_TRAIL_ERR]` while the run reported 46/46 and filed a photograph of the empty screen as evidence it renders. | ✅ an RPC router with the seven implemented, `501 FAKE_NO_RPC` naming anything that is not, and `rpcMisses` asserted by both harnesses so a refusal fails the run |
+| T-32 | **The audit trail attributed every human action to SYSTEM.** `audit_trail()` read the actor from `by`, which only the SQL writers set; both the console and the app write `by_email` — the key the column's own comment has documented since `20260722000000`. So every escalation an officer performed read as the system's, and the machine's were the only accurate attributions on a screen whose purpose is to say who did what. The behaviour test planted `"by":"SYSTEM"`, the one shape that worked, and never asserted the actor. | ✅ `20261019000000` reads `by` then `by_email` (both exist on production and the log is append-only, so neither can be rewritten); both shapes and a no-actor entry asserted in SQL, and the browser run asserts the operator is named |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -2074,6 +2076,171 @@ None of the three was worth a new CI gate — the first two would have cost thre
 false positives and one dismissal for one real finding, and the third has
 nothing to catch. Recorded because the next person to ask the same question
 should not have to re-run them.
+
+### T-31. The stand-in answered no database function, and a green run photographed the empty screen
+
+Running the mobile half of `scripts/local_e2e/run.sh` for the first time in this
+container — a release web build of the app, driven in a real browser — turned the
+suite red. Two findings came out of it, and only one was the app's.
+
+#### The stand-in implemented no RPC at all
+
+`scripts/local_e2e/fake_supabase.js` routes `/rest/v1/<table>`. It had no route
+for `/rest/v1/rpc/<function>`, so every `.rpc()` call fell through to the table
+router, which took the whole path segment as a relation name:
+
+```
+POST /rest/v1/rpc/register_sms_device
+400 {"code":"42P01","message":"relation \"public.rpc/register_sms_device\" does not exist"}
+```
+
+Sixteen functions are called across the two apps. Seven are reachable from a
+browser, and all seven were refused in every run there has ever been:
+
+| function | called by | what was refused |
+|---|---|---|
+| `audit_trail` | `AuditLogs.tsx` | the whole Forensic Audit screen |
+| `latest_ai_report` | the dossier | the persisted AI debrief (T-7's whole point) |
+| `ussd_report_credibility` | the dossier's provenance panel | how much to believe a USSD report |
+| `confirm_ussd_report`, `mark_false_report` | the dossier's controls | both writes |
+| `register_sms_device` | every mobile sign-in | the encrypted SMS fallback key |
+| `revoke_sms_device_keys` | mobile sign-out | retiring it |
+
+**The console's own report file held the proof the whole time**, in
+`local_e2e_screenshots/report.json`:
+
+```
+('hq:audit', 'Failed to load resource: the server responded with a status of 400')
+('hq:audit', '[AUDIT_TRAIL_ERR] [object Object]')
+('hq:dossier', 'Failed to load resource: the server responded with a status of 400')
+```
+
+recorded in `browserProblems`, which nothing asserts on. The run reported
+**46/46** and filed `20-hq-07-audit.png` — a photograph of an empty panel — as
+evidence that the Forensic Audit screen renders. This is the fault PR #71
+described in a different place: *a thing being present is not the same as a thing
+being visible*. Here a thing that could not load at all was present, and nothing
+looked.
+
+`register_sms_device` deserves its own line, because the app swallows its failure
+on purpose — *"Never fatal. A device with no SMS key still works normally; it just
+has one fewer way to reach HQ when the data connection dies."* So nothing on
+screen changed, the harness reported 15/15, and **the encrypted SMS fallback has
+never once been provisioned in a browser run**.
+
+**Fixed in three parts.**
+
+* An RPC router, with the seven browser-reachable functions implemented over the
+  same in-memory tables as everything else. `register_sms_device` returns
+  `\x…`-prefixed hex, because that is how PostgREST renders BYTEA and how the app
+  decodes it — base64 here would have produced a key the ingest route could never
+  match.
+* Anything **not** implemented now answers `501 FAKE_NO_RPC` naming itself and
+  pointing at `RPCS` in the stand-in, instead of lying about a missing relation.
+* `rpcMisses` is recorded on the control plane and **asserted** by both the
+  console and the mobile harness: *"every database function the app called was
+  answered, not refused"*. A refusal is a failure now, because an unimplemented
+  function and a working screen are the same screenshot.
+
+And one fixture change, because the fix alone would still have photographed an
+empty panel: every fixture alert carried an empty `escalation_log`, so
+`audit_trail()` — which exists to flatten exactly that — had nothing to return.
+`a005`, which is `status: ESCALATED` and `escalated_to_agency: ARMY` with no
+history at all, now carries the three entries its own status implies, shaped
+exactly as `escalateAlert` writes them.
+
+#### The mobile screens pass was red for a reason that was not the app
+
+Fourteen page errors, two per staff role and none for the citizen:
+
+```
+mobile:unit:signin  TypeError: Cannot read properties of null (reading 'toString')
+```
+
+The frames land in `main.dart.js` inside Flutter's own web keyboard engine — the
+block that reads `event.key`, `event.location` and `event.keyCode` and looks the
+pair up in `kWebLogicalLocationMap`. In dart2js, a null-assertion compiles to a
+`.toString` on the value, so `map[key][location]` had returned null.
+
+Instrumenting every key event during a real sign-in found it, after a **wrong
+first guess** — Shift for the `@` in the badge, which turned out to be
+synthesised correctly and reproduced nothing. The real cause:
+
+```
+keydown  key=-  code=NumpadSubtract  location=3   ← numpad, mapped
+keypress key=-  code=NumpadSubtract  location=3
+keyup    key=-  code=NumpadSubtract  location=1   ← "the left-hand one of a pair"
+```
+
+`page.keyboard.type` releases `-` with **location 1**, which no minus key has.
+`kWebLogicalLocationMap['-']` holds locations 0 and 3, so the lookup misses and
+the engine throws. The password is `staging-only-password`: two hyphens, two
+errors, and the citizen — who types only digits — got none.
+
+So it is the test driver synthesising an event no keyboard produces, not a defect
+in this app. The flow now types through `Input.insertText` (`sendCharacter`),
+which inserts the text and fires the `input` event Flutter's field listens to
+with no key events at all. Verified: sign-in reaches `#/agent-dashboard` and
+`#/home` with **zero** page errors, for staff and citizen alike.
+
+`scripts/check_one_mobile_login.py` had to be taught the new shape — its
+signature for "the sign-in flow is here" was the typing CALL, so changing the
+mechanism read as the flow having been deleted. Mutation-tested after the change:
+actually removing the flow is still caught.
+
+### T-32. The audit trail attributed every human action to the system
+
+Found immediately after T-31, because fixing the stand-in made the Forensic Audit
+screen legible for the first time and the rows read wrong.
+
+`audit_trail()` takes the actor from one key:
+
+```sql
+coalesce(nullif(e.entry ->> 'by', ''), 'SYSTEM')
+```
+
+and **nothing a person does writes `by`**:
+
+| writer | key | actor shown |
+|---|---|---|
+| `escalate_overdue_alerts()` — the timeout job | `by` | SYSTEM ✓ |
+| the notification-outbox trigger | `by` | SYSTEM ✓ |
+| `confirm_ussd_report()`, `mark_false_report()` | `by` | the uuid ✓ |
+| `alert-actions.ts escalateAlert` — the HQ console | **`by_email`** | SYSTEM ✗ |
+| `agent_dashboard_screen.dart` — a responder's handset | **`by_email`** | SYSTEM ✗ |
+
+So the list inverted responsibility. Every escalation an officer performed — from
+the HQ console or from their own handset — was attributed to the system, and the
+only accurate attributions on the screen were the machine's own. A reader could
+not tell an automatic timeout from a commander's decision, and the commander's
+decision is the one somebody is later asked to account for.
+
+The reader is also what disagreed with the documented shape. The column comment
+on `alerts.escalation_log`, written in `20260722000000`, has said so since the
+beginning:
+
+```
+'Append-only structured log: [{from_tier, to_tier, to_officer_id,
+ to_officer_name, reason, notes, by_email, at}]'
+```
+
+**Why not change the writers.** Production holds entries of both shapes, written
+across this schema's whole life, and the log is append-only — a chain of custody
+that gets rewritten is not one. Both keys have to stay readable. `20261019000000`
+reads `by` first, so the SQL writers' explicit value keeps precedence, then
+`by_email`, then `SYSTEM`. `CREATE OR REPLACE` only; no data is touched.
+
+**Why the behaviour test did not catch it.** `scripts/oversight_behaviour_test.sql`
+plants its fixture as
+`{"from_tier":"UNIT","to_tier":"WARD","reason":"TIMEOUT","by":"SYSTEM",…}` — the
+machine's shape, the one key that worked — and asserted the action and the tiers
+and never the actor. It now plants **both** shapes and asserts the actor for each,
+plus an entry carrying no actor at all, which must still appear as SYSTEM rather
+than be dropped.
+
+The browser run asserts the same thing from the other end: *"the audit screen names
+the officer who escalated it, not SYSTEM"*, against the HQ operator's own address
+in the fixture history.
 
 ### Open, and not closeable from the repository
 

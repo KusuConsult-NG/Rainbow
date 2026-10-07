@@ -945,6 +945,24 @@ async function writeMark() {
     ctl.unknownColumns.join('; ') || 'none',
   );
 
+  // AND NOTHING ANY CONTROL DID WAS REFUSED FOR WANT OF A FUNCTION.
+  //
+  // The sibling claim, missing for the same reason. This pass presses the
+  // dossier's controls, two of which are `confirm_ussd_report()` and
+  // `mark_false_report()`, and the stand-in had no RPC router at all — so both
+  // came back 400 while the sweep recorded the button as having done something
+  // (it issued a request) and moved on.
+  const rpcRefused = [...new Set(ctl.rpcMisses || [])];
+  check(
+    'every database function a control called was answered, not refused',
+    rpcRefused.length === 0,
+    rpcRefused.length
+      ? `refused: ${rpcRefused.join(', ')}`
+        + ' — implement it in RPCS in scripts/local_e2e/fake_supabase.js'
+      : `none refused; ${new Set((ctl.rpcCalls || []).map((c) => c.fn)).size}`
+        + ' function(s) answered',
+  );
+
   fs.writeFileSync(
     path.join(OUT, 'interactions.json'),
     JSON.stringify(
@@ -957,6 +975,8 @@ async function writeMark() {
         controlsExercised: sweepLog.length,
         deadControls,
         sweep: sweepLog,
+        rpcMisses: rpcRefused,
+        rpcCalls: ctl.rpcCalls || [],
         browserProblems: problems,
       },
       null,

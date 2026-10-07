@@ -390,6 +390,16 @@ echo "▶ Applying 20261015000000_oversight_and_debrief.sql"
 psql_run "-f $PGROOT/20261015000000_oversight_and_debrief.sql" >/dev/null
 psql_run "-f $PGROOT/20261015000000_oversight_and_debrief.sql" >/dev/null
 
+# audit_trail() took the actor from `by`, which only the SQL writers set — both
+# apps write `by_email`, so every escalation a PERSON performed was attributed to
+# SYSTEM. Applied here, right after the migration that creates the function,
+# because the oversight assertions below are what caught it and they have to run
+# against the fixed one.
+echo "▶ Applying 20261019000000_the_audit_trail_names_who_acted.sql"
+psql_run "-f $PGROOT/20261019000000_the_audit_trail_names_who_acted.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261019000000_the_audit_trail_names_who_acted.sql" >/dev/null
+
 # The single policy on a live database that PUBLIC could reach. Applied twice,
 # like the rest, because the operator repairing a database may well paste it
 # twice and a DROP/CREATE pair has to survive that.

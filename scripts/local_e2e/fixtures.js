@@ -141,6 +141,38 @@ const alerts = [
     reported_by: byKey('citizen').id,
     assigned_tier: 'LGA',
     escalated_to_agency: 'ARMY',
+    // A HISTORY, BECAUSE AN ESCALATED INCIDENT HAS ONE.
+    //
+    // Every fixture alert carried an empty escalation_log, so `audit_trail()` —
+    // which exists to flatten exactly this — had nothing to return and the Audit
+    // Logs screen was photographed empty in every run. It was ALSO being refused
+    // with a 400 by a stand-in that implemented no RPC at all, and an empty
+    // screen looks the same either way; that is what let the refusal sit there.
+    // This row is now coherent with its own status, and the screen has rows to
+    // render, so the two states are distinguishable.
+    //
+    // Shaped exactly as alert-actions.ts escalateAlert writes an entry: the
+    // tier move in `from_tier`/`to_tier`, the place in its own key, and `at` as
+    // an ISO timestamp.
+    escalation_log: [
+      {
+        from_tier: 'UNIT', to_tier: 'WARD',
+        reason: 'No acknowledgement within the unit window',
+        by_email: 'SYSTEM', at: '2026-09-26T17:22:00.000Z',
+      },
+      {
+        from_tier: 'WARD', to_tier: 'LGA',
+        reason: 'Roadblock spans two wards',
+        by_email: 'ward@staging.operationrainbow.test',
+        at: '2026-09-26T17:41:00.000Z',
+      },
+      {
+        from_tier: 'HQ', to_tier: 'LGA', to_lga: 'MANGU', to_agency: 'ARMY',
+        reason: 'Armed and beyond local capacity',
+        by_email: 'hq@staging.operationrainbow.test',
+        at: '2026-09-26T18:05:00.000Z',
+      },
+    ],
     created_at: '2026-09-26T17:14:00.000Z',
   },
 ];

@@ -75,6 +75,20 @@ const server = http.createServer((req, res) => {
   fs.createReadStream(file).pipe(res);
 });
 
+/**
+ * What the stand-in recorded. Only used for the RPC claim below, which is why
+ * this file never needed it before — and is why the claim was never made.
+ */
+async function control() {
+  return new Promise((resolve) => {
+    http.get('http://127.0.0.1:54322/', (res) => {
+      let d = '';
+      res.on('data', (c) => (d += c));
+      res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve({}); } });
+    }).on('error', () => resolve({}));
+  });
+}
+
 /** The app's visible text, read out of the semantics tree. */
 async function semanticsText(page) {
   return page.evaluate(() => {
@@ -482,6 +496,30 @@ async function semanticsText(page) {
   );
 
 
+  // EVERY DATABASE FUNCTION THE APP CALLED MUST HAVE BEEN ANSWERED.
+  //
+  // `SmsDeviceKey` calls `register_sms_device()` on every sign-in, and the
+  // stand-in had no RPC router at all — so the call came back
+  // `400 relation "public.rpc/register_sms_device" does not exist` for all eight
+  // roles. The app treats that as non-fatal on purpose ("a device with no SMS
+  // key still works normally"), so nothing on screen changed and this harness
+  // reported 15/15: the encrypted SMS fallback has never once been provisioned
+  // in a browser run.
+  //
+  // A refusal is now a failure, because "the function is not implemented" and
+  // "the feature works" are indistinguishable from the outside.
+  const ctl = await control();
+  const misses = [...new Set(ctl.rpcMisses || [])];
+  check(
+    'every database function the app called was answered, not refused',
+    misses.length === 0,
+    misses.length
+      ? `refused: ${misses.join(', ')}`
+        + ' — implement it in RPCS in scripts/local_e2e/fake_supabase.js'
+      : `none refused; ${new Set((ctl.rpcCalls || []).map((c) => c.fn)).size}`
+        + ' function(s) answered',
+  );
+
   const fatal = problems.filter(
     (p) => p.kind === 'pageerror' || /uncaught|cannot read|is not a function/i.test(p.text),
   );
@@ -502,6 +540,8 @@ async function semanticsText(page) {
           'the mobile screens render and route at phone size; NOT an Android/iOS build, ' +
           'and NOT row-level security',
         coverage: Object.fromEntries([...coverage].map(([k, v]) => [k, v])),
+        rpcMisses: misses,
+        rpcCalls: ctl.rpcCalls || [],
         roles: roleReport,
         checks,
         screenshots: shots,

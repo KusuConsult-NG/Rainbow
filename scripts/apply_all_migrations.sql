@@ -3,7 +3,7 @@
 --   Regenerate with: python3 scripts/build_apply_all.py
 --
 -- Paste the WHOLE of this file into the Supabase dashboard -> SQL Editor and
--- run it. It applies the 31 outstanding migrations in order and finishes by
+-- run it. It applies the 32 outstanding migrations in order and finishes by
 -- SELECTing a pass/fail table, so one paste in gives you one answer out.
 --
 -- ---------------------------------------------------------------------------
@@ -5713,13 +5713,142 @@ END $$;
 --    WHERE pol.qual ILIKE '%' || p.proname || '%'
 --       OR pol.with_check ILIKE '%' || p.proname || '%';
 
+-- ----------------------------------------------------------------------------
+-- 20261019000000_the_audit_trail_names_who_acted.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20261019000000_the_audit_trail_names_who_acted.sql'; END $apply$;
+
+-- ============================================================================
+-- OPERATION RAINBOW — THE AUDIT TRAIL NAMES WHO ACTED
+--
+-- `audit_trail()` reads the actor out of each escalation_log entry as
+--
+--     coalesce(nullif(e.entry ->> 'by', ''), 'SYSTEM')
+--
+-- and NOTHING A PERSON DOES WRITES 'by'.
+--
+--   writer                                        key          actor shown
+--   ------------------------------------------    ----------   -----------
+--   escalate_overdue_alerts()  (the timeout job)  'by'         SYSTEM      ✓
+--   the notification outbox trigger               'by'         SYSTEM      ✓
+--   confirm_ussd_report() / mark_false_report()   'by'         the uuid    ✓
+--   alert-actions.ts escalateAlert  (HQ console)  'by_email'   SYSTEM      ✗
+--   agent_dashboard_screen.dart     (a handset)   'by_email'   SYSTEM      ✗
+--
+-- So the audit trail inverted responsibility. Every escalation an officer
+-- performed — from the HQ console or from their own handset — was attributed to
+-- the system, and the only accurate attributions in the list were the machine's
+-- own. On a screen whose entire purpose is to say who did what, that is worse
+-- than showing nothing: a reader cannot tell an automatic timeout from a
+-- commander's decision, and the commander's decision is the one somebody will
+-- later be asked to account for.
+--
+-- The column comment on `alerts.escalation_log`, written in 20260722000000, has
+-- said `by_email` since the beginning:
+--
+--     'Append-only structured log: [{from_tier, to_tier, to_officer_id,
+--      to_officer_name, reason, notes, by_email, at}]'
+--
+-- so the reader is what disagreed with the documented shape, not the writers.
+--
+-- WHY THIS IS NOT FIXED BY CHANGING THE WRITERS
+--
+-- Production holds entries of both shapes, written over this schema's whole
+-- life, and the log is append-only: a chain of custody that is rewritten is not
+-- one. Both keys therefore have to be readable, forever. `by` is tried first so
+-- the SQL writers' explicit value keeps precedence.
+--
+-- WHY THE BEHAVIOUR TEST DID NOT CATCH IT
+--
+-- `scripts/oversight_behaviour_test.sql` plants its fixture entry as
+-- `{"from_tier":"UNIT","to_tier":"WARD","reason":"TIMEOUT","by":"SYSTEM",…}` —
+-- the machine's shape, the one key that worked. It asserted the action and the
+-- tiers and never the actor. Both shapes are now planted and the actor is
+-- asserted for each.
+--
+-- Idempotent: CREATE OR REPLACE, no data is touched.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.audit_trail(p_limit INTEGER DEFAULT 100)
+RETURNS TABLE (
+  alert_id   UUID,
+  reference  TEXT,
+  incident   TEXT,
+  at         TIMESTAMPTZ,
+  action     TEXT,
+  actor      TEXT,
+  detail     TEXT
+)
+LANGUAGE sql
+SECURITY INVOKER
+STABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT a.id,
+         coalesce(a.public_reference, left(a.id::text, 8)),
+         a.type,
+         -- Entries have been written with two different key names over this
+         -- schema's life ('at' as a formatted string, and an ISO timestamp), and
+         -- a row whose timestamp cannot be parsed must still appear — an audit
+         -- entry dropped for a formatting reason is the worst possible thing for
+         -- this list to do quietly. Falls back to the incident's own time.
+         coalesce(
+           nullif(e.entry ->> 'at', '')::timestamptz,
+           a.updated_at,
+           a.created_at
+         ),
+         upper(coalesce(
+           nullif(e.entry ->> 'action', ''),
+           -- A tier move has no 'action' key; it is identified by carrying a
+           -- from_tier. Without this, every automatic escalation in the system
+           -- would read as 'UNKNOWN'.
+           CASE WHEN e.entry ? 'from_tier' THEN 'ESCALATED' END,
+           'UPDATED'
+         )),
+         -- WHO. `by` is what the SQL writers set, explicitly, to 'SYSTEM' or to
+         -- auth.uid(); `by_email` is what both apps set, and is the key the
+         -- column's own comment has always documented. Reading only the first
+         -- attributed every human action to the system — see the header.
+         coalesce(
+           nullif(e.entry ->> 'by', ''),
+           nullif(e.entry ->> 'by_email', ''),
+           'SYSTEM'
+         ),
+         -- For a tier move, BOTH the tiers and the reason. The first version
+         -- coalesced the reason first, so an automatic escalation read simply
+         -- "TIMEOUT" — the word without the movement, which is the half that
+         -- tells a reader nothing. Where an incident WENT is the point of the
+         -- entry; why is the qualifier.
+         CASE
+           WHEN e.entry ? 'from_tier' THEN
+             (e.entry ->> 'from_tier') || ' → ' || (e.entry ->> 'to_tier')
+             || coalesce(' (' || nullif(e.entry ->> 'reason', '') || ')', '')
+           ELSE coalesce(nullif(e.entry ->> 'reason', ''), '')
+         END
+    FROM public.alerts a
+    CROSS JOIN LATERAL jsonb_array_elements(
+           CASE WHEN jsonb_typeof(a.escalation_log) = 'array'
+                THEN a.escalation_log ELSE '[]'::jsonb END
+         ) AS e(entry)
+   ORDER BY 4 DESC
+   LIMIT greatest(1, least(coalesce(p_limit, 100), 500));
+$$;
+
+COMMENT ON FUNCTION public.audit_trail(INTEGER) IS
+  'What was actually DONE to incidents, flattened out of alerts.escalation_log. '
+  'The console previously showed chat_messages under this heading, which '
+  'contained no action anybody had taken. SECURITY INVOKER so alert_is_ours() '
+  'scopes it — including keeping oversight matters out of it. The actor is read '
+  'from `by` then `by_email`: the SQL writers set the first, both apps set the '
+  'second, and reading only `by` attributed every human action to SYSTEM.';
+
 
 
 -- ============================================================================
 -- DID IT WORK?
 --
 -- One row per thing that had to be true. `result` is PASS or FAIL; nothing here
--- writes. If every row says PASS, the 31 migrations are applied.
+-- writes. If every row says PASS, the 32 migrations are applied.
 --
 -- These check BEHAVIOUR-ADJACENT FACTS, not just that statements ran: that anon
 -- holds no policy at all, that the escalation columns exist (their absence made
@@ -5733,8 +5862,8 @@ WITH checks(ord, name, ok) AS (
     -- the output below. A pasted result used to carry nothing identifying its
     -- version, so a run from a stale working copy read exactly like a current
     -- one. Compare with: python3 scripts/migration_sets.py --fingerprint
-    (0, 'script version: 31 outstanding migrations, '
-        'fingerprint d23a7246d420', true),
+    (0, 'script version: 32 outstanding migrations, '
+        'fingerprint 33a8965f5848', true),
     (1, 'agency tables exist (4)',
         (SELECT count(*) = 4 FROM information_schema.tables
           WHERE table_schema = 'public'

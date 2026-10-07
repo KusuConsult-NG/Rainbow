@@ -263,5 +263,3 @@ END $$;
 --    WHERE pol.qual ILIKE '%' || p.proname || '%'
 --       OR pol.with_check ILIKE '%' || p.proname || '%';
 
-
-

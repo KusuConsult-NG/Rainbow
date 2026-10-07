@@ -334,6 +334,66 @@ BEGIN
     RAISE EXCEPTION 'FAIL: the tier move does not say where it went: "%"', r.detail;
   END IF;
   RAISE NOTICE 'PASS: an automatic escalation reads as ESCALATED, naming both tiers';
+
+  -- WHO DID IT — FOR BOTH SHAPES OF ENTRY.
+  --
+  -- The entry planted above carries `"by":"SYSTEM"`, which is what the SQL
+  -- writers set. Both APPS write `by_email` instead, and `audit_trail()` read
+  -- only `by` — so every escalation an officer performed, from the console or
+  -- from a handset, was attributed to the system, and the test never noticed
+  -- because its own fixture used the machine's key. Asserted both ways now.
+  IF r.actor <> 'SYSTEM' THEN
+    RAISE EXCEPTION 'FAIL: an automatic escalation is attributed to "%" rather '
+                    'than SYSTEM', r.actor;
+  END IF;
+
+  UPDATE public.alerts
+     SET escalation_log = '[{"from_tier":"WARD","to_tier":"LGA",'
+                          '"reason":"Beyond local capacity",'
+                          '"by_email":"acp.musa@operationrainbow.plateau.gov.ng",'
+                          '"at":"2026-09-29T11:00:00Z"}]'::jsonb
+   WHERE id = '0eea0000-0000-4000-8000-00000000a001';
+
+  PERFORM pg_temp.as_user('0ee50000-0000-4000-8000-00000000c005');
+  SET LOCAL ROLE authenticated;
+  SELECT * INTO r FROM public.audit_trail(100)
+   WHERE alert_id = '0eea0000-0000-4000-8000-00000000a001' LIMIT 1;
+  RESET ROLE;
+
+  IF r.actor = 'SYSTEM' THEN
+    RAISE EXCEPTION 'FAIL: an escalation a PERSON performed is attributed to '
+                    'SYSTEM. The console and the app both write `by_email`; '
+                    'only the SQL writers set `by`.';
+  END IF;
+  IF r.actor NOT LIKE '%acp.musa%' THEN
+    RAISE EXCEPTION 'FAIL: the audit trail names "%" as the actor, not the '
+                    'officer who escalated it', r.actor;
+  END IF;
+  RAISE NOTICE 'PASS: an escalation performed by a person names that person';
+
+  -- And an entry with no actor at all still appears, as SYSTEM, rather than
+  -- being dropped: an audit entry withheld for a missing field is the worst
+  -- thing this list can do quietly.
+  UPDATE public.alerts
+     SET escalation_log = '[{"from_tier":"LGA","to_tier":"HQ",'
+                          '"reason":"No acknowledgement",'
+                          '"at":"2026-09-29T12:00:00Z"}]'::jsonb
+   WHERE id = '0eea0000-0000-4000-8000-00000000a001';
+
+  PERFORM pg_temp.as_user('0ee50000-0000-4000-8000-00000000c005');
+  SET LOCAL ROLE authenticated;
+  SELECT * INTO r FROM public.audit_trail(100)
+   WHERE alert_id = '0eea0000-0000-4000-8000-00000000a001' LIMIT 1;
+  RESET ROLE;
+
+  IF r.action IS NULL THEN
+    RAISE EXCEPTION 'FAIL: an entry naming no actor was dropped from the trail';
+  END IF;
+  IF r.actor <> 'SYSTEM' THEN
+    RAISE EXCEPTION 'FAIL: an entry naming no actor reads as "%" rather than '
+                    'SYSTEM', r.actor;
+  END IF;
+  RAISE NOTICE 'PASS: an entry naming no actor still appears, as SYSTEM';
 END $$;
 
 ROLLBACK;
