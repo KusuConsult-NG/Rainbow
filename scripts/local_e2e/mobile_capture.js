@@ -366,6 +366,8 @@ async function semanticsText(page) {
   const ROLES = ['citizen', 'responder', 'unit', 'ward', 'lga', 'hq', 'police', 'army'];
   const coverage = new Map();   // route -> the roles that reached it
   const roleReport = {};
+  /** role -> which seeded advisory was on screen. See the block in the loop. */
+  const advisoryReport = {};
 
   // /splash and /login only exist while signed OUT: once there is a session the
   // router correctly redirects away from both, so no signed-in role can ever
@@ -413,8 +415,23 @@ async function semanticsText(page) {
     if (!signedIn) { roleReport[role] = { landed, reached: [] }; continue; }
 
     // The dashboard banner names the tier; grab it before walking the routes.
-    const banner = (await semanticsText(page)).split('\n').map((l) => l.trim())
+    const landingText = await semanticsText(page);
+    const banner = landingText.split('\n').map((l) => l.trim())
       .find((l) => /COMMAND|OPERATIONAL UNIT|CITIZEN/.test(l)) || '';
+
+    // WHICH ADVISORY REACHED THIS PERSON.
+    //
+    // `SystemAlertListener` wraps every screen, so an advisory addressed to this
+    // role is on the landing screen. Two are seeded: one scoped to NARAGUTA
+    // ward, and one legacy row carrying its audience in `target_type` and
+    // addressed to AGENTS. Every fixture person is in NARAGUTA except the ARMY
+    // liaison, who is in PANYAM — so the pair tells the roles apart, and the
+    // assertions below are the only end-to-end check of T-29 outside the widget
+    // tests.
+    advisoryReport[role] = {
+      ward: /naraguta junction/i.test(landingText),
+      legacyAgents: /radio discipline/i.test(landingText),
+    };
 
     const reached = [];
     let n = 0;
@@ -496,6 +513,56 @@ async function semanticsText(page) {
   );
 
 
+  // AN ADVISORY REACHES THE WARD IT NAMES, AND NOT THE NEXT ONE.
+  //
+  // T-29: this banner wraps every screen in the app and had its own targeting
+  // filter, reading `target_type` / `target_value` — columns the console does
+  // not write — so the default let EVERY advisory through to EVERY user. It
+  // calls `broadcastReaches()` now, the same function the HUD uses, and this is
+  // the only check of that outside the widget tests.
+  //
+  // The seeded advisory is scoped to NARAGUTA, where every fixture person works
+  // except the ARMY liaison, who is in PANYAM. Under the old filter the row —
+  // which carries no `target_type` at all, because no writer has ever written
+  // one — defaulted to 'ALL' and would have reached the Army too, so this fails
+  // on the old code and passes on the new.
+  const inWard = ROLES.filter((r) => r !== 'army');
+  const missedWard = inWard.filter((r) => advisoryReport[r] && !advisoryReport[r].ward);
+  check(
+    'a ward-scoped advisory reaches everybody posted to that ward',
+    missedWard.length === 0,
+    missedWard.length
+      ? `did not reach: ${missedWard.join(', ')}`
+      : `${inWard.length} role(s) in NARAGUTA all saw it`,
+  );
+  check(
+    'and does not reach the liaison posted to another ward',
+    advisoryReport.army ? advisoryReport.army.ward === false : false,
+    advisoryReport.army
+      ? (advisoryReport.army.ward
+          ? 'the ARMY liaison in PANYAM was shown a NARAGUTA advisory'
+          : 'the ARMY liaison in PANYAM was not shown it')
+      : 'the ARMY liaison never signed in, so this proves nothing',
+  );
+
+  // AND A LEGACY ROW STILL ARRIVES, TO THE RIGHT AUDIENCE.
+  //
+  // The old mobile broadcast screen wrote the audience into `target_type`, and
+  // `broadcastAudience()` falls back to it. That is the one legacy path that is
+  // real — the place half of the legacy pair was never written by anything — and
+  // it had no end-to-end coverage. The ARMY liaison is a responder outside
+  // NARAGUTA, so the ward advisory does not reach them and this one does, which
+  // is what makes the two distinguishable in a one-banner-at-a-time surface.
+  check(
+    'a legacy advisory addressed by target_type still reaches its audience',
+    advisoryReport.army ? advisoryReport.army.legacyAgents === true : false,
+    advisoryReport.army
+      ? (advisoryReport.army.legacyAgents
+          ? 'the AGENTS advisory reached a responder through the legacy column'
+          : 'a row carrying its audience in target_type reached nobody')
+      : 'the ARMY liaison never signed in, so this proves nothing',
+  );
+
   // EVERY DATABASE FUNCTION THE APP CALLED MUST HAVE BEEN ANSWERED.
   //
   // `SmsDeviceKey` calls `register_sms_device()` on every sign-in, and the
@@ -540,6 +607,7 @@ async function semanticsText(page) {
           'the mobile screens render and route at phone size; NOT an Android/iOS build, ' +
           'and NOT row-level security',
         coverage: Object.fromEntries([...coverage].map(([k, v]) => [k, v])),
+        advisories: advisoryReport,
         rpcMisses: misses,
         rpcCalls: ctl.rpcCalls || [],
         roles: roleReport,

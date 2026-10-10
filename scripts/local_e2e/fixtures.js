@@ -177,18 +177,51 @@ const alerts = [
   },
 ];
 
+// TWO ADVISORIES, AND BOTH ARE SHAPES THE SYSTEM CAN ACTUALLY PRODUCE.
+//
+// There was one, and it was fiction: `target_type: 'LGA'` with
+// `target_value: 'JOS NORTH'`. That encoding — the place in the legacy pair —
+// has NEVER been written by anything. The only two appearances of
+// `target_value` in this repository's whole history are a READER (in
+// system_alert_listener.dart, removed with T-29) and a column inventory in
+// MassBroadcast.test.tsx. The old mobile broadcast screen wrote an AUDIENCE
+// into `target_type`; nothing has ever put a place there.
+//
+// So the fixture described a row no writer could create, which is worse than no
+// fixture: it sent me looking for geography that had been silently dropped, when
+// in fact none was ever stored. The two rows below are the two shapes that do
+// exist, and each is asserted in the browser run.
 const system_alerts = [
   {
+    // SHAPE ONE: canonically scoped, as both composers write today. Scoped to a
+    // WARD, which is the assertion T-29 needed and never had outside the widget
+    // tests: every fixture person is in NARAGUTA except the ARMY liaison, who is
+    // in PANYAM, so this advisory must reach seven roles and not the eighth.
     id: 'cccc3333-0000-4000-8000-00000000c001',
-    title: 'CRITICAL ADVISORY — JOS NORTH LGA',
+    title: 'CRITICAL ADVISORY — NARAGUTA WARD',
     message: 'Avoid the Naraguta junction until further notice.',
     severity: 'CRITICAL',
     target_audience: 'ALL',
-    target_type: 'LGA',
-    target_value: 'JOS NORTH',
+    target_lga: 'JOS NORTH',
+    target_ward: 'NARAGUTA',
     is_active: true,
     created_by: byKey('hq').id,
     created_at: '2026-09-26T21:50:00.000Z',
+  },
+  {
+    // SHAPE TWO: a genuine legacy row, exactly as the old mobile broadcast
+    // screen wrote one — the audience in `target_type`, no canonical column at
+    // all, no place. `broadcastAudience()` falls back to it, which is the one
+    // legacy path that is real, and it had no end-to-end coverage either.
+    // Addressed to responders, so a citizen must NOT see it.
+    id: 'cccc3333-0000-4000-8000-00000000c002',
+    title: 'HIGH ADVISORY — ALL CALL SIGNS',
+    message: 'Radio discipline on the command net until the sweep ends.',
+    severity: 'HIGH',
+    target_type: 'AGENTS',
+    is_active: true,
+    created_by: byKey('hq').id,
+    created_at: '2026-09-26T21:55:00.000Z',
   },
 ];
 

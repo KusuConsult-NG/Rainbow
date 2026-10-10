@@ -1950,6 +1950,73 @@ addressed elsewhere, and a legacy row carrying only `target_type` still arrives.
 The existing dismiss tests were written against `target_type` and still pass,
 which is the back-compatibility path rather than a coincidence.
 
+#### The legacy place column: a defect I talked myself into, and the fixture that sold it
+
+Recorded because the reasoning was convincing and wrong, and the next person to
+look at `broadcast_targeting.dart` will have the same thought.
+
+`broadcastAudience()` falls back from `target_audience` to the legacy
+`target_type`. There is no fallback for `target_value`, and `broadcastReaches()`
+reads geography only from `target_lga` / `target_ward` / `target_pu`. The initial
+schema paired `target_type` with `target_value`, and the old
+`SystemAlertListener` read that pair as a PLACE — `target_type == 'LGA'`, then
+`target_value` as the LGA name. Meanwhile `20260903000002` carried `target_type`
+into `target_audience` and said in its own comment that it was doing so "rather
+than leaving them to the reader's fallback forever".
+
+So: a reader existed for the place encoding, the reconciliation migrated the
+audience and not the place, and the obvious conclusion is that every legacy
+place-scoped advisory is now delivered statewide. That is what I wrote down as
+the next thing to fix.
+
+**It is not true, because nothing has ever written `target_value`.** Across the
+whole history of this repository the column appears exactly twice outside the
+SQL: in that reader, and in a column inventory in `MassBroadcast.test.tsx`. The
+old mobile broadcast screen wrote an AUDIENCE into `target_type` —
+`'CITIZENS'`, `'AGENTS'`, `'ALL'` — and never a place. The console has always
+written the canonical columns. The place half of the pair was read for a scheme
+no writer implemented, which is why the migration had nothing to carry across.
+
+Adding the fallback would therefore have scoped live advisories by a column that
+is empty on every row that exists. The reasoning is now written into
+`broadcastAudience()`'s doc comment, so the question is answered where it gets
+asked.
+
+#### What made it convincing was a fixture describing an impossible row
+
+`scripts/local_e2e/fixtures.js` seeded exactly the row I had just concluded
+could not exist:
+
+```js
+target_audience: 'ALL',
+target_type: 'LGA',
+target_value: 'JOS NORTH',
+```
+
+A fixture for a shape no writer can produce is worse than no fixture. It is also
+self-contradictory — `'ALL'` says everybody and `'LGA'`/`'JOS NORTH'` says one
+place — and `target_audience: 'ALL'` is what won, so the advisory went to
+everyone and the geography in it was decoration.
+
+Replaced with the two shapes that do exist, and each is now asserted in the
+browser:
+
+* **canonically scoped**, as both composers write today, and scoped to a WARD.
+  Every fixture person works in NARAGUTA except the ARMY liaison, who is in
+  PANYAM — so one advisory separates the eight roles.
+* **a genuine legacy row**, the audience in `target_type` and nothing else, as
+  the old mobile screen wrote one.
+
+Three assertions in `mobile_capture.js`: the ward advisory reaches all seven
+roles posted to that ward; it does **not** reach the liaison posted to the next
+one; and the legacy row still reaches its audience through the fallback. They
+discriminate — the ward-scoped row carries no `target_type` at all, so under the
+pre-T-29 filter it defaulted to `'ALL'` and would have reached the Army too.
+
+This is the first end-to-end coverage T-29's fix has had. Until now it was
+proven by seventeen widget tests and nothing else, and the browser run's own
+advisory fixture was one the filter could not meaningfully be tested against.
+
 #### Still open: `target_agency` is written and read by nothing
 
 `MassBroadcast.tsx` offers "transmit to one agency" and writes
@@ -2296,7 +2363,7 @@ in the fixture history.
 
 | # | Finding | Status |
 |---|---|---|
-| T-17 | **GitHub Actions jobs are refused before a runner is assigned — an account billing condition.** (This row said "has not run since 2026-09-29"; wrong — see T-27. Run #392 passed at 16:30 on 2026-10-06, and runs have been created continuously since.) Every job in every run completes in about two seconds with `runner_id: 0`, no runner name and no logs — nothing picks the jobs up. Not a failing test: an Actions or billing condition on the account. | 🔴 **open, and now load-bearing.** Moving to Railway removed the one structural protection App Hosting gave (a secret marked RUNTIME-only, absent during `next build`). The CI job that greps `.next/static` for key material is what remains between this deployment and C-1 recurring, and it is switched off. Fifty merges landed with every gate unexercised, which is how T-10, T-11, T-12 and T-13 survived |
+| T-17 | **GitHub Actions jobs are refused before a runner is assigned — an account billing condition.** (This row said "has not run since 2026-09-29"; wrong — see T-27. Run #392 passed at 16:30 on 2026-10-06, and runs have been created continuously since.) Every job in every run completes in about two seconds with `runner_id: 0`, no runner name and no logs — nothing picks the jobs up. Not a failing test: an Actions or billing condition on the account. | 🔴 **open, and now load-bearing.** Moving to Railway removed the one structural protection App Hosting gave (a secret marked RUNTIME-only, absent during `next build`). The CI job that greps `.next/static` for key material is what remains between this deployment and C-1 recurring, and it is switched off. Fifty merges landed with every gate unexercised, which is how T-10, T-11, T-12 and T-13 survived | **Still open on 2026-10-10, and now measured rather than inferred.** Run #458 (push, `224ceb8`) and #459 (pull_request, same head): all twelve jobs `conclusion: failure`, every one with `runner_id: 0`, no runner name, no steps, and logs returning 404 — and `get_workflow_run_usage` reports **`total_ms: 0` for all twelve**, so not one of them consumed a millisecond of runner time. Eleven finished in 2 seconds and the Flutter job in 38, which is the same refusal with a longer queue gap, not a job that ran. The base branch is red identically: run #443 on `main`'s own head (`2c5b5a6`) failed in 4 seconds. So every gate in this repository has now been unexercised by CI for four days, and the only evidence any of them pass is the local runs recorded above.
 | C-6 | an abandoned second backend, if still deployed | 🟠 unchanged, and **downgraded 2026-10-06**: it writes to Firestore, which nothing in the shipping code reads (13 mentions across `lib/` and `hq-dashboard-next/src/`, all comments, no imports). Cleanup with a billing and data-at-rest tail, not a live hole. `gcloud functions list --project rainbow-97f1e` settles it |
 | T-18 | **Citizen sign-in has no SMS provider.** `signInWithOtp` is refused outright unless the Supabase project has one, so every citizen sign-in fails. | 🔴 open — a blocker, not a checklist item. `docs/PRODUCTION_DEPLOYMENT.md` §2b |
 | T-19 | **One staff account exists**, so dispatch has nobody to send. The nine unacknowledged incidents on the live board are an empty roster, not a broken pipeline. | 🔴 open |
