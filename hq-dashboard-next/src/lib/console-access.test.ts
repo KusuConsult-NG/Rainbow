@@ -57,8 +57,8 @@ describe('an agency liaison', () => {
     // Amotekun is a South-West outfit — Ondo, Ekiti, Oyo, Ogun, Osun — with no
     // presence in Plateau. OPSH is the joint task force that covers this
     // state.
-    // Renamed from Operation Safe Haven. The CODE stays OPSH: it is stored in
-    // `escalated_to_agency`, in the role name, and in three agency tables.
+    // The CODE stays OPSH: it is stored in `escalated_to_agency`, in the role
+    // name, and in three agency tables. See agencies.ts.
     expect(consoleAccess('OPSH_LIAISON').title).toBe('Operation Enduring Peace');
   });
 

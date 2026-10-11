@@ -3782,7 +3782,7 @@ END $realtime$;
 -- THE HOLE
 --
 -- Six agencies send liaison officers to this console: the Police, the Army,
--- the DSS, the NSCDC, the FRSC and Operation Safe Haven. They are officers of
+-- the DSS, the NSCDC, the FRSC and Operation Enduring Peace. They are officers
 -- OTHER organisations, given an account so that an incident handed to their
 -- agency reaches them.
 --
