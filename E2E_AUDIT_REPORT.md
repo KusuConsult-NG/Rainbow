@@ -1249,6 +1249,7 @@ only thing that distinguishes a defect from a preference.
 | T-34 | **The console was command until proven otherwise.** `userRole` in `dashboard/page.tsx` is declared `useState('HQ_OFFICER')` — a COMMAND role — and the console body is gated on `authLoading`, which the auth effect clears after a `profiles` read it issues concurrently with the role read. Whichever returns first wins, so whenever the auth effect wins, the console's first visible render has `isHqUser` true. The advisory banner I had just given targeting reads that as "sees everything, because they sent it", so for that window every console user was shown every live advisory, including ones addressed to other agencies and to citizens: the T-29 leak reopened on the console by a default value. Found by reading my own fix, not by a test — every test sets the role up front, which is the one thing the real client cannot do. | ✅ superseded by T-35's fix, which is the same defect at its source: the role is `null` until the `profiles` read lands, so every consumer is protected at once rather than one guard per surface. 4 tests naming the unresolved viewer |
 | T-35 | **`consoleAccess` was written to stop exactly this, and was never given the chance.** Its doc comment says an unknown role must get the smallest console because *"a default of 'show everything' would flash the whole command console at an agency liaison on every page load"* — and that `userRole` is `''` while the profile loads. It was `useState('HQ_OFFICER')`, and a second path then set it from `u.user_metadata?.role || 'HQ_COMMAND'` — user-writable metadata (H-7) falling back to the top of the command chain. So the function was never handed an unknown role and its `RESOLVING ACCESS` branch was unreachable despite being under test. Worse than a default left unwritten: the console body is gated on `authLoading`, and the effect that clears it is the same one that claimed `'HQ_COMMAND'` on its way there, before its own `profiles` read. The effect that opened the door claimed command walking through it. Clicking the agency tab in that window mounted `AgencyPortal` with `isHq` true and no agency, and a `useState` initialiser runs once: an Army liaison was frozen on the **Police** desk for the life of the mount, with the HQ-only switcher gone when their real role arrived. RLS correctly returned nothing, so the portal reported the Police as having no incidents, no personnel and no deployments — on the only screen that role has. `userAgency \|\| 'POLICE'` put the same guess in the non-HQ branch. | ✅ the role is `null` until `profiles.role` says otherwise, the `user_metadata` reader is deleted, and the portal derives its desk instead of freezing it — an account with no agency is told so rather than shown somebody else's empty desk; 3 component tests, 2 of which fail against the old code, and the gate rewritten around the default with 16 mutations, each caught |
 | T-36 | **The one layer that refused to guess a place was overruled by the layer that displays it.** `AlertService` writes `geo_lga` NULL rather than infer a jurisdiction — "submitting without jurisdiction rather than guessing one" — and the responder feed filter treats a null LGA as reaching everybody. Five screens named one anyway: a responder's card read **PLATEAU · HQ · UNIT**, and `· UNIT` on nearly every card since there is no polling unit from coordinates; the dispatch roster read **JOS**, which is not one of Plateau's seventeen LGAs, and only statewide command — the account dispatching across all seventeen — could see it; the console dossier read **STATE HQ** three lines above a guard that DROPS an absent ward; a map card read **PU: SECTOR HQ**; and the AI triage prompt was told **LGA: STATE HQ** where the Type, Ward and Description lines around it all say `N/A`. Found by sweeping for the shape after T-35, not by a test. The same sweep found the console storing `sender_role: actor.role \|\| 'HQ_COMMAND'` on an incident chat message and the forensic replay naming an unattributed message as from `Responder`/`AGENT` — T-32 with the attribution running the other way. | ✅ one tested place-label module per codebase (`place_label.dart`, `place-label.ts`), 20 tests; a missing segment is dropped and nothing is named that was not recorded; the chat stores `UNKNOWN` rather than Command, asserted by a test that fails against the old code; `scripts/check_no_invented_places.py` in CI, which flags a place fallback only where it is RENDERED — so the clustering sentinel and the fail-open escalation argument are untouched — with 12 mutations, 7 caught and 5 correctly allowed |
+| T-37 | **The screen that sets the statewide escalation policy could not tell "could not read it" from "here it is", and offered to save either way.** `SystemConfig` loaded the three timeouts with `.then(({ data }) => ...)`, destructuring `data` and dropping `error`. A refused or failed read left its own seeded placeholders — 2 / 5 / 10 — on screen with nothing saying the read had not happened; the component has an `error` state and only the SAVE path ever set it. Save **upserts all three keys**, so an operator who saw those numbers, changed one field and pressed Save replaced the live policy with placeholders. The migration seeds exactly 2 / 5 / 10, so it looked right until somebody had changed them — the only point at which it mattered. Also: a key with no row merged over the placeholder and read as configured; `Number(row.value)` on a TEXT column gave `NaN`, which `String()` would have written back as the literal "NaN"; and the three labels were not associated with their inputs. | ✅ a three-state load — loading / failed / ready — that names the reason, shows no values it did not read, and **disables Save**, because this form writes all three and must not overwrite a baseline it has not seen; a missing key is named as not configured rather than shown as live; a non-numeric stored value is a fault with the key quoted, not a NaN; labels wired with `htmlFor`. 7 component tests, all 7 failing against the old code. No gate: a sweep found 27 console reads that drop their error, most of them deliberate degradations, and only two read-modify-write screens — the other handles its error and says why |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -3282,6 +3283,119 @@ defect quoted inside a comment. That last one is the third time this session a
 check has had to learn the difference between prose about a hazard and the
 hazard; this one blanked comments from the start, having been written after the
 other two learned it.
+
+### T-37. A policy form that could not tell a failed read from a value
+
+Found by sweeping for T-35's other half — a `useState` initialiser holding a
+value that something else is supposed to replace.
+
+`SystemConfig` sets the statewide escalation policy: how long an incident waits
+at polling-unit, ward and LGA level before it climbs. The SQL escalation
+watchdog reads those three `app_config` rows. The screen loaded them like this:
+
+```tsx
+const [thresholds, setThresholds] = useState<Config>({ POLLING_UNIT: 2, WARD: 5, LGA: 10 });
+
+useEffect(() => {
+  supabase.from('app_config').select('key, value').in('key', [...])
+    .then(({ data }) => {
+      if (data && data.length > 0) { ... setThresholds(prev => ({ ...prev, ...cfg })); }
+    });
+}, []);
+```
+
+`error` is destructured away. On a refused or failed read `data` is null, the
+`if` is skipped, and the form sits there showing **2 / 5 / 10**. The component
+has an `error` state. Only the save path ever set it.
+
+That is this repository's own rule, from a comment two hundred lines into the
+dashboard:
+
+> A failed count must not read as zero: a badge that says nothing when it could
+> not ask is the same lie as an empty board.
+
+#### Why this is worse than a badge
+
+Save upserts **all three keys**. So:
+
+1. the read fails;
+2. the operator sees 2 / 5 / 10 and believes that is the live policy;
+3. they change the ward timeout to 8 and press Save;
+4. all three rows are written — and the polling-unit and LGA timeouts, which
+   they never touched and never saw, are replaced by this build's placeholders.
+
+The statewide escalation policy is silently reset by a form whose read failed.
+And the reason nobody noticed is the detail that makes this finding: the
+migration seeds exactly `('escalation_timeout_pu','2')`,
+`('escalation_timeout_ward','5')`, `('escalation_timeout_lga','10')`. The
+placeholders match the seed, so on a fresh database the screen is right even
+when the read fails. It only becomes a lie after somebody has changed a
+value — which is the only circumstance in which anybody needs the screen to be
+true.
+
+#### Three more in the same ten lines
+
+* **A key with no row merged over the placeholder.** `setThresholds(prev =>
+  ({ ...prev, ...cfg }))` leaves the placeholder in place for any key the
+  response did not carry, so a timeout that had never been configured read as
+  though it had. The migration seeds all three, so a missing row means the
+  migration has not been applied here — worth saying out loud, not worth
+  papering over.
+* **`Number(row.value)` on a TEXT column.** `Number('ten')` is `NaN`, which
+  renders as an empty number input, and `String(NaN)` — the literal `"NaN"` —
+  is what Save would have written back into the column the watchdog reads.
+* **The labels were not associated with their inputs.** No `htmlFor`, no `id`:
+  three unlabelled number boxes to a screen reader, on the page that sets the
+  escalation policy. The tests found this before they found anything else —
+  three of them failed on "no form control was found associated to that label"
+  rather than on the defect they were written for.
+
+#### The fix
+
+One `Load` state instead of a value pretending to be one:
+
+```ts
+type Load =
+  | { status: 'loading' }
+  | { status: 'failed'; reason: string }
+  | { status: 'ready'; missing: readonly string[] };
+```
+
+Nothing is shown that was not read. A failed read names its reason and
+**disables Save**, with the reason given on screen: this form writes all three
+timeouts and must not replace a policy it has not seen. A missing key is named
+as not configured, with the value shown labelled as this build's default rather
+than the live policy, and Save stays available because setting it is the
+remedy. A non-numeric stored value is a fault, reported with the key and the
+value quoted, rather than a NaN quietly on its way back to the database.
+
+The rule, which is the part worth carrying: **do not offer to save what you
+could not read.**
+
+#### Why there is no gate for this one
+
+The obvious sweep is "a read whose `error` is discarded", and in the console
+there are **27** of them. Most are deliberate: `AgencyPortal.loadAgencyData`
+documents its own choice — "On failure it returns an EMPTY snapshot rather than
+throwing, so the portal clears its spinner and says 'no incidents' instead of
+spinning forever" — and a judgement about how a display degrades is not
+something a regex should be overruling. (T-35 is the case where that particular
+judgement turned out to cost something, and it was fixed there by not reading
+the wrong desk in the first place.)
+
+What separates a defect from a degradation is whether the read becomes the
+**baseline for a write**. Sweeping for that — a component that both reads a
+table and upserts it — found exactly two in the console:
+`SystemConfig` and `AgencyAccessManager`. The second handles its read error and
+records why it has to:
+
+> return `[]` on error, and the panel then said "No agency liaisons
+> registered"
+
+So the one screen in the console that reads to write was the one that did not
+check, and the sweep is the evidence that there is nothing else of the kind to
+gate. Seven component tests hold it instead, all seven of which fail against
+the previous version.
 
 ---
 
