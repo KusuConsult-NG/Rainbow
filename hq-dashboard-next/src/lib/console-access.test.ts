@@ -53,11 +53,13 @@ describe('an agency liaison', () => {
     expect(access.administration).toBe(false);
   });
 
-  it('names Operation Safe Haven, not Amotekun', () => {
+  it('names Operation Enduring Peace, not Amotekun', () => {
     // Amotekun is a South-West outfit — Ondo, Ekiti, Oyo, Ogun, Osun — with no
     // presence in Plateau. OPSH is the joint task force that covers this
     // state.
-    expect(consoleAccess('OPSH_LIAISON').title).toBe('Operation Safe Haven');
+    // Renamed from Operation Safe Haven. The CODE stays OPSH: it is stored in
+    // `escalated_to_agency`, in the role name, and in three agency tables.
+    expect(consoleAccess('OPSH_LIAISON').title).toBe('Operation Enduring Peace');
   });
 
   it('is not invented from a role that merely ends in _LIAISON', () => {

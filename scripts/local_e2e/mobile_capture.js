@@ -365,6 +365,7 @@ async function semanticsText(page) {
   // responder app, and only three of the eight had ever been rendered.
   const ROLES = ['citizen', 'responder', 'unit', 'ward', 'lga', 'hq', 'police', 'army'];
   const coverage = new Map();   // route -> the roles that reached it
+  const feedText = {};          // role -> the mission feed as rendered
   const roleReport = {};
   /** role -> which seeded advisory was on screen. See the block in the loop. */
   const advisoryReport = {};
@@ -456,7 +457,14 @@ async function semanticsText(page) {
       await page.screenshot({ path: path.join(OUT, `${name}.png`) });
       shots.push(`${name}.png`);
       const here = (await page.evaluate(() => window.location.hash)).replace(/^#/, '');
-      const chars = (await semanticsText(page)).length;
+      const screenText = await semanticsText(page);
+      const chars = screenText.length;
+      // WHICH INCIDENTS THIS OFFICER'S MISSION FEED SHOWS. Asserted after the
+      // loop: the word "liaison" appeared nowhere in lib/, so the feed filter
+      // had no branch for one and answered them from their own POSTING.
+      if (route === '/agent-dashboard' && here === route) {
+        feedText[role] = screenText;
+      }
       if (here === route && chars > 0) {
         reached.push(route);
         if (!coverage.has(route)) coverage.set(route, []);
@@ -482,6 +490,51 @@ async function semanticsText(page) {
       ? `never rendered: ${never.map(([r, , f]) => `${r} (${f})`).join(', ')}`
       : `${coverage.size}/${ROUTES.length}`,
   );
+
+  // AN OUTSIDE AGENCY SEES WHAT WAS HANDED TO THEM, AND ONLY THAT.
+  //
+  // RLS says so — `alert_is_ours()` gives a liaison exactly
+  // `escalated_to_agency = liaison_agency()` — and the handset's filter had no
+  // branch for a liaison at all, so it fell through to the place rules and
+  // answered them from their own posting.
+  //
+  // Both fixtures are needed to see it. a005 is handed to the ARMY and sits in
+  // MANGU/PANYAM/PU-11, which is exactly where the Army liaison is posted, so
+  // the old filter admitted it by coincidence. a006 is handed to the POLICE and
+  // is in BOKKOS while the Police liaison is posted to JOS NORTH, so only a
+  // filter that reads the column can deliver it — and the four incidents handed
+  // to NOBODY are all in JOS NORTH, so only a filter that reads the column
+  // keeps them out.
+  //
+  // This stand-in applies no RLS, which is why no run caught this: the Police
+  // liaison was shown four incidents never handed to the Police. Empty against
+  // production, wrong here, green in both.
+  const HANDED = {
+    police: { to_us: 'convoy stopped at mushere', to_them: 'roadblock on the mangu road' },
+    army: { to_us: 'roadblock on the mangu road', to_them: 'convoy stopped at mushere' },
+  };
+  for (const [role, { to_us, to_them }] of Object.entries(HANDED)) {
+    const feed = (feedText[role] || '').toLowerCase();
+    check(
+      `${role} liaison: the incident handed to their agency is on their handset`,
+      feed.includes(to_us),
+      feed.includes(to_us)
+        ? 'delivered, and its LGA is not their posting'
+        : `NOT delivered. feed was: ${feed.replace(/\s+/g, ' ').slice(0, 160)}`,
+    );
+    check(
+      `${role} liaison: the incident handed to the other agency is not`,
+      !feed.includes(to_them),
+      !feed.includes(to_them) ? 'withheld' : 'another agency\'s incident is on their feed',
+    );
+    check(
+      `${role} liaison: incidents handed to nobody are not on their handset`,
+      !feed.includes('armed men at the junction'),
+      !feed.includes('armed men at the junction')
+        ? 'withheld — their posting is not what makes an incident theirs'
+        : 'an incident escalated to nobody reached an outside agency',
+    );
+  }
 
   // Each rung of the chain must identify itself. HQ used to read "OPERATIONAL
   // UNIT" here — the top of the chain wearing the label of an untiered

@@ -4,9 +4,11 @@
 -- THE HOLE
 --
 -- Six agencies send liaison officers to this console: the Police, the Army,
--- the DSS, the NSCDC, the FRSC and Operation Safe Haven. They are officers of
--- OTHER organisations, given an account so that an incident handed to their
--- agency reaches them.
+-- the DSS, the NSCDC, the FRSC and Operation Enduring Peace. They are officers
+-- of OTHER organisations, given an account so that an incident handed to their
+-- agency reaches them. (Operation Enduring Peace was called Operation Safe
+-- Haven when this was written; the code stays OPSH, which is what the role
+-- name and `escalated_to_agency` store.)
 --
 -- `is_staff()` is:
 --

@@ -17,6 +17,7 @@ import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/alerts_feed.dart';
 import 'package:rainbow_app/features/agent/alert_row.dart';
 import 'package:rainbow_app/features/agent/assignable_responders.dart';
+import 'package:rainbow_app/services/alert_audience.dart';
 import 'package:rainbow_app/services/place_label.dart';
 import 'package:rainbow_app/features/agent/responder_tier.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
@@ -32,63 +33,18 @@ import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
 /// safety problem rather than a cosmetic one.
 final alertsStreamProvider = StreamProvider<AlertsFeed>((ref) {
   final auth = ref.watch(authProvider);
-  final profile = auth.profile ?? {};
-  final role = (profile['role'] as String? ?? '').toUpperCase();
-  final geoLga = profile['geo_lga'] as String?;
-  final geoWard = profile['geo_ward'] as String?;
-  final geoPu = profile['geo_pu'] as String?;
-  final userId = auth.user?.id;
+  // The rule itself is in lib/services/alert_audience.dart, with its own tests.
+  // It was a `.where()` in this closure, and every test that touches the feed
+  // overrides this provider — so the rule deciding which emergencies reach a
+  // responder had no test, and had no branch for an agency liaison at all while
+  // RLS was handing them exactly their agency's incidents.
+  final officer = AlertAudience.fromProfile(auth.profile, userId: auth.user?.id);
 
-  return supabaseAlertsFeed(SupabaseConfig.client).map((feed) {
-    return feed.copyWith(rows: feed.rows.where((alert) {
-      final aGeoLga = alert['geo_lga'] as String?;
-      final aGeoWard = alert['geo_ward'] as String?;
-      final aGeoPu = alert['geo_pu'] as String?;
-      final aAssignedTo = alert['assigned_to'] as String?;
-      final aAssignedResponders = (alert['assigned_responders'] as List<dynamic>?)?.cast<String>() ?? [];
-
-      // 1. Directly assigned to officer or multi-unit squad -> ALWAYS SHOW
-      if (userId != null && (aAssignedTo == userId || aAssignedResponders.contains(userId))) return true;
-      if (aAssignedTo == 'HQ' || aAssignedTo == 'LGA' || aAssignedTo == 'WARD') {
-        if (role.contains(aAssignedTo!) || role.contains('HQ') || role == 'ADMIN') return true;
-      }
-
-      // 2. State HQ Commanders -> ALWAYS SHOW ALL
-      if (role.contains('STATE') || role.contains('HQ') || role == 'ADMIN') return true;
-
-      // Place names are compared on geoKey, not on toUpperCase(). This app
-      // writes a ward resolved from the GPS centroid asset ('GINDIRI  I') while
-      // an officer is posted from the tactical map ('GINDIRI  1'), so the raw
-      // comparison failed for four Mangu wards. Here it was masked by the LGA
-      // fallback below the ward test — the commander saw the incident for the
-      // wrong reason — and for a polling-unit responder it was not masked at
-      // all. See lib/core/geo/geo_key.dart.
-
-      // 3. LGA Commanders -> Show alerts matching LGA, unassigned, or escalated to LGA
-      if (role.contains('LGA')) {
-        if (geoLga == null || geoLga == 'ALL') return true;
-        return aGeoLga == null || sameGeo(aGeoLga, geoLga);
-      }
-
-      // 4. Ward Commanders -> Show alerts matching Ward/LGA
-      if (role.contains('WARD')) {
-        if (geoWard == null || geoWard == 'ALL') return true;
-        return aGeoWard == null || sameGeo(aGeoWard, geoWard) ||
-               sameGeo(aGeoLga, geoLga);
-      }
-
-      // 5. PU / Beat Responders -> Show alerts in their PU, Ward, LGA, or unassigned general alerts
-      if (sameGeo(aGeoPu, geoPu)) return true;
-      if (sameGeo(aGeoWard, geoWard)) return true;
-      if (sameGeo(aGeoLga, geoLga)) return true;
-      if (aGeoPu == null && aGeoWard == null && aGeoLga == null) return true;
-
-      // No matching rule — don't show this alert to avoid delivering all
-      // statewide data to every field device. The build-level filteredAlerts
-      // handles any edge cases for assigned-to-me alerts.
-      return false;
-    }).toList(),);
-  });
+  return supabaseAlertsFeed(SupabaseConfig.client).map(
+    (feed) => feed.copyWith(
+      rows: feed.rows.where((alert) => alertReaches(alert, officer)).toList(),
+    ),
+  );
 });
 
 /// Documentation for this public member.
@@ -512,6 +468,23 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
 
 
       final auth = ref.watch(authProvider);
+
+      // AN OUTSIDE AGENCY IS NOT ON THE COMMAND CHAIN.
+      //
+      // Answered here as well as in `alertsStreamProvider`, because this is a
+      // SECOND filter and it was the one that actually hid the incident. The
+      // stream filter delivered the row; `tierCanSee` below then dropped it,
+      // because the tier ladder is Operation Rainbow's own hierarchy and a
+      // liaison has no rung on it. `ResponderTier.unknown` ranks below
+      // everything, and an incident handed to an agency always has a Rainbow
+      // tier owning it — so the rule meant "a liaison sees nothing that was
+      // ever assigned to anybody", which is every incident they are sent.
+      //
+      // Found by the browser harness after the first fix: both liaisons' feeds
+      // came back completely empty, which is the only reason this second filter
+      // was looked at. One rule, in one place, answers them.
+      final officer = AlertAudience.fromProfile(auth.profile, userId: uid);
+      if (officer.isLiaison) return alertReaches(alert, officer);
 
       // OWNER TIER AND EVERYONE ABOVE.
       //

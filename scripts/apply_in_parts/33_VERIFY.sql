@@ -80,7 +80,7 @@ WITH checks(ord, name, ok) AS (
     -- version, so a run from a stale working copy read exactly like a current
     -- one. Compare with: python3 scripts/migration_sets.py --fingerprint
     (0, 'script version: 32 outstanding migrations, '
-        'fingerprint 33a8965f5848', true),
+        'fingerprint 026130fbf42b', true),
     (1, 'agency tables exist (4)',
         (SELECT count(*) = 4 FROM information_schema.tables
           WHERE table_schema = 'public'

@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/permissions_provider.dart';
+import 'package:rainbow_app/shared/widgets/language_picker.dart';
 import 'package:rainbow_app/shared/widgets/location_disclosure_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -191,6 +192,12 @@ class _OnboardingPermissionsScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const SizedBox(height: 24),
+                  // FIRST, on the first screen of setup. Everything below this
+                  // is read by somebody who may not read English, and the only
+                  // language control used to be a flag button on the home
+                  // screen — which is three screens past here.
+                  const LanguagePicker(),
                   const SizedBox(height: 24),
                   Container(
                     padding: const EdgeInsets.all(24),

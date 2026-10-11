@@ -40,6 +40,32 @@ final languageProvider = StateNotifierProvider<LanguageNotifier, AppLanguage>((r
 
 class Translations {
   static const Map<String, Map<AppLanguage, String>> _keys = {
+    'choose_language': {
+      AppLanguage.english: 'LANGUAGE',
+      AppLanguage.hausa: 'HARSHE',
+      AppLanguage.pidgin: 'LANGUAGE',
+    },
+    'choose_language_desc': {
+      AppLanguage.english: 'Choose the language this app speaks to you in.',
+      AppLanguage.hausa: 'Zabi harshen da wannan manhaja za ta yi maka magana.',
+      AppLanguage.pidgin: 'Choose the language wey the app go talk to you.',
+    },
+    // REQUESTED BY dispatcher_chat_screen.dart AND NEVER DEFINED.
+    //
+    // `get()` returned the KEY on a miss, so the citizen's emergency chat
+    // header read `live_dispatch_channel` and `alert_ref #a1b2c3d4` — in every
+    // language, English included. `scripts/check_translation_keys.py` now
+    // refuses a key that is asked for and not defined.
+    'live_dispatch_channel': {
+      AppLanguage.english: 'LIVE DISPATCH CHANNEL',
+      AppLanguage.hausa: 'TASHAR TURA DAUKI KAI TSAYE',
+      AppLanguage.pidgin: 'LIVE DISPATCH LINE',
+    },
+    'alert_ref': {
+      AppLanguage.english: 'ALERT REF',
+      AppLanguage.hausa: 'LAMARIN DAUKI',
+      AppLanguage.pidgin: 'ALERT NUMBER',
+    },
     'title': {
       AppLanguage.english: 'OPERATION RAINBOW',
       AppLanguage.hausa: 'AIKIN RAINBOW',
@@ -235,7 +261,25 @@ class Translations {
     },
   };
 
+  /// The string for [key] in [lang].
+  ///
+  /// Falls back to ENGLISH when a key exists but has no entry for that
+  /// language — a half-translated key should read as English, not as a
+  /// variable name. A key that is not defined at all still returns the key
+  /// itself, which is loud and debuggable;
+  /// `scripts/check_translation_keys.py` stops one reaching a release, because
+  /// the citizen's emergency chat header shipped reading
+  /// `live_dispatch_channel` in every language.
   static String get(String key, AppLanguage lang) {
-    return _keys[key]?[lang] ?? key;
+    final entry = _keys[key];
+    if (entry == null) return key;
+    return entry[lang] ?? entry[AppLanguage.english] ?? key;
   }
+
+  /// Every key this table defines. Used by the tests and the CI check.
+  static Iterable<String> get keys => _keys.keys;
+
+  /// The languages [key] has a string for.
+  static Iterable<AppLanguage> languagesFor(String key) =>
+      _keys[key]?.keys ?? const <AppLanguage>[];
 }

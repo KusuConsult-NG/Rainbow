@@ -64,10 +64,19 @@ export const AGENCY_NAMES: Record<AgencyCode, string> = {
   DSS: 'Department of State Services',
   NSCDC: 'Nigeria Security & Civil Defence Corps',
   FRSC: 'Federal Road Safety Corps',
-  // Operation Safe Haven: the military joint task force that covers Plateau,
-  // Bauchi and Kaduna. NOT Amotekun, which is a South-West outfit with no
-  // presence in this state.
-  OPSH: 'Operation Safe Haven',
+  // Operation Enduring Peace: the military joint task force that covers
+  // Plateau, Bauchi and Kaduna — renamed from Operation Safe Haven, which is
+  // what this said and what the deployment is not called. NOT Amotekun, which
+  // is a South-West outfit with no presence in this state.
+  //
+  // The CODE stays `OPSH`. It is a stored identifier, not a display name: it
+  // is in `alerts.escalated_to_agency`, in the `OPSH_LIAISON` role that
+  // `liaison_agency()` parses, in every row of `agency_personnel`,
+  // `agency_deployments` and `agency_action_reports`, and in the vocabulary
+  // `check_one_agency_vocabulary.py` holds across five surfaces. Changing it
+  // is a data migration and a role rename, not a rename. Changing the label is
+  // what makes the screens say the right thing.
+  OPSH: 'Operation Enduring Peace',
 };
 
 /**

@@ -175,6 +175,37 @@ const alerts = [
     ],
     created_at: '2026-09-26T17:14:00.000Z',
   },
+  {
+    // HANDED TO AN AGENCY, OUTSIDE THAT LIAISON'S OWN POSTING.
+    //
+    // a005 above is escalated to the ARMY and happens to sit in MANGU/PANYAM/
+    // PU-11, which is exactly where the Army liaison is posted — so the
+    // handset's old place-based filter admitted it by coincidence and the
+    // missing liaison rule was invisible. This one is handed to the POLICE and
+    // is in BOKKOS, while the Police liaison is posted to JOS NORTH, so only a
+    // filter that reads `escalated_to_agency` can deliver it.
+    //
+    // It is the normal case, not a corner: a liaison is based somewhere
+    // specific and incidents happen across the state.
+    ...ALERT_DEFAULTS,
+    id: 'aaaa1111-0000-4000-8000-00000000a006',
+    type: 'INCIDENT', status: 'ESCALATED', severity: 'HIGH',
+    description: 'Convoy stopped at Mushere.',
+    latitude: 9.3012, longitude: 9.2411,
+    geo_lga: 'BOKKOS', geo_ward: 'MUSHERE', geo_pu: 'PU-03',
+    reported_by: byKey('citizen').id,
+    assigned_tier: 'LGA',
+    escalated_to_agency: 'POLICE',
+    escalation_log: [
+      {
+        from_tier: 'LGA', to_tier: 'LGA', to_lga: 'BOKKOS', to_agency: 'POLICE',
+        reason: 'Handed to the Police for traffic control',
+        by_email: 'hq@staging.operationrainbow.test',
+        at: '2026-09-26T16:50:00.000Z',
+      },
+    ],
+    created_at: '2026-09-26T16:44:00.000Z',
+  },
 ];
 
 // TWO ADVISORIES, AND BOTH ARE SHAPES THE SYSTEM CAN ACTUALLY PRODUCE.

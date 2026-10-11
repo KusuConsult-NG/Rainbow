@@ -2917,9 +2917,11 @@ DO $b$ BEGIN RAISE NOTICE 'applying 20261003000000_liaisons_are_not_staff.sql'; 
 -- THE HOLE
 --
 -- Six agencies send liaison officers to this console: the Police, the Army,
--- the DSS, the NSCDC, the FRSC and Operation Safe Haven. They are officers of
--- OTHER organisations, given an account so that an incident handed to their
--- agency reaches them.
+-- the DSS, the NSCDC, the FRSC and Operation Enduring Peace. They are officers
+-- of OTHER organisations, given an account so that an incident handed to their
+-- agency reaches them. (Operation Enduring Peace was called Operation Safe
+-- Haven when this was written; the code stays OPSH, which is what the role
+-- name and `escalated_to_agency` store.)
 --
 -- `is_staff()` is:
 --
@@ -6332,7 +6334,7 @@ WITH checks(ord, name, ok) AS (
     -- version, so a run from a stale working copy read exactly like a current
     -- one. Compare with: python3 scripts/migration_sets.py --fingerprint
     (0, 'script version: 36 migrations, '
-        'fingerprint 264ac6283f12', true),
+        'fingerprint a18ccbe31b01', true),
     (1, 'core tables exist (9)',
         (SELECT count(*) = 9 FROM information_schema.tables
           WHERE table_schema = 'public'

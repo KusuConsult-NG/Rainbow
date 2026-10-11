@@ -1250,6 +1250,7 @@ only thing that distinguishes a defect from a preference.
 | T-35 | **`consoleAccess` was written to stop exactly this, and was never given the chance.** Its doc comment says an unknown role must get the smallest console because *"a default of 'show everything' would flash the whole command console at an agency liaison on every page load"* — and that `userRole` is `''` while the profile loads. It was `useState('HQ_OFFICER')`, and a second path then set it from `u.user_metadata?.role || 'HQ_COMMAND'` — user-writable metadata (H-7) falling back to the top of the command chain. So the function was never handed an unknown role and its `RESOLVING ACCESS` branch was unreachable despite being under test. Worse than a default left unwritten: the console body is gated on `authLoading`, and the effect that clears it is the same one that claimed `'HQ_COMMAND'` on its way there, before its own `profiles` read. The effect that opened the door claimed command walking through it. Clicking the agency tab in that window mounted `AgencyPortal` with `isHq` true and no agency, and a `useState` initialiser runs once: an Army liaison was frozen on the **Police** desk for the life of the mount, with the HQ-only switcher gone when their real role arrived. RLS correctly returned nothing, so the portal reported the Police as having no incidents, no personnel and no deployments — on the only screen that role has. `userAgency \|\| 'POLICE'` put the same guess in the non-HQ branch. | ✅ the role is `null` until `profiles.role` says otherwise, the `user_metadata` reader is deleted, and the portal derives its desk instead of freezing it — an account with no agency is told so rather than shown somebody else's empty desk; 3 component tests, 2 of which fail against the old code, and the gate rewritten around the default with 16 mutations, each caught |
 | T-36 | **The one layer that refused to guess a place was overruled by the layer that displays it.** `AlertService` writes `geo_lga` NULL rather than infer a jurisdiction — "submitting without jurisdiction rather than guessing one" — and the responder feed filter treats a null LGA as reaching everybody. Five screens named one anyway: a responder's card read **PLATEAU · HQ · UNIT**, and `· UNIT` on nearly every card since there is no polling unit from coordinates; the dispatch roster read **JOS**, which is not one of Plateau's seventeen LGAs, and only statewide command — the account dispatching across all seventeen — could see it; the console dossier read **STATE HQ** three lines above a guard that DROPS an absent ward; a map card read **PU: SECTOR HQ**; and the AI triage prompt was told **LGA: STATE HQ** where the Type, Ward and Description lines around it all say `N/A`. Found by sweeping for the shape after T-35, not by a test. The same sweep found the console storing `sender_role: actor.role \|\| 'HQ_COMMAND'` on an incident chat message and the forensic replay naming an unattributed message as from `Responder`/`AGENT` — T-32 with the attribution running the other way. | ✅ one tested place-label module per codebase (`place_label.dart`, `place-label.ts`), 20 tests; a missing segment is dropped and nothing is named that was not recorded; the chat stores `UNKNOWN` rather than Command, asserted by a test that fails against the old code; `scripts/check_no_invented_places.py` in CI, which flags a place fallback only where it is RENDERED — so the clustering sentinel and the fail-open escalation argument are untouched — with 12 mutations, 7 caught and 5 correctly allowed |
 | T-37 | **The screen that sets the statewide escalation policy could not tell "could not read it" from "here it is", and offered to save either way.** `SystemConfig` loaded the three timeouts with `.then(({ data }) => ...)`, destructuring `data` and dropping `error`. A refused or failed read left its own seeded placeholders — 2 / 5 / 10 — on screen with nothing saying the read had not happened; the component has an `error` state and only the SAVE path ever set it. Save **upserts all three keys**, so an operator who saw those numbers, changed one field and pressed Save replaced the live policy with placeholders. The migration seeds exactly 2 / 5 / 10, so it looked right until somebody had changed them — the only point at which it mattered. Also: a key with no row merged over the placeholder and read as configured; `Number(row.value)` on a TEXT column gave `NaN`, which `String()` would have written back as the literal "NaN"; and the three labels were not associated with their inputs. | ✅ a three-state load — loading / failed / ready — that names the reason, shows no values it did not read, and **disables Save**, because this form writes all three and must not overwrite a baseline it has not seen; a missing key is named as not configured rather than shown as live; a non-numeric stored value is a fault with the key quoted, not a NaN; labels wired with `htmlFor`. 7 component tests, all 7 failing against the old code. Then, found while checking the fix against the job that reads these rows: the form accepted **any** number its input produced, so an operator could save a ward timeout of `0` or `2.5` and read it back as the policy — while `tier_timeout_minutes()` casts `raw::INTEGER` and rejects `<= 0`, discarding it and using the seeded value. The screen and the job disagreed about what the row means. ✅ the form now refuses what the job would throw away, naming the rule; 9 component tests; `scripts/check_escalation_defaults_agree.py` reads the three fallbacks and the lower bound out of the SQL and asserts the console and every seed agree, with 11 mutations, each caught |
+| T-38 | **The word "liaison" appeared nowhere in `lib/`, and the handset answered an agency liaison from their own posting.** `alert_is_ours()` hands a liaison exactly `escalated_to_agency = liaison_agency()` and nothing else. **Both** of the handset's filters — the `.where()` inside `alertsStreamProvider`, which four test files override so it had no test of its own, and a second pass at build time — had no branch for a liaison. The first fell through to the place rules and compared each incident's location to where that officer is based; the second applied `tierCanSee()`, Operation Rainbow's internal command ladder, on which a liaison has no rung, so every incident with a tier owning it outranked them — which is every incident they are ever handed. An incident handed to the Army is then invisible to the Army liaison unless it happens to be in their LGA, while HQ's console shows the handover as done and `/api/notify-agency` reports it sent. T-28 was "escalating an incident to the Police reached nobody, by three paths at once"; this is a fourth, on the device the officer carries. No harness run caught it because the stand-in applies no RLS, so it failed the other way there — the Police liaison was shown four incidents handed to nobody — and because the one ARMY fixture sits in the Army liaison's own posting, so the place rules admitted it by coincidence. The same filter was stricter than RLS in two more places: an incident with no LGA (which `alert_in_my_area()` grants to all staff, "an emergency nobody can see is worse than one seen too widely") and one HQ delegated to an LGA by name — which the old filter's own comment claimed, over code that read only `geo_lga`. | ✅ the rule is `lib/services/alert_audience.dart`, tested — 35 tests where there were none — and mirrors `alert_is_ours()` clause by clause; a second fixture incident is handed to the POLICE in BOKKOS so the harness can tell the column from the posting; 3 browser assertions per liaison; `scripts/check_alert_audience_agrees.py` in CI holds the rule on both sides, with 16 mutations, each caught |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -3450,6 +3451,195 @@ non-zero — and a traceback tells a contributor nothing except that the check i
 broken. Everything after the first block reads the console *against* the SQL, so
 it now reports and stops when the SQL side cannot be read completely, rather
 than carrying a half-read policy forward.
+
+### T-38. The handset asked where a liaison works, not what was handed to them
+
+Found while explaining a number in a harness log. Every role reached 22 of 25
+mobile routes, and the Army liaison's dashboard rendered 372 characters of
+semantics where the Police liaison's rendered 788 — two accounts of the same
+kind, one with less than half the content.
+
+The explanation turned out to be the defect. **The word "liaison" does not
+appear anywhere in `lib/`.** Six agencies send liaison officers; the database
+has `is_liaison()` and `liaison_agency()`, the console has `agencyOf()`,
+`console-access.ts` and `AgencyPortal`, the fixtures create liaison accounts
+that sign into the app, and the harness screenshots 22 routes for each of them.
+The Flutter app had no concept of one at all.
+
+What the database says, from `20261006000000_alerts_scoped_to_posting.sql`:
+
+```sql
+-- alert_is_ours()
+-- An outside agency: only what was handed to them.
+OR (public.is_liaison()
+    AND upper(COALESCE(p_alert.escalated_to_agency, '')) = public.liaison_agency());
+```
+
+Exactly the incidents escalated to their agency, and nothing else. What the
+handset did:
+
+```dart
+// 3. LGA Commanders -> ...
+if (role.contains('LGA')) { ... }
+// 4. Ward Commanders -> ...
+if (role.contains('WARD')) { ... }
+// 5. PU / Beat Responders -> Show alerts in their PU, Ward, LGA, or unassigned
+if (sameGeo(aGeoPu, geoPu)) return true;
+```
+
+`ARMY_LIAISON` matches none of the role tests, so it fell through to rule 5 and
+was answered by **where that officer is based**. An incident handed to the Army
+reaches the Army liaison only if it happens to be in their LGA — and a liaison
+is posted somewhere specific while incidents happen across the state. HQ's
+console shows the handover as done; `/api/notify-agency` reports it sent; the
+device the officer carries shows nothing.
+
+T-28 was "escalating an incident to the Police reached nobody, by three paths at
+once". This is a fourth path, and the one on the hardware.
+
+#### Why no run had caught it, twice over
+
+Both reasons are worth recording, because each would have hidden it on its own.
+
+**The stand-in has no RLS.** `fake_supabase.js` serves every row, so against the
+harness the filter failed in the opposite direction: the Police liaison, posted
+to JOS NORTH where four of the five fixture incidents are, was shown four
+incidents escalated to **nobody**. Empty against production, wrong against the
+stand-in, and 19/19 green in both — because the mobile pass asserts that routes
+render, not what is on them.
+
+**The one ARMY fixture is in the Army liaison's own posting.** `a005` is
+escalated to the ARMY and sits in MANGU/PANYAM/PU-11, which is exactly where the
+Army liaison is posted — its comment says so, "another agency's LGA, so
+cross-agency and cross-tier scoping is visible". So even a test that checked the
+Army liaison's feed would have passed: the place rules admitted the row by
+coincidence of geography. A fixture that makes a filter look right is harder to
+spot than one that makes it look wrong.
+
+So the fixtures now carry `a006`: handed to the **POLICE**, in **BOKKOS**, while
+the Police liaison is posted to JOS NORTH. Only a filter that reads
+`escalated_to_agency` can deliver it, and only a filter that reads it keeps the
+four incidents handed to nobody out of a liaison's feed. Three assertions per
+liaison, in `mobile_capture.js`: the incident handed to their agency is on their
+handset, the one handed to the other agency is not, and the ones handed to
+nobody are not.
+
+#### The first fix was incomplete, and only the browser found out
+
+Fixing the stream filter, with 35 unit tests behind it, looked complete. The
+browser harness came back with both liaisons' feeds **completely empty** — worse
+than before — and that is the only reason the second filter was ever looked at.
+
+```dart
+if (!tierCanSee(
+  viewerTier: assignedTierLabel(auth.tier),
+  alertTier: alert['assigned_tier'] as String?,
+)) return false;
+```
+
+`tierCanSee` is `tierRank(viewerTier) >= tierRank(alertTier)`. A liaison's tier
+is `ResponderTier.unknown`, which ranks below everything, and an incident handed
+to an outside agency always has a Rainbow tier owning it — so this reads "a
+liaison sees nothing that was ever assigned to anybody". The stream filter had
+started delivering the row and this one dropped it on the way to the screen.
+
+The ladder itself is right, and its comment says what it is for: "OWNER TIER AND
+EVERYONE ABOVE... Geography still scopes WHERE an officer looks; the tier now
+scopes WHAT they are shown of it." It is Operation Rainbow's own chain of
+command. The mistake is applying it to somebody outside that chain — the same
+mistake as answering them from their posting, in a different vocabulary.
+
+Two filters, neither knowing what a liaison is, and 35 passing unit tests over
+the one I had found. The lesson is not "write more unit tests": a unit test
+proves a function and a browser proves a screen, and the thing that reaches a
+person is the screen.
+
+#### The rule had no test, and that is structural
+
+It was a `.where()` inside a `StreamProvider`, and
+`alertsStreamProvider.overrideWith(...)` appears in four test files — every test
+that touches the feed replaces the closure the rule lived in. So the decision
+about which emergencies reach a responder's handset had **no test at all**,
+while `broadcast_targeting.dart` and `assignable_responders.dart` — the same kind
+of decision — were both extracted and tested long ago. It is
+`lib/services/alert_audience.dart` now, with 35 tests.
+
+The contrast with the other half of the same rule is the sharpest thing in this
+finding. `production_readiness_behaviour_test.sql` has asserted the database's
+side since it was written, and asserted it **completely**: a liaison reads the
+incident escalated to their agency, does not read one escalated to another
+agency, does not read one escalated to nobody, and cannot resolve either of the
+two that are not theirs — with the reason recorded, *"reading the board is a
+confidentiality problem, but resolving somebody else's live emergency is an
+operational one."* Three cases, both directions, for SELECT and UPDATE.
+
+Nothing anywhere asserted the client's side. The same rule, written twice, one
+copy under test and one copy unreachable by any test in the repository — and the
+untested copy is the one on the device an officer carries into the field.
+
+#### The asymmetry, which is the general lesson
+
+RLS decides access. This filter decides what is worth putting in front of
+somebody, so a polling-unit officer is not handed the whole state. It may
+therefore be **more** permissive than RLS harmlessly — the extra rows never
+arrive — but it must never be **stricter**, because anything it drops that the
+database deliberately granted is an emergency somebody was meant to see.
+
+Reading it against `alert_is_ours()` clause by clause found two more places
+where it was stricter:
+
+* **An incident with no LGA.** `alert_in_my_area()` tests the LGA alone —
+  "Unlocated incidents fail OPEN. See the note above: an emergency nobody can
+  see is worse than one seen too widely" — while the handset required LGA, ward
+  AND polling unit to all be absent. So an incident with a ward but no LGA was
+  granted by the database to every officer in the state and shown by the handset
+  only to that ward's.
+* **An incident delegated to an LGA by name.** HQ hands one down by setting
+  `assigned_tier` and naming a target LGA in the last escalation entry;
+  `alert_delegated_to_my_lga()` grants it to that LGA's staff whatever the
+  incident's own location says. The handset never read it — and the old filter's
+  comment **claimed** it: *"LGA Commanders -> Show alerts matching LGA,
+  unassigned, or escalated to LGA"*, over four lines of code that read only
+  `geo_lga`. A documented behaviour that was never implemented, which is this
+  report's most frequent single finding.
+
+  Honest about the size of this one: the target LGA is usually the LGA the
+  incident is in, and then the place rule already matched. It bites when they
+  differ, which is why an incident is delegated across a boundary in the first
+  place.
+
+And one place where being broader is deliberate, now recorded in the code so
+nobody tidies it: `commandsWholeState` tests `role.contains('HQ')` while
+`commands_whole_state()` is the exact set `('HQ_COMMAND','HQ_OFFICER','ADMIN')`.
+Narrowing the Dart to those three literals is the change that would drop rows
+from a deployment using any other HQ role name.
+
+#### The check
+
+`scripts/check_alert_audience_agrees.py` holds the rule on both sides: that
+`alert_is_ours()` still scopes a liaison to `escalated_to_agency`, that
+`is_liaison()` and both client copies still read the agency off the `_LIAISON`
+role suffix rather than from `profiles.agency` (a decorative badge, T-28), that
+`alertReaches()` has a liaison branch which **returns** rather than falling
+through, that the branch runs before any place rule, that the unlocated and
+delegated grants are honoured, that `delegatedLga()` reads the **last**
+escalation entry as the SQL does, and that BOTH of the handset's filters ask for
+the answer instead of computing it again — the build-time pass included, and
+before `tierCanSee()`, since answering a liaison after the command ladder has
+already refused them is no answer at all.
+
+Eighteen mutations, each caught. Two of them were holes in the check rather than
+in the code, and both are the same kind of mistake:
+
+* A liaison branch mutated to `if (handed == ours) return true;` — which still
+  falls through for every other row — passed a check that only asked whether the
+  branch contained a `return`. The branch has to be exhaustive, so the check now
+  requires its **last statement** to be the return.
+* Renaming `alert_delegated_to_my_lga` to `..._unused` was caught, but reported
+  as "no longer reads `to_lga`" — because the regex matched the `COMMENT ON
+  FUNCTION` statement, which has no body. Anchored on `CREATE OR REPLACE` now.
+  A check that fires for the wrong reason is a check that will one day not fire
+  for the right one.
 
 ---
 

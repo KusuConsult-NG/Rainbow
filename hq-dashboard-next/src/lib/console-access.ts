@@ -4,9 +4,9 @@
  * ## Why this is one function and not thirty conditionals
  *
  * Six agencies send liaison officers to this console — the Police, the Army,
- * the DSS, the NSCDC, the FRSC and Operation Safe Haven. They are not Operation
- * Rainbow staff. They are officers of other organisations, given an account so
- * that an incident handed to their agency reaches them.
+ * the DSS, the NSCDC, the FRSC and Operation Enduring Peace. They are not
+ * Operation Rainbow staff. They are officers of other organisations, given an
+ * account so that an incident handed to their agency reaches them.
  *
  * What they got was the command console. The navigation offered them the
  * statewide Intelligence Map, the full Incident Feed, every Mission History

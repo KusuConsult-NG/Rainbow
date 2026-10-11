@@ -793,6 +793,31 @@ jobs:
       - name: Assert the job and the screen mean one escalation policy
         run: python3 scripts/check_escalation_defaults_agree.py
 
+      # The word "liaison" appeared nowhere in lib/. `alert_is_ours()` hands an
+      # agency liaison exactly `escalated_to_agency = liaison_agency()` and
+      # nothing else; the handset's feed filter had no branch for one, so it
+      # fell through to the place rules and answered them from their own
+      # POSTING. The Army liaison is posted to MANGU and the incident handed to
+      # the Army can be anywhere in the state. HQ's console shows the handover
+      # as done and /api/notify-agency reports it sent, while the device the
+      # officer carries shows nothing. The same filter was stricter than RLS in
+      # two more places: an incident with no LGA (unlocated, which RLS grants to
+      # all staff) and one HQ delegated to an LGA by name — which the old
+      # filter's own comment claimed, over code that read only geo_lga.
+      - name: Assert an outside agency sees what was handed to them
+        run: python3 scripts/check_alert_audience_agrees.py
+
+      # `Translations.get()` returned the KEY on a miss, and two keys were asked
+      # for and never defined — both on the citizen's DISPATCHER CHAT screen, so
+      # its header read `live_dispatch_channel` and `alert_ref #a1b2c3d4` in
+      # every language, English included. Separately there were two providers
+      # called `languageProvider`, each with a `LanguageNotifier`: the Settings
+      # picker wrote `app_language` = 'HA' while every translated string watches
+      # `app_lang` = 'ha', so choosing Hausa in Settings changed nothing, and it
+      # offered two of the three languages the app has.
+      - name: Assert every string the app asks for exists in every language
+        run: python3 scripts/check_translation_keys.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

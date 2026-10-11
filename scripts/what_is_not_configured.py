@@ -140,7 +140,7 @@ FEATURES: dict[str, tuple[int, str, str]] = {
 for _code, _name in (
     ('POLICE', 'the Police'), ('ARMY', 'the Army'), ('DSS', 'the DSS'),
     ('NSCDC', 'the NSCDC'), ('FRSC', 'the FRSC'),
-    ('OPSH', 'Operation Safe Haven'),
+    ('OPSH', 'Operation Enduring Peace'),
 ):
     FEATURES[f'{_code}_WEBHOOK_URL'] = (
         2, f'an incident handed to {_name} is not delivered by webhook',
