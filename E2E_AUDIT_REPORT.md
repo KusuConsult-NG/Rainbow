@@ -1249,7 +1249,7 @@ only thing that distinguishes a defect from a preference.
 | T-34 | **The console was command until proven otherwise.** `userRole` in `dashboard/page.tsx` is declared `useState('HQ_OFFICER')` — a COMMAND role — and the console body is gated on `authLoading`, which the auth effect clears after a `profiles` read it issues concurrently with the role read. Whichever returns first wins, so whenever the auth effect wins, the console's first visible render has `isHqUser` true. The advisory banner I had just given targeting reads that as "sees everything, because they sent it", so for that window every console user was shown every live advisory, including ones addressed to other agencies and to citizens: the T-29 leak reopened on the console by a default value. Found by reading my own fix, not by a test — every test sets the role up front, which is the one thing the real client cannot do. | ✅ superseded by T-35's fix, which is the same defect at its source: the role is `null` until the `profiles` read lands, so every consumer is protected at once rather than one guard per surface. 4 tests naming the unresolved viewer |
 | T-35 | **`consoleAccess` was written to stop exactly this, and was never given the chance.** Its doc comment says an unknown role must get the smallest console because *"a default of 'show everything' would flash the whole command console at an agency liaison on every page load"* — and that `userRole` is `''` while the profile loads. It was `useState('HQ_OFFICER')`, and a second path then set it from `u.user_metadata?.role || 'HQ_COMMAND'` — user-writable metadata (H-7) falling back to the top of the command chain. So the function was never handed an unknown role and its `RESOLVING ACCESS` branch was unreachable despite being under test. Worse than a default left unwritten: the console body is gated on `authLoading`, and the effect that clears it is the same one that claimed `'HQ_COMMAND'` on its way there, before its own `profiles` read. The effect that opened the door claimed command walking through it. Clicking the agency tab in that window mounted `AgencyPortal` with `isHq` true and no agency, and a `useState` initialiser runs once: an Army liaison was frozen on the **Police** desk for the life of the mount, with the HQ-only switcher gone when their real role arrived. RLS correctly returned nothing, so the portal reported the Police as having no incidents, no personnel and no deployments — on the only screen that role has. `userAgency \|\| 'POLICE'` put the same guess in the non-HQ branch. | ✅ the role is `null` until `profiles.role` says otherwise, the `user_metadata` reader is deleted, and the portal derives its desk instead of freezing it — an account with no agency is told so rather than shown somebody else's empty desk; 3 component tests, 2 of which fail against the old code, and the gate rewritten around the default with 16 mutations, each caught |
 | T-36 | **The one layer that refused to guess a place was overruled by the layer that displays it.** `AlertService` writes `geo_lga` NULL rather than infer a jurisdiction — "submitting without jurisdiction rather than guessing one" — and the responder feed filter treats a null LGA as reaching everybody. Five screens named one anyway: a responder's card read **PLATEAU · HQ · UNIT**, and `· UNIT` on nearly every card since there is no polling unit from coordinates; the dispatch roster read **JOS**, which is not one of Plateau's seventeen LGAs, and only statewide command — the account dispatching across all seventeen — could see it; the console dossier read **STATE HQ** three lines above a guard that DROPS an absent ward; a map card read **PU: SECTOR HQ**; and the AI triage prompt was told **LGA: STATE HQ** where the Type, Ward and Description lines around it all say `N/A`. Found by sweeping for the shape after T-35, not by a test. The same sweep found the console storing `sender_role: actor.role \|\| 'HQ_COMMAND'` on an incident chat message and the forensic replay naming an unattributed message as from `Responder`/`AGENT` — T-32 with the attribution running the other way. | ✅ one tested place-label module per codebase (`place_label.dart`, `place-label.ts`), 20 tests; a missing segment is dropped and nothing is named that was not recorded; the chat stores `UNKNOWN` rather than Command, asserted by a test that fails against the old code; `scripts/check_no_invented_places.py` in CI, which flags a place fallback only where it is RENDERED — so the clustering sentinel and the fail-open escalation argument are untouched — with 12 mutations, 7 caught and 5 correctly allowed |
-| T-37 | **The screen that sets the statewide escalation policy could not tell "could not read it" from "here it is", and offered to save either way.** `SystemConfig` loaded the three timeouts with `.then(({ data }) => ...)`, destructuring `data` and dropping `error`. A refused or failed read left its own seeded placeholders — 2 / 5 / 10 — on screen with nothing saying the read had not happened; the component has an `error` state and only the SAVE path ever set it. Save **upserts all three keys**, so an operator who saw those numbers, changed one field and pressed Save replaced the live policy with placeholders. The migration seeds exactly 2 / 5 / 10, so it looked right until somebody had changed them — the only point at which it mattered. Also: a key with no row merged over the placeholder and read as configured; `Number(row.value)` on a TEXT column gave `NaN`, which `String()` would have written back as the literal "NaN"; and the three labels were not associated with their inputs. | ✅ a three-state load — loading / failed / ready — that names the reason, shows no values it did not read, and **disables Save**, because this form writes all three and must not overwrite a baseline it has not seen; a missing key is named as not configured rather than shown as live; a non-numeric stored value is a fault with the key quoted, not a NaN; labels wired with `htmlFor`. 7 component tests, all 7 failing against the old code. No gate: a sweep found 27 console reads that drop their error, most of them deliberate degradations, and only two read-modify-write screens — the other handles its error and says why |
+| T-37 | **The screen that sets the statewide escalation policy could not tell "could not read it" from "here it is", and offered to save either way.** `SystemConfig` loaded the three timeouts with `.then(({ data }) => ...)`, destructuring `data` and dropping `error`. A refused or failed read left its own seeded placeholders — 2 / 5 / 10 — on screen with nothing saying the read had not happened; the component has an `error` state and only the SAVE path ever set it. Save **upserts all three keys**, so an operator who saw those numbers, changed one field and pressed Save replaced the live policy with placeholders. The migration seeds exactly 2 / 5 / 10, so it looked right until somebody had changed them — the only point at which it mattered. Also: a key with no row merged over the placeholder and read as configured; `Number(row.value)` on a TEXT column gave `NaN`, which `String()` would have written back as the literal "NaN"; and the three labels were not associated with their inputs. | ✅ a three-state load — loading / failed / ready — that names the reason, shows no values it did not read, and **disables Save**, because this form writes all three and must not overwrite a baseline it has not seen; a missing key is named as not configured rather than shown as live; a non-numeric stored value is a fault with the key quoted, not a NaN; labels wired with `htmlFor`. 7 component tests, all 7 failing against the old code. Then, found while checking the fix against the job that reads these rows: the form accepted **any** number its input produced, so an operator could save a ward timeout of `0` or `2.5` and read it back as the policy — while `tier_timeout_minutes()` casts `raw::INTEGER` and rejects `<= 0`, discarding it and using the seeded value. The screen and the job disagreed about what the row means. ✅ the form now refuses what the job would throw away, naming the rule; 9 component tests; `scripts/check_escalation_defaults_agree.py` reads the three fallbacks and the lower bound out of the SQL and asserts the console and every seed agree, with 11 mutations, each caught |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -3396,6 +3396,60 @@ So the one screen in the console that reads to write was the one that did not
 check, and the sweep is the evidence that there is nothing else of the kind to
 gate. Seven component tests hold it instead, all seven of which fail against
 the previous version.
+
+#### The second half, found by checking the fix against the job
+
+Having fixed the form, the obvious question was whether it now agrees with the
+thing that reads those rows. `tier_timeout_minutes()` in
+`20260928000000_command_chain_escalation.sql` is the only reader, and it is
+careful in a way the form was not:
+
+```sql
+  BEGIN
+    parsed := raw::INTEGER;
+  EXCEPTION WHEN others THEN
+    parsed := NULL;
+  END;
+
+  IF parsed IS NULL OR parsed <= 0 THEN
+    parsed := CASE upper(tier) WHEN 'UNIT' THEN 2 WHEN 'WARD' THEN 5 WHEN 'LGA' THEN 10 END;
+  END IF;
+```
+
+with the reason given above it: "A missing or malformed setting must not
+silently mean 'escalate immediately' (a timeout of 0) or 'never escalate' (NULL
+treated as infinite). Both are dangerous defaults for an emergency queue."
+
+The form accepted anything its `type="number"` input would produce. So an
+operator could set the ward timeout to `0`, or to `2.5`, and it was stored, read
+back on the next visit, and displayed as the live policy — while the job cast
+it, failed, and used 5. **T-28 and T-29's signature again: two sides of one
+name, each internally consistent.** And the more valuable half is that it runs
+the other way too — my own "not configured" wording said the displayed value was
+"this build's default, not the live policy", which was wrong, because the job
+falls back to exactly the same number. It IS the effective timeout; it is simply
+not written down. Both halves of that depend on three numbers and one lower
+bound agreeing across a TypeScript file and a SQL file, and nothing was checking.
+
+So the form now refuses a value the job would discard, saying which rule it
+breaks, and `scripts/check_escalation_defaults_agree.py` reads the policy out of
+the SQL rather than assuming it: the tier→key mapping, the three fallbacks, the
+`<= 0` rejection and the `raw::INTEGER` cast, then asserts the console declares
+the same numbers and the same minimum, and that every migration and operator
+script seeding those rows seeds the same values.
+
+Eleven mutations, each caught — including a fallback changed on one side only,
+the console accepting `0` again, the job dropping its cast, a tier losing its
+fallback (which the SQL comment says means "never escalate"), a console timeout
+nothing reads, and a seed drifting from the fallback.
+
+The eleventh is a note on writing checks rather than on this code. Dropping a
+tier's fallback made the first version of the check die with a `KeyError` in its
+seed loop. It "caught" the mutation, in the sense that the exit code was
+non-zero — and a traceback tells a contributor nothing except that the check is
+broken. Everything after the first block reads the console *against* the SQL, so
+it now reports and stops when the SQL side cannot be read completely, rather
+than carrying a half-read policy forward.
 
 ---
 

@@ -39,10 +39,28 @@ import { supabase } from '@/lib/supabase';
  *     three unlabelled number boxes on the page that sets the escalation
  *     policy.
  *
+ * ## And a value the watchdog will not honour
+ *
+ * `tier_timeout_minutes()` in `20260928000000_command_chain_escalation.sql`
+ * reads these rows, and it rejects what it cannot use:
+ *
+ *     parsed := raw::INTEGER;        -- '2.5' raises, and is caught
+ *     IF parsed IS NULL OR parsed <= 0 THEN  -- falls back to the seeded value
+ *
+ * with the reason given: "A missing or malformed setting must not silently mean
+ * 'escalate immediately' (a timeout of 0) or 'never escalate' (NULL treated as
+ * infinite). Both are dangerous defaults for an emergency queue."
+ *
+ * The form accepted anything its number input would produce. So an operator
+ * could set the ward timeout to `0`, or `2.5`, and it was stored, and read
+ * back, and displayed as the policy — while the watchdog discarded it and used
+ * the seeded value. The screen and the job disagreed about what the row means,
+ * which is T-28's and T-29's signature: two sides of one name.
+ *
  * ## The rule
  *
- * Do not offer to save what you could not read. A baseline this form does not
- * have is a baseline it must not overwrite.
+ * Do not offer to save what you could not read, and do not accept a value the
+ * thing that reads it will throw away.
  */
 
 interface Config {
@@ -50,6 +68,18 @@ interface Config {
   WARD: number;
   LGA: number;
 }
+
+/**
+ * The smallest timeout `tier_timeout_minutes()` will honour.
+ *
+ * It rejects `<= 0` and anything that will not cast to INTEGER, falling back to
+ * the seeded value. A form that accepts what the job discards is a form that
+ * lies about the policy, so this is enforced here too.
+ *
+ * `scripts/check_escalation_defaults_agree.py` asserts this and the seeded
+ * values below against the migration.
+ */
+const MIN_MINUTES = 1;
 
 /** Field, its `app_config` key, its label, and what the migration seeds. */
 const FIELDS = [
@@ -133,10 +163,16 @@ export default function SystemConfig() {
     };
   }, []);
 
+  /** Values the watchdog would throw away, named so the operator can fix them. */
+  const unusable = FIELDS.filter(({ field }) => {
+    const v = thresholds[field];
+    return !Number.isInteger(v) || v < MIN_MINUTES;
+  });
+
   const saveConfig = async () => {
     // Guarded here as well as by the disabled button: this is the write that
     // replaces the statewide policy.
-    if (load.status !== 'ready') return;
+    if (load.status !== 'ready' || unusable.length > 0) return;
     setSaving(true);
     setMsg('');
     setError('');
@@ -207,6 +243,24 @@ export default function SystemConfig() {
         </div>
       ))}
 
+      {unusable.length > 0 && load.status === 'ready' && banner('bad', (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>
+              The escalation job would discard this
+            </div>
+            <div style={{ fontSize: 12 }}>
+              {unusable.map(f => f.label.replace(' (Minutes)', '')).join(', ')} —
+              a timeout must be a whole number of minutes, at least
+              {' '}{MIN_MINUTES}. <code>tier_timeout_minutes()</code> rejects
+              anything else and falls back to its seeded value, so saving this
+              would show you a policy the job is not using.
+            </div>
+          </div>
+        </div>
+      ))}
+
       {load.status === 'ready' && load.missing.length > 0 && banner('warn', (
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
@@ -215,9 +269,10 @@ export default function SystemConfig() {
               Not configured in this database
             </div>
             <div style={{ fontSize: 12 }}>
-              {load.missing.join(', ')} — no row in <code>app_config</code>. The
-              value shown is this build&apos;s default, not the live policy. Save
-              to set it.
+              {load.missing.join(', ')} — no row in <code>app_config</code>.
+              The value shown is what <code>tier_timeout_minutes()</code> falls
+              back to, so it IS the effective timeout; it is simply not recorded
+              anywhere. Save to write it down.
             </div>
           </div>
         </div>
@@ -240,6 +295,8 @@ export default function SystemConfig() {
               <input
                 id={`cfg-${key}`}
                 type="number"
+                min={MIN_MINUTES}
+                step={1}
                 className="input-tactical"
                 style={{ width: '100%' }}
                 value={thresholds[field]}
@@ -250,9 +307,9 @@ export default function SystemConfig() {
 
           <button
             onClick={saveConfig}
-            disabled={saving || load.status !== 'ready'}
+            disabled={saving || load.status !== 'ready' || unusable.length > 0}
             className="btn-tactical btn-primary"
-            style={{ padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: saving || load.status !== 'ready' ? 0.7 : 1 }}
+            style={{ padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: saving || load.status !== 'ready' || unusable.length > 0 ? 0.7 : 1 }}
           >
             <Save size={16} />
             {saving ? 'Saving...' : 'Save Configuration'}

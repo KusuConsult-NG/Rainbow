@@ -782,6 +782,17 @@ jobs:
       - name: Assert no screen names a place that was never recorded
         run: python3 scripts/check_no_invented_places.py
 
+      # `tier_timeout_minutes()` is the only reader of the three escalation
+      # timeouts and it refuses what it cannot use — `raw::INTEGER`, then
+      # `parsed <= 0` — because, in the migration's own words, a timeout of 0
+      # means "escalate immediately" and a NULL means "never escalate", and
+      # both are dangerous defaults for an emergency queue. SystemConfig is the
+      # only writer and accepted anything its number input produced, so an
+      # operator could store 0 or 2.5, read it back, and see it displayed as the
+      # live policy while the job discarded it and used the seeded value.
+      - name: Assert the job and the screen mean one escalation policy
+        run: python3 scripts/check_escalation_defaults_agree.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

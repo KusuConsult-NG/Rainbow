@@ -128,6 +128,42 @@ describe('SystemConfig', () => {
     });
   });
 
+  it('refuses a value the escalation job would throw away', async () => {
+    // `tier_timeout_minutes()` does `raw::INTEGER` and then rejects `<= 0`,
+    // falling back to its seeded value — "a timeout of 0" is called out in the
+    // migration as a dangerous default for an emergency queue. The form
+    // accepted anything its number input produced, stored it, and read it back
+    // as the policy while the job used something else.
+    const SystemConfig = await load();
+    render(<SystemConfig />);
+    await waitFor(() => expect(field(/ward/i).value).toBe('7'));
+
+    await userEvent.clear(field(/ward/i));
+    await userEvent.type(field(/ward/i), '0');
+
+    expect(await screen.findByText(/would discard this/i)).toBeInTheDocument();
+    expect(save()).toBeDisabled();
+    await userEvent.click(save());
+    expect(db.inserts.find(i => i.table === 'app_config')).toBeUndefined();
+
+    // And it recovers: a usable value clears the refusal.
+    await userEvent.clear(field(/ward/i));
+    await userEvent.type(field(/ward/i), '6');
+    await waitFor(() => expect(save()).toBeEnabled());
+  });
+
+  it('refuses a fraction of a minute, which the job cannot cast', async () => {
+    const SystemConfig = await load();
+    render(<SystemConfig />);
+    await waitFor(() => expect(field(/lga/i).value).toBe('20'));
+
+    await userEvent.clear(field(/lga/i));
+    await userEvent.type(field(/lga/i), '2.5');
+
+    expect(await screen.findByText(/whole number of minutes/i)).toBeInTheDocument();
+    expect(save()).toBeDisabled();
+  });
+
   it('does not overwrite what the operator typed while the read was in flight', async () => {
     // The load merged its response over current state, so a value typed before
     // the response landed was replaced by the stored one with no warning.
