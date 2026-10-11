@@ -752,16 +752,21 @@ jobs:
       - name: Assert one agency vocabulary, built from one list
         run: python3 scripts/check_one_agency_vocabulary.py
 
-      # `userRole` in the console is declared `useState('HQ_OFFICER')` — a
-      # COMMAND role — so from the first render until the profiles read lands
-      # over the network, every console user is command as far as any filter can
-      # tell. The advisory banner is such a filter, and command means "sees
-      # everything", so an agency liaison was shown advisories addressed to
-      # other agencies and to citizens: the leak the targeting was added to
-      # close, reopened by a default value and invisible to every test that sets
-      # the role up front. The first fix then marked the role resolved from
-      # `user_metadata.role` as well, which the user can write (H-7).
-      - name: Assert identity is resolved before anything is scoped by it
+      # `console-access.ts` exists so that an unknown role gets the SMALLEST
+      # console, and its doc comment says why: "a default of 'show everything'
+      # would flash the whole command console at an agency liaison on every page
+      # load". It also says `userRole` is '' while the profile loads. It was
+      # `useState('HQ_OFFICER')` — a COMMAND role — so that function was never
+      # handed an unknown role and its unknown branch was unreachable. Worse: the
+      # console body is gated on `authLoading`, and the effect that clears it is
+      # the same one that set the role from `user_metadata.role || 'HQ_COMMAND'`
+      # before its own profiles read — the effect that opened the door claimed
+      # command walking through it. The advisory banner read command as "sees
+      # everything" and showed a liaison other agencies' advisories (T-34); an
+      # agency tab clicked in that window froze them on the Police desk for the
+      # life of the mount, reported as empty (T-35). A second path set the role
+      # from `user_metadata.role`, which the user can write (H-7).
+      - name: Assert identity is resolved before anything is acted on
         run: python3 scripts/check_identity_resolved_before_scoping.py
 
   dryrun-fresh:

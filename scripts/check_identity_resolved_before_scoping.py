@@ -1,34 +1,48 @@
 #!/usr/bin/env python3
-"""A console must not scope anything by a role it has not confirmed.
+"""A console must not act on a role it has not been told.
 
     python3 scripts/check_identity_resolved_before_scoping.py
 
 ## What went wrong
 
-`SystemAlertListener` was given targeting — who a mass advisory is for — and the
-dashboard hands it the viewer's identity so it can decide. The dashboard gets
-that identity from `userRole`, which is declared:
+`src/lib/console-access.ts` answers "what may this account reach", and its own
+doc comment says what it is for:
+
+    An unknown role gets the smallest possible console rather than the largest:
+    while the profile is still loading, `userRole` is '', and a default of
+    "show everything" would flash the whole command console at an agency
+    liaison on every page load before settling.
+
+`userRole` was never ''. The dashboard declared it:
 
     const [userRole, setUserRole] = useState('HQ_OFFICER');
 
-HQ_OFFICER is a COMMAND role, and command means "sees everything, because they
-sent it". So from the first render until the `profiles.role` read lands over the
-network, every console user is command as far as any filter can tell — and an
-agency liaison was shown advisories addressed to other agencies and to
-citizens. That is the exact leak the targeting was added to close, reopened by
-a default value, and it is invisible in a test that sets the role up front.
+HQ_OFFICER is a COMMAND role, and a second path then set the role from
+`u.user_metadata?.role || 'HQ_COMMAND'` — user-writable metadata (finding H-7)
+falling back to the top of the command chain. So `consoleAccess` was never once
+handed an unknown role, its "Unknown, or still loading" branch was unreachable,
+and the RESOLVING ACCESS subtitle it returns had never been rendered despite
+being under test. The flash it exists to prevent happened on every page load.
 
-The first fix was incomplete, which is the second half of this check. A second
-code path sets the role from `user_metadata`:
+What that cost, past the chrome:
 
-    setUserRole(u.user_metadata?.role || 'HQ_COMMAND');
+  * **T-34.** The advisory banner reads command as "sees everything, because
+    they sent it". For the window before the profile read returned, every
+    console user was command, so an agency liaison was shown advisories
+    addressed to other agencies and to citizens — the leak the targeting was
+    added to close, reopened by a default value.
+  * **T-35.** `AgencyPortal` seeded its selected agency from
+    `useState(isHq ? AGENCIES[0].code : (userAgency || 'POLICE'))`. A
+    `useState` initialiser runs once, and the HQ-only agency switcher was the
+    one control that could have corrected it, so a liaison who reached that tab
+    in the window was frozen on the Police desk for the life of the mount. RLS
+    correctly returned nothing, and the portal reported the Police as having no
+    incidents, no personnel and no deployments — on the only screen that role
+    has.
 
-`user_metadata` is writable BY THE USER in Supabase — that is finding H-7,
-"role source user-writable". A value an account can set for itself must never
-be what decides that account is command, so that path may set the role for
-presentation but may not mark it resolved. Only `profiles.role` resolves it:
-it is what `requireRole` reads with admin privileges and what the RLS policies
-key on.
+Both were fixed at their own surfaces first. Both fixes were patches: the role
+is read in a dozen places and each would have needed its own guard. The default
+is the defect, and `null` fixes every consumer at once.
 
 ## The asymmetry is deliberate
 
@@ -39,27 +53,31 @@ inconsistent and get tidied into agreement, so this check holds both ends:
     than showing it to somebody outside, so a viewer with no LGA/ward/PU
     recorded is delivered to (`placeMatches` returns true on an empty value);
   * showing one agency's advisory to another agency's liaison is the leak
-    itself, so a viewer whose agency is not yet known is delivered nothing
-    that was addressed to an agency.
+    itself, so a viewer whose agency is not yet known is delivered nothing that
+    was addressed to an agency.
 
 The app learned the identity half once already, in the responder tier filter:
 "you cannot be assigned something when we do not know who you are".
 
 ## What this checks
 
-1. `roleResolved` starts false.
-2. It is set in exactly one place.
-3. That place is the `profiles.role` read, and nothing in it touches
-   `user_metadata`.
-4. Every `viewer={{ ... }}` the dashboard builds carries exactly the fields
-   this filter knows about — a new one fails here until somebody decides which
-   half of the asymmetry it belongs to.
-5. The identity fields in it are gated on `roleResolved`.
-6. The place fields are not, because that guard would be a no-op dressed as
-   consistency and the next reader would read the asymmetry as an oversight.
+At the source, where it protects every consumer:
+
+1. The dashboard's role state starts `null` — not a role, and above all not a
+   command role.
+2. Exactly one thing sets it.
+3. That one setter is the `profiles.role` read.
+4. Nothing in the dashboard reads a role out of `user_metadata` (H-7).
+5. `consoleAccess` is handed the role itself, with no `||` or `??` putting a
+   role back when there is none.
+
+At the surfaces that were caught by it:
+
+6. The advisory `viewer` carries exactly the fields the filter knows about, its
+   identity fields come from the role, and its place fields are left ungated.
 7. `advisoryReaches` still treats an unknown agency as "not this agency".
-   Gating identity hands it `null`; if that ever fails open the way place does,
-   the gate above withholds nothing and this whole fix is theatre.
+8. `AgencyPortal` does not freeze the desk in a `useState` initialiser, and
+   does not fall back to a real agency's code when it has none.
 """
 from __future__ import annotations
 
@@ -68,17 +86,20 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-DASHBOARD = REPO / 'hq-dashboard-next' / 'src' / 'app' / 'dashboard' / 'page.tsx'
-FILTER = REPO / 'hq-dashboard-next' / 'src' / 'lib' / 'advisory-targeting.ts'
+CONSOLE = REPO / 'hq-dashboard-next' / 'src'
+DASHBOARD = CONSOLE / 'app' / 'dashboard' / 'page.tsx'
+FILTER = CONSOLE / 'lib' / 'advisory-targeting.ts'
+PORTAL = CONSOLE / 'components' / 'AgencyPortal.tsx'
 
 # The fields a console viewer is made of, split by which way they fail.
-IDENTITY = ('agency', 'isCommand')
+IDENTITY = {'agency': 'access.agency', 'isCommand': 'isHqUser'}
 PLACE = ('geoLga', 'geoWard', 'geoPu')
+# Names that mean "who is this" — a place field must not be conditional on one.
+IDENTITY_NAMES = ('isHqUser', 'isCommand', 'access.agency', 'roleResolved', 'userRole')
 
-# How far after the authoritative read `setRoleResolved(true)` may sit, and how
-# far back from it we look for the read. The two calls are adjacent today; this
-# is slack for a comment or a sibling setter between them, not for a different
-# code path.
+# How far after the authoritative read the single setter may sit. The two are
+# adjacent today; this is slack for a comment or a sibling setter between them,
+# not for a different code path.
 WINDOW = 14
 
 failures: list[str] = []
@@ -88,15 +109,23 @@ def fail(message: str) -> None:
     failures.append(message)
 
 
-def strip_comments(text: str) -> str:
-    """Comments out, so prose about a hazard is not read as the hazard.
+# One pattern for both comment shapes, so a block comment is matched as a whole
+# rather than line by line. The checks below are line-indexed, so the comment is
+# BLANKED rather than removed: every newline survives and the line numbers in a
+# failure message still point at the file.
+COMMENT = re.compile(r'/\*.*?\*/|//[^\n]*', re.S)
 
-    This check's own failure messages name `user_metadata`, and so does the
-    comment in the dashboard that explains why that path may not resolve the
-    role — the first run of this check failed on its own explanation.
+
+def strip_comments(text: str) -> str:
+    """Comments blanked, so prose about a hazard is not read as the hazard.
+
+    This check's failure messages name `user_metadata`, and so do the comments
+    in the dashboard and the portal recording what was deleted and why. Two
+    versions of this check have now failed on their own explanation: the first
+    did not strip comments at all, and the second stripped them a line at a
+    time, which cannot see that a line belongs to a `/** ... */` block.
     """
-    text = re.sub(r'/\*.*?\*/', '', text, flags=re.S)
-    return re.sub(r'//[^\n]*', '', text)
+    return COMMENT.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)
 
 
 def object_literal_at(text: str, start: int) -> str:
@@ -114,9 +143,8 @@ def object_literal_at(text: str, start: int) -> str:
 
 def top_level_fields(literal: str) -> dict[str, str]:
     """`{ a: 1, b: f({x, y}) }` -> {'a': '1', 'b': 'f({x, y})'}, comments gone."""
-    body = literal.strip()
+    body = strip_comments(literal).strip()
     body = body[1:-1] if body.startswith('{') and body.endswith('}') else body
-    body = strip_comments(body)
 
     parts: list[str] = []
     depth = 0
@@ -143,45 +171,67 @@ def top_level_fields(literal: str) -> dict[str, str]:
     return fields
 
 
-if not DASHBOARD.exists():
-    sys.exit(f'{DASHBOARD.relative_to(REPO)} is missing')
-if not FILTER.exists():
-    sys.exit(f'{FILTER.relative_to(REPO)} is missing')
+for path in (DASHBOARD, FILTER, PORTAL):
+    if not path.exists():
+        sys.exit(f'{path.relative_to(REPO)} is missing')
 
 source = DASHBOARD.read_text()
-lines = source.splitlines()
+code = strip_comments(source)
 
-# 1. The flag starts false. A flag that starts true is the original defect with
-#    an extra step.
-if not re.search(r'\[\s*roleResolved\s*,\s*setRoleResolved\s*\]\s*=\s*useState\(\s*false\s*\)', source):
-    fail('`roleResolved` must be declared `useState(false)` in the dashboard — '
-         'a flag that starts true says the role is confirmed before it is read.')
+# ── 1. No role until there is a role. ──
+declaration = re.search(r'\[\s*userRole\s*,\s*setUserRole\s*\]\s*=\s*useState([^;]*);', code)
+if not declaration:
+    fail('the dashboard no longer declares `[userRole, setUserRole] = useState(...)`, '
+         'so this check cannot see what it starts as.')
+elif not re.fullmatch(r'\s*(<[^>]*>)?\(\s*null\s*\)\s*', declaration.group(1)):
+    fail(f'`userRole` is declared `useState{declaration.group(1).strip()}`. It must '
+         'start `null`: any role here is claimed before it is known, and '
+         '`consoleAccess` gives a known command role the whole command console. '
+         'That is the flash its own doc comment says it prevents.')
 
-# 2 and 3. Exactly one place resolves it, and it is the authoritative read.
-resolutions = [i for i, line in enumerate(lines) if 'setRoleResolved(true)' in line]
-if not resolutions:
-    fail('nothing sets `setRoleResolved(true)`, so the console never admits it '
-         'knows the role and the advisory banner is permanently empty.')
-elif len(resolutions) > 1:
-    at = ', '.join(f'line {i + 1}' for i in resolutions)
-    fail(f'`setRoleResolved(true)` is set in {len(resolutions)} places ({at}). '
-         'Only the `profiles.role` read may resolve it; every other source of a '
-         'role is a guess or is user-writable (H-7).')
+# ── 2 and 3. One writer, and it is the authoritative read. ──
+code_lines = code.splitlines()
+setters = [i for i, line in enumerate(code_lines) if 'setUserRole(' in line]
+if not setters:
+    fail('nothing calls `setUserRole`, so the role never resolves and every '
+         'account is left with the smallest console.')
+elif len(setters) > 1:
+    at = ', '.join(f'line {i + 1}' for i in setters)
+    fail(f'`setUserRole` is called in {len(setters)} places ({at}). Only the '
+         '`profiles.role` read may set the role; every other source of one is a '
+         'guess, or is writable by the account it describes (H-7).')
 else:
-    index = resolutions[0]
-    before = '\n'.join(lines[max(0, index - WINDOW):index + 1])
-    around = '\n'.join(lines[max(0, index - WINDOW):index + WINDOW])
-    if not re.search(r'setUserRole\(\s*profile(?:Row)?[.?]', before):
-        fail(f'`setRoleResolved(true)` at line {index + 1} does not follow a '
-             '`setUserRole(profile.role)`. The role is only resolved by the '
-             '`profiles` read — that is what `requireRole` reads with admin '
-             'privileges and what the RLS policies key on.')
-    if 'user_metadata' in strip_comments(around):
-        fail(f'`setRoleResolved(true)` at line {index + 1} sits in a block that '
-             'reads `user_metadata`, which the user can write (H-7). A role an '
-             'account sets for itself must not be what makes it command.')
+    index = setters[0]
+    before = '\n'.join(code_lines[max(0, index - WINDOW):index + 1])
+    if not re.search(r'profile(?:Row)?\s*[.?]\s*role', before):
+        fail(f'the `setUserRole` at line {index + 1} does not read '
+             '`profile.role`. The role comes from the `profiles` table — what '
+             '`requireRole` reads with admin privileges and what the RLS '
+             'policies key on — and from nowhere else.')
 
-# 4, 5 and 6. Every viewer the dashboard builds.
+# ── 4. H-7 has no reader here. ──
+for i, line in enumerate(code_lines):
+    if 'user_metadata' in line:
+        fail(f'line {i + 1} reads `user_metadata`. In Supabase that is writable '
+             'by the user it belongs to (H-7), so nothing in this console may '
+             'take a role, an agency or a posting from it.')
+
+# ── 5. The role reaches consoleAccess as it is. ──
+# `userRole` itself, or the `profiles` row the one setter reads — the effect
+# that resolves the role also asks where that role lands. Anything else, and
+# above all anything with a `||` or `??` in it, puts a role back when there is
+# none.
+ROLE_ARGUMENT = re.compile(r'^(userRole|profile(?:Row)?\s*[.?]\s*\.?\s*role(\s+as\s+string)?)$')
+for call in re.finditer(r'consoleAccess\(\s*([^,)]*)', code):
+    argument = ' '.join(call.group(1).split())
+    if not ROLE_ARGUMENT.match(argument):
+        line_no = code[:call.start()].count('\n') + 1
+        fail(f'`consoleAccess({argument}...)` at line {line_no} (approx): pass '
+             '`userRole`, or the `profile.role` the one setter reads. A `||` or '
+             '`??` here puts a role back when there is none, which is the defect '
+             'with an extra step.')
+
+# ── 6. The advisory viewer. ──
 literals = [m.start() + len('viewer={') for m in re.finditer(r'viewer=\{\{', source)]
 if not literals:
     fail('the dashboard builds no `viewer={{ ... }}`, so either the advisory '
@@ -205,41 +255,64 @@ for start in literals:
     if missing:
         fail(f'the `viewer` at line {line_no} is missing {", ".join(missing)}.')
 
-    for field in IDENTITY:
+    for field, derived_from in IDENTITY.items():
         value = fields.get(field)
         if value is None:
             continue
-        if 'roleResolved' not in value:
-            fail(f'`{field}` at line {line_no} is `{value}` — not gated on '
-                 '`roleResolved`. `userRole` defaults to a command role, so '
-                 'until the profile read lands this tells the filter that '
-                 'whoever is looking sees everything.')
+        if derived_from not in value:
+            fail(f'`{field}` at line {line_no} is `{value}`, not `{derived_from}`. '
+                 'Both identity fields must come from the role, because the role '
+                 'is what is `null` until it is known.')
 
     for field in PLACE:
         value = fields.get(field)
         if value is None:
             continue
-        if 'roleResolved' in value:
-            fail(f'`{field}` at line {line_no} is gated on `roleResolved`. Place '
-                 'fails OPEN — an unknown place is delivered to — so the guard '
-                 'changes nothing and makes the deliberate asymmetry with '
-                 'identity read as an oversight.')
+        if 'userProfile' not in value:
+            fail(f'`{field}` at line {line_no} is `{value}`, not read from '
+                 '`userProfile`. The viewer\'s place is the posting on their '
+                 'profile and nothing else.')
+        gated_on = [name for name in IDENTITY_NAMES if name in value]
+        if gated_on:
+            fail(f'`{field}` at line {line_no} is conditional on '
+                 f'{", ".join(gated_on)}. Place fails OPEN — an unknown place is '
+                 'delivered to, because withholding a warning from somebody '
+                 'inside the affected area costs more than showing it to '
+                 'somebody outside. Gating it on identity changes nothing and '
+                 'makes the deliberate asymmetry read as an oversight.')
 
-# 7. The filter still fails closed on an agency it does not know.
-filter_source = FILTER.read_text()
-if not re.search(r'if\s*\(\s*!\s*viewer\.agency\s*\)\s*return false\s*;', filter_source):
+# ── 7. The filter still fails closed on an agency it does not know. ──
+if not re.search(r'if\s*\(\s*!\s*viewer\.agency\s*\)\s*return false\s*;',
+                 FILTER.read_text()):
     fail('`advisoryReaches` no longer returns false for a viewer with no '
-         'agency. Gating identity hands it `null`; if an unknown agency fails '
-         'open the way an unknown place does, that gate withholds nothing.')
+         'agency. The role being `null` hands it exactly that; if an unknown '
+         'agency fails open the way an unknown place does, nothing is withheld.')
+
+# ── 8. The portal's desk follows the account. ──
+portal = strip_comments(PORTAL.read_text())
+if re.search(r'useState[^;]*\buserAgency\b', portal):
+    fail('`AgencyPortal` seeds state from `userAgency`. A `useState` '
+         'initialiser runs once and the dashboard supplies that prop late, so '
+         'the desk freezes on whatever the first render guessed — and the '
+         'agency switcher that could correct it is HQ-only. Derive the selected '
+         'agency from the props instead.')
+if re.search(r"userAgency\s*\|\|\s*'", portal) or re.search(r"userAgency\s*\?\?\s*'", portal):
+    fail("`AgencyPortal` falls back to a literal agency code when `userAgency` "
+         "is absent. It used to be `userAgency || 'POLICE'`: an account with no "
+         "agency is not the Police, and RLS then renders that desk empty rather "
+         "than refusing, so the portal states as fact that an agency it cannot "
+         "read has nothing.")
 
 if failures:
-    print('The console scopes by an identity it has not confirmed:\n')
+    print('The console acts on a role it has not been told:\n')
     for message in failures:
         print(f'  * {message}\n')
     print('See scripts/check_identity_resolved_before_scoping.py for why this matters.')
     sys.exit(1)
 
-print('Identity is resolved before it is scoped by:')
-print('  * roleResolved starts false and is set only by the profiles.role read')
-print(f'  * {len(literals)} viewer literal(s): identity gated, place deliberately not')
-print('  * advisoryReaches still fails closed on an unknown agency')
+print('Identity is resolved before it is acted on:')
+print('  * userRole starts null; one setter, and it reads profiles.role')
+print('  * no reader of user_metadata; consoleAccess gets the role as it is')
+print(f'  * {len(literals)} viewer literal(s): identity from the role, place from the profile')
+print('  * advisoryReaches fails closed on an unknown agency')
+print('  * AgencyPortal derives its desk instead of freezing it')

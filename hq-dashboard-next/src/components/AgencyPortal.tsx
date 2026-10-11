@@ -185,10 +185,30 @@ async function loadAgencyData(agency: string): Promise<AgencyData> {
 // ─── Main Component ──────────────────────────────────────────────────────
 
 export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, userId }: AgencyPortalProps) {
-  // If HQ, they can select which agency to view. Liaisons are locked to their agency.
-  const [selectedAgency, setSelectedAgency] = useState<string>(
-    isHq ? (AGENCIES[0].code) : (userAgency || 'POLICE')
-  );
+  /**
+   * Which desk is on screen.
+   *
+   * HQ chooses; a liaison does not, because it is their own. That used to be
+   * one piece of state seeded from the props:
+   *
+   *     useState(isHq ? AGENCIES[0].code : (userAgency || 'POLICE'))
+   *
+   * and a `useState` initialiser runs ONCE. The dashboard renders this before
+   * it knows whose console it is — `userRole` defaults to a command role, so
+   * `isHq` arrives true with no agency — and an Army liaison who reached this
+   * tab in that window was frozen on `AGENCIES[0]`, the Police desk, for the
+   * life of the mount. The switcher below is HQ-only, so when their real role
+   * landed it took the one control that could have moved them. RLS then
+   * correctly returned nothing for POLICE, and the portal reported the Police
+   * as having no incidents, no personnel and no deployments — on the only
+   * screen that role has.
+   *
+   * Derived, it follows the props whenever they settle. And a non-HQ account
+   * with no agency gets NULL rather than `'POLICE'`: it is not the Police, and
+   * naming a real agency is worse than saying we do not know yet.
+   */
+  const [hqSelection, setHqSelection] = useState<string>(AGENCIES[0].code);
+  const selectedAgency: string | null = isHq ? hqSelection : (userAgency || null);
   const [activeSection, setActiveSection] = useState<'incidents' | 'personnel' | 'reports' | 'add_personnel'>('incidents');
 
   // Data — ONE piece of state, tagged with the agency it belongs to.
@@ -216,7 +236,9 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
 
-  const agencyInfo = AGENCIES.find(a => a.code === selectedAgency) || AGENCIES[0];
+  // No `|| AGENCIES[0]` fallback: that is how an unresolved desk came to be
+  // labelled with a real agency's name and colours.
+  const agencyInfo = AGENCIES.find(a => a.code === selectedAgency) ?? null;
 
   // ── Data fetching ─────────────────────────────────────────────────────
   //
@@ -227,10 +249,12 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
   // a rule that gets disabled. Inlining the load in the effect is also plainly
   // better — it can cancel.
   const fetchAll = useCallback(async () => {
+    if (!selectedAgency) return;
     setData(await loadAgencyData(selectedAgency));
   }, [selectedAgency]);
 
   useEffect(() => {
+    if (!selectedAgency) return;
     let cancelled = false;
     void (async () => {
       const snapshot = await loadAgencyData(selectedAgency);
@@ -245,6 +269,7 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
 
   // Realtime subscription for incidents assigned to this agency
   useEffect(() => {
+    if (!selectedAgency) return;
     const channel = supabase
       .channel(`agency-portal-${selectedAgency}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => fetchAll())
@@ -264,6 +289,35 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
   };
 
   // ── Render ────────────────────────────────────────────────────────────
+
+  // Not HQ, and no agency on the account yet. Every hook above has already
+  // run, and each one holds off rather than reading somebody else's desk.
+  //
+  // This is a real state, not a transient: a sector-command or responder
+  // account that opens this tab has no agency and never will, and it used to
+  // be shown the Police desk, empty. "We do not know whose this is" is the
+  // honest version, and it is the same rule as the incident feed's — an empty
+  // board that could not ask is the same lie as an empty board.
+  if (!agencyInfo || !selectedAgency) {
+    return (
+      <div style={{
+        height: '100%', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', gap: 10,
+        color: 'var(--text-muted)', padding: 24, textAlign: 'center',
+      }}>
+        <Shield size={28} />
+        <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: 1 }}>
+          RESOLVING YOUR DESK
+        </div>
+        <div style={{ fontSize: 11, maxWidth: 420 }}>
+          This console has not been told which agency this account belongs to.
+          If it does not resolve, the account has no liaison desk — ask HQ to
+          grant agency access.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 0 }}>
 
@@ -318,7 +372,7 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
                 key={a.code}
                 role="tab"
                 aria-selected={selectedAgency === a.code}
-                onClick={() => setSelectedAgency(a.code)}
+                onClick={() => setHqSelection(a.code)}
                 style={{
                   padding: '5px 12px',
                   borderRadius: 20,

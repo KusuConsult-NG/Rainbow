@@ -172,17 +172,18 @@ describe('the whole thing together', () => {
 });
 
 describe('before the console knows whose screen this is', () => {
-  // `userRole` in the dashboard defaults to HQ_OFFICER, so `isHqUser` — which
-  // this filter reads as `isCommand`, meaning "sees everything" — is true from
-  // the first render until the `profiles.role` read lands. Handing that through
-  // showed an agency liaison every advisory in that window, including ones
-  // addressed to other agencies and to citizens: the leak this module exists to
-  // close, reopened by a default.
+  // `userRole` in the dashboard used to be declared `useState('HQ_OFFICER')` —
+  // a command role — so `isHqUser`, which this filter reads as `isCommand`
+  // meaning "sees everything", was true from the first render until the
+  // `profiles.role` read landed. An agency liaison was shown every advisory in
+  // that window, including ones addressed to other agencies and to citizens:
+  // the leak this module exists to close, reopened by a default (T-34).
   //
-  // So the dashboard withholds both identity fields until the role is this
-  // account's own, and this is the shape it passes meanwhile. The rules above
-  // already make it the most restrictive viewer there is; these assertions name
-  // that as something the window depends on, so it cannot be relaxed quietly.
+  // The role is `null` until that read lands now, so `access.agency` is null
+  // and `isHqUser` is false meanwhile, and this is the viewer the dashboard
+  // passes. The rules above already make it the most restrictive one there is;
+  // these assertions name that as something the window depends on, so it cannot
+  // be relaxed quietly.
   const UNRESOLVED: AdvisoryViewer = { agency: null, isCommand: false };
 
   it('sees nothing addressed to an agency', () => {

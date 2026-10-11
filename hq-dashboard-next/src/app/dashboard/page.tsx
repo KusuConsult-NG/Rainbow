@@ -329,16 +329,34 @@ export default function DashboardPage() {
   const [navOpen, setNavOpen] = useState(false);
 
   const [user, setUser] = useState<any>(null);
-  const [userRole, setUserRole] = useState('HQ_OFFICER');
   /**
-   * Whether `userRole` is this account's ACTUAL role yet.
+   * This account's role, or NULL until the `profiles` read says what it is.
    *
-   * It defaults to HQ_OFFICER, so `isHqUser` is true from the first render
-   * until the profile read lands — and anything that treats command as
-   * "sees everything" therefore does so for whoever is looking, including an
-   * agency liaison. The advisory banner is exactly that, so for the window
-   * before the role resolved a liaison was shown advisories addressed to other
-   * agencies and to citizens: the leak the targeting was added to stop.
+   * It used to be `useState('HQ_OFFICER')` — a COMMAND role — so `consoleAccess`
+   * was never handed an unknown role. That function was written to prevent
+   * exactly that, and says so:
+   *
+   *     An unknown role gets the smallest possible console rather than the
+   *     largest: while the profile is still loading, `userRole` is '', and a
+   *     default of "show everything" would flash the whole command console at
+   *     an agency liaison on every page load before settling.
+   *
+   * `userRole` was never ''. The "Unknown, or still loading" branch was
+   * unreachable, and its RESOLVING ACCESS subtitle had never once been rendered
+   * despite being under test.
+   *
+   * And the window was not merely "until the read returns". This body is gated
+   * on `authLoading`, cleared by the auth effect below — which set the role
+   * from `user_metadata` BEFORE its own `profiles` read and before clearing the
+   * gate. Two concurrent reads of the same row race; when the auth effect won,
+   * the first visible render was command by an active claim.
+   *
+   * What the flash cost, beyond chrome: the advisory banner reads command as
+   * "sees everything, because they sent it", so a liaison was shown advisories
+   * addressed to other agencies and to citizens (T-34); and an agency tab
+   * clicked in that window mounted `AgencyPortal` with `isHq` true and no
+   * agency, which froze that liaison on the Police desk for the life of the
+   * mount (T-35).
    *
    * The app learned this rule once already, in the responder tier filter:
    * "you cannot be assigned something when we do not know who you are". Same
@@ -346,7 +364,7 @@ export default function DashboardPage() {
    * somebody inside the affected area costs more than showing it to somebody
    * outside — but unknown IDENTITY fails closed.
    */
-  const [roleResolved, setRoleResolved] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
 
   // Load real user role from Supabase session
   useEffect(() => {
@@ -360,14 +378,15 @@ export default function DashboardPage() {
             .eq('id', user.id)
             .single();
           if (profile?.role) {
-            setUserRole(profile.role as string);
-            // RESOLVED ONLY HERE. `profiles.role` is the authoritative source —
+            // THE ONLY WRITER. `profiles.role` is the authoritative source —
             // it is what `requireRole` reads with admin privileges and what the
-            // RLS policies key on. The other path below sets `userRole` from
+            // RLS policies key on. A second path used to set `userRole` from
             // `user_metadata.role`, which in Supabase is USER-WRITABLE: that is
             // H-7, "role source user-writable", and a value a user can set must
-            // not be what decides they are command and may see every advisory.
-            setRoleResolved(true);
+            // not be what decides they are command. It is gone; an account with
+            // no role in `profiles` keeps the smallest console, which is the
+            // truth about it.
+            setUserRole(profile.role as string);
             // Land where this role belongs. It used to send liaisons to the
             // agency tab but leave every other tab reachable, so the statewide
             // map was one click away for an officer of another organisation.
@@ -400,7 +419,9 @@ export default function DashboardPage() {
   // polling-unit officer simply gets nothing here rather than an error.
   useEffect(() => {
     const commandRoles = ['HQ_OFFICER', 'HQ_COMMAND', 'ADMIN', 'LGA_COMMAND'];
-    if (!commandRoles.includes(userRole)) return;
+    // `null` until the profile read lands, and not a member of any list: no
+    // privileged read is issued on the strength of a role we do not have yet.
+    if (!userRole || !commandRoles.includes(userRole)) return;
     const loadOpen = async () => {
       const { count, error } = await supabase
         .from('sim_channel_events')
@@ -423,7 +444,7 @@ export default function DashboardPage() {
   // Note: uses userRole directly since isHqUser is declared later in the component
   useEffect(() => {
     const hqRoles = ['HQ_OFFICER', 'HQ_COMMAND', 'ADMIN'];
-    if (!hqRoles.includes(userRole)) return;
+    if (!userRole || !hqRoles.includes(userRole)) return;
     const loadUnread = async () => {
       const { count } = await supabase
         .from('agency_action_reports')
@@ -634,12 +655,11 @@ export default function DashboardPage() {
       }
 
       setUser(u);
-      // Presentation only, and deliberately NOT marked resolved: this reads
-      // `user_metadata.role`, which the user can write (H-7), and defaults to
-      // HQ_COMMAND when it is absent. Either way it is a guess, and the
-      // advisory banner must not take a guess as "this person is command". The
-      // profiles read in the effect above is what resolves it.
-      setUserRole(u.user_metadata?.role || 'HQ_COMMAND');
+      // This used to read `setUserRole(u.user_metadata?.role || 'HQ_COMMAND')`.
+      // `user_metadata` is writable by the user it belongs to (H-7), and the
+      // fallback claimed the top of the command chain for an account with no
+      // role in its metadata at all. The role comes from `profiles` and only
+      // from there; see `userRole`.
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -1539,7 +1559,7 @@ export default function DashboardPage() {
 
             <div style={{ textAlign: 'right', paddingLeft: 4 }}>
               <p style={{ fontSize: 10, fontWeight: 900, color: 'var(--text-primary)' }}>{(user?.email || 'HQ').split('@')[0].toUpperCase()}</p>
-              <p style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)' }}>{userRole.replace('_', ' ')}</p>
+              <p style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)' }}>{(userRole ?? access.subtitle).replace('_', ' ')}</p>
             </div>
           </div>
         </header>
@@ -1552,12 +1572,16 @@ export default function DashboardPage() {
             decorative badge (T-28). */}
         <SystemAlertListener
           viewer={{
-            // Both of these are withheld until the role is this account's own.
-            // See `roleResolved`: the default role is HQ_OFFICER, and handing
-            // that to the filter tells it the viewer is command and may see
-            // everything — which is whoever happens to be looking.
-            agency: roleResolved ? access.agency : null,
-            isCommand: roleResolved && isHqUser,
+            // Both come from the role, and the role is `null` until the
+            // `profiles` read lands — so until then `access.agency` is null and
+            // `isHqUser` is false, which is the most restricted viewer this
+            // filter has. There was a `roleResolved ? ... : null` guard here
+            // for one commit; it was a patch over the privileged default, and
+            // once the default was gone it was dead logic reading as the thing
+            // that protected you. The default is what protects you, and it
+            // protects every other consumer of the role at the same time.
+            agency: access.agency,
+            isCommand: isHqUser,
             geoLga: userProfile?.geo_lga ?? null,
             geoWard: userProfile?.geo_ward ?? null,
             geoPu: userProfile?.geo_pu ?? null,
@@ -1978,7 +2002,7 @@ export default function DashboardPage() {
           {activeTab === 'sim' && <SimChannelEvents />}
           {activeTab === 'agency' && (
             <AgencyPortal
-              userRole={userRole}
+              userRole={userRole ?? ''}
               userAgency={userAgencyCode}
               isHq={isHqUser}
               userEmail={user?.email || ''}

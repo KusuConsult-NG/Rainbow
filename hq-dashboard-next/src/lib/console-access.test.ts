@@ -122,12 +122,20 @@ describe('a field responder', () => {
 
 describe('a role that has not resolved yet', () => {
   it('gets the smallest console, not the largest', () => {
-    // `userRole` is '' while the profile loads. Defaulting to "show
-    // everything" would flash the full command console at an agency liaison on
-    // every page load before settling.
+    // This branch was correct and UNREACHABLE for its whole life, which these
+    // assertions could not tell. The comment here used to say "`userRole` is ''
+    // while the profile loads"; it was `useState('HQ_OFFICER')` — a command
+    // role — so the caller never once handed this function an unknown role and
+    // the flash it exists to prevent happened on every page load (T-35). The
+    // role is `null` until the `profiles` read lands now, which is what makes
+    // the rest of this block something that actually runs.
     const access = consoleAccess('');
     expect(access.tabs).not.toContain('admin');
     expect(access.tabs).not.toContain('broadcast');
+    // Not `agency` either. An agency tab clicked before the role resolved
+    // mounted the portal with `isHq` true and no agency, which froze an Army
+    // liaison on the Police desk for the life of the mount.
+    expect(access.tabs).not.toContain('agency');
     expect(access.administration).toBe(false);
     expect(consoleAccess(undefined).tabs).toEqual(access.tabs);
     expect(consoleAccess(null).tabs).toEqual(access.tabs);

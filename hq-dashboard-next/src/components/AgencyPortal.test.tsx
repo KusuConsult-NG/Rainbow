@@ -163,3 +163,65 @@ describe('AgencyPortal', () => {
     expect(within(tile).getByText('1')).toBeInTheDocument();
   });
 });
+
+describe('whose desk this is', () => {
+  // The dashboard renders this component before it knows whose console it is.
+  // `userRole` is declared `useState('HQ_OFFICER')` — a command role — so until
+  // the `profiles.role` read returns, `consoleAccess` reports the command
+  // console and the dashboard passes `isHq: true` with no agency. That is the
+  // flash `consoleAccess`'s own doc comment says it exists to prevent (T-34,
+  // T-35), and these are the props it hands over meanwhile.
+  const unresolved = {
+    userRole: 'HQ_OFFICER',
+    userAgency: undefined,
+    isHq: true,
+    userEmail: 'liaison@army.mil.ng',
+    userId: 'l-1',
+  };
+  const armyLiaison = {
+    ...unresolved,
+    userRole: 'ARMY_LIAISON',
+    userAgency: 'ARMY',
+    isHq: false,
+  };
+
+  beforeEach(() => {
+    db.setRows('alerts', [incident('a-1', 'POLICE'), incident('a-2', 'ARMY')]);
+  });
+
+  it('an Army liaison whose role arrived late is not left on the Police desk', async () => {
+    const AgencyPortal = await load();
+    const { rerender } = render(<AgencyPortal {...unresolved} />);
+    // While the role is unknown the portal must not name a desk at all: the
+    // first agency in the list is not a guess worth making.
+    rerender(<AgencyPortal {...armyLiaison} />);
+
+    expect(await screen.findByText(/NIGERIAN ARMY/)).toBeInTheDocument();
+    expect(screen.queryByText(/NIGERIA POLICE FORCE/)).not.toBeInTheDocument();
+    // And the data is theirs. The portal reading the Police desk for an Army
+    // liaison does not fail loudly — RLS returns no rows and the portal
+    // reports the Police as having no incidents, no personnel and no
+    // deployments, on the only screen this role has.
+    expect(await screen.findByText(/Incident for ARMY/)).toBeInTheDocument();
+    expect(screen.queryByText(/Incident for POLICE/)).not.toBeInTheDocument();
+  });
+
+  it('says it does not know yet rather than naming an agency', async () => {
+    const AgencyPortal = await load();
+    render(<AgencyPortal {...unresolved} isHq={false} />);
+    // A non-HQ account with no agency is not the Police. It used to default to
+    // `'POLICE'` literally, in both branches.
+    await waitFor(() =>
+      expect(screen.queryByText(/Loading agency data/i)).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/NIGERIA POLICE FORCE/)).not.toBeInTheDocument();
+    expect(screen.getByText(/RESOLVING/i)).toBeInTheDocument();
+  });
+
+  it('an HQ operator still gets a desk and a switcher', async () => {
+    const AgencyPortal = await load();
+    render(<AgencyPortal {...unresolved} userRole="HQ_COMMAND" />);
+    expect(await screen.findByText(/NIGERIA POLICE FORCE/)).toBeInTheDocument();
+    expect(screen.getByRole('tablist', { name: 'Agency' })).toBeInTheDocument();
+  });
+});

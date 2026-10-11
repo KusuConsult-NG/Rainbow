@@ -1246,7 +1246,8 @@ only thing that distinguishes a defect from a preference.
 | T-31 | **The local stand-in implemented no database functions, and the run was green over it.** It routed `/rest/v1/<table>` and had no route for `/rest/v1/rpc/<fn>`, so every `.rpc()` came back `400 relation "public.rpc/<fn>" does not exist` — seven browser-reachable functions, including the one the Forensic Audit screen is built on and the one that issues a handset's SMS fallback key on every sign-in. The console's own `report.json` recorded `[AUDIT_TRAIL_ERR]` while the run reported 46/46 and filed a photograph of the empty screen as evidence it renders. | ✅ an RPC router with the seven implemented, `501 FAKE_NO_RPC` naming anything that is not, and `rpcMisses` asserted by both harnesses so a refusal fails the run |
 | T-32 | **The audit trail attributed every human action to SYSTEM.** `audit_trail()` read the actor from `by`, which only the SQL writers set; both the console and the app write `by_email` — the key the column's own comment has documented since `20260722000000`. So every escalation an officer performed read as the system's, and the machine's were the only accurate attributions on a screen whose purpose is to say who did what. The behaviour test planted `"by":"SYSTEM"`, the one shape that worked, and never asserted the actor. | ✅ `20261019000000` reads `by` then `by_email` (both exist on production and the log is append-only, so neither can be rewritten); both shapes and a no-actor entry asserted in SQL, and the browser run asserts the operator is named |
 | T-33 | **C-6 was unanswerable for three reasons and two had quietly stopped being true.** The row said no Google CLI was installed and that the network policy denied the endpoint. `gcloud` 570.0.0 is in the container, and the Cloud Functions API answers `401 UNAUTHENTICATED` — a request that arrived and was refused for want of a credential, which is not what a blocked CONNECT looks like. | ✅ blocker narrowed to one credential, and `scripts/is_the_old_backend_deployed.sh` answers it: three outcomes by exit code, the two never-hardened endpoints marked, `allUsers` bindings called out, deletion commands printed, nothing deleted and no function ever called |
-| T-34 | **The console was command until proven otherwise.** `userRole` in `dashboard/page.tsx` is declared `useState('HQ_OFFICER')` — a COMMAND role — so `isHqUser` is true from the first render until the `profiles.role` read returns over the network. The advisory banner I had just given targeting reads that as "sees everything, because they sent it", so for that window every console user was shown every live advisory, including ones addressed to other agencies and to citizens: the T-29 leak reopened on the console by a default value. Found by reading my own fix, not by a test — every test sets the role up front, which is the one thing the real client cannot do. | ✅ a `roleResolved` flag, set only by the authoritative `profiles` read and never from `user_metadata` (H-7); 4 tests naming the unresolved viewer; `scripts/check_identity_resolved_before_scoping.py` in CI, run against 11 mutations and failing on each by name |
+| T-34 | **The console was command until proven otherwise.** `userRole` in `dashboard/page.tsx` is declared `useState('HQ_OFFICER')` — a COMMAND role — and the console body is gated on `authLoading`, which the auth effect clears after a `profiles` read it issues concurrently with the role read. Whichever returns first wins, so whenever the auth effect wins, the console's first visible render has `isHqUser` true. The advisory banner I had just given targeting reads that as "sees everything, because they sent it", so for that window every console user was shown every live advisory, including ones addressed to other agencies and to citizens: the T-29 leak reopened on the console by a default value. Found by reading my own fix, not by a test — every test sets the role up front, which is the one thing the real client cannot do. | ✅ superseded by T-35's fix, which is the same defect at its source: the role is `null` until the `profiles` read lands, so every consumer is protected at once rather than one guard per surface. 4 tests naming the unresolved viewer |
+| T-35 | **`consoleAccess` was written to stop exactly this, and was never given the chance.** Its doc comment says an unknown role must get the smallest console because *"a default of 'show everything' would flash the whole command console at an agency liaison on every page load"* — and that `userRole` is `''` while the profile loads. It was `useState('HQ_OFFICER')`, and a second path then set it from `u.user_metadata?.role || 'HQ_COMMAND'` — user-writable metadata (H-7) falling back to the top of the command chain. So the function was never handed an unknown role and its `RESOLVING ACCESS` branch was unreachable despite being under test. Worse than a default left unwritten: the console body is gated on `authLoading`, and the effect that clears it is the same one that claimed `'HQ_COMMAND'` on its way there, before its own `profiles` read. The effect that opened the door claimed command walking through it. Clicking the agency tab in that window mounted `AgencyPortal` with `isHq` true and no agency, and a `useState` initialiser runs once: an Army liaison was frozen on the **Police** desk for the life of the mount, with the HQ-only switcher gone when their real role arrived. RLS correctly returned nothing, so the portal reported the Police as having no incidents, no personnel and no deployments — on the only screen that role has. `userAgency \|\| 'POLICE'` put the same guess in the non-HQ branch. | ✅ the role is `null` until `profiles.role` says otherwise, the `user_metadata` reader is deleted, and the portal derives its desk instead of freezing it — an account with no agency is told so rather than shown somebody else's empty desk; 3 component tests, 2 of which fail against the old code, and the gate rewritten around the default with 16 mutations, each caught |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -2877,9 +2878,19 @@ const [userRole, setUserRole] = useState('HQ_OFFICER');
 
 HQ_OFFICER is a command role. `isCommand` is the one field in that object that
 short-circuits every other rule — command composes advisories and withdraws
-them, so command sees all of them regardless of who they were addressed to. So
-between the first render and the moment the `profiles.role` read came back over
-the network, **every** console user was command: a Police liaison was shown the
+them, so command sees all of them regardless of who they were addressed to.
+
+How long that lasts needs stating precisely, because it is not "until the role
+read returns". The console body is gated on `authLoading`, and the effect that
+clears it issues its own `profiles` read — concurrent with, and independent of,
+the role effect's read of the same row. Whichever request returns first wins. If
+the role read wins there is no window at all; if the auth effect wins, the
+console's first visible render is as command. T-35 found the sharper half: that
+same effect set the role from `user_metadata` *before* its read, so when it won
+the race the first render was command by an active claim rather than by a
+default left unwritten.
+
+In that window **every** console user was command: a Police liaison was shown the
 advisory addressed to the Army, and the one addressed to citizens of one ward,
 and then they disappeared when their actual role arrived.
 
@@ -2894,7 +2905,7 @@ written for — chrome, so the console does not flicker through a reduced layout
 on every load — and a dangerous one the moment a filter reads it. Nothing marked
 the difference.
 
-So the console now records whether it knows:
+So the console first recorded whether it knew:
 
 ```tsx
 const [roleResolved, setRoleResolved] = useState(false);
@@ -2903,8 +2914,18 @@ agency: roleResolved ? access.agency : null,
 isCommand: roleResolved && isHqUser,
 ```
 
-Withholding both leaves the most restricted viewer the filter has: no agency, not
-command. Statewide advisories still dock — an unscoped advisory is addressed to
+**That fix is gone, and T-35 is why.** Reading the surrounding code afterwards
+turned up the same default feeding a second surface, and then the far more
+damning fact that `consoleAccess` was written to prevent precisely this and had
+never been given an unknown role to work with. Guarding one consumer at a time
+was the wrong altitude: the role is read in a dozen places. It is `null` until
+the `profiles` read lands now, which makes `access.agency` null and `isHqUser`
+false meanwhile without any guard at the call site. The two lines above became
+dead logic that read as the thing protecting you, so they were removed.
+
+What survives from this finding is the shape of the leak and the four tests
+below. Withholding both identity fields leaves the most restricted viewer the
+filter has: no agency, not command. Statewide advisories still dock — an unscoped advisory is addressed to
 whoever is looking, and the person at the console is somebody — and nothing
 addressed to an agency or to citizens does. One of the four new tests states that
 as a property rather than a case: whatever the profile read turns out to say, the
@@ -2938,22 +2959,169 @@ viewer whose agency is not yet known is delivered nothing that was addressed to 
 agency. The app had already learned the identity half once, in the responder tier
 filter: *you cannot be assigned something when we do not know who you are.*
 
-`scripts/check_identity_resolved_before_scoping.py` holds seven claims — the flag
-starts false, exactly one place sets it, that place is the `profiles` read and
-contains no `user_metadata`, the viewer literal carries exactly the fields this
-filter knows about, its identity fields are gated, its place fields are not, and
-`advisoryReaches` still treats an unknown agency as "not this agency". The last
-one is cross-file and is the load-bearing one: gating identity hands the filter
-`null`, and if an unknown agency ever failed open the way an unknown place does,
-the gate would withhold nothing and the whole fix would be theatre. Eleven
-mutations, each caught, each named — including the one that reproduces the
-original defect and the one that reproduces my incomplete fix.
+`scripts/check_identity_resolved_before_scoping.py` was written for this finding
+and then rewritten for T-35, around the default rather than the one consumer. It
+is described there.
 
-The check also failed on its own first run, which is worth a line: it scans for
-`user_metadata` near the resolution and found it in the comment *explaining why
-that path may not resolve the role*. A check that cannot tell prose about a hazard
-from the hazard will punish the person who documents it, so it strips comments
-first.
+The check has now failed on its own explanation twice, which is worth recording
+because the second failure is the subtler bug. It scans for `user_metadata` and
+found it in the comment *recording why that path was deleted*. The first version
+did not strip comments at all. The second stripped them a line at a time — and a
+line in the middle of a `/** ... */` block has no comment marker on it, so a
+doc comment sailed straight through. It now blanks comments across the whole
+file in one pass, replacing each character with a space so the newlines survive
+and a failure message still points at the right line. A check that cannot tell
+prose about a hazard from the hazard punishes whoever documents it.
+
+### T-35. The guard was written, documented, tested — and unreachable
+
+T-34 was fixed by gating the one consumer I had just written. Reading the code
+around it afterwards turned this up, and it is the same defect one level up.
+
+`src/lib/console-access.ts` is the module that answers "what may this account
+reach". Its doc comment:
+
+> An unknown role gets the smallest possible console rather than the largest:
+> **while the profile is still loading, `userRole` is `''`**, and a default of
+> "show everything" would flash the whole command console at an agency liaison
+> on every page load before settling.
+
+Every clause of that is right except the premise. `userRole` was never `''`:
+
+```tsx
+const [userRole, setUserRole] = useState('HQ_OFFICER');   // a COMMAND role
+...
+setUserRole(u.user_metadata?.role || 'HQ_COMMAND');       // user-writable (H-7)
+```
+
+So `consoleAccess` was **never once handed an unknown role**. Its "Unknown, or
+still loading" branch — `tabs: ['map', 'alerts']`, subtitle `RESOLVING ACCESS` —
+was unreachable for its entire life.
+
+The second line is the one that makes this more than a stale default. The
+console body never renders until `authLoading` clears, and the effect that
+clears it is the same effect that called `setUserRole(u.user_metadata?.role ||
+'HQ_COMMAND')` — **before** its own `profiles` read, and before clearing the
+gate. So the effect that opened the door claimed a command role walking through
+it. The role effect is a second, concurrent read of the same `profiles` row, and
+whichever request returns first wins: if the role read wins there is no window,
+and if the auth effect wins the console's first visible render is as command,
+with certainty rather than by accident. The declared `'HQ_OFFICER'` default is
+the same claim one step earlier, and is exactly what would be left if the
+metadata line were deleted without fixing the default — which is why both go.
+
+What renders in that window is the whole command navigation: statewide map,
+incident feed, history, broadcast composer, Inter-Agency Command, admin, audit,
+settings, uninstall, SIM — for an agency liaison.
+
+Two tests in `console-access.test.ts` asserted that branch and passed. They were
+testing a function, correctly, and nothing was testing whether the caller could
+ever reach it. This is the report's own recurring signature — *a thing being
+present is not the same as a thing being visible* — in the one place that is
+hardest to see it, a tested branch.
+
+#### The second consumer: a liaison locked onto the Police desk
+
+The agency tab is rendered during the flash, because command's tab list includes
+it. Clicking it mounts `AgencyPortal`, which began:
+
+```tsx
+const [selectedAgency, setSelectedAgency] = useState<string>(
+  isHq ? (AGENCIES[0].code) : (userAgency || 'POLICE')
+);
+```
+
+A `useState` initialiser runs **once**. In that window `isHq` is true and
+`userAgency` is undefined, so the desk is seeded to `AGENCIES[0].code` —
+`'POLICE'`. When the real role lands, `isHq` goes false, and the agency switcher
+is `{isHq && ...}`, so the one control that could have moved them is removed.
+
+An **Army** liaison is then on the **Police** desk for the life of the mount,
+with no way off short of a reload. The four queries run `.eq('agency','POLICE')`;
+RLS does its job and returns nothing; `loadAgencyData` catches and returns empty
+lists by design, so the portal renders the Nigeria Police Force heading over "no
+incidents", `0/0` personnel, no reports and no deployments. Their own agency's
+incidents, roster and deployments are invisible, on the only screen their role
+has — and nothing anywhere says the desk is not theirs.
+
+The non-HQ branch's `userAgency || 'POLICE'` is the same guess written out
+literally, and it needs no race at all: any account with no agency — sector
+command, a responder at a desk — that opens that tab is shown the Police desk,
+empty.
+
+Worth being precise about the severity, because RLS is doing its job throughout:
+**no data crossed an agency boundary.** What crossed was the claim. The console
+told a liaison, in a heading and four empty panels, that another agency has
+nothing going on. That is the same class as the finding this report records
+about the alert badge — *"a badge that says nothing when it could not ask is the
+same lie as an empty board"* — and the console's own comment on the SIM badge
+says it in the opposite direction: *"a failed count must not read as zero"*.
+
+#### The fix is the default, not the guards
+
+The role is read in a dozen places in `page.tsx`. Guarding them one at a time is
+what T-34 did and it does not scale, so:
+
+```tsx
+const [userRole, setUserRole] = useState<string | null>(null);
+```
+
+`consoleAccess(null)` now returns what it was written to return. `isHqUser` is
+false, `access.agency` is null, and the smallest console does not include the
+agency tab at all — so the portal cannot be mounted in that window, and T-34's
+two guards became dead logic and were removed. The viewer literal reads
+`agency: access.agency, isCommand: isHqUser` again, protected by the role rather
+than by a flag beside it.
+
+The `user_metadata` line is **deleted** rather than left as presentation. With
+the role null-until-known, a path that sets it from metadata the account can
+write would immediately re-claim command — and its fallback was `'HQ_COMMAND'`,
+so an account with no role in its metadata asserted the top of the chain. The
+`profiles` read is the only writer now. An account whose profile has no role
+keeps the smallest console, which is the truth about it: RLS would refuse that
+account anyway.
+
+`AgencyPortal` derives its desk instead of freezing it:
+
+```tsx
+const [hqSelection, setHqSelection] = useState<string>(AGENCIES[0].code);
+const selectedAgency: string | null = isHq ? hqSelection : (userAgency || null);
+```
+
+HQ chooses; a liaison does not, because it is their own. `null` means we do not
+know whose desk this is, and nothing is read or subscribed for it — the portal
+says so instead, and points at the remedy ("ask HQ to grant agency access").
+
+#### Coverage
+
+Three component tests in `AgencyPortal.test.tsx`, two of which fail against the
+old code — one re-rendering with the resolved liaison props and asserting the
+desk follows (it stayed on the Police desk), one asserting a non-HQ account with
+no agency is not shown a real agency's name (it was shown the Police). The third
+is the HQ case, which must keep its desk and its switcher.
+
+`scripts/check_identity_resolved_before_scoping.py` was rewritten around the
+default. Five claims at the source — the role state starts `null`, exactly one
+thing sets it, that one setter reads `profile.role`, nothing in the console reads
+`user_metadata`, and `consoleAccess` is handed the role with no `||` putting one
+back — and three at the surfaces this was caught at: the advisory viewer's
+identity fields come from the role and its place fields are not conditional on
+identity, `advisoryReaches` still treats an unknown agency as "not this agency",
+and `AgencyPortal` neither seeds state from `userAgency` nor falls back to a
+literal agency code.
+
+Sixteen mutations, each caught and each named by the check that caught it,
+including the original defect restored verbatim, a *non*-command default
+(`'RESPONDER'` — still a claim about an account we know nothing about), the
+`user_metadata` reader returning, `consoleAccess(userRole || 'HQ_OFFICER')`, and
+both halves of the portal's frozen desk.
+
+One mutation was **not** caught on the first run, and it is the one I would have
+missed by hand: gating a place field on identity
+(`geoWard: isHqUser ? ... : null`). The check required place to be read from
+`userProfile`, which that mutation still did. Place failing open and identity
+failing closed is the asymmetry this whole finding turns on, and a check that
+only holds one end of it is not holding the thing that matters.
 
 ---
 
