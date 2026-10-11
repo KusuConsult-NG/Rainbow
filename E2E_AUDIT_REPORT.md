@@ -2017,6 +2017,21 @@ This is the first end-to-end coverage T-29's fix has had. Until now it was
 proven by seventeen widget tests and nothing else, and the browser run's own
 advisory fixture was one the filter could not meaningfully be tested against.
 
+Observed, in a real browser against a release build of the app:
+
+```
+PASS  a ward-scoped advisory reaches everybody posted to that ward
+        — 7 role(s) in NARAGUTA all saw it
+PASS  and does not reach the liaison posted to another ward
+        — the ARMY liaison in PANYAM was not shown it
+PASS  a legacy advisory addressed by target_type still reaches its audience
+        — the AGENTS advisory reached a responder through the legacy column
+19/19 checks passed, 211 mobile screenshots
+```
+
+The screens pass is 19/19 now, from 14/15 at the start of this work: fourteen
+page errors fixed, the RPC refusal caught, and these three.
+
 #### Still open: `target_agency` is written and read by nothing
 
 `MassBroadcast.tsx` offers "transmit to one agency" and writes
@@ -2264,7 +2279,7 @@ assertions, no failures**, and `run.sh` exits 0.
 |---|---|---|
 | console screens | 46/46, with the audit screen refused and photographed empty | **49/49** — the refusal, the audit rows and the actor all asserted |
 | console controls | 33/33 | **36/36** |
-| mobile screens | 14/15, fourteen page errors | **16/16**, clean, `register_sms_device` answered for all eight roles |
+| mobile screens | 14/15, fourteen page errors | **19/19**, clean — `register_sms_device` answered for all eight roles, plus the three advisory assertions added after that run |
 | mobile controls | never run in this container | **36/36**, 225 controls exercised |
 | camera and microphone | never run in this container | **17/17** |
 | messaging round trip | never run in this container | **17/17** |
