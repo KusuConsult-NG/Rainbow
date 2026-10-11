@@ -26,6 +26,47 @@ OUT="${E2E_OUT:-$ROOT/local_e2e_screenshots}"
 export NO_PROXY="127.0.0.1,localhost"
 export no_proxy="127.0.0.1,localhost"
 
+# WHERE THE BROWSER IS.
+#
+# In CI `npm ci` downloads puppeteer's own Chrome and it resolves itself. A
+# sandbox that sets PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 has a Chromium already
+# and no puppeteer download, so every pass died at launch with "Could not find
+# Chrome" — after the build, after the server was up, forty seconds in. The
+# browser was on disk the whole time and the run needed one environment
+# variable that nothing recorded.
+#
+# Resolved here, once, rather than left to whoever remembers to export it:
+# an explicit PUPPETEER_EXECUTABLE_PATH wins, then puppeteer's own cache
+# (CI), then a sandbox Chromium. Unset if none is found, so puppeteer reports
+# its own error rather than this script inventing a worse one.
+if [[ -z "${PUPPETEER_EXECUTABLE_PATH:-}" ]]; then
+  # Puppeteer's own download, which is what CI has. Left to resolve itself:
+  # it knows which build its version wants and this script must not guess.
+  shopt -s nullglob
+  puppeteer_own=("${PUPPETEER_CACHE_DIR:-$HOME/.cache/puppeteer}"/chrome*/*/chrome \
+                 "${PUPPETEER_CACHE_DIR:-$HOME/.cache/puppeteer}"/chrome*/*/chrome-*/chrome)
+  shopt -u nullglob
+  if (( ${#puppeteer_own[@]} == 0 )); then
+    for candidate in \
+      /opt/pw-browsers/chromium \
+      /usr/bin/chromium \
+      /usr/bin/chromium-browser \
+      /usr/bin/google-chrome
+    do
+      # -f as well as -x: a DIRECTORY is executable, and passing one to
+      # puppeteer fails with a confusing ENOENT rather than "not a browser".
+      if [[ -f "$candidate" && -x "$candidate" ]]; then
+        export PUPPETEER_EXECUTABLE_PATH="$candidate"
+        echo "==> browser: $candidate (puppeteer has no download of its own)"
+        break
+      fi
+    done
+    if [[ -z "${PUPPETEER_EXECUTABLE_PATH:-}" ]]; then
+      echo "==> no browser anywhere; the browser passes will fail at launch and say so" >&2
+    fi
+  fi
+fi
+
 # Is anything listening? No curl, no lsof: a bare TCP connect, which cannot be
 # fooled by a server that answers 404.
 port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && exec 3<&- || return 1; }

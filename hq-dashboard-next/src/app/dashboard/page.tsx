@@ -22,6 +22,7 @@ import { usePersistedTheme } from '@/hooks/usePersistedTheme';
 import { useToast } from '@/components/ToastProvider';
 import { plateauTacticalMap, TacticalJurisdiction, TacticalWard, STATE_SECURITY_AGENCIES } from '@/lib/tactical_mapping';
 import { AGENCY_LIST, AGENCY_TARGET_ALL } from '@/lib/agencies';
+import { placeField } from '@/lib/place-label';
 import {
   ShieldAlert, Shield, Map as MapIcon, Users, Radio, Settings,
   LogOut, AlertTriangle, CheckCircle, ChevronUp, Phone,
@@ -2191,7 +2192,7 @@ export default function DashboardPage() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>LGA / Sector:</span>
-                        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', textTransform: 'uppercase' }}>{selectedReport.geo_lga || 'STATE HQ'}</span>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', textTransform: 'uppercase' }}>{placeField(selectedReport.geo_lga, 'lga')}</span>
                       </div>
                       {selectedReport.geo_ward && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -3149,7 +3150,7 @@ Respond ONLY with a JSON object with this exact shape:
             borderRadius: 6,
             display: 'inline-block'
           }}>
-            PU: {a.geo_pu || 'SECTOR HQ'}
+            PU: {placeField(a.geo_pu, 'pu')}
           </div>
           {a.lat && a.lng && (
             <div style={{ fontSize: 8, color: 'var(--text-dim)', marginTop: 6, letterSpacing: 0.5, fontFamily: 'monospace' }}>

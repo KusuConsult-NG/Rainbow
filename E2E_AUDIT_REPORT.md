@@ -1248,6 +1248,7 @@ only thing that distinguishes a defect from a preference.
 | T-33 | **C-6 was unanswerable for three reasons and two had quietly stopped being true.** The row said no Google CLI was installed and that the network policy denied the endpoint. `gcloud` 570.0.0 is in the container, and the Cloud Functions API answers `401 UNAUTHENTICATED` — a request that arrived and was refused for want of a credential, which is not what a blocked CONNECT looks like. | ✅ blocker narrowed to one credential, and `scripts/is_the_old_backend_deployed.sh` answers it: three outcomes by exit code, the two never-hardened endpoints marked, `allUsers` bindings called out, deletion commands printed, nothing deleted and no function ever called |
 | T-34 | **The console was command until proven otherwise.** `userRole` in `dashboard/page.tsx` is declared `useState('HQ_OFFICER')` — a COMMAND role — and the console body is gated on `authLoading`, which the auth effect clears after a `profiles` read it issues concurrently with the role read. Whichever returns first wins, so whenever the auth effect wins, the console's first visible render has `isHqUser` true. The advisory banner I had just given targeting reads that as "sees everything, because they sent it", so for that window every console user was shown every live advisory, including ones addressed to other agencies and to citizens: the T-29 leak reopened on the console by a default value. Found by reading my own fix, not by a test — every test sets the role up front, which is the one thing the real client cannot do. | ✅ superseded by T-35's fix, which is the same defect at its source: the role is `null` until the `profiles` read lands, so every consumer is protected at once rather than one guard per surface. 4 tests naming the unresolved viewer |
 | T-35 | **`consoleAccess` was written to stop exactly this, and was never given the chance.** Its doc comment says an unknown role must get the smallest console because *"a default of 'show everything' would flash the whole command console at an agency liaison on every page load"* — and that `userRole` is `''` while the profile loads. It was `useState('HQ_OFFICER')`, and a second path then set it from `u.user_metadata?.role || 'HQ_COMMAND'` — user-writable metadata (H-7) falling back to the top of the command chain. So the function was never handed an unknown role and its `RESOLVING ACCESS` branch was unreachable despite being under test. Worse than a default left unwritten: the console body is gated on `authLoading`, and the effect that clears it is the same one that claimed `'HQ_COMMAND'` on its way there, before its own `profiles` read. The effect that opened the door claimed command walking through it. Clicking the agency tab in that window mounted `AgencyPortal` with `isHq` true and no agency, and a `useState` initialiser runs once: an Army liaison was frozen on the **Police** desk for the life of the mount, with the HQ-only switcher gone when their real role arrived. RLS correctly returned nothing, so the portal reported the Police as having no incidents, no personnel and no deployments — on the only screen that role has. `userAgency \|\| 'POLICE'` put the same guess in the non-HQ branch. | ✅ the role is `null` until `profiles.role` says otherwise, the `user_metadata` reader is deleted, and the portal derives its desk instead of freezing it — an account with no agency is told so rather than shown somebody else's empty desk; 3 component tests, 2 of which fail against the old code, and the gate rewritten around the default with 16 mutations, each caught |
+| T-36 | **The one layer that refused to guess a place was overruled by the layer that displays it.** `AlertService` writes `geo_lga` NULL rather than infer a jurisdiction — "submitting without jurisdiction rather than guessing one" — and the responder feed filter treats a null LGA as reaching everybody. Five screens named one anyway: a responder's card read **PLATEAU · HQ · UNIT**, and `· UNIT` on nearly every card since there is no polling unit from coordinates; the dispatch roster read **JOS**, which is not one of Plateau's seventeen LGAs, and only statewide command — the account dispatching across all seventeen — could see it; the console dossier read **STATE HQ** three lines above a guard that DROPS an absent ward; a map card read **PU: SECTOR HQ**; and the AI triage prompt was told **LGA: STATE HQ** where the Type, Ward and Description lines around it all say `N/A`. Found by sweeping for the shape after T-35, not by a test. The same sweep found the console storing `sender_role: actor.role \|\| 'HQ_COMMAND'` on an incident chat message and the forensic replay naming an unattributed message as from `Responder`/`AGENT` — T-32 with the attribution running the other way. | ✅ one tested place-label module per codebase (`place_label.dart`, `place-label.ts`), 20 tests; a missing segment is dropped and nothing is named that was not recorded; the chat stores `UNKNOWN` rather than Command, asserted by a test that fails against the old code; `scripts/check_no_invented_places.py` in CI, which flags a place fallback only where it is RENDERED — so the clustering sentinel and the fail-open escalation argument are untouched — with 12 mutations, 7 caught and 5 correctly allowed |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -3122,6 +3123,165 @@ missed by hand: gating a place field on identity
 `userProfile`, which that mutation still did. Place failing open and identity
 failing closed is the asymmetry this whole finding turns on, and a check that
 only holds one end of it is not holding the thing that matters.
+
+### T-36. Three layers, and only the display guessed
+
+Found by sweeping for the shape of T-35 — a value invented where none was
+recorded — rather than by a test. No test was going to find it: every fixture
+has a jurisdiction.
+
+`AlertService` is unusually careful about this. Its comment:
+
+> The reporter's profile is deliberately NOT a fallback here. Filing an
+> incident against the address someone registered at is how a report from Mangu
+> is routed to a unit in Jos, and it would be indistinguishable afterwards from
+> a measured position. C-5 was this mistake with coordinates; this is the same
+> mistake with jurisdiction.
+
+and when the coordinates do not resolve to a Plateau LGA it logs "submitting
+without jurisdiction rather than guessing one" and writes NULL. The responder
+feed filter agrees: `alert['geo_lga'] == null` reaches everybody, because an
+unknown place must fail open.
+
+Then the screens:
+
+| where | what it rendered |
+|---|---|
+| responder's incident card | `${geo_lga ?? 'PLATEAU'} · ${geo_ward ?? 'HQ'} · ${geo_pu ?? 'UNIT'}` |
+| dispatch roster | `Role: ${role ?? 'RESPONDER'} · ${geo_lga ?? 'JOS'}` |
+| console incident dossier | `LGA / Sector: {geo_lga \|\| 'STATE HQ'}` |
+| console map card | `PU: {geo_pu \|\| 'SECTOR HQ'}` |
+| AI triage prompt | `- LGA: ${geo_lga \|\| 'STATE HQ'}` |
+| staff directory | `Sector: {geo_lga \|\| 'STATEWIDE HQ'}` |
+
+Three layers — writer, filter, display — and the two that were careful are the
+two nobody needed to be careful about. Nothing downstream of a correct writer
+and a correct filter was going to catch this.
+
+#### What each one costs
+
+**`· UNIT` on nearly every card.** `geo_pu` is null on essentially every
+GPS-originated incident, by design: "there is no polling unit from coordinates,
+and there cannot be. A PU arrives only when the reporter picks one." So the
+third segment was fabricated on almost every incident in the feed, which
+devalues the whole line — a responder learns the place text is unreliable and
+stops reading it, including on the incidents where it is exact.
+
+**`PLATEAU · HQ · UNIT`.** Three place names, none measured, for an incident
+whose jurisdiction did not resolve. "HQ" reads as a ward and suggests the
+incident is at a headquarters.
+
+**`JOS`.** Not one of Plateau's seventeen LGAs — they are JOS NORTH, JOS SOUTH,
+JOS EAST and fourteen others. T-16 is the finding about invented geography in
+the seed data ("rows that look right and behave wrong: unselectable by the ward
+filter, refused by RLS to the commander whose area they were in"); this is the
+same thing at runtime. And it is reachable for exactly one kind of account:
+`assignableResponders` returns true for a statewide commander before it compares
+LGAs, so the officers with no posting appear only on the list of the account
+that dispatches across all seventeen LGAs and most needs the label to be true.
+
+**`LGA: STATE HQ` in a prompt.** The model's priority and unit recommendation
+were conditioned on a location nobody measured. The lines immediately around it
+read `- Type: ${a.type || 'N/A'}`, `- Ward: ${a.geo_ward || 'N/A'}`,
+`- Description: ${a.description || 'No description provided'}`. The right answer
+was already written three times in the same template.
+
+**`STATE HQ` in the dossier.** Three lines below it:
+`{selectedReport.geo_ward && (...)}` — an absent ward is DROPPED. The same block
+drops one missing place and names another.
+
+That is the pattern worth keeping from this finding: in four of the five cases
+the honest wording was already present in the same file, often on an adjacent
+line. Nobody decided to invent a place. Each `??` was written on its own, by
+somebody filling in a template, and the question "what if this is null" was
+answered locally and differently each time.
+
+#### The same sweep, on people
+
+Two more, which are the same fault about an actor rather than a place:
+
+```ts
+sender_name: actor.name || actor.email || 'HQ DISPATCH',
+sender_role: actor.role || 'HQ_COMMAND',
+```
+
+That is a **write**, into `chat_messages` — the operational thread attached to
+an incident. A message from an operator the console cannot name was stored as
+having been sent by HQ Command. T-32 was this fault with the attribution
+running the other way: the audit trail called every human action SYSTEM. And
+the app side had already learned it, in a comment three lines long:
+
+> the thread carried HQ_COMMAND from one writer and RESPONDER from another for
+> the same person. The profile role is the answer everywhere now, with the
+> coarse enum only as a fallback for a session whose profile has not loaded.
+
+The console side had not. With T-35's fix the console's `actor.role` is `null`
+until the `profiles` read lands, so the window in which this fires is explicit.
+
+And on the read side, `IncidentReplayPanel` — the forensic timeline, the screen
+whose whole purpose is saying who did what — rendered an unattributed message as
+`actor: 'Responder', role: 'AGENT'`. Two facts about an author nobody recorded,
+on the one screen that must not have any.
+
+#### The fix
+
+One tested module per codebase, deliberately a pair, because the same incident
+must read the same way on a handset and at HQ:
+`lib/services/place_label.dart` and
+`hq-dashboard-next/src/lib/place-label.ts`. Twenty tests between them. The rules
+are short:
+
+* show what is recorded, joined;
+* a missing segment is **dropped**, not filled — `JOS NORTH · NARAGUTA`;
+* when nothing is recorded, say so: `JURISDICTION NOT RESOLVED`;
+* `null`, `''` and whitespace all mean "not recorded", because a reader cannot
+  tell them apart;
+* and in a context whose neighbouring lines say `N/A`, say `N/A`.
+
+Nothing is lost by refusing to name a place: the coordinates are what the map
+plots and they are measured. It is the jurisdiction that is unknown, and that is
+what these lines were always about.
+
+The chat now stores `UNKNOWN` for an author it cannot name, asserted by a test
+that fails against the old code, and the replay renders `UNKNOWN` rather than
+promoting an unattributed message to a responder.
+
+#### The check, and the two things it refuses to flag
+
+`scripts/check_no_invented_places.py` flags a literal fallback on a place field
+**only where the fallback is being rendered** — inside a `${...}` or a JSX
+expression. That distinction is the whole design, because the identical `||` in
+a non-rendering position is often right:
+
+* `alert-display.ts` builds a clustering key from `alert.geo_lga || 'STATE'`. A
+  sentinel, never displayed, and it groups unlocated reports of one type
+  together, which is what it is for.
+* `escalateAlert(id, selectedReport.geo_lga || 'ALL')` escalates an unlocated
+  incident to everybody — the documented fail-open on place.
+
+Neither is flagged and neither needs an exemption, because neither is inside a
+string shown to anybody. My first version of this check had no such rule, named
+`role`, `full_name` and `badge_number` among its fields, and reported
+**31 violations** — of which most were placeholders for a missing display name
+and two were the legitimate cases above. A check that cries wolf 25 times to
+catch 6 defects does not get run twice, so it was narrowed to the claim it can
+actually defend.
+
+One literal is allowed by name, with its reason recorded in the check:
+`'Sector'`, from `${userProfile?.geo_lga || 'Sector'} Monitoring`. That reads
+"SECTOR MONITORING" — a possessive in a panel heading where an LGA name would
+go, not a claim about where anything is. `'SECTOR HQ'` is a different thing and
+is still flagged, which one of the mutations proves: the allowance is an exact
+match, not a substring.
+
+Twelve mutations. Seven caught — all five original defects restored verbatim,
+one freshly invented place in a shape nobody has written, and `Sector HQ`
+attempting to hide behind the allowance. Five correctly **allowed** — the
+clustering sentinel, the fail-open escalation argument, an honest wording, and a
+defect quoted inside a comment. That last one is the third time this session a
+check has had to learn the difference between prose about a hazard and the
+hazard; this one blanked comments from the start, having been written after the
+other two learned it.
 
 ---
 

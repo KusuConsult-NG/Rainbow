@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { Users, UserPlus, Trash2, Loader2, RefreshCw, Shield } from 'lucide-react';
 import { plateauTacticalMap, TacticalJurisdiction, TacticalWard, STATE_SECURITY_AGENCIES } from '@/lib/tactical_mapping';
 import AgencyAccessManager from '@/components/AgencyAccessManager';
+import { placeField } from '@/lib/place-label';
 
 
 interface StaffRecord {
@@ -272,7 +273,7 @@ export default function AdminDirectory() {
                     </span>
                   </h4>
                   <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.email} | Role: {s.role}</p>
-                  <p style={{ fontSize: 10, color: 'var(--text-dim)' }}>Sector: {s.geo_lga || 'STATEWIDE HQ'} | District: {s.geo_ward || 'N/A'}</p>
+                  <p style={{ fontSize: 10, color: 'var(--text-dim)' }}>Sector: {placeField(s.geo_lga, 'lga')} | District: {s.geo_ward || 'N/A'}</p>
                 </div>
 
                 <span style={{ fontSize: 10, fontWeight: 900, background: 'var(--primary-dim)', color: 'var(--primary)', padding: '4px 10px', borderRadius: 20 }}>

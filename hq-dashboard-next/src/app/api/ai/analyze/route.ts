@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin, requireRole, COMMAND_ROLES } from '@/lib/supabase-server';
 import { serverEnv } from '@/lib/env';
+import { placeField } from '@/lib/place-label';
 
 /**
  * Server-side Gemini access for the dashboard's two AI features.
@@ -54,7 +55,7 @@ INCIDENT METADATA:
 - Type: ${a.type || 'N/A'}
 - Description: ${a.description || 'No description provided'}
 - Severity: ${a.severity || a.priority || 'MEDIUM'}
-- LGA: ${a.geo_lga || 'STATE HQ'}
+- LGA: ${placeField(a.geo_lga)}
 - Ward: ${a.geo_ward || 'N/A'}
 
 Provide your analysis formatted in Markdown. Your summary MUST contain the following four specific sections:

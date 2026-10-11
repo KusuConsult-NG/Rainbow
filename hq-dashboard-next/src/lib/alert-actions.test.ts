@@ -588,6 +588,22 @@ describe('sendChatMessage', () => {
     });
   });
 
+  it('does not sign an unnamed operator as HQ Command', async () => {
+    // The console passes `role: userRole`, which is null until the `profiles`
+    // read lands (T-35). This used to store sender_role 'HQ_COMMAND' and
+    // sender_name 'HQ DISPATCH' — a claim about who spoke, written into the
+    // incident's own record.
+    const { sendChatMessage } = await actions();
+    await sendChatMessage('alert-1', 'hold position', {
+      ...HQ, name: undefined, email: undefined, role: undefined,
+    } as Parameters<typeof sendChatMessage>[2]);
+
+    expect(inserted()).toMatchObject({
+      sender_name: 'UNKNOWN',
+      sender_role: 'UNKNOWN',
+    });
+  });
+
   it('trims the message', async () => {
     const { sendChatMessage } = await actions();
     await sendChatMessage('alert-1', '   hold position   ', { ...HQ });

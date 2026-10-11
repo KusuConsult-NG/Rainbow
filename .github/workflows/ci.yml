@@ -769,6 +769,19 @@ jobs:
       - name: Assert identity is resolved before anything is acted on
         run: python3 scripts/check_identity_resolved_before_scoping.py
 
+      # AlertService refuses to guess where an incident happened — "submitting
+      # without jurisdiction rather than guessing one" — and writes NULL, and
+      # the responder feed filter treats a null LGA as reaching everybody. Five
+      # screens then named a place anyway: PLATEAU · HQ · UNIT on a responder's
+      # card, JOS on the dispatch roster (not one of Plateau's seventeen LGAs),
+      # STATE HQ in the console dossier three lines above a guard that drops an
+      # absent ward, SECTOR HQ on nearly every map card since there is no
+      # polling unit from coordinates, and STATE HQ in the AI triage prompt
+      # where every line around it says N/A. Only the display guessed, which is
+      # why nothing downstream of the writer or the filter caught it.
+      - name: Assert no screen names a place that was never recorded
+        run: python3 scripts/check_no_invented_places.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

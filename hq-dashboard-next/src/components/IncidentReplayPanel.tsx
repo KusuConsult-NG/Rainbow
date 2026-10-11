@@ -98,8 +98,12 @@ export default function IncidentReplayPanel({ alertId }: { alertId: string }) {
             combined.push({
               id: d.id,
               type: 'COMMUNICATION',
-              actor: d.sender_name || 'Responder',
-              role: d.sender_role || 'AGENT',
+              // A replay is evidence. It used to name an unattributed message
+              // as from 'Responder' with role 'AGENT' — two facts about an
+              // author nobody recorded, on the screen whose whole purpose is
+              // saying who did what (T-32).
+              actor: d.sender_name || 'UNKNOWN',
+              role: d.sender_role || 'UNKNOWN',
               timestamp: d.created_at,
               notes: d.message,
             });

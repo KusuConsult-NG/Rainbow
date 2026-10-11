@@ -566,8 +566,17 @@ export async function sendChatMessage(
     const { error } = await supabase.from('chat_messages').insert({
       alert_id: alertId,
       sender_id: actor.id,
-      sender_name: actor.name || actor.email || 'HQ DISPATCH',
-      sender_role: actor.role || 'HQ_COMMAND',
+      // Neither of these may invent an author. This used to store
+      // 'HQ DISPATCH' and 'HQ_COMMAND' for an actor the console could not name
+      // — a claim about who said something, written into the operational
+      // record of an incident, and the T-32 fault with the attribution running
+      // the other way: there the audit trail called every human SYSTEM, here
+      // the chat called an unknown author Command. The app side already
+      // learned this (see secure_chat_screen.dart: "the thread carried
+      // HQ_COMMAND from one writer and RESPONDER from another for the same
+      // person"); the console side had not.
+      sender_name: actor.name || actor.email || 'UNKNOWN',
+      sender_role: actor.role || 'UNKNOWN',
       message: text,
     });
     if (error) throw error;

@@ -17,6 +17,7 @@ import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/alerts_feed.dart';
 import 'package:rainbow_app/features/agent/alert_row.dart';
 import 'package:rainbow_app/features/agent/assignable_responders.dart';
+import 'package:rainbow_app/services/place_label.dart';
 import 'package:rainbow_app/features/agent/responder_tier.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/auth_service.dart';
@@ -1042,8 +1043,11 @@ class _MissionCard extends ConsumerWidget {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          '${alert['geo_lga'] ?? 'PLATEAU'} · ${alert['geo_ward'] ?? 'HQ'} · ${alert['geo_pu'] ?? 'UNIT'}'
-                              .toUpperCase(),
+                          // `PLATEAU · HQ · UNIT` used to appear here when the
+                          // jurisdiction had not resolved, and `· UNIT` on
+                          // almost every card, since there is no polling unit
+                          // from coordinates. See place_label.dart.
+                          incidentPlace(alert).toUpperCase(),
                           style: GoogleFonts.outfit(
                             color: AppColors.textDim,
                             fontSize: 10,
@@ -2229,7 +2233,9 @@ class _DispatchDialogState extends State<_DispatchDialog> {
                                 ),
                               ),
                               subtitle: Text(
-                                'Role: ${r['role'] ?? 'RESPONDER'} · ${r['geo_lga'] ?? 'JOS'}',
+                                // `JOS` is not one of Plateau's seventeen
+                                // LGAs. See place_label.dart.
+                                responderPosting(r),
                                 style: GoogleFonts.inter(fontSize: 10, color: const Color(0xFF94A3B8)),
                               ),
                               onChanged: (val) {
