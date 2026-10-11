@@ -131,6 +131,52 @@ BEGIN
   END IF;
   RAISE NOTICE 'PASS: the notice is lost and the report is not';
 
+  -- ── AND IT WORKS ON THE PATH THAT ACTUALLY HAPPENS ──────────────────────
+  --
+  -- Every insert above was made as the owner. The real one is a CITIZEN, and
+  -- `notification_outbox` is `REVOKE ALL ... FROM anon, authenticated` with RLS
+  -- on and no policy for them — "every row is invisible and unwritable to
+  -- them". That is why the trigger is SECURITY DEFINER, and this is the
+  -- assertion that proves the grants line up rather than assuming they do: the
+  -- table, and the sequence behind its BIGSERIAL, are both owner-only.
+  PERFORM set_config('request.jwt.claim.sub', reporter::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  SET LOCAL ROLE authenticated;
+
+  INSERT INTO public.alerts
+    (type, status, severity, description, reported_by, geo_lga, geo_ward, geo_pu)
+  VALUES ('SOS', 'PENDING', 'CRITICAL', 'filed by the citizen themselves',
+          reporter, 'JOS NORTH', 'NARAGUTA', 'PU-01')
+  RETURNING id INTO a_id;
+
+  RESET ROLE;
+
+  SELECT count(*) INTO n FROM public.notification_outbox
+   WHERE alert_id = a_id AND kind = 'NEW_INCIDENT';
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL: a citizen filing their own SOS queued % notices, '
+                    'not 1 — the trigger needs SECURITY DEFINER because the '
+                    'outbox is revoked from authenticated', n;
+  END IF;
+  RAISE NOTICE 'PASS: a citizen filing their own SOS queues the notice';
+
+  -- And they still cannot read it.
+  PERFORM set_config('request.jwt.claim.sub', reporter::text, true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    SELECT count(*) INTO n FROM public.notification_outbox;
+    RESET ROLE;
+    IF n <> 0 THEN
+      RAISE EXCEPTION 'FAIL: a citizen can read % outbox row(s) — the notices '
+                      'name incidents and tiers that are not theirs', n;
+    END IF;
+  EXCEPTION WHEN insufficient_privilege THEN
+    RESET ROLE;
+    -- Refused outright by the REVOKE, which is the stronger of the two.
+    n := 0;
+  END;
+  RAISE NOTICE 'PASS: writing the notice did not make it readable to them';
+
   RAISE NOTICE 'ALL NEW INCIDENT NOTICE ASSERTIONS PASSED';
 END $$;
 
