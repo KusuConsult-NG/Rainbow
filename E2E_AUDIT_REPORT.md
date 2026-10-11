@@ -1251,6 +1251,8 @@ only thing that distinguishes a defect from a preference.
 | T-36 | **The one layer that refused to guess a place was overruled by the layer that displays it.** `AlertService` writes `geo_lga` NULL rather than infer a jurisdiction — "submitting without jurisdiction rather than guessing one" — and the responder feed filter treats a null LGA as reaching everybody. Five screens named one anyway: a responder's card read **PLATEAU · HQ · UNIT**, and `· UNIT` on nearly every card since there is no polling unit from coordinates; the dispatch roster read **JOS**, which is not one of Plateau's seventeen LGAs, and only statewide command — the account dispatching across all seventeen — could see it; the console dossier read **STATE HQ** three lines above a guard that DROPS an absent ward; a map card read **PU: SECTOR HQ**; and the AI triage prompt was told **LGA: STATE HQ** where the Type, Ward and Description lines around it all say `N/A`. Found by sweeping for the shape after T-35, not by a test. The same sweep found the console storing `sender_role: actor.role \|\| 'HQ_COMMAND'` on an incident chat message and the forensic replay naming an unattributed message as from `Responder`/`AGENT` — T-32 with the attribution running the other way. | ✅ one tested place-label module per codebase (`place_label.dart`, `place-label.ts`), 20 tests; a missing segment is dropped and nothing is named that was not recorded; the chat stores `UNKNOWN` rather than Command, asserted by a test that fails against the old code; `scripts/check_no_invented_places.py` in CI, which flags a place fallback only where it is RENDERED — so the clustering sentinel and the fail-open escalation argument are untouched — with 12 mutations, 7 caught and 5 correctly allowed |
 | T-37 | **The screen that sets the statewide escalation policy could not tell "could not read it" from "here it is", and offered to save either way.** `SystemConfig` loaded the three timeouts with `.then(({ data }) => ...)`, destructuring `data` and dropping `error`. A refused or failed read left its own seeded placeholders — 2 / 5 / 10 — on screen with nothing saying the read had not happened; the component has an `error` state and only the SAVE path ever set it. Save **upserts all three keys**, so an operator who saw those numbers, changed one field and pressed Save replaced the live policy with placeholders. The migration seeds exactly 2 / 5 / 10, so it looked right until somebody had changed them — the only point at which it mattered. Also: a key with no row merged over the placeholder and read as configured; `Number(row.value)` on a TEXT column gave `NaN`, which `String()` would have written back as the literal "NaN"; and the three labels were not associated with their inputs. | ✅ a three-state load — loading / failed / ready — that names the reason, shows no values it did not read, and **disables Save**, because this form writes all three and must not overwrite a baseline it has not seen; a missing key is named as not configured rather than shown as live; a non-numeric stored value is a fault with the key quoted, not a NaN; labels wired with `htmlFor`. 7 component tests, all 7 failing against the old code. Then, found while checking the fix against the job that reads these rows: the form accepted **any** number its input produced, so an operator could save a ward timeout of `0` or `2.5` and read it back as the policy — while `tier_timeout_minutes()` casts `raw::INTEGER` and rejects `<= 0`, discarding it and using the seeded value. The screen and the job disagreed about what the row means. ✅ the form now refuses what the job would throw away, naming the rule; 9 component tests; `scripts/check_escalation_defaults_agree.py` reads the three fallbacks and the lower bound out of the SQL and asserts the console and every seed agree, with 11 mutations, each caught |
 | T-38 | **The word "liaison" appeared nowhere in `lib/`, and the handset answered an agency liaison from their own posting.** `alert_is_ours()` hands a liaison exactly `escalated_to_agency = liaison_agency()` and nothing else. **Both** of the handset's filters — the `.where()` inside `alertsStreamProvider`, which four test files override so it had no test of its own, and a second pass at build time — had no branch for a liaison. The first fell through to the place rules and compared each incident's location to where that officer is based; the second applied `tierCanSee()`, Operation Rainbow's internal command ladder, on which a liaison has no rung, so every incident with a tier owning it outranked them — which is every incident they are ever handed. An incident handed to the Army is then invisible to the Army liaison unless it happens to be in their LGA, while HQ's console shows the handover as done and `/api/notify-agency` reports it sent. T-28 was "escalating an incident to the Police reached nobody, by three paths at once"; this is a fourth, on the device the officer carries. No harness run caught it because the stand-in applies no RLS, so it failed the other way there — the Police liaison was shown four incidents handed to nobody — and because the one ARMY fixture sits in the Army liaison's own posting, so the place rules admitted it by coincidence. The same filter was stricter than RLS in two more places: an incident with no LGA (which `alert_in_my_area()` grants to all staff, "an emergency nobody can see is worse than one seen too widely") and one HQ delegated to an LGA by name — which the old filter's own comment claimed, over code that read only `geo_lga`. | ✅ the rule is `lib/services/alert_audience.dart`, tested — 35 tests where there were none — and mirrors `alert_is_ours()` clause by clause; a second fixture incident is handed to the POLICE in BOKKOS so the harness can tell the column from the posting; 3 browser assertions per liaison; `scripts/check_alert_audience_agrees.py` in CI holds the rule on both sides, with 16 mutations, each caught |
+| T-39 | **Choosing Hausa in Settings changed nothing.** There were two providers called `languageProvider`, each with a class called `LanguageNotifier`, and which one a file got depended on its imports: `shared/localization/translations.dart` stores `app_lang` = `'ha'` and is what every translated string watches; `providers/language_provider.dart` stored `app_language` = `'HA'` and was imported by nothing. The Settings screen imported neither — it kept a private `_language` string and wrote `app_language` straight to SharedPreferences — so its "App Language" dropdown was wired to a key no reader has ever heard of, and it offered two of the three languages the app has. The only working control was a flag button on the home screen, three screens into the app. Separately, `Translations.get()` returned the KEY on a miss and two keys were asked for and never defined, both on the citizen's DISPATCHER CHAT screen — so its header read `live_dispatch_channel` and `alert_ref #a1b2c3d4` in every language, English included. | ✅ one `LanguagePicker`, used by Settings and by the first screen of first-run setup so the language can be chosen before the rest of setup is read; the dead provider deleted; the four missing keys added in all three languages; `get()` falls back to English rather than a variable name; 8 Dart tests; `scripts/check_translation_keys.py` in CI — every key asked for exists, every key has every language, one provider, one storage key — mutation-tested including the duplicate provider returning |
+| T-40 | **A sign-out could end a live duress trail, and needed no PIN.** `signOut()` stopped tracking first, deliberately: *"Signing out is the clearest statement a person can make that they are done being observed, and it was the one action that did not stop it."* True of a person signing out of their own phone, and wrong in the one case the duress design exists for. A duress PIN tells the person their alarm is cancelled and KEEPS TRACKING RUNNING because they may still be in danger — and the lock screen offers a sign-out that needs no code at all. So whoever was holding the phone could end the tracking of a live duress alert without knowing any PIN, and all HQ saw was a track going quiet, indistinguishable from a flat battery. Two deliberate rules collided and nothing recorded which won. | ✅ a patrol track still stops on sign-out; an SOS track runs until the incident closes or the twelve-hour ceiling expires; `20261020000000` adds `alerts.device_signed_out_at` so an operator reads "handset signed out at 19:42, tracking continues" rather than inferring a dead battery, shown in the dossier and on the forensic timeline; 10 Dart tests and 2 SQL assertions |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -3640,6 +3642,204 @@ in the code, and both are the same kind of mistake:
   FUNCTION` statement, which has no body. Anchored on `CREATE OR REPLACE` now.
   A check that fires for the wrong reason is a check that will one day not fire
   for the right one.
+
+### T-39. Two providers with one name, and a dropdown wired to neither
+
+Found by answering a direct question — "does the Hausa work well?" — rather than
+by a sweep. The translations themselves are good: 38 strings in English, Hausa
+and Pidgin, and the Hausa is real (`NEMI TAIMAKO`, `DANNA DOMIN NEMEN DAUKI`),
+not machine filler.
+
+The wiring was not.
+
+```dart
+// lib/shared/localization/translations.dart
+final languageProvider = StateNotifierProvider<LanguageNotifier, AppLanguage>(...)
+//   prefs.setString('app_lang', language.code)   →  'ha'
+
+// lib/providers/language_provider.dart
+final languageProvider = StateNotifierProvider<LanguageNotifier, String>(...)
+//   prefs.setString('app_language', lang)        →  'HA'
+```
+
+**Two providers with the same name, two classes with the same name, two storage
+keys, two value formats.** Which one a file gets depends on which it imports.
+Every screen that actually reads a translated string imports the first.
+`lib/providers/language_provider.dart` was imported by **nobody**.
+
+And `settings_screen.dart` imported neither. It kept a private `_language`
+string and wrote `app_language` directly:
+
+```dart
+String _language = 'EN';
+...
+await prefs.setString('app_language', lang);
+```
+
+So the "App Language" row in Settings — the obvious place to look for it —
+changed nothing at all. It also offered English and Hausa, while the enum, the
+table and the home screen's flag menu all have three languages. Pidgin was
+implemented and unreachable from Settings.
+
+The second half is sharper. `Translations.get()` was:
+
+```dart
+return _keys[key]?[lang] ?? key;
+```
+
+A miss returns the key. And two keys were asked for and never defined:
+
+```dart
+title: Translations.get('live_dispatch_channel', currentLang),
+subtitle: '${Translations.get('alert_ref', currentLang)} #...',
+```
+
+Both on `dispatcher_chat_screen.dart` — the screen a citizen opens to talk to a
+dispatcher during an emergency. Its header read **`live_dispatch_channel`** and
+**`alert_ref #a1b2c3d4`**, in every language including English, and had done
+since those lines were written. Nothing caught it because a missing key fails in
+the only way that matters: the screen renders, the suite is green, and the
+defect is visible only to the person reading it.
+
+#### The fix, and why it is one widget
+
+`LanguagePicker`, used by Settings and by the first screen of first-run setup —
+the language should be chosen before the rest of setup is read, and the only
+working control was three screens further in. The dead provider is deleted
+rather than left to be imported by accident. `get()` falls back to English for a
+key that exists in some languages, because a half-translated string should read
+as English and not as a variable name; a key that does not exist at all still
+returns itself, loudly, and CI is what stops one shipping.
+
+`scripts/check_translation_keys.py` holds five claims: every key the app asks
+for is defined, every defined key has every language in the enum, nothing
+declares a second `languageProvider` or `LanguageNotifier`, the language is
+stored under one preference key, and every control that changes it goes through
+that one provider. Two controls are fine — a picker in Settings and in setup, a
+flag menu in the home app bar — as long as they write the same place; a control
+bound to a different store is the defect, not a second control. That distinction
+had to be made twice: the check's first version demanded a single caller and
+flagged both the home screen's legitimate menu and `tts_service.dart`'s
+`_flutterTts.setLanguage('en-US')`, which is the speech engine's voice and
+nothing to do with this.
+
+Worth saying plainly about scope: 42 keys over four screens is not a translated
+app. What was broken was the wiring, and that is fixed; translating the rest is
+content work, and the check now makes a half-added key fail CI rather than
+appear on somebody's screen as a variable name.
+
+### T-40. Two deliberate rules collided, and the captor won
+
+The duress design is careful and documented. A duress PIN tells the person their
+alarm has been cancelled and deliberately leaves tracking running, because they
+may still be in danger; the screen treats the duress and safe outcomes
+identically so that a captor watching cannot tell which code was entered; and
+`sosTrackingMaxAge` caps it at twelve hours, because an earlier version left it
+running for the life of the install.
+
+The sign-out path is also careful and documented:
+
+> Signing out is the clearest statement a person can make that they are done
+> being observed, and it was the one action that did not stop it.
+
+That comment is the fix for a real defect — tracking used to survive a sign-out
+— and it is right about a person signing out of their own phone.
+
+It is wrong about the one case the duress design exists for. The lock screen
+offers a sign-out that needs no code; the browser harness asserts exactly that
+("the lock screen offers a way out that needs no code"), and it is there for a
+borrowed phone. So:
+
+* duress PIN → "your alarm is cancelled", tracking **continues**;
+* sign-out → tracking **stops**, no PIN, no code, one tap from the lock screen.
+
+Whoever is holding that phone can end the tracking of a live duress alert
+without knowing anything. And HQ sees a track go quiet, which is what a flat
+battery looks like, and what being out of coverage looks like.
+
+Neither rule is wrong on its own. Nothing in the code recorded which one wins
+where they meet, so the more recently written one did.
+
+#### What changed
+
+A **responder's** patrol track still stops on sign-out: they are going off duty,
+and the privacy argument applies in full. An **SOS** track keeps running until
+the incident closes or the twelve-hour ceiling expires — the ceiling that
+already exists for precisely this reason.
+
+The decision is made from one question, `activeSosAlertId()`, which answers null
+for a patrol track, for nothing being tracked, for an expired track, and for a
+failure to read the store. That last one is not a compromise, and it is worth
+spelling out because the first version got it the other way round: the
+background isolate learns its own mode from the **same** SharedPreferences, so a
+store that cannot be read means nothing is telling it to be on an SOS track, and
+the privacy rule applies. The first version treated a read failure as "assume an
+emergency is open", which broke two existing tests in
+`tracking_consent_test.dart` — and those tests were right.
+
+And the loss of the app is now a fact rather than an inference.
+`alerts.device_signed_out_at` is written by the handset in the window before its
+session is cleared, so `alerts_update_own_or_ours` covers it
+(`reported_by = auth.uid()`), best-effort, because a phone being switched off
+must not have its sign-out blocked on a network write. One column, not a
+message: a handset must not be able to write prose onto an operator's screen,
+which is the rule `sim_channel_events` states for itself. The console shows it in
+the incident dossier — "Handset signed out at 19:42. Location tracking is still
+running — the app is gone, the trail is not" — and on the forensic replay
+timeline, where the question a review asks is *when did we lose the app* and a
+gap in the track cannot answer it.
+
+No new CI gate for this one. `flutter test` already fails if the branch goes,
+and a script that re-asserts what a test asserts is maintenance without
+coverage.
+
+### Restating a function is only safe against its current definition
+
+Not a finding in the product — a near miss in my own work, recorded because the
+next person to touch that function will make the same move.
+
+The LGA→ward hand-down needed one clause added to `alert_is_ours()`. That
+function has been replaced twice. `20261006000000` restates it as a flat `OR`
+and explains why:
+
+> Restated here so a replica built from these files in order gets the same
+> result whichever migration ran last.
+
+and `20261015000000` then **wrapped it in a `CASE`** whose first branch is
+exclusive:
+
+```sql
+SELECT CASE
+  WHEN public.is_oversight_matter(p_alert.type) THEN
+    public.commands_whole_state() OR p_alert.reported_by = auth.uid()
+  ELSE
+    ...
+END;
+```
+
+A complaint about security personnel reaches HQ and the complainant and nobody
+else, because the ordinary clauses would hand it to the accused's own command.
+
+I copied the restatement idiom from `20261006000000` — the older generation —
+and so dropped that `CASE`. 712 Dart tests and 786 console tests passed.
+`scripts/oversight_behaviour_test.sql` failed on a real PostgreSQL:
+
+```
+FAIL: the WARD COMMAND of the ward it was filed in can read a complaint
+      about security personnel
+```
+
+The lesson is narrow and worth keeping: a `CREATE OR REPLACE` is a statement
+about the function's **current** definition, and the only way to know which that
+is, is to replay the history. Reading the migration that introduced the function
+tells you what it used to be. The migration now says this at the point where the
+next person will copy it, and `ward_handdown_behaviour_test.sql` asserts
+structurally that the oversight branch is still there — because whoever adds the
+next clause will copy whichever version of the function they happen to open.
+
+It is also the clearest case this document has for why the SQL behaviour tests
+run against a real database rather than being trusted to review. Nothing a
+client test could do would have found this.
 
 ---
 
