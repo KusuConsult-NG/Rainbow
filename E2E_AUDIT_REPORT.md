@@ -2338,11 +2338,15 @@ actually removing the flow is still caught.
 #### What the fixed run reports
 
 The whole suite, end to end, for the first time in this container: **305
-assertions, no failures**, and `run.sh` exits 0.
+assertions, no failures**, and `run.sh` exits 0. Re-run after the advisory
+targeting work below, which changed shared fixtures and a console component six
+other passes depend on: **311 assertions, no failures, exit 0** — verified rather
+than reasoned about, because checking two passes in isolation is not checking
+the suite.
 
 | pass | before | after |
 |---|---|---|
-| console screens | 46/46, with the audit screen refused and photographed empty | **49/49** — the refusal, the audit rows and the actor all asserted |
+| console screens | 46/46, with the audit screen refused and photographed empty | **52/52** — the refusal, the audit rows, the actor, and the three advisory assertions |
 | console controls | 33/33 | **36/36** |
 | mobile screens | 14/15, fourteen page errors | **19/19**, clean — `register_sms_device` answered for all eight roles, plus the three advisory assertions added after that run |
 | mobile controls | never run in this container | **36/36**, 225 controls exercised |
