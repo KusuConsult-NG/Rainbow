@@ -1516,7 +1516,21 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        <SystemAlertListener />
+        {/* The advisory banner is scoped to this operator now: it applied no
+            targeting at all, so an advisory addressed to citizens of one ward
+            docked here and one addressed to another agency docked on that
+            liaison's screen. `access.agency` rather than `userProfile.agency`,
+            because the former is derived from the ROLE and the latter is a
+            decorative badge (T-28). */}
+        <SystemAlertListener
+          viewer={{
+            agency: access.agency,
+            isCommand: isHqUser,
+            geoLga: userProfile?.geo_lga ?? null,
+            geoWard: userProfile?.geo_ward ?? null,
+            geoPu: userProfile?.geo_pu ?? null,
+          }}
+        />
 
         {/* Filters sit IN THE FLOW, not floating over the map.
             They were `position: absolute; top: 86` with only a left edge, so

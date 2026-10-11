@@ -224,6 +224,8 @@ async function chooseTactical(page, triggerText, optionText) {
   ];
 
   const roleReport = {};
+  /** role -> whether the ward-scoped advisory docked for them. */
+  const advisoryReport = {};
 
   for (const role of ['hq', 'lga', 'police', 'army', 'responder', 'citizen']) {
     currentScreen = `${role}:login`;
@@ -244,6 +246,22 @@ async function chooseTactical(page, triggerText, optionText) {
       !/__next_error__/.test(await page.content()) && body.length > 200,
       `${body.length} chars of text`,
     );
+
+    // WHICH ADVISORY DOCKED UNDER THIS OPERATOR'S HEADER.
+    //
+    // `SystemAlertListener` took no viewer and applied no targeting: it docked
+    // the newest live row, so an advisory addressed to CITIZENS of one ward sat
+    // under the HQ header and one addressed to another agency sat on that
+    // liaison's screen. The seeded ward advisory names NARAGUTA, where the
+    // police liaison works; the army liaison is in PANYAM. Asserted below.
+    advisoryReport[role] = {
+      ward: /naraguta junction/i.test(body),
+      // What the Army liaison falls through to. Recorded so their NOT seeing
+      // the ward advisory can be told apart from their banner being dead —
+      // which is how the first version of this check passed for the wrong
+      // reason.
+      legacyAgents: /radio discipline/i.test(body),
+    };
     await shot(page, `20-${role}-01-map`);
 
     const seen = [];
@@ -665,6 +683,36 @@ async function chooseTactical(page, triggerText, optionText) {
     ctl.unknownColumns.join('; ') || 'none',
   );
 
+  // AN ADVISORY DOCKS FOR THE PEOPLE IT NAMES, AND NOT THE OTHERS.
+  //
+  // The console's advisory banner honoured none of the composer's five
+  // targeting controls. The seeded advisory is scoped to NARAGUTA ward: the
+  // police liaison and the LGA command are posted there, the army liaison is in
+  // PANYAM. Command sees every advisory by design — they compose and withdraw
+  // them — so HQ is expected to see it too.
+  check(
+    'the ward-scoped advisory docks for the operators posted to that ward',
+    ['hq', 'lga', 'police'].every((r) => advisoryReport[r]?.ward),
+    ['hq', 'lga', 'police'].map((r) => `${r}:${advisoryReport[r]?.ward ? 'shown' : 'absent'}`).join(' '),
+  );
+  check(
+    'and does not dock for the liaison posted to another ward',
+    advisoryReport.army ? advisoryReport.army.ward === false : false,
+    advisoryReport.army
+      ? (advisoryReport.army.ward
+          ? 'the ARMY liaison in PANYAM was shown a NARAGUTA advisory'
+          : 'the ARMY liaison in PANYAM was not shown it')
+      : 'the ARMY liaison never signed in, so this proves nothing',
+  );
+  // AND THEIR BANNER IS ALIVE, so the line above means scoping and not silence.
+  check(
+    "the other-ward liaison's banner still docks an advisory addressed to them",
+    advisoryReport.army ? advisoryReport.army.legacyAgents === true : false,
+    advisoryReport.army?.legacyAgents
+      ? 'the ARMY liaison was shown the AGENTS advisory instead'
+      : 'the ARMY liaison was shown nothing at all, so the check above proves nothing',
+  );
+
   // AND NO FUNCTION THE STAND-IN COULD NOT ANSWER.
   //
   // The sibling of the check above, and it was missing for the same reason that
@@ -738,6 +786,7 @@ async function chooseTactical(page, triggerText, optionText) {
     roles: roleReport,
     checks,
     unknownColumns: ctl.unknownColumns,
+    advisories: advisoryReport,
     rpcMisses: ctl.rpcMisses || [],
     rpcCalls: ctl.rpcCalls || [],
     writesObserved: ctl.writes.map((w) => ({ table: w.table, method: w.method })),

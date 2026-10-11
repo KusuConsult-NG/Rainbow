@@ -206,7 +206,14 @@ const system_alerts = [
     target_ward: 'NARAGUTA',
     is_active: true,
     created_by: byKey('hq').id,
-    created_at: '2026-09-26T21:50:00.000Z',
+    // NEWEST, deliberately. The console's banner orders by `created_at` and
+    // docks ONE advisory — the newest the viewer is addressed by — so whichever
+    // row is newer is the one an assertion about that surface can see. With the
+    // legacy row newer, every console role was shown IT and the ward row was
+    // invisible to the test, which made "the Army was not shown the ward
+    // advisory" pass for the wrong reason: absence was indistinguishable from a
+    // banner that renders nothing at all.
+    created_at: '2026-09-26T21:55:00.000Z',
   },
   {
     // SHAPE TWO: a genuine legacy row, exactly as the old mobile broadcast
@@ -221,7 +228,10 @@ const system_alerts = [
     target_type: 'AGENTS',
     is_active: true,
     created_by: byKey('hq').id,
-    created_at: '2026-09-26T21:55:00.000Z',
+    // Older than the ward row above, so it is what the Army liaison falls
+    // through to — which is what proves their banner is alive and the ward
+    // advisory's absence is a scoping decision rather than a broken surface.
+    created_at: '2026-09-26T21:50:00.000Z',
   },
 ];
 

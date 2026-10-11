@@ -42,6 +42,14 @@ SOURCE = CONSOLE / 'src' / 'lib' / 'agencies.ts'
 
 # Files that key off an agency code and must therefore take it from `agencies.ts`.
 CONSUMERS = [
+    # Writes `system_alerts.target_agency`, which the console's advisory banner
+    # now compares against the viewer's liaison agency. It used to be EXEMPTED
+    # here, back when that column was read by nothing — and removing the
+    # exemption was not the same as adding coverage: the file simply dropped out
+    # of this check altogether, and a mutation putting `NPF` and `MILITARY` back
+    # into its menu passed. Found by mutation-testing the guard rather than
+    # trusting the edit.
+    'src/components/MassBroadcast.tsx',
     'src/components/AgencyPortal.tsx',
     'src/components/AgencyAccessManager.tsx',
     'src/app/api/notify-agency/route.ts',
@@ -76,16 +84,22 @@ RETIRED = {
 # answer is not to force the two lists together: it is to say which file owns
 # which. Each exemption is written out because a blanket skip would have let the
 # escalation menu back in.
+#
+# `MassBroadcast.tsx` WAS exempted here, on the grounds that it addresses an
+# advisory rather than an incident and that its agency control was read by
+# nothing at all. The second half stopped being true when the console's advisory
+# banner learned to honour targeting: `target_agency` now has a reader, which
+# compares it against the viewer's liaison agency. So the composer's staff-badge
+# options would have addressed advisories to codes no liaison answers to — the
+# escalation-menu defect again, in the one place this check had been told to
+# look away from. The exemption is gone and the composer is built from
+# AGENCY_LIST like everything else.
 OWNS_STAFF_BADGES = {
     'src/lib/tactical_mapping.ts':
         'declares STATE_SECURITY_AGENCIES: the parent organisation of a member '
         'of staff, worn as a badge. Never written to escalated_to_agency.',
     'src/components/AdminDirectory.tsx':
         'draws a staff member\'s badge from STATE_SECURITY_AGENCIES.',
-    'src/components/MassBroadcast.tsx':
-        'addresses an advisory, not an incident — and its agency control is '
-        'currently read by nothing at all. See the broadcast finding in '
-        'E2E_AUDIT_REPORT.md; this exemption goes when that is closed.',
 }
 
 def strip_comments(text: str) -> str:

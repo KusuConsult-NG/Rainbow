@@ -2033,24 +2033,88 @@ PASS  a legacy advisory addressed by target_type still reaches its audience
 The screens pass is 19/19 now, from 14/15 at the start of this work: fourteen
 page errors fixed, the RPC refusal caught, and these three.
 
-#### Still open: `target_agency` is written and read by nothing
+#### Closed: `target_agency` had no reader because the console's banner had no targeting
 
-`MassBroadcast.tsx` offers "transmit to one agency" and writes
-`system_alerts.target_agency`. Nothing in the app or the console reads that
-column — confirmed across `lib/` and `hq-dashboard-next/src/` — so an advisory
-addressed to one agency reaches everyone the other four controls allow.
+Left open above as needing a decision about who an advisory is for. It did not:
+the question answers itself once you look at the surface agency liaisons
+actually use.
 
-It is left as a finding rather than fixed, because the two candidate meanings
-need a decision this audit should not make silently:
+`SystemAlertListener` in the console docked the newest live advisory under the
+header and applied **no targeting at all** — only `is_active` and expiry. The
+composer offers five targeting controls and this surface honoured none of them,
+so:
 
-* the **liaison** vocabulary (`POLICE`…`OPSH`, T-28), which would send the
-  advisory to an outside agency's liaison accounts; or
-* the **staff badge** vocabulary (`RAINBOW`, `NPF`, `MILITARY`, `VGN`), which
-  would send it to Operation Rainbow's own officers drawn from that organisation.
+* an advisory addressed to **CITIZENS** docked under an HQ operator's header.
+  The file's own comment warns that "an advisory that is no longer true is worse
+  than none, because operators calibrate against it"; one that was never theirs
+  is the same fault with a different cause;
+* an advisory addressed to **one agency** appeared on every other agency's
+  liaison screen — and `console-access.ts` exists precisely to stop a liaison
+  from an outside agency seeing what is not theirs. This was the one surface
+  that ignored it;
+* an advisory scoped to one LGA or ward went to every console user in the state.
 
-The composer's list is currently the second. `scripts/check_one_agency_vocabulary.py`
-exempts `MassBroadcast.tsx` by name with that reason recorded, and the exemption
-is written to be removed when this is settled.
+So `target_agency` was never waiting on a product decision. Agency liaisons have
+console accounts and not handsets, which is why the mobile side has no agency
+reader and never needed one; the console is the surface an agency-addressed
+advisory was always for, and it was the surface throwing the targeting away.
+
+`src/lib/advisory-targeting.ts` decides it now, deliberately mirroring
+`broadcastReaches` in the app so the composer means one thing on a console and
+on a handset: the canonical audience with a fallback to the legacy
+`target_type`, place scoping that fails **open** on a viewer whose own posting is
+unknown, an unrecognised audience treated as ALL rather than dropped, and the
+expiry rules that were inline before. Two deliberate differences, both because
+the surfaces differ — `CITIZENS` reaches nobody on a console, and agency scoping
+exists here and nowhere else. Command still sees everything: they compose
+advisories and withdraw them.
+
+27 unit tests, and three assertions in the browser run.
+
+#### The first version of the browser assertion passed for the wrong reason
+
+Worth recording, because the failure is what taught me the surface.
+
+The console docks **one** banner — the newest advisory the viewer is addressed
+by — and the two seeded advisories had the legacy row newer. So every console
+role was shown IT, the ward-scoped row was invisible to the test, and
+*"the Army liaison was not shown the ward advisory"* passed while proving
+nothing: their absence was indistinguishable from a banner rendering nothing at
+all. What exposed it was the other half of the pair failing — HQ, the LGA
+command and the Police liaison all read `absent` for an advisory HQ should see
+unconditionally, which is impossible if the surface works.
+
+Fixed in the fixture and in the assertion. The ward advisory is now the newer
+row, so it is what the people it names actually see; and the Army liaison is
+asserted to be shown the **other** advisory, which is what makes their absence
+from the first one a scoping decision rather than silence.
+
+#### Giving the column a reader made the composer's own list a live defect
+
+T-28 found the HQ escalation menu writing `NPF`, `MILITARY`, `RAINBOW` and `VGN`
+— staff badges, not agency codes — and the broadcast composer was doing the same
+thing. It was **exempted** from
+`scripts/check_one_agency_vocabulary.py` on the explicit grounds that its agency
+control was "read by nothing at all", with a note that the exemption goes when
+that is closed.
+
+Closing it is what made the exemption dangerous. With a reader in place,
+`advisoryReaches` compares `target_agency` against the viewer's liaison
+agency — so an advisory addressed to "NIGERIA POLICE FORCE (NPF)" would have
+matched no liaison and reached nobody but command: exactly the escalation-menu
+defect, in the one file the guard had been told to look away from. The composer
+is built from `AGENCY_LIST`'s canonical codes now, and `RAINBOW` and `VGN` are
+gone for the reason they are not escalation destinations either — Operation
+Rainbow's own staff are addressed by `target_audience: AGENTS`, and no vigilante
+outfit has a console account to read an advisory with.
+
+**And removing the exemption did not add coverage.** The guard passed a mutation
+that put `NPF` and `MILITARY` straight back, because the file had simply dropped
+out of every check rather than becoming subject to them — it was never in
+`CONSUMERS`. Adding it there is what closed the hole, and the mutation now fails
+naming both codes. Three times in this session a guard has needed
+mutation-testing to show it guarded anything; this is the one where the edit
+looked complete and was not.
 
 ### T-30. The gate watched the template; the shipped artefact carried the name
 
