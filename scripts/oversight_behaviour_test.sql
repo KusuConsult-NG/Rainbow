@@ -219,16 +219,43 @@ BEGIN
   RAISE NOTICE 'PASS: a complaint does not climb the ladder towards the accused';
 END $$;
 
+-- NARROWED, DELIBERATELY, AND THIS IS WHY.
+--
+-- This asserted that NO row at all was queued for a complaint, "they would page
+-- the accused's own commander". When it was written the outbox had one kind —
+-- TIER_ESCALATION — and zero rows was a consequence of
+-- `awaiting_human_confirmation()` holding a complaint out of the ladder, not an
+-- independent rule that a complaint must never be announced.
+--
+-- 20261022000000 queues a NEW_INCIDENT notice on INSERT, addressed to
+-- `NEW.assigned_tier` — which the oversight trigger has already set to 'HQ'.
+-- HQ is who the complaint is routed TO, and telling them is the point: a
+-- complaint nobody is told about sits in a queue until somebody looks, which is
+-- the silence the outbox exists to end.
+--
+-- So the assertion now says what it always meant, and says it more strictly: no
+-- escalation notice, and nothing addressed anywhere but HQ.
 DO $$
-DECLARE n INTEGER;
+DECLARE
+  n   INTEGER;
+  bad INTEGER;
 BEGIN
   SELECT count(*) INTO n FROM public.notification_outbox
-   WHERE alert_id = '0eea0000-0000-4000-8000-00000000a002';
+   WHERE alert_id = '0eea0000-0000-4000-8000-00000000a002'
+     AND kind = 'TIER_ESCALATION';
   IF n <> 0 THEN
     RAISE EXCEPTION 'FAIL: % escalation notice(s) were queued for a complaint — '
                     'they would page the accused''s own commander', n;
   END IF;
-  RAISE NOTICE 'PASS: no escalation notice is queued for a complaint';
+
+  SELECT count(*) INTO bad FROM public.notification_outbox
+   WHERE alert_id = '0eea0000-0000-4000-8000-00000000a002'
+     AND coalesce(payload ->> 'to_tier', '') <> 'HQ';
+  IF bad <> 0 THEN
+    RAISE EXCEPTION 'FAIL: % notice(s) for a complaint are addressed below HQ, '
+                    'which is the command the complaint is about', bad;
+  END IF;
+  RAISE NOTICE 'PASS: nothing about a complaint is addressed below HQ';
 END $$;
 
 -- ── The debrief column ────────────────────────────────────────────────────

@@ -1253,6 +1253,7 @@ only thing that distinguishes a defect from a preference.
 | T-38 | **The word "liaison" appeared nowhere in `lib/`, and the handset answered an agency liaison from their own posting.** `alert_is_ours()` hands a liaison exactly `escalated_to_agency = liaison_agency()` and nothing else. **Both** of the handset's filters — the `.where()` inside `alertsStreamProvider`, which four test files override so it had no test of its own, and a second pass at build time — had no branch for a liaison. The first fell through to the place rules and compared each incident's location to where that officer is based; the second applied `tierCanSee()`, Operation Rainbow's internal command ladder, on which a liaison has no rung, so every incident with a tier owning it outranked them — which is every incident they are ever handed. An incident handed to the Army is then invisible to the Army liaison unless it happens to be in their LGA, while HQ's console shows the handover as done and `/api/notify-agency` reports it sent. T-28 was "escalating an incident to the Police reached nobody, by three paths at once"; this is a fourth, on the device the officer carries. No harness run caught it because the stand-in applies no RLS, so it failed the other way there — the Police liaison was shown four incidents handed to nobody — and because the one ARMY fixture sits in the Army liaison's own posting, so the place rules admitted it by coincidence. The same filter was stricter than RLS in two more places: an incident with no LGA (which `alert_in_my_area()` grants to all staff, "an emergency nobody can see is worse than one seen too widely") and one HQ delegated to an LGA by name — which the old filter's own comment claimed, over code that read only `geo_lga`. | ✅ the rule is `lib/services/alert_audience.dart`, tested — 35 tests where there were none — and mirrors `alert_is_ours()` clause by clause; a second fixture incident is handed to the POLICE in BOKKOS so the harness can tell the column from the posting; 3 browser assertions per liaison; `scripts/check_alert_audience_agrees.py` in CI holds the rule on both sides, with 16 mutations, each caught |
 | T-39 | **Choosing Hausa in Settings changed nothing.** There were two providers called `languageProvider`, each with a class called `LanguageNotifier`, and which one a file got depended on its imports: `shared/localization/translations.dart` stores `app_lang` = `'ha'` and is what every translated string watches; `providers/language_provider.dart` stored `app_language` = `'HA'` and was imported by nothing. The Settings screen imported neither — it kept a private `_language` string and wrote `app_language` straight to SharedPreferences — so its "App Language" dropdown was wired to a key no reader has ever heard of, and it offered two of the three languages the app has. The only working control was a flag button on the home screen, three screens into the app. Separately, `Translations.get()` returned the KEY on a miss and two keys were asked for and never defined, both on the citizen's DISPATCHER CHAT screen — so its header read `live_dispatch_channel` and `alert_ref #a1b2c3d4` in every language, English included. | ✅ one `LanguagePicker`, used by Settings and by the first screen of first-run setup so the language can be chosen before the rest of setup is read; the dead provider deleted; the four missing keys added in all three languages; `get()` falls back to English rather than a variable name; 8 Dart tests; `scripts/check_translation_keys.py` in CI — every key asked for exists, every key has every language, one provider, one storage key — mutation-tested including the duplicate provider returning |
 | T-40 | **A sign-out could end a live duress trail, and needed no PIN.** `signOut()` stopped tracking first, deliberately: *"Signing out is the clearest statement a person can make that they are done being observed, and it was the one action that did not stop it."* True of a person signing out of their own phone, and wrong in the one case the duress design exists for. A duress PIN tells the person their alarm is cancelled and KEEPS TRACKING RUNNING because they may still be in danger — and the lock screen offers a sign-out that needs no code at all. So whoever was holding the phone could end the tracking of a live duress alert without knowing any PIN, and all HQ saw was a track going quiet, indistinguishable from a flat battery. Two deliberate rules collided and nothing recorded which won. | ✅ a patrol track still stops on sign-out; an SOS track runs until the incident closes or the twelve-hour ceiling expires; `20261020000000` adds `alerts.device_signed_out_at` so an operator reads "handset signed out at 19:42, tracking continues" rather than inferring a dead battery, shown in the dossier and on the forensic timeline; 10 Dart tests and 2 SQL assertions |
+| T-41 | **The system told you when it gave up waiting for you, not when the emergency arrived.** `notification_outbox` was built so a TIMEOUT escalation could not move an incident in silence — its header says "the whole point of the timeout is the case where nobody is watching". Nothing queued a notice when an alert was **INSERTED**. The only paths to a phone were a human pressing DISPATCH or ESCALATE on the console, and the timeout job. So a citizen's SOS reached a responder only if that responder happened to have the app open and in the foreground; a phone in a pocket learned nothing until a dispatcher acted or the unit's two-minute window expired. There is no trigger on `alerts` INSERT except the timestamp one and the oversight router, and nothing in `alert_service.dart` notifies anybody. | ✅ `20261022000000` queues a `NEW_INCIDENT` notice on INSERT, addressed to `NEW.assigned_tier` read from the column — so the oversight trigger's routing of a complaint to HQ is honoured and a complaint is never announced to the command it is about; the drain widens the UNIT audience for this kind to the field responders, who are the ones who go, and says "has just been reported" rather than the escalation wording; the trigger swallows its own failure so an SOS is never refused because a notice could not be written. 10 console tests and 6 SQL assertions, one of which files an emergency with the outbox renamed out from under it |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -3840,6 +3841,107 @@ next clause will copy whichever version of the function they happen to open.
 It is also the clearest case this document has for why the SQL behaviour tests
 run against a real database rather than being trusted to review. Nothing a
 client test could do would have found this.
+
+### T-41. The outbox was built for the second notification, not the first
+
+Found by checking a sentence rather than code: "when an alert is sent out,
+responders get alerted immediately and can respond." Most of that is true — the
+handset's feed is a Supabase realtime stream, so an open app shows a new
+incident at once — and the word that fails is *immediately*, for the phone in
+somebody's pocket.
+
+`notification_outbox` exists because of a defect that is the same shape as this
+one. Its header:
+
+> `escalate_overdue_alerts()` runs every minute under pg_cron and climbs any
+> unacknowledged incident one rung when its tier has held it too long... But it
+> only ever UPDATED the row. Every notification in this system is sent from
+> `alert-actions.ts`, which runs when a human presses ESCALATE or DISPATCH. So
+> an incident that climbed to the LGA at 02:00 because nobody at the ward
+> answered was moved into another tier's queue in complete silence, and was only
+> seen if somebody happened to have the console open. **The whole point of the
+> timeout is the case where nobody is watching.**
+
+Every word of that applies to the first report, more strongly. And the outbox is
+written in exactly two places, both inside `escalate_overdue_alerts()`, both
+with `kind = 'TIER_ESCALATION'`. The triggers on `alerts` are the `updated_at`
+stamp and the oversight router. `alert_service.dart` mentions no push at all.
+
+So:
+
+* a responder with the app open and in the foreground: sees it at once;
+* a responder with the app closed, or backgrounded, or the screen off: **nothing**
+  until a dispatcher presses DISPATCH, or the polling unit's two-minute window
+  expires and the timeout escalates it to the ward — at which point the WARD is
+  paged about an incident the unit was never told about.
+
+The system notified you when it gave up waiting for you, and not when the
+emergency arrived. That is the shape of the gap, and it is why this is a finding
+rather than a feature request: the machinery to do it was already built, already
+tested, and pointed at the second notification instead of the first.
+
+#### Three decisions worth recording
+
+**Who is told.** The tier the row lands at, read from `NEW.assigned_tier` rather
+than hardcoded as `'UNIT'`. That is not defensive style, it is the difference
+between honouring the oversight rule and routing around it: the BEFORE INSERT
+trigger `route_oversight_to_hq_trg` sets `assigned_tier := 'HQ'` for a complaint
+against security personnel, so reading the column means a complaint is announced
+to HQ and never to the local command it is about. A hardcoded `'UNIT'` would
+have been a way past that rule through a door nobody was watching.
+
+Then the drain widens the audience for this kind, at the unit only, to the field
+responders. They hold no tier, so `rolesForTier` does not name them, and a new
+emergency that reaches only the unit commander's phone is waiting on one person
+to be awake. Widened for this kind alone: an escalation arriving at the LGA is a
+message to a desk, and copying every responder in the LGA on it is how people
+turn off the notifications they do need. The module's own constraint holds —
+"an officer who would be refused the row by row-level security must not be sent
+a push about it" — because `alert_in_my_area()` gives a field responder their
+whole LGA, so their own polling unit is well inside it.
+
+**What it says.** `escalationMessage` read "was not acknowledged in time and has
+come up to WARD". True of a timeout and false of an emergency just filed: an
+officer reading that on a new SOS learns that somebody already had it and did
+nothing, which nobody did. A new incident says "has just been reported".
+
+**What happens if the notice cannot be queued.** This trigger sits on the hot
+path of the one thing the system exists to do. It catches its own failure and
+raises a WARNING, so the SOS is filed either way, and it is SECURITY DEFINER so
+the insert does not depend on a citizen being able to write the outbox. The
+assertion that proves it renames `notification_outbox` out from under the
+trigger, files an emergency, and checks the alert landed and no notice did:
+
+```
+PASS: an SOS is filed even when no notice can be queued
+PASS: the notice is lost and the report is not
+```
+
+An emergency that reaches the database silently beats one refused because a
+notice could not be written.
+
+#### One existing assertion narrowed, which needs saying out loud
+
+`oversight_behaviour_test.sql` asserted that **no** outbox row existed for a
+complaint — "they would page the accused's own commander". My trigger queues
+one, and the run went red.
+
+The assertion was written when the outbox had one kind. Zero rows was a
+consequence of `awaiting_human_confirmation()` holding a complaint out of the
+escalation ladder, not an independent rule that a complaint must never be
+announced to anybody. HQ is who a complaint is routed *to*, and a complaint
+nobody is told about sits in a queue until somebody looks — which is the silence
+this whole mechanism exists to end.
+
+So it now says what it always meant, and more strictly: no escalation notice for
+a complaint, **and** nothing about a complaint addressed anywhere but HQ. The
+second clause is new and catches more than the original did — a future notice
+addressed to the ward would fail it, where the old "count = 0" test would have
+been deleted by whoever added that notice.
+
+Changing somebody else's assertion is worth doing carefully and worth declaring
+plainly, which is why it is in this document rather than only in a commit
+message.
 
 ---
 

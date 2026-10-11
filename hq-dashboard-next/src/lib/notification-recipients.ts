@@ -40,8 +40,23 @@ export interface OutboxRow {
     geo_pu?: string | null;
     severity?: string | null;
     reason?: string;
+    /** The reporting category, on a NEW_INCIDENT notice. */
+    type?: string | null;
   };
 }
+
+/** A timeout moved an incident up the chain. */
+export const TIER_ESCALATION = 'TIER_ESCALATION';
+
+/**
+ * An incident was just reported.
+ *
+ * Queued by `queue_new_incident_notice()` on INSERT. Nothing queued anything
+ * on insert before: the only paths to a phone were a human pressing DISPATCH
+ * and the timeout two minutes later, so the system announced that it had given
+ * up waiting for you and not that the emergency had arrived.
+ */
+export const NEW_INCIDENT = 'NEW_INCIDENT';
 
 /** The profile fields this rule reads. */
 export interface OfficerRow {
@@ -92,7 +107,7 @@ export function rolesForTier(tier: string | null | undefined): string[] {
  * ones that must not fall silently between desks.
  */
 export function officerShouldHear(officer: OfficerRow, row: OutboxRow): boolean {
-  const roles = rolesForTier(row.payload.to_tier);
+  const roles = rolesToNotify(row);
   if (roles.length === 0) return false;
   if (!roles.includes(norm(officer.role) ?? '')) return false;
 
@@ -115,6 +130,32 @@ export function officerShouldHear(officer: OfficerRow, row: OutboxRow): boolean 
   return true;
 }
 
+/**
+ * The roles a notice is addressed to.
+ *
+ * For an escalation it is the desk that now owns the incident — that is what
+ * `rolesForTier` answers and what the chain means.
+ *
+ * For a NEW incident at the unit it is also the FIELD RESPONDERS, because they
+ * are who go. They hold no tier, so `rolesForTier` does not name them, and a
+ * new emergency that only reaches the unit commander's phone is waiting on one
+ * person to be awake.
+ *
+ * Widened only for this kind and only at the UNIT: an escalation reaching the
+ * LGA is a message to a desk, and copying every responder in the LGA on it is
+ * how people turn off the notifications they do need. And nobody is sent a push
+ * about a row RLS would refuse them: `alert_in_my_area()` gives a field
+ * responder their whole LGA, so their own polling unit is well inside it.
+ */
+export function rolesToNotify(row: OutboxRow): string[] {
+  const tier = rolesForTier(row.payload.to_tier);
+  if (tier.length === 0) return tier;
+  if (norm(row.kind) === NEW_INCIDENT && norm(row.payload.to_tier) === 'UNIT') {
+    return [...tier, 'RESPONDER', 'AGENT'];
+  }
+  return tier;
+}
+
 /** The officers to notify, from everyone loaded. */
 export function recipientsFor(officers: OfficerRow[], row: OutboxRow): OfficerRow[] {
   return officers.filter(o => o && officerShouldHear(o, row));
@@ -132,6 +173,22 @@ export function escalationMessage(row: OutboxRow): { heading: string; body: stri
   const where = row.payload.geo_lga || 'an unlocated incident';
   const severity = norm(row.payload.severity);
   const ref = (row.payload.alert_id || row.alert_id || '').slice(0, 8);
+
+  // A FIRST REPORT IS NOT AN ESCALATION.
+  //
+  // "was not acknowledged in time and has come up to" is a true sentence about
+  // a timeout and a false one about an emergency that has just been filed. An
+  // officer who reads the escalation wording on a new SOS learns that somebody
+  // already had it and did nothing, which nobody did.
+  if (norm(row.kind) === NEW_INCIDENT) {
+    const what = norm(row.payload.type) ?? 'INCIDENT';
+    return {
+      heading: severity === 'CRITICAL'
+        ? `⚠️ CRITICAL — ${what} REPORTED`
+        : `${what} REPORTED`,
+      body: `Incident #${ref} has just been reported in ${where}. Open it to accept and respond.`,
+    };
+  }
 
   return {
     heading: severity === 'CRITICAL'

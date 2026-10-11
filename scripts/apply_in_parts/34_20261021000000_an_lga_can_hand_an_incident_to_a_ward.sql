@@ -187,5 +187,3 @@ COMMENT ON FUNCTION public.alert_is_ours(public.alerts) IS
 
 COMMIT;
 
-
-

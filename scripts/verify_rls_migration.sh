@@ -67,6 +67,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/alert_category_behaviour_test.sql \
    "$REPO"/scripts/alert_scoping_behaviour_test.sql \
    "$REPO"/scripts/ward_handdown_behaviour_test.sql \
+   "$REPO"/scripts/new_incident_notice_behaviour_test.sql \
    "$REPO"/scripts/notification_outbox_behaviour_test.sql \
    "$REPO"/scripts/escalation_targets_behaviour_test.sql \
    "$REPO"/scripts/geo_key_behaviour_test.sql \
@@ -452,6 +453,20 @@ psql_run "-f $PGROOT/20261021000000_an_lga_can_hand_an_incident_to_a_ward.sql" >
 # — that one runs earlier in the replay, before this migration exists, where
 # the assertions passed for the wrong reason and then failed with "function
 # does not exist".
+# The outbox was built for the timeout escalation and nothing queued anything
+# when an alert was INSERTED, so a report reached a responder only if they had
+# the app open.
+echo "▶ Applying 20261022000000_a_new_emergency_tells_the_unit.sql"
+psql_run "-f $PGROOT/20261022000000_a_new_emergency_tells_the_unit.sql" >/dev/null
+psql_run "-f $PGROOT/20261022000000_a_new_emergency_tells_the_unit.sql" >/dev/null
+
+echo "▶ Asserting a new emergency tells the unit it landed in"
+NI_OUT=$(psql_run "-f $PGROOT/new_incident_notice_behaviour_test.sql" 2>&1) && NI_RC=0 || NI_RC=$?
+echo "$NI_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$NI_RC" -ne 0 ] || echo "$NI_OUT" | grep -q "ERROR"; then
+  echo "$NI_OUT"; echo "✗ new incident notice assertions failed"; exit 1
+fi
+
 echo "▶ Asserting an LGA commander can hand an incident across to a ward"
 WH_OUT=$(psql_run "-f $PGROOT/ward_handdown_behaviour_test.sql" 2>&1) && WH_RC=0 || WH_RC=$?
 echo "$WH_OUT" | grep -E "PASS|FAIL|ERROR" || true
