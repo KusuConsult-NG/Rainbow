@@ -65,7 +65,7 @@ END $precheck$;
 -- DID IT WORK?
 --
 -- One row per thing that had to be true. `result` is PASS or FAIL; nothing here
--- writes. If every row says PASS, the 32 migrations are applied.
+-- writes. If every row says PASS, the 33 migrations are applied.
 --
 -- These check BEHAVIOUR-ADJACENT FACTS, not just that statements ran: that anon
 -- holds no policy at all, that the escalation columns exist (their absence made
@@ -79,8 +79,8 @@ WITH checks(ord, name, ok) AS (
     -- the output below. A pasted result used to carry nothing identifying its
     -- version, so a run from a stale working copy read exactly like a current
     -- one. Compare with: python3 scripts/migration_sets.py --fingerprint
-    (0, 'script version: 32 outstanding migrations, '
-        'fingerprint 026130fbf42b', true),
+    (0, 'script version: 33 outstanding migrations, '
+        'fingerprint 67249ea3f49b', true),
     (1, 'agency tables exist (4)',
         (SELECT count(*) = 4 FROM information_schema.tables
           WHERE table_schema = 'public'

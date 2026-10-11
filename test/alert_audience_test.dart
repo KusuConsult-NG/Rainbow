@@ -216,7 +216,7 @@ void main() {
 
     test('a log with no to_lga delegates to nobody', () {
       expect(delegatedLga(alert()), isNull);
-      expect(delegatedLga(<String, dynamic>{...alert(), 'escalation_log': []}), isNull);
+      expect(delegatedLga(<String, dynamic>{...alert(), 'escalation_log': <Object?>[]}), isNull);
       expect(
         delegatedLga(<String, dynamic>{
           ...alert(),

@@ -117,6 +117,37 @@ class BackgroundTrackingService {
     }
   }
 
+  /// The SOS this handset is currently tracking for, or null.
+  ///
+  /// Null when the track is a responder's patrol, when nothing is being
+  /// tracked, or when the twelve-hour `sosTrackingMaxAge` ceiling has passed —
+  /// an expired track is not a live emergency.
+  ///
+  /// `signOut()` asks this to decide what it may stop. A patrol track ends when
+  /// an officer goes off duty; an SOS track must not, because the lock screen's
+  /// sign-out needs no code and a duress alarm deliberately leaves tracking
+  /// running.
+  /// Null on a read failure too, and that is not a compromise: the isolate
+  /// learns its own mode from THIS SAME store. If SharedPreferences cannot be
+  /// read, there is no SOS track to preserve, because nothing is telling the
+  /// background service to be on one.
+  Future<String?> activeSosAlertId() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString('trackingMode') != 'sos') return null;
+      final expiresAt = prefs.getInt('trackingExpiresAt');
+      if (expiresAt != null &&
+          DateTime.now().millisecondsSinceEpoch >= expiresAt) {
+        return null;
+      }
+      final alertId = prefs.getString('activeTrackingAlertId');
+      return (alertId == null || alertId.isEmpty) ? null : alertId;
+    } catch (e) {
+      debugPrint('[TRACKING] could not read the tracking mode: $e');
+      return null;
+    }
+  }
+
   Future<void> stopTracking() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('trackingMode');

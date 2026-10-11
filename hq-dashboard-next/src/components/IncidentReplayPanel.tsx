@@ -73,6 +73,21 @@ export default function IncidentReplayPanel({ alertId }: { alertId: string }) {
             });
           }
 
+          // The handset left while this was open. On the timeline because the
+          // question a review asks is "when did we lose the app", and a gap in
+          // the track cannot answer it.
+          if (alert.device_signed_out_at) {
+            combined.push({
+              id: `signout-${alert.id}`,
+              type: 'ESCALATION',
+              actor: 'Reporting handset',
+              role: 'DEVICE',
+              timestamp: alert.device_signed_out_at,
+              notes: 'Signed out while this incident was open. Location '
+                + 'tracking continued; the app did not.',
+            });
+          }
+
           // Resolution event
           if (alert.status === 'RESOLVED' || alert.resolved_at) {
             combined.push({

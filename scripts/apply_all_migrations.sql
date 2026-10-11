@@ -3,7 +3,7 @@
 --   Regenerate with: python3 scripts/build_apply_all.py
 --
 -- Paste the WHOLE of this file into the Supabase dashboard -> SQL Editor and
--- run it. It applies the 32 outstanding migrations in order and finishes by
+-- run it. It applies the 33 outstanding migrations in order and finishes by
 -- SELECTing a pass/fail table, so one paste in gives you one answer out.
 --
 -- ---------------------------------------------------------------------------
@@ -5844,13 +5844,69 @@ COMMENT ON FUNCTION public.audit_trail(INTEGER) IS
   'from `by` then `by_email`: the SQL writers set the first, both apps set the '
   'second, and reading only `by` attributed every human action to SYSTEM.';
 
+-- ----------------------------------------------------------------------------
+-- 20261020000000_a_handset_that_leaves_mid_emergency.sql
+-- ----------------------------------------------------------------------------
+DO $apply$ BEGIN RAISE NOTICE 'applying 20261020000000_a_handset_that_leaves_mid_emergency.sql'; END $apply$;
+
+-- ============================================================================
+-- A HANDSET THAT SIGNS OUT WHILE ITS EMERGENCY IS STILL OPEN
+-- ============================================================================
+--
+-- `AuthService.signOut()` stopped location tracking first, deliberately, and
+-- said why:
+--
+--     Signing out is the clearest statement a person can make that they are
+--     done being observed, and it was the one action that did not stop it.
+--
+-- That is right about a person signing out of their own phone. It is wrong
+-- about the one case the duress design exists for. A duress PIN tells the
+-- person their alarm is cancelled and KEEPS TRACKING RUNNING, because they may
+-- still be in danger — and the lock screen offers a sign-out that needs no code
+-- at all. So whoever is holding the phone could end the tracking of a live
+-- duress alert without knowing any PIN, and HQ saw silence indistinguishable
+-- from a flat battery.
+--
+-- Two rules collided and nothing recorded which won. Now: signing out ends the
+-- session and retires the SMS key as before, a RESPONDER's patrol track still
+-- stops (they are off duty), and an SOS track keeps running until the incident
+-- closes or the twelve-hour ceiling in `sosTrackingMaxAge` expires.
+--
+-- This column is the other half: the loss of the app has to be visible as a
+-- FACT rather than inferred from a gap. An operator watching a track go quiet
+-- cannot tell a captor from a dead phone; one that says "this handset signed
+-- out at 19:42, tracking continues" can.
+--
+-- Written by the handset itself, in the window before the session is cleared,
+-- so `alerts_update_own_or_ours` covers it: `reported_by = auth.uid()`.
+-- Best-effort by design — a phone being switched off must not have the sign-out
+-- blocked on a network write.
+-- ============================================================================
+
+BEGIN;
+
+ALTER TABLE public.alerts
+  ADD COLUMN IF NOT EXISTS device_signed_out_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN public.alerts.device_signed_out_at IS
+  'When the reporting handset signed out while this incident was still open. '
+  'Tracking continues regardless; this says the app is gone, so an operator can '
+  'tell that from a dead battery. Written by the handset before its session '
+  'ends, best-effort.';
+
+-- The console reads it on one incident at a time, from the dossier, so no index
+-- is warranted. Said out loud because the next column added here will be
+-- tempted to copy an index it does not need either.
+
+COMMIT;
+
 
 
 -- ============================================================================
 -- DID IT WORK?
 --
 -- One row per thing that had to be true. `result` is PASS or FAIL; nothing here
--- writes. If every row says PASS, the 32 migrations are applied.
+-- writes. If every row says PASS, the 33 migrations are applied.
 --
 -- These check BEHAVIOUR-ADJACENT FACTS, not just that statements ran: that anon
 -- holds no policy at all, that the escalation columns exist (their absence made
@@ -5864,8 +5920,8 @@ WITH checks(ord, name, ok) AS (
     -- the output below. A pasted result used to carry nothing identifying its
     -- version, so a run from a stale working copy read exactly like a current
     -- one. Compare with: python3 scripts/migration_sets.py --fingerprint
-    (0, 'script version: 32 outstanding migrations, '
-        'fingerprint 026130fbf42b', true),
+    (0, 'script version: 33 outstanding migrations, '
+        'fingerprint 67249ea3f49b', true),
     (1, 'agency tables exist (4)',
         (SELECT count(*) = 4 FROM information_schema.tables
           WHERE table_schema = 'public'

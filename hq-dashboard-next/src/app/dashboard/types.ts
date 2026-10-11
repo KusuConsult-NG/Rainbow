@@ -55,6 +55,19 @@ export interface Alert {
     | 'RESOLVED'
     | 'DURESS'
     | 'CANCELLED';
+  /**
+   * When the reporting handset signed out while this incident was still open.
+   *
+   * Tracking continues regardless — a duress PIN deliberately leaves it
+   * running, and the lock screen's sign-out needs no code, so this is the one
+   * path somebody other than the reporter can reach. The column exists so an
+   * operator can tell "the app is gone" from "the battery died", which a gap in
+   * the track cannot. See `20261020000000`.
+   *
+   * Optional, because a console can be running against a database the
+   * migration has not reached yet.
+   */
+  device_signed_out_at?: string | null;
   severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   priority?: string;
   assigned_to?: string;

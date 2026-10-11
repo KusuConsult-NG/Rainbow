@@ -380,6 +380,14 @@ class AuthService {
   @visibleForTesting
   static Future<void> Function()? stopTrackingOverride;
 
+  /// Test seam: whether an SOS track is running, and for which incident.
+  @visibleForTesting
+  static Future<String?> Function()? activeSosOverride;
+
+  /// Test seam: the write that tells HQ this handset signed out.
+  @visibleForTesting
+  static Future<void> Function(String alertId)? stampSignOutOverride;
+
   /// Test seam: the SMS key service reaches secure storage and Supabase.
   @visibleForTesting
   static Future<void> Function()? forgetSmsKeyOverride;
@@ -404,12 +412,58 @@ class AuthService {
   /// screen. Signing out is the clearest statement a person can make that they
   /// are done being observed, and it was the one action that did not stop it.
   ///
-  /// First, so that a failure below cannot leave tracking alive.
+  /// Tells HQ that the app is gone while this incident is still open.
+  ///
+  /// One column, not a message: `alerts.device_signed_out_at`. A handset must
+  /// not be able to write prose onto an operator's screen — the same rule
+  /// `sim_channel_events` states, where the words HQ reads are composed by the
+  /// console from a code.
+  static Future<void> _stampSignOut(String alertId) async {
+    await SupabaseConfig.client
+        .from('alerts')
+        .update({'device_signed_out_at': DateTime.now().toIso8601String()})
+        .eq('id', alertId);
+  }
+
+  /// EXCEPT WHILE AN EMERGENCY IS STILL OPEN.
+  ///
+  /// The paragraph above is right about a person signing out of their own
+  /// phone, and wrong about the one case the duress design exists for. A duress
+  /// PIN tells the person their alarm is cancelled and deliberately KEEPS
+  /// TRACKING RUNNING, because they may still be in danger; and the lock
+  /// screen offers a sign-out that needs no code at all. So whoever was holding
+  /// the phone could end the tracking of a live duress alert without knowing
+  /// any PIN, and all HQ saw was a track going quiet — indistinguishable from a
+  /// flat battery.
+  ///
+  /// A RESPONDER's patrol track still stops: they are going off duty. An SOS
+  /// track keeps running until the incident closes or the twelve-hour
+  /// `sosTrackingMaxAge` ceiling expires, and the alert is stamped so the loss
+  /// of the app is a fact an operator can read rather than a gap to infer.
+  ///
+  /// First, so that a failure below cannot leave a patrol track alive.
   Future<void> signOut() async {
-    try {
-      await (stopTrackingOverride ?? BackgroundTrackingService().stopTracking)();
-    } catch (e) {
-      debugPrint('[SIGNOUT_TRACKING_ERR] could not stop tracking: $e');
+    // `activeSosAlertId()` answers null rather than throwing, including on a
+    // failure to read: the background isolate takes its mode from the same
+    // store, so an unreadable store means there is no SOS track to preserve.
+    final liveSos = await (activeSosOverride ??
+        BackgroundTrackingService().activeSosAlertId)();
+
+    if (liveSos == null) {
+      try {
+        await (stopTrackingOverride ?? BackgroundTrackingService().stopTracking)();
+      } catch (e) {
+        debugPrint('[SIGNOUT_TRACKING_ERR] could not stop tracking: $e');
+      }
+    } else {
+      // Best-effort, and before the session is cleared so RLS still sees the
+      // reporter. A phone being switched off must not have its sign-out
+      // blocked on a network write.
+      try {
+        await (stampSignOutOverride ?? _stampSignOut)(liveSos);
+      } catch (e) {
+        debugPrint('[SIGNOUT_STAMP_ERR] HQ was not told the app is gone: $e');
+      }
     }
     // And give up the SMS device key, for the same reason tracking stops: this
     // handset is no longer authorised to speak for that person, and the key

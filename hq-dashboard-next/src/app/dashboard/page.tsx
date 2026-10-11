@@ -2194,6 +2194,28 @@ export default function DashboardPage() {
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>LGA / Sector:</span>
                         <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', textTransform: 'uppercase' }}>{placeField(selectedReport.geo_lga, 'lga')}</span>
                       </div>
+                      {/* THE HANDSET LEFT, AND THE TRACK DID NOT.
+                          A track going quiet reads as a flat battery. This says
+                          the app was signed out — which on the lock screen needs
+                          no code, so it is the one path somebody other than the
+                          reporter can reach. Tracking continues either way; see
+                          20261020000000. */}
+                      {selectedReport.device_signed_out_at && (
+                        <div style={{
+                          display: 'flex', gap: 8, alignItems: 'flex-start',
+                          padding: 10, borderRadius: 8,
+                          background: 'rgba(245,158,11,0.12)',
+                          border: '1px solid #F59E0B', color: '#F59E0B',
+                        }}>
+                          <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                          <div style={{ fontSize: 11 }}>
+                            <strong>Handset signed out</strong> at{' '}
+                            {new Date(selectedReport.device_signed_out_at as string).toLocaleString()}.
+                            Location tracking is still running — the app is gone,
+                            the trail is not.
+                          </div>
+                        </div>
+                      )}
                       {selectedReport.geo_ward && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Ward:</span>

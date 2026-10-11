@@ -433,6 +433,14 @@ echo "▶ Applying 20261018000000_the_mirrors_and_two_dead_functions_are_gone.sq
 psql_run "-f $PGROOT/20261018000000_the_mirrors_and_two_dead_functions_are_gone.sql" >/dev/null
 psql_run "-f $PGROOT/20261018000000_the_mirrors_and_two_dead_functions_are_gone.sql" >/dev/null
 
+# One nullable column, so that a handset leaving mid-emergency is a fact an
+# operator can read rather than a gap in a track they have to infer. Applied
+# twice, like every other one here: `ADD COLUMN IF NOT EXISTS` must be
+# re-runnable, because the runbook tells an operator to paste these by hand.
+echo "▶ Applying 20261020000000_a_handset_that_leaves_mid_emergency.sql"
+psql_run "-f $PGROOT/20261020000000_a_handset_that_leaves_mid_emergency.sql" >/dev/null
+psql_run "-f $PGROOT/20261020000000_a_handset_that_leaves_mid_emergency.sql" >/dev/null
+
 echo "▶ Asserting the schema now behaves the way production's does"
 CONV_OUT=$(psql_run "-f $PGROOT/schema_convergence_behaviour_test.sql" 2>&1) && CONV_RC=0 || CONV_RC=$?
 echo "$CONV_OUT" | grep -E "PASS|FAIL|NOTE|ERROR" || true

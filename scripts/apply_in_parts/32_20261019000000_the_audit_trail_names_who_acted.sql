@@ -160,5 +160,3 @@ COMMENT ON FUNCTION public.audit_trail(INTEGER) IS
   'from `by` then `by_email`: the SQL writers set the first, both apps set the '
   'second, and reading only `by` attributed every human action to SYSTEM.';
 
-
-
