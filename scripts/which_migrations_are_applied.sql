@@ -136,6 +136,7 @@ WITH expected(migration, kind, obj, want) AS (VALUES
   ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief_by', true),
   ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief_at', true),
   ('20261020000000_a_handset_that_leaves_mid_emergency', 'column', 'alerts.device_signed_out_at', true),
+  ('20261021000000_an_lga_can_hand_an_incident_to_a_ward', 'function', 'alert_delegated_to_my_ward', true),
   ('phase1_foundation', 'table', 'safe_zones', true),
   ('phase1_foundation', 'table', 'uninstall_requests', true),
   ('phase1_foundation', 'table', 'app_config', true),

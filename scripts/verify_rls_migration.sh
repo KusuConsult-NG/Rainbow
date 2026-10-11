@@ -66,6 +66,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/mesh_ingest_behaviour_test.sql \
    "$REPO"/scripts/alert_category_behaviour_test.sql \
    "$REPO"/scripts/alert_scoping_behaviour_test.sql \
+   "$REPO"/scripts/ward_handdown_behaviour_test.sql \
    "$REPO"/scripts/notification_outbox_behaviour_test.sql \
    "$REPO"/scripts/escalation_targets_behaviour_test.sql \
    "$REPO"/scripts/geo_key_behaviour_test.sql \
@@ -440,6 +441,23 @@ psql_run "-f $PGROOT/20261018000000_the_mirrors_and_two_dead_functions_are_gone.
 echo "▶ Applying 20261020000000_a_handset_that_leaves_mid_emergency.sql"
 psql_run "-f $PGROOT/20261020000000_a_handset_that_leaves_mid_emergency.sql" >/dev/null
 psql_run "-f $PGROOT/20261020000000_a_handset_that_leaves_mid_emergency.sql" >/dev/null
+
+# The chain only ever climbed. This is the sideways move an LGA commander never
+# had: hand the incident to a ward they command, by name.
+echo "▶ Applying 20261021000000_an_lga_can_hand_an_incident_to_a_ward.sql"
+psql_run "-f $PGROOT/20261021000000_an_lga_can_hand_an_incident_to_a_ward.sql" >/dev/null
+psql_run "-f $PGROOT/20261021000000_an_lga_can_hand_an_incident_to_a_ward.sql" >/dev/null
+
+# Its own file, and run HERE rather than inside alert_scoping_behaviour_test.sql
+# — that one runs earlier in the replay, before this migration exists, where
+# the assertions passed for the wrong reason and then failed with "function
+# does not exist".
+echo "▶ Asserting an LGA commander can hand an incident across to a ward"
+WH_OUT=$(psql_run "-f $PGROOT/ward_handdown_behaviour_test.sql" 2>&1) && WH_RC=0 || WH_RC=$?
+echo "$WH_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$WH_RC" -ne 0 ] || echo "$WH_OUT" | grep -q "ERROR"; then
+  echo "$WH_OUT"; echo "✗ ward hand-down assertions failed"; exit 1
+fi
 
 echo "▶ Asserting the schema now behaves the way production's does"
 CONV_OUT=$(psql_run "-f $PGROOT/schema_convergence_behaviour_test.sql" 2>&1) && CONV_RC=0 || CONV_RC=$?

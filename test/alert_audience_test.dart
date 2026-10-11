@@ -250,6 +250,121 @@ void main() {
     });
   });
 
+  group('handed across to a ward by name', () {
+    // The LGA hand-down one rung lower: an LGA commander judges that a
+    // neighbouring ward should take an incident. Before `to_ward` existed they
+    // could assign individual responders but could not give that ward's
+    // commander the incident.
+    Map<String, dynamic> handedToWard(String ward, {String? lga = 'JOS NORTH'}) =>
+        <String, dynamic>{
+          // The incident itself is in MANGU; the ward it is handed to is not.
+          ...alert(lga: 'MANGU', ward: 'PANYAM', pu: 'PU-11'),
+          'escalation_log': [
+            {'from_tier': 'WARD', 'to_tier': 'LGA'},
+            {'from_tier': 'LGA', 'to_tier': 'WARD', 'to_ward': ward, 'to_lga': lga},
+          ],
+        };
+
+    const naraguta = AlertAudience(
+      role: 'WARD_COMMAND', geoLga: 'JOS NORTH', geoWard: 'NARAGUTA');
+
+    test('reaches the ward commander it was handed to', () {
+      expect(alertReaches(handedToWard('NARAGUTA'), naraguta), isTrue);
+    });
+
+    test('and not another ward in the same LGA', () {
+      const gangare = AlertAudience(
+        role: 'WARD_COMMAND', geoLga: 'JOS NORTH', geoWard: 'GANGARE');
+      expect(alertReaches(handedToWard('NARAGUTA'), gangare), isFalse);
+    });
+
+    test('nor a ward of the same NAME in a different LGA', () {
+      // Ward names are not unique across Plateau's seventeen LGAs. Granting on
+      // the ward name alone would hand the incident to a commander in an LGA
+      // that was never involved.
+      const elsewhere = AlertAudience(
+        role: 'WARD_COMMAND', geoLga: 'BOKKOS', geoWard: 'NARAGUTA');
+      expect(alertReaches(handedToWard('NARAGUTA'), elsewhere), isFalse);
+    });
+
+    test('an entry that named no LGA is trusted on the ward alone', () {
+      // What the SQL does, so the two agree.
+      expect(
+        alertReaches(handedToWard('NARAGUTA', lga: null), naraguta),
+        isTrue,
+      );
+    });
+
+    test('only the LAST entry counts', () {
+      final superseded = <String, dynamic>{
+        ...alert(lga: 'MANGU', ward: 'PANYAM', pu: 'PU-11'),
+        'escalation_log': [
+          {'to_tier': 'WARD', 'to_ward': 'NARAGUTA', 'to_lga': 'JOS NORTH'},
+          {'to_tier': 'WARD', 'to_ward': 'GANGARE', 'to_lga': 'JOS NORTH'},
+        ],
+      };
+      expect(alertReaches(superseded, naraguta), isFalse);
+      const gangare = AlertAudience(
+        role: 'WARD_COMMAND', geoLga: 'JOS NORTH', geoWard: 'GANGARE');
+      expect(alertReaches(superseded, gangare), isTrue);
+    });
+
+    test('the LGA command that directed it keeps the incident', () {
+      // They chose the ward, and the incident may sit outside their own area —
+      // this one is in MANGU. Losing it the moment they delegate is how a
+      // commander stops being able to follow what they ordered.
+      const josLga = AlertAudience(role: 'LGA_COMMAND', geoLga: 'JOS NORTH');
+      expect(alertReaches(handedToWard('NARAGUTA'), josLga), isTrue);
+    });
+
+    test('but not a responder elsewhere in that LGA', () {
+      const responder = AlertAudience(
+        role: 'RESPONDER', geoLga: 'JOS NORTH', geoWard: 'GANGARE', geoPu: 'PU-07');
+      expect(alertReaches(handedToWard('NARAGUTA'), responder), isFalse);
+    });
+
+    test('an LGA hand-down with no ward still reaches the whole LGA', () {
+      // The HQ -> LGA shape is unchanged: no ward named, so everybody in that
+      // LGA has it, which is what `alert_delegated_to_my_lga()` grants.
+      final toLgaOnly = <String, dynamic>{
+        ...alert(lga: 'MANGU', ward: 'PANYAM', pu: 'PU-11'),
+        'escalation_log': [
+          {'to_tier': 'LGA', 'to_lga': 'JOS NORTH'},
+        ],
+      };
+      const responder = AlertAudience(
+        role: 'RESPONDER', geoLga: 'JOS NORTH', geoWard: 'GANGARE', geoPu: 'PU-07');
+      expect(alertReaches(toLgaOnly, responder), isTrue);
+      expect(alertReaches(toLgaOnly, naraguta), isTrue);
+    });
+
+    test('an officer with no ward is handed nothing by delegation', () {
+      // `geo_ward` is self-writable, and blank must never mean "everywhere".
+      expect(delegatedToWard(handedToWard('NARAGUTA'), null, 'JOS NORTH'), isFalse);
+      expect(delegatedToWard(handedToWard('NARAGUTA'), '  ', 'JOS NORTH'), isFalse);
+    });
+
+    test('a log with no to_ward hands it to no ward', () {
+      expect(delegatedWard(alert()), isNull);
+      expect(
+        delegatedWard(<String, dynamic>{
+          ...alert(),
+          'escalation_log': [
+            {'to_tier': 'LGA', 'to_lga': 'JOS NORTH'},
+          ],
+        }),
+        isNull,
+      );
+    });
+
+    test('it does not override the liaison rule', () {
+      const army = AlertAudience(
+        role: 'ARMY_LIAISON', agency: 'ARMY',
+        geoLga: 'JOS NORTH', geoWard: 'NARAGUTA');
+      expect(alertReaches(handedToWard('NARAGUTA'), army), isFalse);
+    });
+  });
+
   group('an incident with no LGA is unlocated', () {
     // `alert_in_my_area()` tests only the LGA: "Unlocated incidents fail OPEN
     // ... an emergency nobody can see is worse than one seen too widely." This

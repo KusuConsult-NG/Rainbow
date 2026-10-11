@@ -87,5 +87,3 @@ COMMENT ON COLUMN public.alerts.device_signed_out_at IS
 
 COMMIT;
 
-
-

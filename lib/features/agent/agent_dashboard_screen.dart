@@ -1453,6 +1453,24 @@ class _EscalationDialogState extends State<_EscalationDialog> {
   List<Map<String, dynamic>> _availableCommanders = [];
   bool _loadingCommanders = true;
 
+  /// HAND ACROSS TO A WARD INSTEAD OF UP TO HQ.
+  ///
+  /// Offered only to an LGA commander, because the wards are theirs to direct.
+  /// The chain only ever climbed — `escalationTargetFor` gives LGA exactly one
+  /// target, HQ — so a commander who judged that a neighbouring ward should
+  /// take an incident could assign individual responders but could not give
+  /// that ward's COMMANDER the incident. See
+  /// `20261021000000_an_lga_can_hand_an_incident_to_a_ward.sql`.
+  bool _handToWard = false;
+
+  /// Whether this escalation may be handed sideways at all.
+  bool get _canHandToWard => widget.assignedTier.toUpperCase() == 'LGA';
+
+  /// The tier taking it. One place, asked by the loader, the body and the write.
+  String get _targetTier => _handToWard
+      ? 'WARD'
+      : (escalationTargetFor(widget.assignedTier) ?? 'HQ');
+
   final List<String> _presets = [
     'Tactical Resource Exhaustion',
     'Overwhelming Threat Level',
@@ -1468,23 +1486,41 @@ class _EscalationDialogState extends State<_EscalationDialog> {
   }
 
   Future<void> _loadTargetCommanders() async {
-    final targetTier = escalationTargetFor(widget.assignedTier) ?? 'HQ';
+    final targetTier = _targetTier;
 
     // Map tier to role string
     final roleMap = {'WARD': 'WARD_COMMAND', 'LGA': 'LGA_COMMAND', 'HQ': 'HQ_COMMAND'};
     final targetRole = roleMap[targetTier] ?? 'HQ_COMMAND';
 
+    if (mounted) {
+      setState(() {
+        _loadingCommanders = true;
+        _availableCommanders = [];
+        _targetCommander = null;
+      });
+    }
+
     try {
-      // Get the alert's geo_lga to find commanders in the right area
+      // Get the alert's geo_lga to find commanders in the right area.
+      //
+      // Handing SIDEWAYS is scoped to the escalating officer's own LGA, not the
+      // incident's: the point is that an LGA commander directs the wards they
+      // command, and the incident may sit in a ward of another LGA — which is
+      // often why it is being handed over at all.
       final alertLga = widget.alertDoc['geo_lga'] as String?;
+      final myLga = _handToWard
+          ? (SupabaseConfig.client.auth.currentUser == null
+              ? alertLga
+              : await _myLga() ?? alertLga)
+          : alertLga;
       var query = SupabaseConfig.client
           .from('profiles')
           .select('id, full_name, role, geo_lga, geo_ward')
           .eq('role', targetRole);
 
       // For ward/LGA tier, narrow to same LGA
-      if (alertLga != null && targetTier != 'HQ') {
-        query = query.eq('geo_lga', alertLga);
+      if (myLga != null && targetTier != 'HQ') {
+        query = query.eq('geo_lga', myLga);
       }
 
       final res = await query.limit(20);
@@ -1502,6 +1538,23 @@ class _EscalationDialogState extends State<_EscalationDialog> {
     }
   }
 
+  /// The escalating officer's own LGA, for scoping a sideways hand-down.
+  Future<String?> _myLga() async {
+    try {
+      final me = SupabaseConfig.client.auth.currentUser;
+      if (me == null) return null;
+      final row = await SupabaseConfig.client
+          .from('profiles')
+          .select('geo_lga')
+          .eq('id', me.id)
+          .maybeSingle();
+      return row?['geo_lga'] as String?;
+    } catch (e) {
+      debugPrint('[ESCALATION_MY_LGA_ERR] $e');
+      return null;
+    }
+  }
+
   @override
   void dispose() {
     _notesController.dispose();
@@ -1510,7 +1563,7 @@ class _EscalationDialogState extends State<_EscalationDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final targetTier = escalationTargetFor(widget.assignedTier) ?? 'HQ';
+    final targetTier = _targetTier;
 
     return AlertDialog(
       backgroundColor: AppColors.surfaceContainer,
@@ -1539,13 +1592,76 @@ class _EscalationDialogState extends State<_EscalationDialog> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Transferring command to $targetTier tier',
+            _handToWard
+                ? 'Handing command to a ward in your LGA'
+                : 'Transferring command to $targetTier tier',
             style: GoogleFonts.outfit(
               color: AppColors.textDim,
               fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
           ),
+          // UP, OR ACROSS. Only an LGA commander is offered the choice: the
+          // wards are theirs to direct, and the chain above them has one rung.
+          if (_canHandToWard) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                for (final toWard in [false, true]) ...[
+                  Expanded(
+                    child: Semantics(
+                      button: true,
+                      selected: _handToWard == toWard,
+                      label: toWard
+                          ? 'Hand to a ward'
+                          : 'Escalate to ${escalationTargetFor(widget.assignedTier) ?? 'HQ'}',
+                      excludeSemantics: true,
+                      child: InkWell(
+                        onTap: _isSubmitting || _handToWard == toWard
+                            ? null
+                            : () {
+                                setState(() => _handToWard = toWard);
+                                unawaited(_loadTargetCommanders());
+                              },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _handToWard == toWard
+                                ? AppColors.primary.withValues(alpha: 0.18)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: _handToWard == toWard
+                                  ? AppColors.primary
+                                  : AppColors.outline,
+                            ),
+                          ),
+                          child: Center(
+                            child: Text(
+                              toWard
+                                  ? 'HAND TO A WARD'
+                                  : 'ESCALATE TO ${escalationTargetFor(widget.assignedTier) ?? 'HQ'}',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.outfit(
+                                color: _handToWard == toWard
+                                    ? AppColors.primary
+                                    : AppColors.textSecondary,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 10,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (!toWard) const SizedBox(width: 8),
+                ],
+              ],
+            ),
+          ],
         ],
       ),
       content: Form(
@@ -1726,7 +1842,7 @@ class _EscalationDialogState extends State<_EscalationDialog> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSubmitting = true);
 
-    final targetTier = escalationTargetFor(widget.assignedTier) ?? 'HQ';
+    final targetTier = _targetTier;
 
     try {
       final alertId = widget.alertDoc['id'] as String?;
@@ -1741,6 +1857,14 @@ class _EscalationDialogState extends State<_EscalationDialog> {
       final escalationEntry = {
         'from_tier': widget.assignedTier,
         'to_tier': targetTier,
+        // NAMED, when it is handed across rather than up. `to_ward` is what
+        // `alert_delegated_to_my_ward()` reads, and the LGA goes with it
+        // because ward names are not unique across Plateau's seventeen LGAs.
+        // Written from the TARGET COMMANDER's own posting, so the name comes
+        // from the same tactical map their profile was posted from and an exact
+        // comparison is enough.
+        if (_handToWard) 'to_ward': _targetCommander?['geo_ward'],
+        if (_handToWard) 'to_lga': _targetCommander?['geo_lga'],
         'to_officer_id': targetCommanderId,
         'to_officer_name': targetCommanderName,
         'reason': _selectedReason,

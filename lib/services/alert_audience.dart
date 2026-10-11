@@ -145,6 +145,40 @@ bool delegatedToLga(Map<String, dynamic> alert, String? myLga) {
   return to != null && sameGeo(to, myLga);
 }
 
+/// The WARD the last escalation entry handed this incident to, if any.
+///
+/// Mirrors `alert_delegated_to_my_ward()`. An LGA commander can hand an
+/// incident to a ward other than the one it sits in — the roadblock is on the
+/// far side of the boundary, or the ward it is in has nobody free — and before
+/// `to_ward` existed they could assign individual responders but could not give
+/// that ward's commander the incident.
+String? delegatedWard(Map<String, dynamic> alert) {
+  final log = alert['escalation_log'];
+  if (log is! List || log.isEmpty) return null;
+  final last = log.last;
+  if (last is! Map) return null;
+  final to = (last['to_ward'] as String?)?.trim();
+  return (to == null || to.isEmpty) ? null : to;
+}
+
+/// Whether the last escalation handed this incident to `myWard` in `myLga`.
+///
+/// The LGA is compared too, because ward names are NOT unique across Plateau's
+/// seventeen LGAs — granting on the ward name alone would hand the incident to
+/// a commander in a different LGA who happens to share it. An entry that
+/// recorded no LGA is trusted on the ward alone, which is what the SQL does.
+bool delegatedToWard(
+  Map<String, dynamic> alert,
+  String? myWard,
+  String? myLga,
+) {
+  if (myWard == null || myWard.trim().isEmpty) return false;
+  final toWard = delegatedWard(alert);
+  if (toWard == null || !sameGeo(toWard, myWard)) return false;
+  final toLga = delegatedLga(alert);
+  return toLga == null || sameGeo(toLga, myLga);
+}
+
 /// Whether `alert` belongs on `officer`'s handset.
 bool alertReaches(Map<String, dynamic> alert, AlertAudience officer) {
   final assignedTo = alert['assigned_to'] as String?;
@@ -210,7 +244,7 @@ bool alertReaches(Map<String, dynamic> alert, AlertAudience officer) {
   // emergencies.
   if (alertLga == null) return true;
 
-  // 5. Handed down to an LGA by name.
+  // 5. Handed down to an LGA, or across to a WARD, by name.
   //
   // HQ delegates by setting `assigned_tier` and naming a target LGA in the last
   // escalation_log entry, and `alert_delegated_to_my_lga()` grants it to that
@@ -219,7 +253,27 @@ bool alertReaches(Map<String, dynamic> alert, AlertAudience officer) {
   // escalated to LGA" — and the code under it read only `geo_lga`. It bites
   // when the target LGA differs from the incident's own, which is why an
   // incident is delegated across a boundary in the first place.
-  if (delegatedToLga(alert, officer.geoLga)) return true;
+  if (delegatedToWard(alert, officer.geoWard, officer.geoLga)) return true;
+  if (delegatedToLga(alert, officer.geoLga)) {
+    // AN ENTRY THAT ALSO NAMES A WARD IS AIMED AT THAT WARD.
+    //
+    // A hand-down carries both: an LGA commander directing a ward writes
+    // `to_ward` and their own `to_lga`. Granting on the LGA alone would then
+    // put the incident on every ward commander's screen in that LGA, which is
+    // the noise this filter exists to prevent. The LGA command that directed
+    // it keeps the incident — they chose the ward, and the incident may sit
+    // outside their own area — and the named ward has it from the rule above.
+    //
+    // Deliberately STRICTER than `alert_delegated_to_my_lga()`, which grants on
+    // `to_lga` whatever else the entry says. That is the one shape where
+    // stricter is right: the row is granted to a GROUP and this narrows it to
+    // the member it names, rather than withholding something addressed to the
+    // officer in front of it. Nothing is lost — the named ward, the LGA
+    // command and HQ all have it.
+    if (delegatedWard(alert) == null || officer.role.contains('LGA')) {
+      return true;
+    }
+  }
 
   // 6. LGA command: their LGA.
   if (officer.role.contains('LGA')) {
