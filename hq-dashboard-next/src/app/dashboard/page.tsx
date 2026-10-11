@@ -330,6 +330,23 @@ export default function DashboardPage() {
 
   const [user, setUser] = useState<any>(null);
   const [userRole, setUserRole] = useState('HQ_OFFICER');
+  /**
+   * Whether `userRole` is this account's ACTUAL role yet.
+   *
+   * It defaults to HQ_OFFICER, so `isHqUser` is true from the first render
+   * until the profile read lands — and anything that treats command as
+   * "sees everything" therefore does so for whoever is looking, including an
+   * agency liaison. The advisory banner is exactly that, so for the window
+   * before the role resolved a liaison was shown advisories addressed to other
+   * agencies and to citizens: the leak the targeting was added to stop.
+   *
+   * The app learned this rule once already, in the responder tier filter:
+   * "you cannot be assigned something when we do not know who you are". Same
+   * principle. Unknown PLACE still fails open — withholding a warning from
+   * somebody inside the affected area costs more than showing it to somebody
+   * outside — but unknown IDENTITY fails closed.
+   */
+  const [roleResolved, setRoleResolved] = useState(false);
 
   // Load real user role from Supabase session
   useEffect(() => {
@@ -344,14 +361,20 @@ export default function DashboardPage() {
             .single();
           if (profile?.role) {
             setUserRole(profile.role as string);
-              // Land where this role belongs. It used to send liaisons to
-              // the agency tab but leave every other tab reachable, so the
-              // statewide map was one click away for an officer of another
-              // organisation.
-              const resolved = consoleAccess(profile.role as string);
-              setActiveTab((current) =>
-                resolved.tabs.includes(current) ? current : resolved.landing,
-              );
+            // RESOLVED ONLY HERE. `profiles.role` is the authoritative source —
+            // it is what `requireRole` reads with admin privileges and what the
+            // RLS policies key on. The other path below sets `userRole` from
+            // `user_metadata.role`, which in Supabase is USER-WRITABLE: that is
+            // H-7, "role source user-writable", and a value a user can set must
+            // not be what decides they are command and may see every advisory.
+            setRoleResolved(true);
+            // Land where this role belongs. It used to send liaisons to the
+            // agency tab but leave every other tab reachable, so the statewide
+            // map was one click away for an officer of another organisation.
+            const resolved = consoleAccess(profile.role as string);
+            setActiveTab((current) =>
+              resolved.tabs.includes(current) ? current : resolved.landing,
+            );
           }
         }
       } catch (e) {
@@ -611,6 +634,11 @@ export default function DashboardPage() {
       }
 
       setUser(u);
+      // Presentation only, and deliberately NOT marked resolved: this reads
+      // `user_metadata.role`, which the user can write (H-7), and defaults to
+      // HQ_COMMAND when it is absent. Either way it is a guess, and the
+      // advisory banner must not take a guess as "this person is command". The
+      // profiles read in the effect above is what resolves it.
       setUserRole(u.user_metadata?.role || 'HQ_COMMAND');
 
       const { data: profile } = await supabase
@@ -1524,8 +1552,12 @@ export default function DashboardPage() {
             decorative badge (T-28). */}
         <SystemAlertListener
           viewer={{
-            agency: access.agency,
-            isCommand: isHqUser,
+            // Both of these are withheld until the role is this account's own.
+            // See `roleResolved`: the default role is HQ_OFFICER, and handing
+            // that to the filter tells it the viewer is command and may see
+            // everything — which is whoever happens to be looking.
+            agency: roleResolved ? access.agency : null,
+            isCommand: roleResolved && isHqUser,
             geoLga: userProfile?.geo_lga ?? null,
             geoWard: userProfile?.geo_ward ?? null,
             geoPu: userProfile?.geo_pu ?? null,

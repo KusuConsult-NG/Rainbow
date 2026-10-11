@@ -170,3 +170,56 @@ describe('the whole thing together', () => {
     expect(advisoryReaches(row, { ...ARMY, geoWard: 'NARAGUTA' })).toBe(false);
   });
 });
+
+describe('before the console knows whose screen this is', () => {
+  // `userRole` in the dashboard defaults to HQ_OFFICER, so `isHqUser` — which
+  // this filter reads as `isCommand`, meaning "sees everything" — is true from
+  // the first render until the `profiles.role` read lands. Handing that through
+  // showed an agency liaison every advisory in that window, including ones
+  // addressed to other agencies and to citizens: the leak this module exists to
+  // close, reopened by a default.
+  //
+  // So the dashboard withholds both identity fields until the role is this
+  // account's own, and this is the shape it passes meanwhile. The rules above
+  // already make it the most restrictive viewer there is; these assertions name
+  // that as something the window depends on, so it cannot be relaxed quietly.
+  const UNRESOLVED: AdvisoryViewer = { agency: null, isCommand: false };
+
+  it('sees nothing addressed to an agency', () => {
+    expect(advisoryReaches(advisory({ target_agency: 'POLICE' }), UNRESOLVED)).toBe(false);
+    expect(advisoryReaches(advisory({ target_agency: 'ARMY' }), UNRESOLVED)).toBe(false);
+  });
+
+  it('sees nothing addressed to citizens', () => {
+    expect(advisoryReaches(advisory({ target_audience: 'CITIZENS' }), UNRESOLVED)).toBe(false);
+    // The legacy column is only consulted when the canonical one is empty, so
+    // a row from the old mobile composer has to be written that way.
+    expect(advisoryReaches(
+      advisory({ target_audience: '', target_type: 'CITIZENS' }), UNRESOLVED)).toBe(false);
+  });
+
+  it('still sees a statewide advisory, which is addressed to whoever is looking', () => {
+    // Fails closed on IDENTITY, not on the warning itself. An unscoped
+    // advisory is for everybody, and the person at the console is somebody.
+    expect(advisoryReaches(advisory(), UNRESOLVED)).toBe(true);
+  });
+
+  it('is no less restricted than the liaison it might turn out to be', () => {
+    // Whatever the profile read returns, the viewer can only gain advisories,
+    // never lose them — so nothing is shown early that the resolved role would
+    // have withheld.
+    const rows = [
+      advisory(),
+      advisory({ target_agency: 'POLICE' }),
+      advisory({ target_audience: 'CITIZENS' }),
+      advisory({ target_lga: 'JOS NORTH' }),
+      advisory({ target_audience: 'AGENTS', target_ward: 'NARAGUTA' }),
+    ];
+    for (const row of rows) {
+      if (!advisoryReaches(row, UNRESOLVED)) continue;
+      for (const resolved of [HQ, LGA, POLICE, ARMY]) {
+        expect(advisoryReaches(row, resolved)).toBe(true);
+      }
+    }
+  });
+});

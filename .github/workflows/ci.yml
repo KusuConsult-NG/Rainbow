@@ -752,6 +752,18 @@ jobs:
       - name: Assert one agency vocabulary, built from one list
         run: python3 scripts/check_one_agency_vocabulary.py
 
+      # `userRole` in the console is declared `useState('HQ_OFFICER')` — a
+      # COMMAND role — so from the first render until the profiles read lands
+      # over the network, every console user is command as far as any filter can
+      # tell. The advisory banner is such a filter, and command means "sees
+      # everything", so an agency liaison was shown advisories addressed to
+      # other agencies and to citizens: the leak the targeting was added to
+      # close, reopened by a default value and invisible to every test that sets
+      # the role up front. The first fix then marked the role resolved from
+      # `user_metadata.role` as well, which the user can write (H-7).
+      - name: Assert identity is resolved before anything is scoped by it
+        run: python3 scripts/check_identity_resolved_before_scoping.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

@@ -1246,6 +1246,7 @@ only thing that distinguishes a defect from a preference.
 | T-31 | **The local stand-in implemented no database functions, and the run was green over it.** It routed `/rest/v1/<table>` and had no route for `/rest/v1/rpc/<fn>`, so every `.rpc()` came back `400 relation "public.rpc/<fn>" does not exist` — seven browser-reachable functions, including the one the Forensic Audit screen is built on and the one that issues a handset's SMS fallback key on every sign-in. The console's own `report.json` recorded `[AUDIT_TRAIL_ERR]` while the run reported 46/46 and filed a photograph of the empty screen as evidence it renders. | ✅ an RPC router with the seven implemented, `501 FAKE_NO_RPC` naming anything that is not, and `rpcMisses` asserted by both harnesses so a refusal fails the run |
 | T-32 | **The audit trail attributed every human action to SYSTEM.** `audit_trail()` read the actor from `by`, which only the SQL writers set; both the console and the app write `by_email` — the key the column's own comment has documented since `20260722000000`. So every escalation an officer performed read as the system's, and the machine's were the only accurate attributions on a screen whose purpose is to say who did what. The behaviour test planted `"by":"SYSTEM"`, the one shape that worked, and never asserted the actor. | ✅ `20261019000000` reads `by` then `by_email` (both exist on production and the log is append-only, so neither can be rewritten); both shapes and a no-actor entry asserted in SQL, and the browser run asserts the operator is named |
 | T-33 | **C-6 was unanswerable for three reasons and two had quietly stopped being true.** The row said no Google CLI was installed and that the network policy denied the endpoint. `gcloud` 570.0.0 is in the container, and the Cloud Functions API answers `401 UNAUTHENTICATED` — a request that arrived and was refused for want of a credential, which is not what a blocked CONNECT looks like. | ✅ blocker narrowed to one credential, and `scripts/is_the_old_backend_deployed.sh` answers it: three outcomes by exit code, the two never-hardened endpoints marked, `allUsers` bindings called out, deletion commands printed, nothing deleted and no function ever called |
+| T-34 | **The console was command until proven otherwise.** `userRole` in `dashboard/page.tsx` is declared `useState('HQ_OFFICER')` — a COMMAND role — so `isHqUser` is true from the first render until the `profiles.role` read returns over the network. The advisory banner I had just given targeting reads that as "sees everything, because they sent it", so for that window every console user was shown every live advisory, including ones addressed to other agencies and to citizens: the T-29 leak reopened on the console by a default value. Found by reading my own fix, not by a test — every test sets the role up front, which is the one thing the real client cannot do. | ✅ a `roleResolved` flag, set only by the authoritative `profiles` read and never from `user_metadata` (H-7); 4 tests naming the unresolved viewer; `scripts/check_identity_resolved_before_scoping.py` in CI, run against 11 mutations and failing on each by name |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -2853,6 +2854,106 @@ clear the warnings, drop `--no-fatal-warnings`; then the infos, then
    hand-created dashboard policies will not be dropped. Not on production until
    staging is green.
 3. **Review Supabase logs** for prior anonymous reads of `profiles` and `telemetry`.
+
+### T-34. The console was command until proven otherwise
+
+Found by re-reading the fix for T-29's console half, which was about forty
+minutes old. There is no harness run behind this one and no screenshot: the
+window it opens is a few hundred milliseconds wide and every test in the repo
+closes it before the first assertion, by setting the role up front.
+
+`SystemAlertListener` now decides who a mass advisory is for, and the dashboard
+hands it the viewer's identity:
+
+```tsx
+<SystemAlertListener viewer={{ agency: access.agency, isCommand: isHqUser, ... }} />
+```
+
+`isHqUser` comes from `userRole`, and `userRole` is declared:
+
+```tsx
+const [userRole, setUserRole] = useState('HQ_OFFICER');
+```
+
+HQ_OFFICER is a command role. `isCommand` is the one field in that object that
+short-circuits every other rule — command composes advisories and withdraws
+them, so command sees all of them regardless of who they were addressed to. So
+between the first render and the moment the `profiles.role` read came back over
+the network, **every** console user was command: a Police liaison was shown the
+advisory addressed to the Army, and the one addressed to citizens of one ward,
+and then they disappeared when their actual role arrived.
+
+That is T-29 — "every mass advisory reached every user" — reproduced on the
+console, by the fix for it, through a default value. Which is the lesson worth
+keeping: the targeting was correct, every one of its 27 tests passed, and the
+defect was entirely in what the caller knew at the time it asked.
+
+A default is a claim about the unknown case, and `'HQ_OFFICER'` claims the most
+privileged thing available. It is a reasonable default for the thing it was
+written for — chrome, so the console does not flicker through a reduced layout
+on every load — and a dangerous one the moment a filter reads it. Nothing marked
+the difference.
+
+So the console now records whether it knows:
+
+```tsx
+const [roleResolved, setRoleResolved] = useState(false);
+...
+agency: roleResolved ? access.agency : null,
+isCommand: roleResolved && isHqUser,
+```
+
+Withholding both leaves the most restricted viewer the filter has: no agency, not
+command. Statewide advisories still dock — an unscoped advisory is addressed to
+whoever is looking, and the person at the console is somebody — and nothing
+addressed to an agency or to citizens does. One of the four new tests states that
+as a property rather than a case: whatever the profile read turns out to say, the
+viewer can only *gain* advisories, never lose them, so nothing is shown early
+that the resolved role would have withheld.
+
+**The first fix was incomplete, and where it leaked is the more interesting
+half.** Two code paths set the role, and I marked both resolved. The second is:
+
+```tsx
+setUserRole(u.user_metadata?.role || 'HQ_COMMAND');
+```
+
+`user_metadata` in Supabase is writable **by the user it belongs to** — that is
+finding H-7, "role source user-writable", from the original audit. A role an
+account can set for itself must not be what decides that account is command and
+may read every advisory in the state. And the fallback is `'HQ_COMMAND'`, so an
+account with no role in its metadata at all asserts the top of the chain. Only
+`profiles.role` resolves it now: that is what `requireRole` reads with admin
+privileges and what the RLS policies key on.
+
+Worth stating plainly, because the two halves of this fix point opposite ways and
+look like an inconsistency somebody will tidy up:
+
+> Unknown PLACE fails open. Unknown IDENTITY fails closed.
+
+Withholding a warning from somebody inside the affected area costs more than
+showing it to somebody outside, so a viewer with no LGA recorded is delivered to.
+Showing one agency's advisory to another agency's liaison is the leak itself, so a
+viewer whose agency is not yet known is delivered nothing that was addressed to an
+agency. The app had already learned the identity half once, in the responder tier
+filter: *you cannot be assigned something when we do not know who you are.*
+
+`scripts/check_identity_resolved_before_scoping.py` holds seven claims — the flag
+starts false, exactly one place sets it, that place is the `profiles` read and
+contains no `user_metadata`, the viewer literal carries exactly the fields this
+filter knows about, its identity fields are gated, its place fields are not, and
+`advisoryReaches` still treats an unknown agency as "not this agency". The last
+one is cross-file and is the load-bearing one: gating identity hands the filter
+`null`, and if an unknown agency ever failed open the way an unknown place does,
+the gate would withhold nothing and the whole fix would be theatre. Eleven
+mutations, each caught, each named — including the one that reproduces the
+original defect and the one that reproduces my incomplete fix.
+
+The check also failed on its own first run, which is worth a line: it scans for
+`user_metadata` near the resolution and found it in the comment *explaining why
+that path may not resolve the role*. A check that cannot tell prose about a hazard
+from the hazard will punish the person who documents it, so it strips comments
+first.
 
 ---
 
