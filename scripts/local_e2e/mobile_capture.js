@@ -366,6 +366,7 @@ async function semanticsText(page) {
   const ROLES = ['citizen', 'responder', 'unit', 'ward', 'lga', 'hq', 'police', 'army'];
   const coverage = new Map();   // route -> the roles that reached it
   const feedText = {};          // role -> the mission feed as rendered
+  const setupText = {};         // role -> the first screen of first-run setup
   const roleReport = {};
   /** role -> which seeded advisory was on screen. See the block in the loop. */
   const advisoryReport = {};
@@ -465,6 +466,14 @@ async function semanticsText(page) {
       if (route === '/agent-dashboard' && here === route) {
         feedText[role] = screenText;
       }
+      // THE LANGUAGE CONTROL ON THE FIRST SCREEN OF SETUP. Asserted after the
+      // loop: the picker in Settings wrote `app_language` = 'HA' while every
+      // translated string watches `app_lang` = 'ha', so choosing Hausa changed
+      // nothing, and the only working control was a flag button three screens
+      // further in.
+      if (route === '/onboarding-permissions' && here === route) {
+        setupText[role] = screenText;
+      }
       if (here === route && chars > 0) {
         reached.push(route);
         if (!coverage.has(route)) coverage.set(route, []);
@@ -490,6 +499,23 @@ async function semanticsText(page) {
       ? `never rendered: ${never.map(([r, , f]) => `${r} (${f})`).join(', ')}`
       : `${coverage.size}/${ROUTES.length}`,
   );
+
+  // THE LANGUAGE CAN BE CHOSEN BEFORE THE REST OF SETUP IS READ.
+  //
+  // Everything below the picker on that screen is read by somebody who may not
+  // read English. The only language control used to be a flag button on the
+  // home screen, which is three screens past here, and the one in Settings was
+  // wired to a key no reader has ever heard of.
+  const setup = (setupText.citizen || '').toLowerCase();
+  for (const language of ['english', 'hausa', 'pidgin']) {
+    check(
+      `first-run setup offers ${language}`,
+      setup.includes(language),
+      setup.includes(language)
+        ? 'on the first screen, before anything it has to explain'
+        : `not offered. screen was: ${setup.replace(/\s+/g, ' ').slice(0, 160)}`,
+    );
+  }
 
   // AN OUTSIDE AGENCY SEES WHAT WAS HANDED TO THEM, AND ONLY THAT.
   //

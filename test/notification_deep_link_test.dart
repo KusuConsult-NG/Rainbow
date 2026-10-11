@@ -40,11 +40,32 @@ void main() {
       );
     });
 
+    test('a new incident opens the incident it names', () {
+      // The most urgent notification the system sends, and until NEW_INCIDENT
+      // was listed, tapping it opened the app and stopped — an unlisted type is
+      // ignored by this rule.
+      expect(
+        notificationTarget({'type': 'NEW_INCIDENT', 'alertId': 'alert-3'}),
+        const NotificationTarget(alertId: 'alert-3'),
+      );
+    });
+
+    test('so does a timeout escalation', () {
+      // Queued since 20261007000000 and never able to deep-link either; found
+      // while adding the one above.
+      expect(
+        notificationTarget({'type': 'TIER_ESCALATION', 'alertId': 'alert-4'}),
+        const NotificationTarget(alertId: 'alert-4'),
+      );
+    });
+
     // Anything else must be ignored rather than navigating somewhere
     // arbitrary. A responder taken to the wrong incident is worse than one
     // taken nowhere.
     test('other notification types are not deep links', () {
-      for (final type in ['BROADCAST', 'INFO', '', 'dispatch']) {
+      for (final type in [
+        'BROADCAST', 'INFO', '', 'dispatch', 'new_incident', 'ADVISORY',
+      ]) {
         expect(
           notificationTarget({'type': type, 'alertId': 'alert-1'}),
           isNull,
