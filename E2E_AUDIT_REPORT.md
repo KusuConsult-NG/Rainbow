@@ -1245,6 +1245,7 @@ only thing that distinguishes a defect from a preference.
 | T-30 | **Every mobile credential gate scanned `.env.example`; the file that ships is `.env`.** `pubspec.yaml` declares `.env` as a Flutter asset, so it is bundled verbatim and extracts with `unzip`. The template declared zero credential-shaped keys and all three gates passed, while a release build made by this repository's own harness carried `AGENT_DEFAULT_PASS=staging-only-password` in `build/web/assets/.env` — the T-20 name, removed in PR #61, that two of those gates exist to keep out. `scripts/local_e2e/provision_env.sh` wrote it back, and asserted it was non-empty: a liveness check on a key nothing has read since. No real credential leaked; the shape did. | ✅ the script deletes it rather than writing it, marks the file as harness-provisioned, and CI now scans the BUNDLED asset instead of the template — run against the artefact as built (fails, naming it) and against the fixed file (passes) |
 | T-31 | **The local stand-in implemented no database functions, and the run was green over it.** It routed `/rest/v1/<table>` and had no route for `/rest/v1/rpc/<fn>`, so every `.rpc()` came back `400 relation "public.rpc/<fn>" does not exist` — seven browser-reachable functions, including the one the Forensic Audit screen is built on and the one that issues a handset's SMS fallback key on every sign-in. The console's own `report.json` recorded `[AUDIT_TRAIL_ERR]` while the run reported 46/46 and filed a photograph of the empty screen as evidence it renders. | ✅ an RPC router with the seven implemented, `501 FAKE_NO_RPC` naming anything that is not, and `rpcMisses` asserted by both harnesses so a refusal fails the run |
 | T-32 | **The audit trail attributed every human action to SYSTEM.** `audit_trail()` read the actor from `by`, which only the SQL writers set; both the console and the app write `by_email` — the key the column's own comment has documented since `20260722000000`. So every escalation an officer performed read as the system's, and the machine's were the only accurate attributions on a screen whose purpose is to say who did what. The behaviour test planted `"by":"SYSTEM"`, the one shape that worked, and never asserted the actor. | ✅ `20261019000000` reads `by` then `by_email` (both exist on production and the log is append-only, so neither can be rewritten); both shapes and a no-actor entry asserted in SQL, and the browser run asserts the operator is named |
+| T-33 | **C-6 was unanswerable for three reasons and two had quietly stopped being true.** The row said no Google CLI was installed and that the network policy denied the endpoint. `gcloud` 570.0.0 is in the container, and the Cloud Functions API answers `401 UNAUTHENTICATED` — a request that arrived and was refused for want of a credential, which is not what a blocked CONNECT looks like. | ✅ blocker narrowed to one credential, and `scripts/is_the_old_backend_deployed.sh` answers it: three outcomes by exit code, the two never-hardened endpoints marked, `allUsers` bindings called out, deletion commands printed, nothing deleted and no function ever called |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -2374,12 +2375,64 @@ The browser run asserts the same thing from the other end: *"the audit screen na
 the officer who escalated it, not SYSTEM"*, against the HQ operator's own address
 in the fixture history.
 
+### T-33. C-6 was unanswerable for three reasons; two of them stopped being true
+
+C-6 — a second backend, deleted from this repository in PR #58 but never
+confirmed undeployed — has been the longest-running unknown in this document.
+Four of its endpoints answer with no credential and two were never hardened:
+`validateAgentAccessCode`, which returns a working staff email and password to
+whoever asks, and `triggerSLASweep`, which escalates every open alert.
+
+It was unanswerable for three stated reasons: no Google credential, neither CLI
+installed, and an environment network policy that denied the endpoint with a 403
+on CONNECT. **Two of those are no longer true**, and nobody would have noticed
+without checking, because the row said so and rows go stale:
+
+| blocker | then | now |
+|---|---|---|
+| a CLI | neither installed | `gcloud` 570.0.0 is in the container |
+| the network | 403 on CONNECT to `cloudfunctions.net` | the **API** host answers; `…/v2/projects/rainbow-97f1e/locations/-/functions` returns `401 UNAUTHENTICATED` |
+| a credential | absent | **still absent — this is the whole remaining blocker** |
+
+A 401 from Google is a request that arrived and was refused for want of
+credentials. A network policy refusing to carry it looks different, and that is
+what the row described.
+
+#### And a script, because the command was never the hard part
+
+The report has said since the beginning that `gcloud functions list --project
+rainbow-97f1e` settles it. True, and not enough: the answer is a list of names,
+and what an operator needs is which of those names are the dangerous two,
+whether the PLATFORM is serving them to the public — an IAM binding, which the
+code being "hardened" says nothing about — and what to run next.
+
+`scripts/is_the_old_backend_deployed.sh` answers all three and distinguishes
+three outcomes by exit code: **2** not answered (no credential, and it says that
+is the only missing input), **0** nothing deployed, **1** deployed, with the
+never-hardened two marked `!!!`, any `allUsers` binding called out, and the
+deletion commands printed.
+
+It deletes nothing — deleting a deployed function is irreversible and is the
+operator's call — and it **never calls a function**. That is the part worth
+stating: probing is the obvious way to check whether these are live and it is
+not available, because `seedMockData` writes ten CRITICAL alerts including
+DURESS ones, so a probe manufactures the emergencies the system exists to
+report, and `triggerSLASweep` moves every open alert up a tier. The script asks
+the Cloud Functions and IAM APIs what EXISTS and nothing else.
+
+Both verdict paths were exercised against a stubbed `gcloud`, which is the only
+way to reach them without a credential — and that caught a real bug in the one
+that matters most: in the clean-bill-of-health message, `` `seedMockData` `` sat
+inside a double-quoted bash string, so the backticks ran it as a command and the
+word vanished from the output. A corrupted all-clear is the worst line in the
+script to get wrong, and it would have shipped.
+
 ### Open, and not closeable from the repository
 
 | # | Finding | Status |
 |---|---|---|
 | T-17 | **GitHub Actions jobs are refused before a runner is assigned — an account billing condition.** (This row said "has not run since 2026-09-29"; wrong — see T-27. Run #392 passed at 16:30 on 2026-10-06, and runs have been created continuously since.) Every job in every run completes in about two seconds with `runner_id: 0`, no runner name and no logs — nothing picks the jobs up. Not a failing test: an Actions or billing condition on the account. | 🔴 **open, and now load-bearing.** Moving to Railway removed the one structural protection App Hosting gave (a secret marked RUNTIME-only, absent during `next build`). The CI job that greps `.next/static` for key material is what remains between this deployment and C-1 recurring, and it is switched off. Fifty merges landed with every gate unexercised, which is how T-10, T-11, T-12 and T-13 survived | **Still open on 2026-10-10, and now measured rather than inferred.** Run #458 (push, `224ceb8`) and #459 (pull_request, same head): all twelve jobs `conclusion: failure`, every one with `runner_id: 0`, no runner name, no steps, and logs returning 404 — and `get_workflow_run_usage` reports **`total_ms: 0` for all twelve**, so not one of them consumed a millisecond of runner time. Eleven finished in 2 seconds and the Flutter job in 38, which is the same refusal with a longer queue gap, not a job that ran. The base branch is red identically: run #443 on `main`'s own head (`2c5b5a6`) failed in 4 seconds. So every gate in this repository has now been unexercised by CI for four days, and the only evidence any of them pass is the local runs recorded above.
-| C-6 | an abandoned second backend, if still deployed | 🟠 unchanged, and **downgraded 2026-10-06**: it writes to Firestore, which nothing in the shipping code reads (13 mentions across `lib/` and `hq-dashboard-next/src/`, all comments, no imports). Cleanup with a billing and data-at-rest tail, not a live hole. `gcloud functions list --project rainbow-97f1e` settles it |
+| C-6 | an abandoned second backend, if still deployed | 🟠 unchanged, and **downgraded 2026-10-06**: it writes to Firestore, which nothing in the shipping code reads (13 mentions across `lib/` and `hq-dashboard-next/src/`, all comments, no imports). Cleanup with a billing and data-at-rest tail, not a live hole. `gcloud functions list --project rainbow-97f1e` settles it | **The blocker narrowed on 2026-10-11, from three things to one.** The row above and C-6's own section say no Google CLI is installed and that the environment's network policy denies the endpoint. Both are now out of date: `gcloud` 570.0.0 is in the audit container, and `https://cloudfunctions.googleapis.com/v2/projects/rainbow-97f1e/locations/-/functions` answers **`401 UNAUTHENTICATED`** — Google refusing a request that arrived, not a policy refusing to carry it. The only missing input is a credential with read access to the project; a VIEWER role answers the question. `scripts/is_the_old_backend_deployed.sh` does the rest.
 | T-18 | **Citizen sign-in has no SMS provider.** `signInWithOtp` is refused outright unless the Supabase project has one, so every citizen sign-in fails. | 🔴 open — a blocker, not a checklist item. `docs/PRODUCTION_DEPLOYMENT.md` §2b |
 | T-19 | **One staff account exists**, so dispatch has nobody to send. The nine unacknowledged incidents on the live board are an empty roster, not a broken pipeline. | 🔴 open |
 
