@@ -1264,6 +1264,7 @@ only thing that distinguishes a defect from a preference.
 | T-49 | **The harness reported the agency liaison desk broken, and it was the stand-in.** `fake_supabase.js` rejects a column no migration defines, in full, the way PostgREST does — and read that column list ONCE, at require time. A stand-in started at 13:06 was still answering at 14:28, after T-46 had added `alerts.voice_note_url` and given the agency portal's `select` the new column: `UNKNOWN COLUMN alerts.voice_note_url (read)`, the whole query failed, and the one surface an outside agency ever sees came back with no incidents. Three checks failed naming the card and both its buttons, on code that was fine. Same trap as a stale `next-server` holding :3000 while `.next` is rebuilt underneath it — which is what the five "missing" navigation tabs were, and which has now invalidated two runs. A long-lived process answering from a snapshot does not report an error; it reports the PRODUCT broken, on exactly the screen that depends on the thing that moved. | ✅ The stand-in refills its schema rather than freezing it, and compares a fingerprint of every migration's name, size and mtime before answering — rebuilding, loudly, when it moves; proved both directions against a live stand-in. `check_standin_reads_live_schema.py` keeps the require-time freeze from returning and fails if the refresh is defined but never called — 9 mutations. `interact.js` gained a boot assertion that fails the run on a console serving a build it cannot load, with the remedy in the message |
 | T-50 | **The document the README sends an operator to first described nine of the thirty-seven migrations as the whole list.** `docs/APPLYING_THE_MIGRATIONS.md` — "**Read this before the first one**", per README — opened with *"Nine migrations are proven in CI on every push and not yet applied"*, named those nine, and said the single-paste script applies *"all nine, in order, finishing with a 14-row PASS/FAIL table"*. There are **37** outstanding and the generated script ends in **34** rows. Everything from the last fortnight of this audit — the voice note, non-emergency routing, one table one shape, incident tracks — was absent from it. An operator following it applies nine files, gets a verdict table two and a half times the size they were told to expect, and has no way to tell success from a wrong script. `check_runbook_covers_migrations.py` was written for exactly this drift (it had already caught the other runbook seventeen short) and watched ONE file, so the second one drifted behind it unseen. | ✅ The step-by-step file now states the real total, says which nine of them it walks through one at a time and why (the C-3 era is the part with ordering dependencies and a human decision in it), and points at the generated table that carries all 37. The gate now reads every doc that names migration files: one must carry the complete table, any other must declare its subset and point at that one, and every figure quoted is checked against the repository — including a count spelled out in WORDS, which is refused outright, because the stale claim was "Nine" and no check can verify a word. 5 mutations |
 | T-51 | **The other policy PUBLIC could reach — on the incident table, twelve lines above the comment explaining the defect.** *(Scope corrected the same day: I described this as live on production from a three-column query output that did not include `roles`. A later query with that column returned zero rows on the database checked, where the policy does not exist at all. The CODE defect below is real and proven on real PostgreSQL; which databases carry it is not something this repository can answer, and I wrote as though it could — the same "checked against the repository rather than the database" mistake this report records as a defect elsewhere.)* A policy query returned two rows: `alerts_select_geo_lga_scoped` and `telemetry_select_geo_lga_scoped`. The second was known — it had sat on a live database as the single policy reaching PUBLIC and was repaired by `20261016000000`. Both are created by `20260725000000_v6_geo_lga_scoping_staging.sql`, twelve lines apart: the telemetry one is written `TO authenticated`, the **alerts** one with no `TO` clause at all — and PostgreSQL records that as **TO PUBLIC**, which includes `anon`. That is a policy naming the anonymous key over the incident table: the reporter, their phone number, what they said, where they are. The earlier fix had written *"TO authenticated is not decoration"* into that very file, directly beneath the policy that still lacked it; nobody looked at the sibling. Three structural reasons it survived: `20260813` drops 98 policies BY NAME and cannot name one from a later file (0 occurrences of `geo_lga_scoped` in it); the v6 file is STAGING_ONLY so it is not in the paste at all, so only a database it was run on by hand can have these policies — and that era was applied by hand somewhere, which is why `20261016000000` exists; and the verifier asserts no policy reaches anon or public **at the end of the full replay**, which passes because `20261006000000` drops this policy on the way to a narrower one, so a database that ran v6 and has not had `20261006` applied sits in the MIDDLE, which no assertion described. Where the policy is present and open, one layer stands in the way: the table-level REVOKE from `anon`. | ✅ `TO authenticated` added at the source so no new database creates it open, plus `20261025000000_the_other_policy_public_could_reach.sql` to repair the one that exists. It runs `ALTER POLICY … TO authenticated` — roles and nothing else — because a database carrying this policy got it BY HAND and the first draft's drop-and-recreate would have imposed this repository's `USING` text on a copy whose body may differ by a character, rewriting a read path as a side effect of closing an anon hole. Idempotent, a no-op both where the policy is already scoped and where `20261006` has replaced it, and it ends by naming anything still reaching anon or public. `check_every_policy_names_its_roles.py` now requires every `CREATE POLICY` in the repository to WRITE its `TO` clause — any roles, even `TO public`, because the rule is that the intent is visible; silence means PUBLIC and reads like nothing. The 43 policies of the v2–v6 and phase1 era are grandfathered as an exact frozen inventory, so a new policy in an old file still fails. 10 mutations, and 5 SQL assertions that read `pg_policies.roles` — the state, not the text — including a planted TO-PUBLIC probe, because the earlier version of this claim passed every run for weeks while the telemetry policy was open |
+| T-52 | **"What a production database still needs" was a list of filenames, and I repeated it to the operator all day as the top blocker.** `migration_sets.outstanding()` had that sentence as its docstring and this body: `all_files()` minus a hand-maintained exclusion set. Nothing updates it when a migration is applied anywhere, so it answered a question about a DATABASE with a fact about a DIRECTORY. Both runbooks opened with *"N migrations are proven in CI on every push and **not yet applied** to the production Supabase project"*, T-50 added a gate that ENFORCED that wording, and I named it first on every list of what was left — "the agency liaison desks return nothing against production until they go in". Then the operator ran `which_migrations_are_applied.sql`: **32 of the 38 were already applied**, everything through `20261015`. Six were genuinely missing. The number was out by a factor of six, in the direction that makes a deployment look impossible — and the one real consequence I had predicted was buried under 32 that were not. | ✅ The concept is now `in_the_paste()`: what the paste carries, which is a fact about this repository and checkable here. Both runbooks say that instead, and send the operator to `which_migrations_are_applied.sql` for what their own database needs — the gate now REFUSES the words "not yet applied" in front of a count, requires that pointer in any doc naming migrations, and skips backticked quotations so a doc explaining the defect can quote it. Two of its three new mutations are sentences I wrote myself two hours earlier. Also: the probe labelled `20261023000000` "APPLIED PARTWAY, look here first" at 5 of 8 — but that is a CONVERGENCE migration, and the 5 present are production's own pre-existing columns while the 3 missing are the ones it adds, so the file written to handle a divergent database was reported as the worst case. It now says "PARTLY PRESENT: either applied partway, or a convergence migration whose objects already existed here" |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -4985,6 +4986,103 @@ a probe is exempt only when it is named `zz_…` **and** dropped in the same fil
 And five SQL assertions that read `pg_policies.roles` rather than the text of a
 migration, because what a file says and what the database recorded are the two
 things this finding is about.
+
+### T-52. The number I led with all day was a count of filenames
+
+The operator asked what was left. I gave a list, and the first item on it —
+every time I was asked, in four separate messages — was this:
+
+> **37 migrations are not applied to production.** This is the urgent one. […]
+> against production as it stands, the police and army liaison desks return
+> *nothing*.
+
+Then they ran `scripts/which_migrations_are_applied.sql` against the database.
+**Thirty-two of the thirty-eight were already applied** — every migration
+through `20261015000000`. Six were genuinely missing.
+
+#### Where the number came from
+
+```python
+def outstanding() -> list[str]:
+    """What a production database still needs, in filename (timestamp) order."""
+    return [n for n in all_files() if n not in NOT_OUTSTANDING]
+```
+
+A docstring making a claim about a database, over a body that lists a
+directory minus a hand-maintained exclusion set. Nothing updates that set when
+a migration is applied somewhere, because nothing in a repository can know
+that it was.
+
+And it travelled, as a wrong number with a confident source does. Both
+runbooks opened with *"N migrations are proven in CI on every push and **not
+yet applied** to the production Supabase project"*. T-50 — four hours earlier,
+in this same session — found one of those runbooks naming nine of thirty-seven
+and added a gate to keep them in agreement. **The gate made both of them
+repeat the false claim in unison.** I hardened the wrong sentence and called
+it a fix.
+
+The irony is exact and worth stating plainly: T-49 is my own finding that a
+long-lived process answering from a stale snapshot *"does not report an error
+— it reports the PRODUCT broken, convincingly"*. T-51's correction is me
+asserting a database's policy state from a file. This is the third one in a
+day, and the biggest, because it set the operator's priorities: the single most
+consequential thing I told them was the deployment, and six-sevenths of it was
+already done.
+
+#### The one part that was right, and what it cost
+
+`alerts.voice_note_url` and `voice_note_seconds` really are missing from that
+database, and `AgencyPortal.tsx` really does name them in its `select` — so
+the agency liaison desk really does return nothing there, right now, exactly as
+T-49 predicted. That is a live, one-paste fix. It was sitting in a list of
+thirty-eight, thirty-two of which were noise, and the noise was mine.
+
+#### What was done
+
+`outstanding()` is now `in_the_paste()`, documenting what it actually computes:
+the migrations the paste carries. That is a fact about this repository, it is
+checkable here, and it is the right input for building `apply_all_migrations.sql`.
+
+The paste being idempotent is what makes this a reporting defect rather than a
+deployment one. Every statement is `IF NOT EXISTS`, `OR REPLACE` or guarded by
+an explicit check, and `verify_apply_all.sh` applies the whole bundle **twice**
+on every push to prove it. Pasting all 38 was always safe. Knowing which six
+are missing is not about safety — it is about being able to tell afterwards
+whether anything changed, and about not burying a real break under 32
+non-problems.
+
+Both runbooks now describe the paste and send the operator to the query, and
+`check_runbook_covers_migrations.py` enforces the distinction rather than the
+old claim:
+
+* the words "not yet applied" in front of a count are **refused** — the
+  figure is the paste's size, and no file here can see a database;
+* any doc naming migration files must point at
+  `which_migrations_are_applied.sql`, so a count of the paste always arrives
+  with the way to ask your own database;
+* backticked quotations and fenced blocks are skipped, because a document
+  explaining this defect has to be able to quote it — the first version of the
+  check failed on my own description of the mistake.
+
+Two of its three new mutations are sentences I wrote two hours earlier.
+
+#### And the probe over-alarmed on the one migration built for this
+
+`20261023000000_one_table_one_shape` reported `5 of 8 present — APPLIED
+PARTWAY, look here first`. It had never been applied at all. It is a
+**convergence** migration — it exists because production and every repo-built
+database had the same tables with different columns (T-43) — so it adds columns
+with `ADD COLUMN IF NOT EXISTS`, and the 5 it found were production's own
+`detail`, `sent_by`, `target_lga`, `acknowledged_at` and `resolved_at`. The 3
+missing were the `created_at` columns it adds. The file written to handle a
+divergent database was reported as the worst case on precisely the database it
+was written for.
+
+The summary line no longer picks a reading: *"PARTLY PRESENT: either applied
+partway, or a convergence migration whose objects already existed here. Read
+its `missing` rows below"* — which is where the two cases separate, since a
+partial failure leaves an arbitrary subset and a convergence migration leaves
+exactly what that database never had.
 
 ---
 

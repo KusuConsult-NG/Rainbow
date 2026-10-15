@@ -164,7 +164,7 @@ def repo_objects() -> tuple[dict[str, set[str]], set[str]]:
     out: dict[str, set[str]] = {
         'table': set(), 'column': set(), 'function': set(), 'policy': set()}
     dropped: set[str] = set()
-    for name in ms.ORIGINAL_SCHEMA + ms.outstanding():
+    for name in ms.ORIGINAL_SCHEMA + ms.in_the_paste():
         sql = strip_noise((MIGRATIONS / name).read_text(encoding='utf-8'))
         for m in re.finditer(
                 r'(?is)CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?'

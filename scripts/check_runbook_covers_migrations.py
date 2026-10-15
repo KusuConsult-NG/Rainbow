@@ -19,6 +19,29 @@ This is the same class of defect as T-21 and is checked the same way: the list
 is derived from supabase/migrations/, and anything the table omits is named.
 Adding a migration now fails CI until the runbook describes it.
 
+## And then the number itself was wrong
+
+Worse than a stale table: a wrong CLAIM, which this check went on to enforce.
+
+Both runbooks opened with "N migrations are proven in CI on every push and
+**not yet applied** to the production Supabase project", where N came from
+`migration_sets.outstanding()` — a function whose docstring read "what a
+production database still needs" and whose body is `all_files()` minus an
+exclusion set. Nothing updates it when a migration is applied anywhere. It
+answered a question about a DATABASE with a fact about a DIRECTORY, and this
+gate made both runbooks repeat it.
+
+`which_migrations_are_applied.sql`, run against the database, reported **32 of
+those 38 already present** — everything up to 20261015 — with six genuinely
+missing. The number was out by a factor of six, in the direction that makes a
+deployment look impossible.
+
+The function is now `in_the_paste()`, which is a fact about this repository and
+is checkable here. What a given database still needs is answered by querying
+that database. So this gate checks that the runbooks describe the PASTE and
+point at that query, and it refuses the words "not yet applied" in front of a
+count, because no file here can know that.
+
 ## The second runbook, which this check could not see
 
 It watched ONE file. `docs/APPLYING_THE_MIGRATIONS.md` is the step-by-step
@@ -72,6 +95,12 @@ ROW_CLAIM = re.compile(r'(\d+)-row PASS/FAIL table')
 # "all 37" / "**37 migrations**" — a count of the outstanding set in prose.
 COUNT_CLAIM = re.compile(r'\ball (\d+), in order\b|\*\*(\d+) migrations\*\*')
 
+# "38 migrations … not yet applied" — a claim about a DATABASE, from a file
+# that cannot see one. The count itself is fine (it is the paste's size); what
+# is refused is presenting it as what some database is missing.
+UNAPPLIED_CLAIM = re.compile(
+    r'\*?\*?\d+\*?\*?\s+migrations?[^.\n]{0,80}?\bnot (?:yet )?applied', re.I)
+
 # A count SPELLED OUT is a count this check cannot verify, and the stale claim
 # was spelled out: "Nine migrations are proven in CI and not yet applied". So
 # the word form is refused outright rather than parsed — a number nothing can
@@ -81,6 +110,23 @@ WORD_COUNT = re.compile(
     r'thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|'
     r'thirty|forty|fifty)([ -](one|two|three|four|five|six|seven|eight|nine))?'
     r'\s+migrations\b', re.I)
+
+
+CODE_SPAN = re.compile(r'`[^`\n]*`')
+FENCE = re.compile(r'^```.*?^```', re.M | re.S)
+
+
+def unquoted(text: str) -> str:
+    """Blank inline-code spans and fenced blocks, keeping line structure.
+
+    A runbook that explains this defect has to be able to QUOTE it, and the
+    quotation IS the defective sentence. Blanking code formatting is the same
+    move the Python gates make with comments: a citation in backticks is a
+    citation, a claim in prose is a claim. It also stops the sample output of
+    `which_migrations_are_applied.sql` being read as an assertion.
+    """
+    text = FENCE.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)
+    return CODE_SPAN.sub(lambda m: ' ' * len(m.group(0)), text)
 
 
 def _verdict_rows() -> int:
@@ -104,13 +150,13 @@ def main() -> int:
         return 2
 
     listed = [f for _, f, _ in rows]
-    outstanding = ms.outstanding()
+    outstanding = ms.in_the_paste()
     problems: list[str] = []
 
     missing = [m for m in outstanding if m not in listed]
     for m in missing:
         problems.append(
-            f'{m} is outstanding and the runbook table does not list it. Add a '
+            f'{m} is in the paste and the runbook table does not list it. Add a '
             f'row saying what breaks until it runs.')
 
     unknown = [f for f in listed if f not in set(ms.all_files())]
@@ -181,6 +227,25 @@ def main() -> int:
                     'tells the operator how many migrations there are. State '
                     f'it ({len(outstanding)}) in prose this check can find: '
                     '"**N migrations**" or "all N, in order".')
+        # The count is a fact about the paste, so the operator has to be
+        # told how to ask their own database. Without this pointer the doc is
+        # back to implying that its number describes them.
+        if 'which_migrations_are_applied.sql' not in other:
+            problems.append(
+                f'{rel} names migration files and never mentions '
+                'scripts/which_migrations_are_applied.sql, so it gives an '
+                'operator a count of the PASTE and no way to find out what '
+                'their own database is missing. That is how 38 came to be '
+                'read as 38 missing when six were.')
+        for m in UNAPPLIED_CLAIM.finditer(unquoted(other)):
+            problems.append(
+                f'{rel} says {m.group(0)!r}. That is a claim about a '
+                'DATABASE, and no file in this repository can see one — the '
+                'figure is the size of the PASTE. This exact sentence told an '
+                'operator that 38 migrations were missing when 32 of them '
+                'were already applied. Say what the paste carries, and point '
+                'at scripts/which_migrations_are_applied.sql for what a given '
+                'database still needs.')
         for m in WORD_COUNT.finditer(other):
             problems.append(
                 f'{rel} spells a migration count out in words: '
@@ -206,8 +271,8 @@ def main() -> int:
               f'{RUNBOOK.relative_to(REPO)}.', file=sys.stderr)
         return 1
 
-    print(f'✓ the runbook describes all {len(outstanding)} outstanding '
-          f'migrations, in order, and its verdict-table row count matches '
+    print(f'✓ the runbook describes all {len(outstanding)} migrations the '
+          f'paste carries, in order, and its verdict-table row count matches '
           f'({_verdict_rows()})')
     print(f'✓ {len(OTHER_DOCS)} other doc(s) naming migrations declare which '
           'subset they cover, point at the complete table, and quote figures '

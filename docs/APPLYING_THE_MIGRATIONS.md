@@ -1,19 +1,53 @@
 # Applying the migrations to production
 
-**38 migrations** are proven in CI on every push and **not yet applied** to the
-production Supabase project. The complete, generated list — every one of the
-38, in apply order, with what breaks until each runs — is the table in
-`docs/PRODUCTION_DEPLOYMENT.md`, and `scripts/check_runbook_covers_migrations.py`
-fails CI if a migration is added and that table does not describe it.
+**The paste carries 38 migrations.** That is a count of this repository, not of
+your database — and the difference matters, because this file used to open with
+`38 migrations … are not yet applied to the production Supabase project`,
+which is a claim no file here can make. When that was finally checked
+against a real database, **32 of them were already applied** and six were not.
+
+So, before anything else:
+
+### Which migrations does YOUR database still need?
+
+Paste `scripts/which_migrations_are_applied.sql`. It is **read-only**, safe on
+production, and one statement because the Supabase SQL editor shows only the
+last result set. It checks every table, column and function the migrations
+declare and returns one `summary` row each:
+
+```
+20261015000000_oversight_and_debrief     | 6 of 6 present
+20261024000000_a_voice_note_…            | 0 of 4 present — NEVER APPLIED
+20261023000000_one_table_one_shape       | 5 of 8 present — partly present
+```
+
+`N of N` is applied. `0 of N` was never applied. Anything between is either a
+migration that failed partway — the worst case, worth looking at first — or a
+CONVERGENCE migration whose columns already existed on that database, which is
+what `20261023000000` is for and why it reads 5 of 8 on a database that has
+production's own `detail`/`sent_by` columns and not its own `created_at` ones.
+The `missing` rows below the summary name each absent object, so the two cases
+are easy to tell apart.
+
+### Then paste what it says you need — or all of it
+
+Both are correct. Every statement in every migration is `IF NOT EXISTS`,
+`OR REPLACE` or guarded by an explicit existence check, and
+`scripts/verify_apply_all.sh` applies the whole bundle **twice** on every push
+to prove it. So pasting a migration a database already has is a no-op, and
+pasting all 38 is always safe. The reason to know which ones are missing is
+not safety — it is being able to tell, afterwards, whether anything changed.
+
+The complete table of all 38, in apply order, with what breaks until each one
+runs, is in `docs/PRODUCTION_DEPLOYMENT.md`, and
+`scripts/check_runbook_covers_migrations.py` fails CI if a migration is added
+and that table does not describe it.
 
 This file is the **step-by-step** runbook, and the steps below cover the first
 nine — the C-3 least-privilege era, where the order has dependencies and a
-failure needs a human decision. The remaining 29 are ordinary forward
-migrations and go in with the one paste under "the short way", which applies
-all 38.
-
-Read this file before the first paste either way: the RLS migration drops prior
-policies by exact name, and a policy made by hand in the dashboard survives it.
+failure needs a human decision. Read it before the first paste either way: the
+RLS migration drops prior policies by exact name, and a policy made by hand in
+the dashboard survives it.
 
 The nine covered one at a time below:
 

@@ -12,6 +12,16 @@
 -- never applied; `N of N` was. Anything in between is a migration that failed
 -- partway, which is the worst case and the one worth looking at first.
 --
+-- "Partly present" has TWO readings and the summary line no longer picks one.
+-- A migration that failed halfway is the alarming case. But a CONVERGENCE
+-- migration — `20261023000000_one_table_one_shape`, which exists because two
+-- databases had the same table with different columns — adds columns with
+-- `ADD COLUMN IF NOT EXISTS`, and on a database that already had some of them
+-- it reads `5 of 8` while never having been applied at all. That is the file
+-- written to handle exactly this, reported as the worst case. The `missing`
+-- rows tell them apart: a partial failure leaves an arbitrary subset, while a
+-- convergence migration leaves the objects that database never had.
+--
 -- Most migrations CREATE, and read `N of N present`. One REMOVES, and reads
 -- `N of N removed` — for those the assertion is that the object is gone, so
 -- `0 of 7 removed` means that migration has not been applied yet, not that
@@ -203,7 +213,7 @@ SELECT 1 AS ord, 'summary' AS section, migration AS name,
               CASE
                 WHEN migration IN ('20260721000000_v2_agency_tables', '20260722000000_v3_telemetry_geofence', '20260723000000_v4_mesh_broadcast', '20260724000000_v5_rls_security') THEN ' — by hand in production, absence is not a fault'
                 WHEN count(*) FILTER (WHERE present = want) = 0 THEN ' — NEVER APPLIED'
-                WHEN count(*) FILTER (WHERE present = want) < count(*) THEN ' — APPLIED PARTWAY, look here first'
+                WHEN count(*) FILTER (WHERE present = want) < count(*) THEN ' — PARTLY PRESENT: either applied partway, or a convergence migration whose objects already existed here. Read its `missing` rows below'
                 ELSE ''
               END) AS detail
   FROM resolved
