@@ -561,16 +561,36 @@ printf '%s\n' "$PLANT_OUT" | grep -qx "planted={public}" || {
   exit 1; }
 echo "  PASS  planted alerts_select_geo_lga_scoped and PostgreSQL recorded it TO {public}"
 
+# The expression BEFORE, so the claim that the migration leaves it alone is
+# asserted rather than described. The policy on production was applied by hand;
+# a repair that rewrites its body from this repository's text would silently
+# change which officer may read which incident, and `pg_policies.qual` is the
+# only place that difference would show.
+QUAL_BEFORE=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
+  \"select qual from pg_policies where schemaname='public' \
+    and policyname='alerts_select_geo_lga_scoped';\"")
 psql_run "-f $PGROOT/20261025000000_the_other_policy_public_could_reach.sql" >/dev/null
 REPAIRED=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
   \"select roles::text from pg_policies where schemaname='public' \
+    and policyname='alerts_select_geo_lga_scoped';\"")
+QUAL_AFTER=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
+  \"select qual from pg_policies where schemaname='public' \
     and policyname='alerts_select_geo_lga_scoped';\"")
 if [ "$REPAIRED" != "{authenticated}" ]; then
   echo "    roles after the migration: $REPAIRED"
   echo "✗ the repair branch did not scope the policy TO authenticated"
   exit 1
 fi
-echo "  PASS  and the migration recreated it TO {authenticated}, same name, same USING"
+echo "  PASS  and the migration scoped it TO {authenticated}"
+if [ -z "$QUAL_BEFORE" ] || [ "$QUAL_BEFORE" != "$QUAL_AFTER" ]; then
+  echo "    before: $QUAL_BEFORE"
+  echo "    after:  $QUAL_AFTER"
+  echo "✗ the policy's USING expression changed. ALTER POLICY … TO must change"
+  echo "  the roles and nothing else: production's copy of this policy was"
+  echo "  applied by hand, and rewriting its body decides who reads what."
+  exit 1
+fi
+echo "  PASS  and its USING expression is byte-identical, so no read path moved"
 
 # Left in place it would be an extra policy on alerts that no migration creates,
 # which the convergence assertions would rightly call drift.
