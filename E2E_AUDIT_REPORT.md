@@ -5066,6 +5066,41 @@ old claim:
 
 Two of its three new mutations are sentences I wrote two hours earlier.
 
+#### How it ended, the same evening
+
+The operator pasted the six, in timestamp order, and ran the probe again:
+
+```
+20261018000000_the_mirrors_and_two_dead_functions_are_gone  | 7 of 7 removed
+20261020000000_a_handset_that_leaves_mid_emergency          | 1 of 1 present
+20261021000000_an_lga_can_hand_an_incident_to_a_ward        | 1 of 1 present
+20261022000000_a_new_emergency_tells_the_unit               | 1 of 1 present
+20261023000000_one_table_one_shape                          | 8 of 8 present
+20261024000000_a_voice_note_…                               | 4 of 4 present
+
+every object in every migration is as it should be — nothing to apply
+```
+
+So the deployment this report called its top blocker for weeks took one paste,
+once somebody asked the database instead of the repository. The thirty-two
+already-applied migrations were never the obstacle; the belief that they were
+is what the obstacle was made of.
+
+The combined file was tested before it was handed over, which is the part worth
+keeping as practice: a database was built with every other migration applied
+and exactly those six missing, the probe was run to confirm it reported those
+six **and only those six**, the file was pasted, the probe came back clean, and
+then it was pasted a second time to prove it changed nothing. Handing an
+operator an untested bundle to run against production, having just written
+three findings about asserting things one has not checked, would have been a
+fourth.
+
+Nine migrations remain *"not detectable"* by object existence — they create
+policies, a storage bucket, a trigger and a publication rather than tables,
+columns and functions. `scripts/rls_inventory.sql` covers the policy ones, and
+a single read-only query settles all nine at once against a known-good
+reference of eight rows.
+
 #### And the probe over-alarmed on the one migration built for this
 
 `20261023000000_one_table_one_shape` reported `5 of 8 present — APPLIED
