@@ -79,6 +79,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/schema_convergence_behaviour_test.sql \
    "$REPO"/scripts/agency_delivery_behaviour_test.sql \
    "$REPO"/scripts/non_emergency_behaviour_test.sql \
+   "$REPO"/scripts/policy_roles_behaviour_test.sql \
    "$REPO"/scripts/why_is_the_board_empty.sql \
    "$REPO"/scripts/why_did_my_insert_fail.sql \
    "$REPO"/scripts/which_migrations_are_applied.sql \
@@ -513,6 +514,74 @@ NE_OUT=$(psql_run "-f $PGROOT/non_emergency_behaviour_test.sql" 2>&1) && NE_RC=0
 echo "$NE_OUT" | grep -E "PASS|FAIL|ERROR" || true
 if [ "$NE_RC" -ne 0 ] || echo "$NE_OUT" | grep -q "ERROR"; then
   echo "$NE_OUT"; echo "✗ non-emergency assertions failed"; exit 1
+fi
+
+# The other policy PUBLIC could reach. `alerts_select_geo_lga_scoped` was
+# created by 20260725 (staging-only, applied to production BY HAND) with no TO
+# clause, which PostgreSQL records as TO PUBLIC — twelve lines above its
+# telemetry twin, which carries a comment explaining exactly that and was
+# repaired on its own. On a database built from this repository 20261006 has
+# already dropped it, so this is a no-op here and the fix on production.
+echo "▶ Applying 20261025000000_the_other_policy_public_could_reach.sql"
+psql_run "-f $PGROOT/20261025000000_the_other_policy_public_could_reach.sql" >/dev/null
+psql_run "-f $PGROOT/20261025000000_the_other_policy_public_could_reach.sql" >/dev/null
+
+# AND THE BRANCH THAT MATTERS, WHICH THE REPLAY DOES NOT REACH.
+#
+# On a database built from this repository the policy is already gone (20261006
+# dropped it, and 20260725 is staging-only), so the run above only proves the
+# no-op. The branch that does the work on PRODUCTION — policy exists, recorded
+# TO PUBLIC, repair it — would otherwise ship untested. So plant production's
+# shape and watch the migration close it.
+echo "▶ Asserting the repair branch closes a TO-PUBLIC policy it finds"
+cat > "$PGROOT/zz_plant_public_policy.sql" <<'PLANT'
+-- Exactly what 20260725000000_v6_geo_lga_scoping_staging.sql used to create:
+-- no TO clause, which PostgreSQL records as TO PUBLIC.
+CREATE POLICY "alerts_select_geo_lga_scoped"
+  ON public.alerts FOR SELECT
+  USING (
+    auth.role() = 'authenticated'
+    AND EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.role IN ('FIELD_OFFICER', 'WARD_OFFICER', 'LGA_OFFICER')
+        AND p.geo_lga IS NOT NULL
+        AND TRIM(p.geo_lga) <> ''
+        AND public.normalise_lga(p.geo_lga) = public.normalise_lga(alerts.geo_lga)
+    )
+  );
+SELECT 'planted=' || roles::text FROM pg_policies
+ WHERE schemaname='public' AND policyname='alerts_select_geo_lga_scoped';
+PLANT
+chown postgres:postgres "$PGROOT/zz_plant_public_policy.sql"
+PLANT_OUT=$(psql_run "-t -A -f $PGROOT/zz_plant_public_policy.sql" 2>&1)
+printf '%s\n' "$PLANT_OUT" | grep -qx "planted={public}" || {
+  printf '%s\n' "$PLANT_OUT" | sed 's/^/    /'
+  echo "✗ the planted policy was not recorded as {public} — this step proves nothing"
+  exit 1; }
+echo "  PASS  planted alerts_select_geo_lga_scoped and PostgreSQL recorded it TO {public}"
+
+psql_run "-f $PGROOT/20261025000000_the_other_policy_public_could_reach.sql" >/dev/null
+REPAIRED=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
+  \"select roles::text from pg_policies where schemaname='public' \
+    and policyname='alerts_select_geo_lga_scoped';\"")
+if [ "$REPAIRED" != "{authenticated}" ]; then
+  echo "    roles after the migration: $REPAIRED"
+  echo "✗ the repair branch did not scope the policy TO authenticated"
+  exit 1
+fi
+echo "  PASS  and the migration recreated it TO {authenticated}, same name, same USING"
+
+# Left in place it would be an extra policy on alerts that no migration creates,
+# which the convergence assertions would rightly call drift.
+psql_run "-c 'DROP POLICY \"alerts_select_geo_lga_scoped\" ON public.alerts;'" >/dev/null
+echo "  PASS  and the planted policy is removed, so the end state is the repo's own"
+
+echo "▶ Asserting no policy in schema public reaches anon or public, by name"
+PR_OUT=$(psql_run "-f $PGROOT/policy_roles_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?
+echo "$PR_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$PR_RC" -ne 0 ] || echo "$PR_OUT" | grep -q "ERROR"; then
+  echo "$PR_OUT"; echo "✗ policy-role assertions failed"; exit 1
 fi
 
 echo "▶ Asserting a complaint about an officer does not reach that officer"

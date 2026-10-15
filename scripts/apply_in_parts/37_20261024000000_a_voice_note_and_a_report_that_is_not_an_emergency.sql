@@ -294,5 +294,3 @@ COMMENT ON FUNCTION public.escalate_overdue_alerts() IS
 
 COMMIT;
 
-
-

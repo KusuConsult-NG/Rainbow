@@ -902,6 +902,22 @@ jobs:
       - name: Assert every gate in scripts/ is actually run
         run: python3 scripts/check_every_gate_runs.py
 
+      # A production policy query returned two rows, and the second was known:
+      # `telemetry_select_geo_lga_scoped` sat on a live database as the one
+      # policy reaching PUBLIC and was repaired on its own. Its twin,
+      # `alerts_select_geo_lga_scoped`, is created twelve lines above it in the
+      # same file with no TO clause — and PostgreSQL records that as TO PUBLIC,
+      # which includes anon. The incident table: reporter names, phone numbers,
+      # locations. The fix for the twin had put a comment in that very file
+      # saying TO authenticated is not decoration, and the sibling kept the
+      # defect. 20260813 cannot drop either by name (both postdate it), the
+      # file is staging-only yet production has the policies because that era
+      # was applied by hand, and the end-of-replay sweep passes because a later
+      # migration drops this one — production sits in the middle, which nothing
+      # described.
+      - name: Assert every policy says which roles it is for
+        run: python3 scripts/check_every_policy_names_its_roles.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

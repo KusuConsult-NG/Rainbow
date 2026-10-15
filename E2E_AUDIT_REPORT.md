@@ -1263,6 +1263,7 @@ only thing that distinguishes a defect from a preference.
 | T-48 | **Every button in every map popup was dead, and our own CSP was why.** The Intelligence Map is the screen the console OPENS on, and a marker's popup is how a dispatcher acts on a pin: DOSSIER, DISPATCH, RESOLVE. The popups are HTML strings, so the buttons carried `onclick="window._hqShowDispatch('…')"` — and `script-src 'self' `'nonce-…' 'strict-dynamic'` has **no** `'unsafe-inline'`: a nonce authorises a `<script>` ELEMENT and cannot authorise an event handler ATTRIBUTE, so Chrome refused all of them from the day that policy shipped. No error reached the operator. Three layers nearly caught it and each measured the wrong half: the sweep logged `changed: NOTHING`, which is a log line and not a check; `csp.test.ts`'s seven tests assert the HEADER, not what the header does to the page; and the component tests asserted the `onclick` attribute and the global SEPARATELY, with a comment explaining that jsdom cannot evaluate an inline handler — so the join was tested nowhere, never worked, and the suite was defending it. | ✅ Delegation: the buttons carry `data-hq-action`/`data-hq-id` and `LiveMap` listens once on its container. Both tests now press the real button and assert the real outcome. `check_no_inline_handlers.py` forbids the `on<event>="…"` attribute form in the console (a React `onClick={fn}` prop is unaffected), and the browser harness opens a popup and asserts it carries its actions as data, zero handler attributes, and that DOSSIER opens the dossier. 2 new console tests (one of them presses an action no popup renders a button for, to prove the listener routes and that the tier it hands on comes from the incident rather than the markup) and one rewritten from asserting the attribute to pressing the button, and `check_no_inline_handlers.py` — 6 shapes it must catch (both cases of the attribute, every event name, spaces round the `=`) and 6 it must allow, among them a camelCase React prop that happens to start with those two letters |
 | T-49 | **The harness reported the agency liaison desk broken, and it was the stand-in.** `fake_supabase.js` rejects a column no migration defines, in full, the way PostgREST does — and read that column list ONCE, at require time. A stand-in started at 13:06 was still answering at 14:28, after T-46 had added `alerts.voice_note_url` and given the agency portal's `select` the new column: `UNKNOWN COLUMN alerts.voice_note_url (read)`, the whole query failed, and the one surface an outside agency ever sees came back with no incidents. Three checks failed naming the card and both its buttons, on code that was fine. Same trap as a stale `next-server` holding :3000 while `.next` is rebuilt underneath it — which is what the five "missing" navigation tabs were, and which has now invalidated two runs. A long-lived process answering from a snapshot does not report an error; it reports the PRODUCT broken, on exactly the screen that depends on the thing that moved. | ✅ The stand-in refills its schema rather than freezing it, and compares a fingerprint of every migration's name, size and mtime before answering — rebuilding, loudly, when it moves; proved both directions against a live stand-in. `check_standin_reads_live_schema.py` keeps the require-time freeze from returning and fails if the refresh is defined but never called — 9 mutations. `interact.js` gained a boot assertion that fails the run on a console serving a build it cannot load, with the remedy in the message |
 | T-50 | **The document the README sends an operator to first described nine of the thirty-seven migrations as the whole list.** `docs/APPLYING_THE_MIGRATIONS.md` — "**Read this before the first one**", per README — opened with *"Nine migrations are proven in CI on every push and not yet applied"*, named those nine, and said the single-paste script applies *"all nine, in order, finishing with a 14-row PASS/FAIL table"*. There are **37** outstanding and the generated script ends in **34** rows. Everything from the last fortnight of this audit — the voice note, non-emergency routing, one table one shape, incident tracks — was absent from it. An operator following it applies nine files, gets a verdict table two and a half times the size they were told to expect, and has no way to tell success from a wrong script. `check_runbook_covers_migrations.py` was written for exactly this drift (it had already caught the other runbook seventeen short) and watched ONE file, so the second one drifted behind it unseen. | ✅ The step-by-step file now states the real total, says which nine of them it walks through one at a time and why (the C-3 era is the part with ordering dependencies and a human decision in it), and points at the generated table that carries all 37. The gate now reads every doc that names migration files: one must carry the complete table, any other must declare its subset and point at that one, and every figure quoted is checked against the repository — including a count spelled out in WORDS, which is refused outright, because the stale claim was "Nine" and no check can verify a word. 5 mutations |
+| T-51 | **The other policy PUBLIC could reach — on the incident table, twelve lines above the comment explaining the defect.** A production policy query returned two rows: `alerts_select_geo_lga_scoped` and `telemetry_select_geo_lga_scoped`. The second was known — it had sat on a live database as the single policy reaching PUBLIC and was repaired by `20261016000000`. Both are created by `20260725000000_v6_geo_lga_scoping_staging.sql`, twelve lines apart: the telemetry one is written `TO authenticated`, the **alerts** one with no `TO` clause at all — and PostgreSQL records that as **TO PUBLIC**, which includes `anon`. That is a policy naming the anonymous key over the incident table: the reporter, their phone number, what they said, where they are. The earlier fix had written *"TO authenticated is not decoration"* into that very file, directly beneath the policy that still lacked it; nobody looked at the sibling. Three structural reasons it survived: `20260813` drops 98 policies BY NAME and cannot name one from a later file (0 occurrences of `geo_lga_scoped` in it); the v6 file is STAGING_ONLY so it is not in the paste at all, yet production carries its policies because that era was applied BY HAND; and the verifier asserts no policy reaches anon or public **at the end of the full replay**, which passes because `20261006000000` drops this policy on the way to a narrower one — production is sitting in the MIDDLE, where it exists and that drop has not been applied, and no assertion described the middle. What stops it being an open database today is one layer: the table-level REVOKE from `anon`. | ✅ `TO authenticated` added at the source so no new database creates it open, plus `20261025000000_the_other_policy_public_could_reach.sql` to repair the one that exists — same name, same USING expression to the character, idempotent, a no-op both where the policy is already scoped and where `20261006` has replaced it, and it ends by naming anything still reaching anon or public. `check_every_policy_names_its_roles.py` now requires every `CREATE POLICY` in the repository to WRITE its `TO` clause — any roles, even `TO public`, because the rule is that the intent is visible; silence means PUBLIC and reads like nothing. The 43 policies of the v2–v6 and phase1 era are grandfathered as an exact frozen inventory, so a new policy in an old file still fails. 10 mutations, and 5 SQL assertions that read `pg_policies.roles` — the state, not the text — including a planted TO-PUBLIC probe, because the earlier version of this claim passed every run for weeks while the telemetry policy was open |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -4803,6 +4804,117 @@ and every figure quoted is checked against the repository. Including a count
 spelled out in words, which is now refused rather than parsed — the stale claim
 was the word "Nine", and a number no check can verify is a number that goes
 stale in silence.
+
+### T-51. The other policy PUBLIC could reach
+
+A production policy query came back with two rows:
+
+```
+alerts_select_geo_lga_scoped    | alerts    | SELECT
+telemetry_select_geo_lga_scoped | telemetry | SELECT
+```
+
+The second is known. `20261016000000_telemetry_policy_is_not_public.sql` exists
+because a production paste reported it as the one policy reaching PUBLIC —
+*"and it was this, alone"*, says its header.
+
+The first is its twin, and nothing had ever looked at it.
+
+Both are created by `20260725000000_v6_geo_lga_scoping_staging.sql`, twelve
+lines apart. The telemetry one is written `TO authenticated`. The alerts one
+was written:
+
+```sql
+CREATE POLICY "alerts_select_geo_lga_scoped"
+  ON public.alerts
+  FOR SELECT
+  USING ( … )          -- no TO clause
+```
+
+and PostgreSQL records a policy with no `TO` clause as **TO PUBLIC**, where
+PUBLIC includes `anon`. `alerts` is the incident table: the reporter's name and
+phone number, what they said, where they are.
+
+The part that should be uncomfortable is where the lesson was already written.
+Fixing the telemetry twin put this comment into that same file, on the policy
+immediately below the defective one:
+
+> `TO authenticated` is not decoration. Without it PostgreSQL records the
+> policy as TO PUBLIC, PUBLIC includes anon, and
+> `20260813000000_rls_least_privilege.sql` cannot drop it by name because that
+> migration predates this file. A production database carried it as the single
+> policy reaching anon for weeks.
+
+Twelve lines above that paragraph sat a policy with exactly that defect, on a
+more sensitive table. The fix had been reasoned out, written down, and
+committed next to the thing it also described — and the sibling was never
+checked. "The single policy reaching anon" was two.
+
+#### Three structural reasons it survived
+
+None of them is carelessness, which is why it needs a gate rather than a
+resolution to be careful:
+
+* `20260813000000_rls_least_privilege.sql` drops prior policies **by exact
+  name** — 98 of them — and cannot name a policy from a file written after it.
+  Checked: 0 occurrences of `geo_lga_scoped` in that migration.
+* `20260725…_staging.sql` is `STAGING_ONLY`: it is **not in the production
+  paste at all**. Production carries its policies because that era was applied
+  **by hand**. A file excluded from the deployment still shaped the database
+  the deployment runs against.
+* `verify_rls_migration.sh` asserts that no policy reaches anon or public **at
+  the end of the full replay** — and passes, because `20261006000000` drops
+  this policy on its way to the narrower `alerts_select_own_or_ours`. The end
+  state is clean. Production is sitting in the **middle**, where the policy
+  exists and that drop has not been applied, and nothing in this repository
+  described the middle.
+
+What stops this being an open database today is a single layer: `20260813`
+REVOKEs the table privileges from `anon`, so the policy has nothing to permit.
+One `GRANT`, or one click in the dashboard's table editor, and the only thing
+between the anonymous key and every incident on the board is a policy that says
+yes.
+
+#### What was done
+
+Three things, because the defect has three lives — the file, the database that
+already ran it, and the next person to write a policy.
+
+**The source.** `TO authenticated` added to the v6 alerts policy, so no
+database built from this repository ever creates it open.
+
+**The database that already has it.**
+`20261025000000_the_other_policy_public_could_reach.sql` repairs it in place the
+way `20261016000000` repaired the twin: same name, same `USING` expression to
+the character, `TO authenticated` added. No officer loses a row they could read
+before. It is idempotent and a no-op in two different ways on purpose — where
+the policy is already scoped, and where `20261006` has already replaced it —
+and it ends by naming any policy still reaching anon or public, because the
+next one should not need a production query to find.
+
+That repair branch is the one a replay cannot reach, since on a repo-built
+database the policy is already gone. So the verifier now **plants production's
+shape** — creates the policy with no `TO` clause, confirms PostgreSQL recorded
+it as `{public}`, applies the migration, asserts the roles came back
+`{authenticated}`, and removes the plant so the end state is still the
+repository's own. Shipping the repair without that would have been shipping an
+untested branch to the only database that needs it.
+
+**The next policy.** `check_every_policy_names_its_roles.py` requires every
+`CREATE POLICY` in the repository to write its `TO` clause. Any roles will do —
+`TO authenticated`, `TO service_role`, even `TO public` — because the rule is
+that the intent is **visible**. Silence is the defect: it means PUBLIC and it
+reads like nothing. The 43 policies of the v2–v6 and phase1 era are
+grandfathered as an exact frozen inventory of (file, policy) pairs, so adding a
+new policy to an old file still fails, and so does renaming one. 10 mutations,
+including the loophole its own test needed: `policy_roles_behaviour_test.sql`
+plants a `TO PUBLIC` policy deliberately, to prove its sweep can detect one, so
+a probe is exempt only when it is named `zz_…` **and** dropped in the same file
+— a probe left behind on a real database still fails.
+
+And five SQL assertions that read `pg_policies.roles` rather than the text of a
+migration, because what a file says and what the database recorded are the two
+things this finding is about.
 
 ---
 

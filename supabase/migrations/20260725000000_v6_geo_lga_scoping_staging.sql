@@ -50,9 +50,17 @@ BEGIN
       AND policyname = 'alerts_select_geo_lga_scoped'
   ) THEN
     EXECUTE $pol$
-      CREATE POLICY "alerts_select_geo_lga_scoped"
+      -- TO authenticated is not decoration — see the same note on the
+        -- telemetry policy below. This one was written WITHOUT it, and
+        -- PostgreSQL recorded it as TO PUBLIC on every database that ran this
+        -- file, production among them (the v6 era was applied by hand). Its
+        -- twin was repaired and this one was not, with the explanation sitting
+        -- twelve lines away. Repaired on existing databases by
+        -- 20261025000000_the_other_policy_public_could_reach.sql.
+        CREATE POLICY "alerts_select_geo_lga_scoped"
         ON public.alerts
         FOR SELECT
+        TO authenticated
         USING (
           -- Caller must be an authenticated field-level officer
           auth.role() = 'authenticated'

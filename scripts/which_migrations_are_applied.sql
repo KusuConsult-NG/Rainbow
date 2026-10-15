@@ -227,7 +227,8 @@ SELECT 3, 'not detectable', name, detail
          ('20260927000000_signup_cannot_choose_role', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
          ('20261016000000_telemetry_policy_is_not_public', 'it only creates policies, which object existence cannot see — use scripts/rls_inventory.sql'),
          ('20261017000000_the_hand_applied_era_is_in_the_history', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
-         ('20261019000000_the_audit_trail_names_who_acted', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them')
+         ('20261019000000_the_audit_trail_names_who_acted', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
+         ('20261025000000_the_other_policy_public_could_reach', 'it only creates policies, which object existence cannot see — use scripts/rls_inventory.sql')
        ) AS u(name, detail)
 UNION ALL
 SELECT 4, 'as expected', 'every object in every migration is as it should be',
