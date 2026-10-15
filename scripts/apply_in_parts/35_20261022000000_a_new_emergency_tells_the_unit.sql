@@ -132,5 +132,3 @@ CREATE TRIGGER queue_new_incident_notice_trg
 
 COMMIT;
 
-
-

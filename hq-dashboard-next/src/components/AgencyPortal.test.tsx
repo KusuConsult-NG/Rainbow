@@ -107,6 +107,39 @@ describe('AgencyPortal', () => {
     expect(screen.queryByText(/Incident for POLICE/)).not.toBeInTheDocument();
   });
 
+  // The escalation log on this desk is the only history a sister agency gets:
+  // they have no console, no feed and no audit screen. It is read with the
+  // same three functions as the HQ replay panel, so "who escalated this" has
+  // one answer in the codebase (T-32's order: `by`, then `by_email`, then
+  // SYSTEM) and an entry whose time was never written says so instead of
+  // rendering the string "Invalid Date".
+  it('reads an escalation entry the same way the replay panel does', async () => {
+    db.setRows('alerts', [{
+      ...incident('a-1', 'POLICE'),
+      escalation_log: [
+        {
+          at: '2026-09-01T12:30:00Z',
+          from_tier: 'WARD',
+          to_tier: 'LGA',
+          by_email: 'ward.commander@operationrainbow.test',
+          reason: 'No unit free in the ward',
+        },
+        // No `at`. Nothing validates the log's keys, and `audit_trail()`
+        // already falls back for exactly this shape.
+        { from_tier: 'LGA', to_tier: 'HQ', by: 'SYSTEM', reason: 'TIMEOUT' },
+      ],
+    }]);
+    const AgencyPortal = await load();
+
+    const { container } = render(<AgencyPortal {...hqProps} />);
+    await userEvent.click(await screen.findByText(/Incident for POLICE/));
+
+    expect(await screen.findByText(/WARD → LGA/)).toBeInTheDocument();
+    expect(container.textContent).toContain('ward.commander@operationrainbow.test');
+    expect(container.textContent).toContain('TIME NOT RECORDED');
+    expect(container.textContent).not.toContain('Invalid Date');
+  });
+
   it('acknowledges a report and re-reads', async () => {
     db.setRows('alerts', []);
     db.setRows('agency_action_reports', [

@@ -818,6 +818,33 @@ jobs:
       - name: Assert every string the app asks for exists in every language
         run: python3 scripts/check_translation_keys.py
 
+      # `IncidentReplayPanel` — the forensic replay of one incident — built its
+      # escalation events by string-matching `ai_summary`. Every automatic
+      # escalation was therefore missing from it: `escalate_overdue_alerts()`
+      # appends to `escalation_log` and writes no prose, so an incident that
+      # climbed at 02:00 because nobody answered showed on the Audit History
+      # screen and nowhere on the replay of the incident it happened to. Every
+      # escalation also carried `updated_at`, so three tier moves shared one
+      # time and could not be ordered, and the actor was the literal 'Tactical
+      # Command' while the log records who did it — T-32's fault, one screen
+      # later.
+      - name: Assert an incident's history is read from the record
+        run: python3 scripts/check_history_reads_the_record.py
+
+      # Three of the four agency tables are created TWICE, by two files with
+      # different column lists and IF NOT EXISTS on both — so the second is a
+      # no-op and the winner is whichever ran first. The v3/v4 era was applied
+      # to production by hand and is excluded from every replay, so production
+      # has `detail`, `sent_by`, `target_lga`, `acknowledged_at` and
+      # `resolved_at` and no `created_at`, while every database this repository
+      # can build has the opposite. `/api/notify-agency` wrote the intersection
+      # and dropped `result.detail` — the only field that says WHY a handover
+      # to the Police or the Army failed. Nothing could have caught it: the
+      # convergence gate compares objects, not columns, and the local stand-in
+      # unions every definition it finds.
+      - name: Assert every table has one shape on both databases
+        run: python3 scripts/check_one_table_one_shape.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

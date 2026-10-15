@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 
 import { supabase } from '@/lib/supabase';
 import { AGENCY_LIST } from '@/lib/agencies';
+import { entryActor, entryNotes, stampLabel } from '@/lib/incident-timeline';
 import LiveFeedViewer from '@/components/LiveFeedViewer';
 
 import {
@@ -646,12 +647,16 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
               <div style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1, marginBottom: 6 }}>ESCALATION LOG</div>
               {incident.escalation_log.map((entry: any, i: number) => (
                 <div key={i} style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                  <span style={{ color: agencyColor, fontWeight: 700 }}>{entry.from_tier} → {entry.to_tier}</span>
-                  {/* The LGA an HQ handover was aimed at. It used to be written
-                      into `to_tier` itself, which put a place where every other
-                      writer puts a rung; naming it separately keeps both. */}
-                  {entry.to_lga && entry.to_lga !== 'ALL' ? ` (${entry.to_lga})` : ''}
-                  {' '}{entry.reason} · {entry.by_email ?? entry.by ?? 'SYSTEM'} · {new Date(entry.at).toLocaleString()}
+                  {/* One reading of an entry, shared with the replay panel.
+                      `entryNotes` names the tiers AND where a hand-down went
+                      (the LGA an HQ handover was aimed at used to be written
+                      into `to_tier` itself, which put a place where every
+                      other writer puts a rung). `entryActor` is the T-32 order
+                      — `by`, then `by_email`, then SYSTEM — and `stampLabel`
+                      is why an entry with no `at` no longer reads
+                      "Invalid Date" on this desk. */}
+                  <span style={{ color: agencyColor, fontWeight: 700 }}>{entryNotes(entry)}</span>
+                  {' '}· {entryActor(entry)} · {stampLabel(entry.at, 'full')}
                 </div>
               ))}
             </div>

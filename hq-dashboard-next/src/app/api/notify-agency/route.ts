@@ -266,6 +266,17 @@ export async function POST(req: NextRequest) {
     // Every leg, including the skipped ones: this table is the only durable
     // record of whether an agency was told, and a row set that omits the
     // channels nobody used cannot answer that question later.
+    //
+    // `detail` is the only thing on the row that says WHY — `HTTP 502`, a
+    // timeout's message, "no contact configured for the DSS". It was dropped,
+    // along with `sent_by` and `target_lga`, because those three columns were
+    // created by `20260722000000_v3_telemetry_geofence` (applied to production
+    // by hand, excluded from every replay) and NOT by the `20260812000000`
+    // definition that any other database applies. Writing them would have
+    // worked in production and failed everywhere else with a 42703, on the one
+    // path that records whether an outside agency was reached, so the route
+    // wrote the intersection of the two shapes and the reason went to a server
+    // log. `20261023000000_one_table_one_shape.sql` converges them.
     for (const result of results) {
       await supabase.from('agency_notifications').insert({
         alert_id: alertId,
@@ -273,6 +284,9 @@ export async function POST(req: NextRequest) {
         method: result.method,
         status: result.status,
         sent_at: new Date().toISOString(),
+        detail: result.detail ?? null,
+        sent_by: sentBy ?? auth.userId ?? null,
+        target_lga: targetLga ?? null,
       }).then(({ error }) => {
         if (error) console.error('[AGENCY_NOTIFY_DB_ERR]', error.message);
       });

@@ -77,6 +77,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/ai_reports_behaviour_test.sql \
    "$REPO"/scripts/oversight_behaviour_test.sql \
    "$REPO"/scripts/schema_convergence_behaviour_test.sql \
+   "$REPO"/scripts/agency_delivery_behaviour_test.sql \
    "$REPO"/scripts/why_is_the_board_empty.sql \
    "$REPO"/scripts/why_did_my_insert_fail.sql \
    "$REPO"/scripts/which_migrations_are_applied.sql \
@@ -479,6 +480,23 @@ CONV_OUT=$(psql_run "-f $PGROOT/schema_convergence_behaviour_test.sql" 2>&1) && 
 echo "$CONV_OUT" | grep -E "PASS|FAIL|NOTE|ERROR" || true
 if [ "$CONV_RC" -ne 0 ]; then
   echo "$CONV_OUT"; echo "✗ schema convergence assertions failed"; exit 1
+fi
+
+# Three of the four agency tables are created twice, by two files with
+# different column lists and IF NOT EXISTS on both — so THIS database, which
+# excludes the hand-applied v3/v4 era, had `created_at` and none of the five
+# columns production has. Applied twice like the rest: the runbook tells an
+# operator to paste it, and a backfill that runs twice must not change anything
+# the second time.
+echo "▶ Applying 20261023000000_one_table_one_shape.sql"
+psql_run "-f $PGROOT/20261023000000_one_table_one_shape.sql" >/dev/null
+psql_run "-f $PGROOT/20261023000000_one_table_one_shape.sql" >/dev/null
+
+echo "▶ Asserting the delivery log of a handover to an outside agency"
+AGD_OUT=$(psql_run "-f $PGROOT/agency_delivery_behaviour_test.sql" 2>&1) && AGD_RC=0 || AGD_RC=$?
+echo "$AGD_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$AGD_RC" -ne 0 ] || echo "$AGD_OUT" | grep -q "ERROR"; then
+  echo "$AGD_OUT"; echo "✗ agency delivery assertions failed"; exit 1
 fi
 
 echo "▶ Asserting a complaint about an officer does not reach that officer"

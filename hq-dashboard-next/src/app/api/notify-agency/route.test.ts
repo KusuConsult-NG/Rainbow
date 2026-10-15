@@ -134,6 +134,41 @@ describe('never calling nothing a delivery', () => {
     expect(inserted.every(i => i.row.agency === 'ARMY')).toBe(true);
   });
 
+  it('records WHY each leg ended as it did, not just that it did', async () => {
+    // The row's `detail` is the only thing that says why. The route wrote
+    // method and status and dropped it, because the column was created by the
+    // hand-applied v3 migration and not by the 20260812 definition that every
+    // other database applies — so writing it worked in production and failed
+    // everywhere else. `20261023000000_one_table_one_shape.sql` converges the
+    // two shapes; this is the write that was being avoided.
+    process.env.ARMY_LIAISON_PHONE = '+2348000000003';
+    await notify({ alertId: ALERT, agency: 'ARMY', targetLga: 'JOS NORTH', sentBy: 'hq@rainbow.test' });
+
+    const sms = inserted.find(i => i.row.method === 'SMS');
+    expect(sms?.row.detail).toBe('no TERMII_API_KEY');
+    const webhook = inserted.find(i => i.row.method === 'WEBHOOK');
+    expect(webhook?.row.detail).toBe('no ARMY_WEBHOOK_URL');
+    // And who asked for the handover, and for where: a delivery record that
+    // cannot be traced to an operator or a sector answers less than it looks.
+    expect(sms?.row.sent_by).toBe('hq@rainbow.test');
+    expect(sms?.row.target_lga).toBe('JOS NORTH');
+  });
+
+  it('writes a null reason rather than dropping the row when there is none', async () => {
+    env.termiiApiKey = 'termii-key';
+    process.env.ARMY_LIAISON_PHONE = '+2348000000003';
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ message_id: 'x' }), { status: 200 }) as never,
+    );
+
+    await notify({ alertId: ALERT, agency: 'ARMY' });
+
+    const sms = inserted.find(i => i.row.method === 'SMS');
+    expect(sms).toBeDefined();
+    expect(sms?.row.status).toBe('SENT');
+    expect('detail' in (sms?.row as object)).toBe(true);
+  });
+
   it('says so when the phone is there and the Termii key is not', async () => {
     process.env.ARMY_LIAISON_PHONE = '+2348000000003';
     const { body } = await notify({ alertId: ALERT, agency: 'ARMY' });
