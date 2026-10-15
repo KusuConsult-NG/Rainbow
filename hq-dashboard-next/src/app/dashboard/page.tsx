@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import AdminDirectory from '@/components/AdminDirectory';
+import VoiceNote from '@/components/VoiceNote';
 import SystemConfig from '@/components/SystemConfig';
 import AuditLogs from '@/components/AuditLogs';
 import MassBroadcast from '@/components/MassBroadcast';
@@ -3025,6 +3026,12 @@ Respond ONLY with a JSON object with this exact shape:
       )}
 
       <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: alert.media_urls && alert.media_urls.length > 0 ? 12 : 20 }}>{alert.description}</p>
+
+      {/* ABOVE the evidence: for a report filed by voice this IS the report,
+          and the photographs are the attachments. */}
+      {alert.voice_note_url && (
+        <VoiceNote url={alert.voice_note_url} seconds={alert.voice_note_seconds} />
+      )}
 
       {/* Evidence Media Thumbnails — Phase 7 */}
       {alert.media_urls && alert.media_urls.length > 0 && (

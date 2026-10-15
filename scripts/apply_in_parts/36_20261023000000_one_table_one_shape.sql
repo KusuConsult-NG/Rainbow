@@ -151,5 +151,3 @@ COMMENT ON COLUMN public.agency_deployments.resolved_at IS
 
 COMMIT;
 
-
-

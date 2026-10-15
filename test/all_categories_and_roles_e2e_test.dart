@@ -21,6 +21,7 @@ import 'package:rainbow_app/services/push_notification_service.dart';
 import 'package:rainbow_app/services/sync_service.dart';
 import 'package:rainbow_app/services/user_service.dart';
 import 'package:rainbow_app/shared/widgets/system_alert_listener.dart';
+import 'package:rainbow_app/services/voice_note_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
 // ─── Fakes ──────────────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ class FakeAlertService implements AlertService {
     bool isCritical = false,
     AlertPriority priority = AlertPriority.medium,
     List<String>? attachments,
+    VoiceNote? voiceNote,
     String? geoLga,
     String? geoWard,
     String? geoSiecWard,
@@ -181,7 +183,8 @@ void main() {
 
       expect(find.byType(ReportCategoryScreen), findsOneWidget);
 
-      // Verify all 10 category titles are discoverable
+      // Every category the app offers is discoverable — derived from
+      // `alertCategories`, so adding one is covered without editing this.
       for (final cat in alertCategories) {
         final categoryText = find.text(cat.label.toUpperCase());
         await tester.scrollUntilVisible(categoryText, 200, scrollable: find.byType(Scrollable).first);
@@ -192,7 +195,7 @@ void main() {
       expect(stopwatch.elapsedMilliseconds, lessThan(5000), reason: 'UI render time exceeded threshold');
     });
 
-    testWidgets('2. Full reporting flow on ALL 10 categories (Subtype -> Dossier -> Transmission)', (tester) async {
+    testWidgets('2. Full reporting flow on EVERY category (Subtype -> Dossier -> Transmission)', (tester) async {
       for (final catInfo in alertCategories) {
         // Test Subtypes Screen
         await tester.pumpWidget(
@@ -241,7 +244,15 @@ void main() {
       }
 
       // Verify all 10 reports were submitted into the service
-      expect(fakeAlertService.submittedAlertTypes.length, equals(10));
+      // Counted from the catalogue rather than hardcoded. It said 10, and two
+      // non-emergency categories — Public property and Public service — took
+      // it to 12, so a test whose whole subject is "every category can be
+      // filed" failed for the reason it should have passed.
+      expect(
+        fakeAlertService.submittedAlertTypes.length,
+        equals(alertCategories.length),
+        reason: 'every category in alertCategories must reach submitAlert',
+      );
     });
   });
 

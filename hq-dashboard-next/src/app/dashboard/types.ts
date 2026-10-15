@@ -106,6 +106,18 @@ export interface Alert {
   feedback_at?: string;
   post_sos_status?: string;
   media_urls?: string[];
+  /**
+   * The reporter's own voice, when they could not or did not type.
+   *
+   * Its own column and not one of `media_urls`: that list is evidence —
+   * photographs, video — and a voice note is the report. While the app
+   * uploaded it as one more attachment, this dossier drew it as a 72px
+   * thumbnail with a musical note on it, among the photographs, and an
+   * operator had to open each one to find out which was somebody speaking.
+   */
+  voice_note_url?: string | null;
+  /** Its length, so the player can say so before anything is fetched. */
+  voice_note_seconds?: number | null;
   attachments?: string[];
   created_at?: string;
   updated_at?: string;

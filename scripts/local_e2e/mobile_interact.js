@@ -347,11 +347,28 @@ async function logMark() {
   await sleep(800);
 
   // ---- every reporting category --------------------------------------------
-  const CATEGORIES = [
-    'Kidnap', 'Fire', 'Drug abuse', 'Police brutality', 'Flood',
-    'Cyber crime', 'Child abuse', 'Domestic violence', 'Cattle rustling',
-    'Community attack',
-  ];
+  //
+  // READ FROM THE APP'S OWN CATALOGUE, not written out here. This was a list of
+  // ten labels, and two non-emergency categories — Public property and Public
+  // service, for government property mismanaged, vandalised, abandoned or
+  // needing repair — would have been swept by nothing: the check that says
+  // "every reporting category can be selected" would have gone on passing
+  // while two of them were never pressed.
+  const CATEGORIES = (() => {
+    const dart = fs.readFileSync(
+      path.join(ROOT, 'lib', 'core', 'constants', 'alert_categories.dart'),
+      'utf8',
+    );
+    const labels = [...dart.matchAll(/label:\s*'([^']+)'/g)].map((m) => m[1]);
+    if (labels.length < 10) {
+      throw new Error(
+        `only ${labels.length} categories parsed out of alert_categories.dart — `
+        + 'the shape of that file changed and this sweep is about to pass by '
+        + 'testing almost nothing',
+      );
+    }
+    return labels;
+  })();
 
   const categoryResults = [];
   for (const [i, cat] of CATEGORIES.entries()) {
@@ -441,6 +458,25 @@ async function logMark() {
     submitted.length === CATEGORIES.length,
     `${submitted.length}/${CATEGORIES.length} inserted` +
       (submitted.length ? `; e.g. ${submitted[0].type} / ${submitted[0].severity}` : ''),
+  );
+
+  // A REPORT THAT IS NOT AN EMERGENCY IS FILED AS ONE.
+  //
+  // `Public property` and `Public service` exist so somebody can report
+  // government property mismanaged, vandalised, abandoned or needing repair.
+  // The danger is that this system treats everything as a kidnapping: at UNIT
+  // tier the drain widens a new-incident notice to the field responders'
+  // handsets, and the timeout sweep climbs anything unacknowledged. The
+  // database holds them back (`is_non_emergency`), and this is the proof that
+  // the app files them in a shape the database recognises — the label travels
+  // as `type` = '<label> - <subtype>', so a rename on either side breaks it.
+  const nonEmergency = submitted.filter((r) => /^Public (property|service) - /.test(r.type));
+  check(
+    'a public-property report is filed at a priority that is not an emergency',
+    nonEmergency.length === 2 && nonEmergency.every((r) => r.severity === 'LOW'),
+    nonEmergency.length
+      ? nonEmergency.map((r) => `${r.type} / ${r.severity}`).join('; ')
+      : 'neither non-emergency category reached the database',
   );
 
   // ---- the rest of the features --------------------------------------------

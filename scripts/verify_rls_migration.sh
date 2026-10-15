@@ -78,6 +78,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/oversight_behaviour_test.sql \
    "$REPO"/scripts/schema_convergence_behaviour_test.sql \
    "$REPO"/scripts/agency_delivery_behaviour_test.sql \
+   "$REPO"/scripts/non_emergency_behaviour_test.sql \
    "$REPO"/scripts/why_is_the_board_empty.sql \
    "$REPO"/scripts/why_did_my_insert_fail.sql \
    "$REPO"/scripts/which_migrations_are_applied.sql \
@@ -497,6 +498,21 @@ AGD_OUT=$(psql_run "-f $PGROOT/agency_delivery_behaviour_test.sql" 2>&1) && AGD_
 echo "$AGD_OUT" | grep -E "PASS|FAIL|ERROR" || true
 if [ "$AGD_RC" -ne 0 ] || echo "$AGD_OUT" | grep -q "ERROR"; then
   echo "$AGD_OUT"; echo "✗ agency delivery assertions failed"; exit 1
+fi
+
+# A voice note from somebody who cannot type, and a report about government
+# property that must not page a patrol at 02:00 or climb to HQ by morning.
+# Applied twice, like every other one here: the runbook tells an operator to
+# paste these by hand.
+echo "▶ Applying 20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency.sql"
+psql_run "-f $PGROOT/20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency.sql" >/dev/null
+psql_run "-f $PGROOT/20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency.sql" >/dev/null
+
+echo "▶ Asserting a report about public property is not treated as an emergency"
+NE_OUT=$(psql_run "-f $PGROOT/non_emergency_behaviour_test.sql" 2>&1) && NE_RC=0 || NE_RC=$?
+echo "$NE_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$NE_RC" -ne 0 ] || echo "$NE_OUT" | grep -q "ERROR"; then
+  echo "$NE_OUT"; echo "✗ non-emergency assertions failed"; exit 1
 fi
 
 echo "▶ Asserting a complaint about an officer does not reach that officer"

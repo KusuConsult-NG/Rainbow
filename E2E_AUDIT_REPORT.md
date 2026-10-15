@@ -1258,6 +1258,8 @@ only thing that distinguishes a defect from a preference.
 | T-43 | **The same table, two shapes, and the column that said why was on only one of them.** Three of the four agency tables are created TWICE, by two files with different column lists and `CREATE TABLE IF NOT EXISTS` on both — so the second is a no-op and the winner is whichever ran first. The v3/v4 era was applied to production by hand and is excluded from every replay, so **production** carries `detail`, `sent_by`, `target_lga`, `acknowledged_at`, `resolved_at` and no `created_at`, while **every database this repository can build** carries `created_at` and none of those five. `/api/notify-agency` — whose own comment calls `agency_notifications` "the only durable record of whether an agency was told" — therefore wrote the intersection and dropped `result.detail`, the one field that says WHY a handover to the Police or the Army failed (`HTTP 502`, a timeout, "no contact configured"). And nothing read the table at all: the console sets `escalated_to_agency` the moment an operator presses escalate, so "handed to the Army" and "the Army was told" were the same line on the screen and different facts in the database. Invisible to both schema gates (they compare objects, not columns) and to the browser harness (the stand-in UNIONS every definition it finds). | ✅ `20261023000000` converges the shapes with `ADD COLUMN IF NOT EXISTS`, backfilling `created_at` from `sent_at`/`submitted_at`/`deployed_at` rather than from the migration's clock; the route writes `detail`, `sent_by` and `target_lga`; the incident replay now SHOWS each leg, with `SKIPPED` rendered as "NOT USED", a handover with no delivery row called out as such, and a delivery log that could not be READ saying so rather than showing none. `check_one_table_one_shape.py` replays both worlds and compares every table's effective shape — 7 mutations, 3 shapes that must stay allowed, one exception recorded with its reason; `agency_delivery_behaviour_test.sql` proves it on real PostgreSQL in 5 assertions |
 | T-44 | **The console could be read without a mouse and not operated.** `check_control_labels.py` has gated the Flutter app since controls there were found with empty accessible names; the console had no equivalent, and ten of its controls were clickable `<div>`s with no role, no `tabIndex` and no key handler. Among them the **agency desk's incident card** — the only way to the escalation log, the evidence, the live feed and both action buttons, on the one surface an outside agency ever sees — and the **responder picker**, which was worse than unreachable: it held a real `<input type="checkbox">` whose `onChange` was `() => {}` ("Handled by div onClick"), so a dispatcher working by keyboard could tab onto an officer, press Space, see nothing change, and conclude the roster was broken. The evidence thumbnails called `window.open` from a div. And there was **no `keydown` handler anywhere**, so the incident dossier — a fixed overlay over the feed and the map — could only be dismissed with a pointer. | ✅ real `<button>`/`<a>`/`<label>` elements where that is what they are (the picker is now a label around the real checkbox, which does the toggling itself); the card carries `aria-expanded`, stating a fact only the chevron's shape had; Escape closes the dossier and the drawer, with precedence expressed by the caller because two `window` listeners fire in registration order, not z-order; the dossier is a named `role="dialog"` (focus is NOT trapped — recorded as open rather than half-done). `check_console_controls.py` requires operability and a name, with backdrops declaring `data-pointer-only="<reason>"` in the markup — 8 mutations, 8 shapes allowed. Its first version was VACUOUS for every button with an inline handler (`[^>]*?` stops at the `>` inside `() => {}`); the brace-aware rewrite immediately found four more unnamed buttons, every one of them a dismiss control. The console browser pass now opens the dossier, finds its close control by accessible name, and presses Escape |
 | T-45 | **"ACTIVE INCIDENTS" emptied the board.** `'ACTIVE'` is not one of the ten statuses an alert can carry, and two controls set it: the status dropdown's ACTIVE INCIDENTS option and the ACTIVE tile in the UNIT STATUS panel. `filterAlerts` compares `a.status !== filters.status`, so both filtered the board down to **nothing, always** — the one control that says *show me what is happening now* produced an empty feed, which on this console is what reads as ALL CLEAR (T-33 is the finding about a board that cannot say why it is empty; this is a control whose only possible effect was to produce one). The tile was wrong twice: it advertised `alerts.length`, every incident in the window with resolved ones included, above a filter that would show none of them. Found by the TYPECHECKER while making the tile keyboard-operable for T-44 — and it could only speak because an earlier finding had completed the status union, making the comparison an error instead of a silently-false expression. | ✅ `isLiveIncident()` (not RESOLVED, not CANCELLED) in `alert-display.ts`, used by both the filter branch and the tile's count, so the number and the action cannot disagree again; the count is sector-scoped like the DURESS tile beside it; the tiles carry `aria-pressed` for the filter they apply. 2 tests, one of which fails against the old comparison |
+| T-46 | **The one path for somebody who cannot type threw away what they said.** AI VOICE REPORT ran speech-to-text, filed the TRANSCRIPT, and recorded no audio — and `if (_transcription.trim().isEmpty) return;` meant a recogniser that is offline or has never heard Hausa or Pidgin produced *"No voice input recorded"* and **filed nothing at all**, from somebody speaking perfectly clearly. The other microphone path kept the file but uploaded it into `media_urls` — the evidence list — so a responder's card said "3 attachments" with no way to tell one was a person speaking, and it wrote `[AUDIO_REPORT] voice message recorded` into the narrative field, so that marker arrived at HQ as the incident's description. Neither screen could PLAY it: both handed the url to the platform (`launchUrl`, a browser tab), which on a handset means leaving the app mid-incident — past a re-entry lock that can then demand a code — and for a Cloudinary `/raw/` link is often a download. There was no audio-player dependency in the app at all. | ✅ `alerts.voice_note_url` + `voice_note_seconds`: the reporter's voice in its own column, with its length so a responder on a weak connection knows what they are about to pull. `VoiceNoteService` records FIRST and treats the transcript as a bonus, discards a sub-second mis-tap, and caps at the ten minutes the row's own CHECK allows. `VoiceNotePlayer` plays it in the app and says when it failed and why; the console uses `<audio controls preload="metadata">`. Shown above the evidence on the responder's screen, the HQ dossier and the agency desk — a liaison has that desk and nothing else. 11 Dart tests, 8 console tests |
+| T-47 | **"Not an emergency" had to be enforced, not labelled.** Two new categories for government property mismanaged, destroyed, abandoned, unsafe or needing repair — and this system treats everything as a kidnapping. `queue_new_incident_notice()` announces every INSERT to the tier it landed at and the drain widens a UNIT notice to the **field responders**, so a culvert filed at 02:00 would push to the handsets of the people who go; `escalate_overdue_alerts()` climbs anything unacknowledged, so by morning a street light would be an HQ-tier incident with three escalations against it, among the night's real emergencies. | ✅ `is_non_emergency(type)` matched on the category before " - " (so every subtype is covered and a new one needs no migration), a BEFORE INSERT trigger files it at the LGA with no responder assigned and records why, and the timeout sweep skips it — built the same way as the two mechanisms that already existed for this (`is_oversight_matter`, `awaiting_human_confirmation`) rather than a third way. It is NOT hidden: still on the board, in the feed, on the map, filterable. `check_non_emergency_categories_agree.py` keeps the app's labels and the SQL's one list — 6 mutations, and its own first version matched the function name as a PREFIX, so a rename that breaks every caller passed. 7 SQL assertions, including that an overdue kidnapping still climbs and an oversight matter still goes to HQ |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -4421,6 +4423,147 @@ Two tests, one of which fails against the old comparison. And the tiles now
 carry `aria-pressed` for the filter they apply — which is what a filter control
 owes a screen reader, and what let the browser sweep tell "already applied"
 from "wired to nothing".
+
+---
+
+## Asked for: a voice note, and a report that is not an emergency
+
+Two requests from the operator, built together because they meet in the same
+place — a report from somebody who cannot type, about something that is not an
+emergency. Both uncovered defects on the way in, which are the interesting part.
+
+### T-46. The one path for somebody who cannot type threw away what they said
+
+The app has a control called **AI VOICE REPORT / TALK TO REPORT**. It is the
+only path built for a person who cannot type. It ran speech-to-text and filed
+the **transcript**, and the audio was never recorded at all. Two consequences,
+both worst for the person it exists for:
+
+```dart
+if (_transcription.trim().isEmpty) {
+  setState(() { _errorMessage = Translations.get('no_voice_input', lang); });
+  return;                       // ← nothing is filed. At all.
+}
+```
+
+* **A silent recogniser meant a silent report.** An Android speech recogniser
+  that is offline, or has never heard Hausa or Pidgin, returns an empty string
+  from somebody speaking perfectly clearly — and this told them *"No voice
+  input recorded"* and filed nothing. The person who most needs the app to
+  listen was the one it refused.
+* **Even when it worked, their voice was gone.** Nobody downstream could judge
+  for themselves. The keyword triage that graded the report is English-only
+  (`gun`, `fire`, `riot`, `blood`), so a report spoken in Hausa matched nothing
+  and filed at MEDIUM — and there was no recording for an operator to listen to
+  and grade properly.
+
+The other path that touched a microphone — the recorder in the report details
+screen — kept the file but uploaded it into **`media_urls`**, the EVIDENCE
+list, next to photographs. So a responder's card said "3 attachments" with no
+way to tell that one of them was a person speaking, and the console drew it as
+a 72px thumbnail with a musical note on it. It also wrote the placeholder
+`[AUDIO_REPORT] voice message recorded` **into the narrative field** — the
+field the reporter was meant to type in — so that string arrived at HQ as the
+incident's description, and an operator read a marker instead of a report.
+
+#### What it is now
+
+`alerts.voice_note_url` and `voice_note_seconds` are the reporter's own voice,
+in their own column, because a voice note is not one of several attachments —
+it is the report. The duration travels with the url so a responder on a metered
+or weak connection knows whether they are about to pull eight seconds or two
+minutes before they press play.
+
+`VoiceNoteService` records first and treats the transcript as a bonus, so a
+voice note survives a failed transcription, no network, and a recogniser that
+has never heard the language being spoken. It discards a recording under a
+second — an empty voice note on an incident is worse than none, because a
+responder presses play, hears nothing, and cannot tell that from a file that
+failed to upload — and caps at the ten minutes the database's own
+`alerts_voice_note_seconds_sane` constraint allows, so a recording cannot be
+made that the row would refuse to describe.
+
+**It plays in the app now.** Both screens that could show a recording handed
+the url to the platform and hoped: the responder's mission intel drew a
+microphone with **TAP TO PLAY** under it and called `launchUrl()`, and the
+console opened a browser tab. On a handset that means leaving Operation Rainbow
+mid-incident — and this app has a re-entry lock that engages when it has been
+away from the foreground, so playing a voice note could cost a responder a code
+prompt to get back to the incident they were working. Whether it played at all
+depended on what the phone does with an `.m4a` url, which for a Cloudinary
+`/raw/` link is often a download. There was no audio-player dependency in the
+app at all.
+
+A shared `VoiceNotePlayer` plays it in the card, and says which state it is in
+— loading, playing, paused, and the one that matters, **failed, with the
+reason**. A play button that does nothing and says nothing is how a responder
+concludes a reporter sent silence. On the console it is `<audio controls>`,
+whose play button, scrubber, volume and keyboard interface would otherwise all
+have to be built and none of which would be better, with `preload="metadata"`
+so opening a dossier does not pull every recording on it.
+
+The voice note is above the evidence on the responder's screen, on the HQ
+dossier and on the **agency desk** — a liaison has that desk and nothing else,
+so a report filed by somebody who could not type has to be audible there.
+
+### T-47. "Not an emergency" had to be enforced, not labelled
+
+The second request was a general report: government property mismanaged,
+destroyed, abandoned, unsafe, needing repair. Two new categories — **Public
+property** and **Public service** — with six subtypes each.
+
+The hard part is that this system is built to treat everything as a kidnapping,
+and two mechanisms would have picked up a street light and run with it:
+
+* `queue_new_incident_notice()` announces every INSERT to the tier it landed
+  at, and the drain widens a UNIT notice to the **field responders** — the
+  people who physically go. A broken culvert filed at 02:00 would push to their
+  handsets.
+* `escalate_overdue_alerts()` climbs anything unacknowledged one rung per
+  timeout. Nobody acknowledges a street light at 02:00, so by morning it would
+  be an HQ-tier incident with three escalations against it, sitting among the
+  night's actual emergencies.
+
+Both are right for an emergency and wrong for this. The mechanism for "handle
+this differently" already existed twice — `is_oversight_matter()` routes a
+complaint about an officer to HQ, `awaiting_human_confirmation()` holds an
+unconfirmed keypad report out of the ladder — so this is built the same way
+rather than a third way. `is_non_emergency(type)` matches on the CATEGORY, the
+part of `type` before `' - '`, so every subtype is covered and a new one added
+to the app needs no migration. A BEFORE INSERT trigger files it at the **LGA**
+— the local authority whose property it is — clears any responder assignment,
+and records why on the escalation log. The timeout sweep skips it.
+
+What it deliberately does **not** do is hide it. The report is a normal row on
+the board, in the feed, on the map, with its own category: an operator can see
+it, filter to it and act on it. *Not an emergency* means not paged and not
+climbed; it does not mean not seen. Something nobody is shown is something
+nobody fixes, which is how a thing ends up abandoned in the first place.
+
+#### Two lists that are one list
+
+The labels are load-bearing: the app files `type` = `'<label> - <subtype>'` and
+the database matches the label. If they drift, the failure is silent and at
+night — a category the app can file and the database does not recognise is
+routed, paged and escalated exactly like a kidnapping.
+`scripts/check_non_emergency_categories_agree.py` fails when they disagree in
+either direction, and when the app files one of them at a priority that is not
+LOW. Six mutations, including a rename on each side; one is recorded as out of
+scope with the reason (the ladder is the SQL behaviour test's subject, not the
+gate's).
+
+Its own first version had the bug it exists to prevent: the regex matched
+`is_non_emergency` as a **prefix**, so renaming the function to
+`is_non_emergency_renamed` — which breaks every caller — passed the check.
+Mutation-testing caught it; anchoring on the opening parenthesis fixed it.
+
+#### And the harness was testing ten of twelve
+
+`mobile_interact.js` held the ten category labels as a list in the file. The
+two new ones would have been swept by nothing, while the check that says
+*"every reporting category can be selected"* went on passing. It now reads the
+labels out of `alert_categories.dart` and throws if it parses fewer than ten,
+because a sweep that silently tests almost nothing is worse than one that fails.
 
 ---
 

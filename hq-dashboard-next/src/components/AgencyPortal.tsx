@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { AGENCY_LIST } from '@/lib/agencies';
 import { entryActor, entryNotes, stampLabel } from '@/lib/incident-timeline';
 import LiveFeedViewer from '@/components/LiveFeedViewer';
+import VoiceNote from '@/components/VoiceNote';
 
 import {
   Shield, Users, FileText, AlertTriangle, CheckCircle,
@@ -26,6 +27,9 @@ interface AgencyAlert {
   latitude?: number;
   longitude?: number;
   media_urls?: string[];
+  /** The reporter's own voice. See the note in dashboard/types.ts. */
+  voice_note_url?: string | null;
+  voice_note_seconds?: number | null;
   escalated_to_agency: string;
   escalation_log?: any[];
   created_at: string;
@@ -138,7 +142,7 @@ async function loadAgencyData(agency: string): Promise<AgencyData> {
   try {
     const { data: incidentData } = await supabase
       .from('alerts')
-      .select('id, type, description, status, severity, geo_lga, geo_ward, geo_pu, latitude, longitude, media_urls, escalated_to_agency, escalation_log, created_at, updated_at')
+      .select('id, type, description, status, severity, geo_lga, geo_ward, geo_pu, latitude, longitude, media_urls, voice_note_url, voice_note_seconds, escalated_to_agency, escalation_log, created_at, updated_at')
       .eq('escalated_to_agency', agency)
       .neq('status', 'RESOLVED')
       .order('created_at', { ascending: false })
@@ -626,6 +630,18 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
 
           {/* WebRTC Live Stream Receiver */}
           <LiveFeedViewer alertId={incident.id} />
+
+          {/* The reporter's voice, above the evidence: an agency liaison has
+              this desk and nothing else, so a report filed by somebody who
+              could not type has to be audible here. */}
+          {incident.voice_note_url && (
+            <div style={{ marginTop: 12 }}>
+              <VoiceNote
+                url={incident.voice_note_url}
+                seconds={incident.voice_note_seconds}
+              />
+            </div>
+          )}
 
           {/* Media */}
           {incident.media_urls && incident.media_urls.length > 0 && (

@@ -212,6 +212,33 @@ class Translations {
       AppLanguage.hausa: 'Babu kalmomin da aka nada.',
       AppLanguage.pidgin: 'No voice input recorded.',
     },
+    // The microphone is not available, which is a different thing from having
+    // said nothing — and the person it happens to cannot type, so the wording
+    // has to tell them what to do instead.
+    'voice_note_unavailable': {
+      AppLanguage.english:
+          'This phone has not given Operation Rainbow access to the '
+          'microphone, so your voice cannot be recorded. Allow it in your '
+          'phone settings, or send a photo instead.',
+      AppLanguage.hausa:
+          'Wannan wayar ba ta ba Operation Rainbow damar amfani da makirufo '
+          'ba, don haka ba za a iya naɗa muryar ka ba. Ba da izini a cikin '
+          'saitunan wayar, ko ka aika hoto maimakon haka.',
+      AppLanguage.pidgin:
+          'Dis phone no gree give Operation Rainbow access to di microphone, '
+          'so we no go fit record your voice. Allow am inside your phone '
+          'settings, abi send picture instead.',
+    },
+    'voice_note_recorded': {
+      AppLanguage.english: 'Voice note recorded',
+      AppLanguage.hausa: 'An naɗa saƙon murya',
+      AppLanguage.pidgin: 'We don record your voice note',
+    },
+    'play_voice_note': {
+      AppLanguage.english: 'Play the voice note',
+      AppLanguage.hausa: 'Kunna saƙon murya',
+      AppLanguage.pidgin: 'Play di voice note',
+    },
     'sample_speech_prompt': {
       AppLanguage.english: 'Say something like: "Violent crash on Bauchi Road..."',
       AppLanguage.hausa: 'Fadi wani abu kamar: "Hadari mai tsanani a Bauchi Road..."',
