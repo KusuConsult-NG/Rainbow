@@ -1256,6 +1256,8 @@ only thing that distinguishes a defect from a preference.
 | T-41 | **The system told you when it gave up waiting for you, not when the emergency arrived.** `notification_outbox` was built so a TIMEOUT escalation could not move an incident in silence — its header says "the whole point of the timeout is the case where nobody is watching". Nothing queued a notice when an alert was **INSERTED**. The only paths to a phone were a human pressing DISPATCH or ESCALATE on the console, and the timeout job. So a citizen's SOS reached a responder only if that responder happened to have the app open and in the foreground; a phone in a pocket learned nothing until a dispatcher acted or the unit's two-minute window expired. There is no trigger on `alerts` INSERT except the timestamp one and the oversight router, and nothing in `alert_service.dart` notifies anybody. | ✅ `20261022000000` queues a `NEW_INCIDENT` notice on INSERT, addressed to `NEW.assigned_tier` read from the column — so the oversight trigger's routing of a complaint to HQ is honoured and a complaint is never announced to the command it is about; the drain widens the UNIT audience for this kind to the field responders, who are the ones who go, and says "has just been reported" rather than the escalation wording; the trigger swallows its own failure so an SOS is never refused because a notice could not be written. 10 console tests and 6 SQL assertions, one of which files an emergency with the outbox renamed out from under it |
 | T-42 | **The forensic replay read the story, not the record.** `IncidentReplayPanel` — the per-incident timeline somebody opens to ask what happened and in what order — built its escalation events by string-matching `ai_summary`, the free-text note a human escalation appends. `escalate_overdue_alerts()` appends to `escalation_log` and writes no prose, so **every automatic escalation was missing**: the moves nobody chose, at 02:00, because nobody answered — the entries a review exists to find. They were on the Audit History screen the whole time, because `audit_trail()` reads the log. Every escalation also carried `updated_at`, so UNIT → WARD → LGA → HQ produced three events with one time, in no order, with the chat messages sent between them on the wrong side; and the actor was the literal `'Tactical Command'` while the log records who did it — T-32, one screen later. | ✅ `lib/incident-timeline.ts` owns the reading of an entry and three screens share it: the replay panel parses no prose at all, the agency desk (the only history an outside agency ever gets) and the audit screen take the same actor order and the same timestamp wording. A manual escalation present in both the log and the summary is counted once; `[MULTI-UNIT DISPATCH]` is still read from prose, declared, because a dispatch has no log of its own. An entry with no `at` now reads `TIME NOT RECORDED` instead of "Invalid Date" and is placed last with a note saying why. 33 console tests, and `check_history_reads_the_record.py` compares the actor order on both sides of the language boundary — 14 mutations, 3 shapes that must stay allowed |
 | T-43 | **The same table, two shapes, and the column that said why was on only one of them.** Three of the four agency tables are created TWICE, by two files with different column lists and `CREATE TABLE IF NOT EXISTS` on both — so the second is a no-op and the winner is whichever ran first. The v3/v4 era was applied to production by hand and is excluded from every replay, so **production** carries `detail`, `sent_by`, `target_lga`, `acknowledged_at`, `resolved_at` and no `created_at`, while **every database this repository can build** carries `created_at` and none of those five. `/api/notify-agency` — whose own comment calls `agency_notifications` "the only durable record of whether an agency was told" — therefore wrote the intersection and dropped `result.detail`, the one field that says WHY a handover to the Police or the Army failed (`HTTP 502`, a timeout, "no contact configured"). And nothing read the table at all: the console sets `escalated_to_agency` the moment an operator presses escalate, so "handed to the Army" and "the Army was told" were the same line on the screen and different facts in the database. Invisible to both schema gates (they compare objects, not columns) and to the browser harness (the stand-in UNIONS every definition it finds). | ✅ `20261023000000` converges the shapes with `ADD COLUMN IF NOT EXISTS`, backfilling `created_at` from `sent_at`/`submitted_at`/`deployed_at` rather than from the migration's clock; the route writes `detail`, `sent_by` and `target_lga`; the incident replay now SHOWS each leg, with `SKIPPED` rendered as "NOT USED", a handover with no delivery row called out as such, and a delivery log that could not be READ saying so rather than showing none. `check_one_table_one_shape.py` replays both worlds and compares every table's effective shape — 7 mutations, 3 shapes that must stay allowed, one exception recorded with its reason; `agency_delivery_behaviour_test.sql` proves it on real PostgreSQL in 5 assertions |
+| T-44 | **The console could be read without a mouse and not operated.** `check_control_labels.py` has gated the Flutter app since controls there were found with empty accessible names; the console had no equivalent, and ten of its controls were clickable `<div>`s with no role, no `tabIndex` and no key handler. Among them the **agency desk's incident card** — the only way to the escalation log, the evidence, the live feed and both action buttons, on the one surface an outside agency ever sees — and the **responder picker**, which was worse than unreachable: it held a real `<input type="checkbox">` whose `onChange` was `() => {}` ("Handled by div onClick"), so a dispatcher working by keyboard could tab onto an officer, press Space, see nothing change, and conclude the roster was broken. The evidence thumbnails called `window.open` from a div. And there was **no `keydown` handler anywhere**, so the incident dossier — a fixed overlay over the feed and the map — could only be dismissed with a pointer. | ✅ real `<button>`/`<a>`/`<label>` elements where that is what they are (the picker is now a label around the real checkbox, which does the toggling itself); the card carries `aria-expanded`, stating a fact only the chevron's shape had; Escape closes the dossier and the drawer, with precedence expressed by the caller because two `window` listeners fire in registration order, not z-order; the dossier is a named `role="dialog"` (focus is NOT trapped — recorded as open rather than half-done). `check_console_controls.py` requires operability and a name, with backdrops declaring `data-pointer-only="<reason>"` in the markup — 8 mutations, 8 shapes allowed. Its first version was VACUOUS for every button with an inline handler (`[^>]*?` stops at the `>` inside `() => {}`); the brace-aware rewrite immediately found four more unnamed buttons, every one of them a dismiss control. The console browser pass now opens the dossier, finds its close control by accessible name, and presses Escape |
+| T-45 | **"ACTIVE INCIDENTS" emptied the board.** `'ACTIVE'` is not one of the ten statuses an alert can carry, and two controls set it: the status dropdown's ACTIVE INCIDENTS option and the ACTIVE tile in the UNIT STATUS panel. `filterAlerts` compares `a.status !== filters.status`, so both filtered the board down to **nothing, always** — the one control that says *show me what is happening now* produced an empty feed, which on this console is what reads as ALL CLEAR (T-33 is the finding about a board that cannot say why it is empty; this is a control whose only possible effect was to produce one). The tile was wrong twice: it advertised `alerts.length`, every incident in the window with resolved ones included, above a filter that would show none of them. Found by the TYPECHECKER while making the tile keyboard-operable for T-44 — and it could only speak because an earlier finding had completed the status union, making the comparison an error instead of a silently-false expression. | ✅ `isLiveIncident()` (not RESOLVED, not CANCELLED) in `alert-display.ts`, used by both the filter branch and the tile's count, so the number and the action cannot disagree again; the count is sector-scoped like the DURESS tile beside it; the tiles carry `aria-pressed` for the filter they apply. 2 tests, one of which fails against the old comparison |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -4227,6 +4229,198 @@ all ten columns present, a leg that records its own reason, a skipped channel
 recorded as a skipped channel, the deployment's stand-down time, and — as
 characterisation, so a later widening is deliberate — that command reads the
 delivery log while an agency liaison and a citizen do not.
+
+---
+
+### T-44. The console could be read without a mouse and not operated
+
+`check_control_labels.py` has gated the Flutter app since controls there were
+found with empty accessible names. The HQ console had no equivalent, and ten of
+its controls were clickable `<div>`s — no `role`, no `tabIndex`, no key
+handler. A pointer could use them. A keyboard could not, nor a screen reader,
+nor the voice control an officer might be using with one hand on a radio.
+
+Four of the ten are worth naming:
+
+* **The agency desk's incident card.** Expanding it is the only way to the
+  escalation log, the evidence, the live feed and both action buttons — on the
+  one surface an outside agency ever sees, since they have no console, no feed
+  and no audit screen. It is now a `<button>` with `aria-expanded`, which is
+  also the first time the open/shut state was stated anywhere but in the
+  chevron's shape.
+* **The responder picker**, which a dispatcher assigns an emergency with. This
+  one was *worse* than unreachable: inside the clickable div sat a real
+  `<input type="checkbox">` whose `onChange` was `() => {}`, with a comment
+  saying "Handled by div onClick". So the checkbox was focusable, looked
+  operable, and did nothing. A dispatcher working by keyboard could tab onto an
+  officer's row, press Space, see no change, and conclude the roster was
+  broken. The row is now a `<label>` around the real checkbox, which does the
+  toggling itself: clicking anywhere on the row still works, Space works
+  because the control is a checkbox, and a screen reader announces the
+  officer's name with its checked state instead of reading an unlabelled
+  checkbox and then some unrelated text.
+* **The evidence thumbnails**, on both the dossier and the agency desk. They
+  called `window.open` from a div: no keyboard, no middle-click, no address to
+  copy, and the one shape a popup blocker treats as suspicious. They are links
+  now, which is what they always were.
+* **The counts that filter the board.** `StatBar` renders a `<button>` when it
+  has an `onClick` and a plain row when it does not — a div that is always a
+  button lies to a keyboard user in the other direction.
+
+And the console had **no `keydown` handler anywhere**. The incident dossier is
+a fixed overlay over the feed and the map, and an operator opens it on the
+wrong report often, because the cards are a dense list during an incident. The
+only ways out were its close button and a click on the backdrop. Escape now
+closes it, and the narrow-screen drawer too.
+
+#### The two things the fix is careful about
+
+`useEscapeKey` takes an `enabled` flag, and the dossier/drawer precedence is
+expressed by the *caller*: `navOpen && selectedReport === null`. Two listeners
+on `window` fire in **registration order, not in z-order**, so the overlay that
+mounted first would otherwise win, and no `stopPropagation` inside a handler
+can reorder that. A test pins it both ways round.
+
+The dossier is now `role="dialog" aria-modal="true"` with a name. Focus is
+**not** trapped and not moved into it — that is the other half of a modal
+dialog, and doing it properly means turning a 500-line inline block into a
+component. It is recorded here as open rather than half-done, and the gate
+deliberately does not claim to check it.
+
+#### The gate found four more, and its first version was vacuous
+
+`scripts/check_console_controls.py` requires that an element with an `onClick`
+is either natively interactive or carries both a `role` and a `tabIndex`, and
+that every `<button>` has a name. A backdrop and a `stopPropagation` wrapper
+are neither, so each declares `data-pointer-only="<reason>"` **in the markup** —
+not in a list of line numbers in the gate, which would rot the moment anything
+moved, and the reason is then in front of the next person reading the JSX.
+
+Its first version matched a button with `<button\b([^>]*?)>`, and an
+attribute's value can contain the character that ends a tag:
+
+```tsx
+<button onClick={() => {}}>
+```
+
+`[^>]*?` stops at the `>` of the arrow, so for **every button with an inline
+handler** — which is most of them — the rule read `{}}><X /></button>` as the
+button's children, found the stray `>`, and concluded there was a name. The
+rule passed on an icon-only button with no label, which is the one thing it
+exists to catch. Mutation-testing said so, and the fix is a brace-aware
+scanner that knows a `>` inside braces or quotes is not the end of a tag.
+
+With that fixed it immediately found **four more** unnamed buttons, and all
+four are dismiss controls: the dossier's own close button, the system-alert
+banner's, the tactical select's clear, and the toast's. The class of control a
+keyboard user needs most was exactly the class the broken regex hid.
+
+Eight mutations caught, eight legitimate shapes allowed — among them a button
+whose name is a ternary of two phrases, a div that carries both a role and a
+tabIndex, and a clickable div inside a comment.
+
+`scripts/local_e2e/interact.js` closes the half a static check cannot reach: in
+a real browser it opens the dossier, asserts it is a named dialog, finds the
+close control **by its accessible name** rather than by its glyph, presses
+Escape, and asserts the dialog is gone.
+
+#### Three things the harness had to learn to see this
+
+**It could only press what started above the fold — the console version.** The
+sweep captured its control list once per tab and then indexed into it. React
+re-renders on any state change, so the FIRST control that changed anything
+detached every node after it: the click was skipped, and a skipped control is
+not a failed one. It had been pressing 145 of the screens' controls and
+reporting a clean sweep. Converting three sidebar stat tiles into real buttons
+dropped it to **88 with every check still passing**, because the tiles switch
+tab and come early in the DOM. The mobile sweep had already paid for this and
+fixed it the same way: work through the screen by identity, and re-read it after
+every press.
+
+**Then it reached a native dialog and died.** `AgencyAccessManager` asks
+`confirm('Revoke portal access for …?')` before deactivating a liaison, and a
+`confirm()` blocks the page's main thread until something answers it. Every
+`page.evaluate` after it timed out; the run ended on
+`ProtocolError: Runtime.callFunctionOn timed out`, forty checks in, with nothing
+in the log to say a dialog had ever been on screen. The old sweep never got
+there. Dialogs are now **dismissed** by the shared browser helper — accepting
+would revoke a liaison's access mid-run and change the data later checks read,
+and a harness must not take a destructive action nobody asked for — and
+recorded, so a control that asks for confirmation counts as having acted rather
+than being reported dead.
+
+**And one of the new checks passed for the wrong reason.** "Escape closes the
+dossier" read `!(await stillOpen())`, where `stillOpen()` looks for
+`[role="dialog"][aria-modal="true"]`. On a console with no dialog markup at all
+that is false before the keystroke, so the check passed — which is what running
+the new harness against the commit *before* the fix revealed. It is now gated on
+the dialog having been open: a check whose pass condition is satisfied by the
+thing it tests not existing is worse than no check, because it reports
+confidence.
+
+---
+
+### T-45. "ACTIVE INCIDENTS" emptied the board
+
+Found by the typechecker, while making the stat tiles keyboard-operable for
+T-44. Converting `StatBar` into a `<button>` meant writing a count beside its
+filter, and the moment those two sat on the same line the compiler said:
+
+```
+error TS2367: This comparison appears to be unintentional because the types
+'"PENDING" | "DISPATCHED" | "ACKNOWLEDGED" | "IN_PROGRESS" | "ON_ROUTE" |
+ "ON_SITE" | "ESCALATED" | "RESOLVED" | "DURESS" | "CANCELLED"'
+and '"ACTIVE"' have no overlap.
+```
+
+`'ACTIVE'` is not a status an alert can have. And two controls set it:
+
+* the status dropdown's **ACTIVE INCIDENTS** option, on the Incident Feed and
+  on Mission History;
+* the **ACTIVE** tile in the UNIT STATUS panel, beside DURESS.
+
+`filterAlerts` compares `a.status !== filters.status`, so both filtered the
+board down to **nothing, always**. The one control that says *show me what is
+happening now* produced an empty feed — and on this console an empty feed is
+the thing that reads as ALL CLEAR. T-33 is the finding about an empty board
+that cannot say why it is empty; this is a control whose only possible effect
+was to produce one.
+
+The tile was wrong twice over: it advertised `alerts.length` — every incident
+in the loaded window, **resolved ones included** — above a filter that would
+show none of them. The number, the action and the word each described a
+different set.
+
+#### Why it survived
+
+Nothing could see it. The status filter has always had two values that are not
+statuses — `CRITICAL` and `SMS_FALLBACK` — each handled by its own branch, so
+a third one looked like more of the same to a reader. There is no test that
+asserts a filter returns anything, only tests that it returns the right rows
+for the values somebody thought to test. And the browser sweep pressed the tile
+and recorded "nothing", every run, in a line nobody reads unless a check fails
+— which it did not, because the tile was a `<div>` and the sweep only collects
+`button, a[href], [role=button]`. Making it a button is what put it in front of
+the check.
+
+The compiler could only speak because of an earlier finding: the status union
+in `dashboard/types.ts` was completed when `ESCALATED` and `IN_PROGRESS` turned
+out to be written by `alert-actions.ts` and missing from the type. Before that,
+the union was incomplete and `'ACTIVE'` was merely one more string it had not
+heard of. **The second defect that one union has produced on contact.**
+
+#### The fix
+
+`isLiveIncident(a)` — not RESOLVED and not CANCELLED — in `alert-display.ts`,
+used by the filter branch and by the tile's count, so the number and the action
+cannot disagree again. The tile also counts over `sectorAlerts`, the same
+sector-scoped set the DURESS tile beside it uses; it was reading the unscoped
+window.
+
+Two tests, one of which fails against the old comparison. And the tiles now
+carry `aria-pressed` for the filter they apply — which is what a filter control
+owes a screen reader, and what let the browser sweep tell "already applied"
+from "wired to nothing".
 
 ---
 

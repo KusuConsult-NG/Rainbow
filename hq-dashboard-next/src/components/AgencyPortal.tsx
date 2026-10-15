@@ -571,8 +571,20 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
       borderRadius: 12,
       overflow: 'hidden',
     }}>
-      <div
-        style={{ padding: '14px 16px', cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: 12 }}
+      {/* THE CARD HEADER IS THE ONLY WAY INTO THE DETAIL, so it has to be a
+          button. This was a clickable div: the escalation log, the evidence,
+          the live feed and both action buttons sit behind it, on the one
+          surface an outside agency ever sees, and none of it could be reached
+          without a pointer. `aria-expanded` says which state it is in, which
+          the chevron says visually and said nowhere else. */}
+      <button
+        type="button"
+        aria-expanded={expanded}
+        style={{
+          padding: '14px 16px', cursor: 'pointer', display: 'flex',
+          alignItems: 'flex-start', gap: 12, width: '100%', textAlign: 'left',
+          background: 'none', border: 'none', color: 'inherit', font: 'inherit',
+        }}
         onClick={() => setExpanded(!expanded)}
       >
         {/* Severity dot */}
@@ -604,7 +616,7 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
           </div>
         </div>
         {expanded ? <ChevronDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} /> : <ChevronRight size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />}
-      </div>
+      </button>
 
       {expanded && (
         <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--border)' }}>
@@ -621,13 +633,18 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
               <div style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1, marginBottom: 6 }}>EVIDENCE ({incident.media_urls.length})</div>
               <div style={{ display: 'flex', gap: 6 }}>
                 {incident.media_urls.slice(0, 4).map((url, i) => (
-                  <div
+                  /* A link, because it opens evidence in a new tab. See the
+                     same change in dashboard/page.tsx. */
+                  <a
                     key={i}
-                    onClick={() => window.open(url, '_blank')}
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`Open evidence ${i + 1} for this incident in a new tab`}
                     style={{
                       width: 64, height: 64, borderRadius: 8, overflow: 'hidden',
                       background: 'var(--input-bg)', border: '1px solid var(--border)',
-                      cursor: 'pointer', flexShrink: 0,
+                      cursor: 'pointer', flexShrink: 0, display: 'block',
                     }}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element -- images.unoptimized is set, so next/image serves this unchanged; see the note in dashboard/page.tsx. */}
@@ -635,7 +652,7 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                     />
-                  </div>
+                  </a>
                 ))}
               </div>
             </div>

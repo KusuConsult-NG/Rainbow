@@ -164,7 +164,7 @@ async function writeMark() {
 // ===========================================================================
 
 (async () => {
-  const { browser, newPage, tiles, problems, state } = await launch({ viewport: VIEWPORT });
+  const { browser, newPage, tiles, problems, state, dialogs } = await launch({ viewport: VIEWPORT });
   const page = await newPage();
 
   await resetAll();
@@ -282,12 +282,30 @@ async function writeMark() {
     // until somebody is selected — dispatching to nobody is refused, which is
     // right, and is why a naive click-and-assert reported this as broken.
     if (label === 'DISPATCH') {
-      await page.evaluate(() => {
-        const rows = [...document.querySelectorAll('div')].filter(
-          (d) => /LIVE GPS|READY/.test(d.textContent) && d.children.length < 6,
+      // TICK THE CHECKBOX, which is what a dispatcher does.
+      //
+      // This used to look for a `div` containing "LIVE GPS|READY", because the
+      // row WAS a clickable div with a dead checkbox inside it (its onChange
+      // was `() => {}`). The row is now a <label> around the real checkbox —
+      // the fix for a control a keyboard could focus and not operate — so a
+      // div query finds nothing, the picker stays empty, and DISPATCH is
+      // correctly refused. Selecting the control itself does not care what its
+      // container is next time.
+      const picked = await page.evaluate(() => {
+        const boxes = [...document.querySelectorAll('input[type="checkbox"]')].filter(
+          (b) => b.offsetParent !== null
+            && /LIVE GPS|READY/.test(b.closest('label')?.textContent || ''),
         );
-        (rows[rows.length - 1] || rows[0])?.click();
+        const box = boxes[boxes.length - 1] || boxes[0];
+        if (!box) return 0;
+        box.click();
+        return boxes.length;
       });
+      check(
+        'the dispatch picker offers a responder to select',
+        picked > 0,
+        picked ? `${picked} responder(s) on the picker` : 'no selectable responder row',
+      );
       await sleep(800);
       await shot(page, '52a-dispatch-responder-picker');
     }
@@ -715,6 +733,72 @@ async function writeMark() {
   await shot(page, '69-hq-dossier-reply-sent');
 
   // -----------------------------------------------------------------------
+  // THE DOSSIER WITHOUT A MOUSE.
+  //
+  // This console had no keydown handler anywhere, and the dossier is a fixed
+  // overlay over the feed and the map. An operator who opened it on the wrong
+  // report — which is the common case, since the cards are a dense list during
+  // an incident — had to find its close button with a pointer to see the board
+  // again. Ten of its controls were also clickable `<div>`s, so a keyboard
+  // could not reach them at all; `check_console_controls.py` gates that
+  // statically, and this is the half a static check cannot make: that the key
+  // actually closes the thing in a browser.
+  state.screen = 'hq:dossier-keyboard';
+  const stillOpen = () => page.evaluate(
+    () => !!document.querySelector('[role="dialog"][aria-modal="true"]'),
+  );
+
+  const dialogPresent = await stillOpen();
+  check(
+    'the dossier is a dialog, and says so',
+    dialogPresent,
+    dialogPresent ? '' : 'no [role=dialog][aria-modal] on screen while the dossier is open',
+  );
+
+  const dossierName = await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"][aria-modal="true"]');
+    return d ? d.getAttribute('aria-label') : null;
+  });
+  check(
+    'the dialog is named for the incident it is showing',
+    !!dossierName && /dossier/i.test(dossierName),
+    dossierName || '(no aria-label)',
+  );
+
+  // The close button has to be findable by its NAME, not by its glyph: it was
+  // an unlabelled circle holding an X, which reads as "button" and nothing
+  // else. Four more like it were found by the gate, all of them dismiss
+  // controls, all hidden from the first version of the rule by a regex that
+  // stopped at the `>` inside `() => {}`.
+  const closeNamed = await page.evaluate(() => {
+    const el = document.querySelector('[aria-label="Close the incident dossier"]');
+    return !!el && el.tagName === 'BUTTON';
+  });
+  check(
+    'the dossier close control is a named button',
+    closeNamed,
+    closeNamed ? '' : 'nothing on screen is a <button> named "Close the incident dossier"',
+  );
+
+  await page.keyboard.press('Escape');
+  await sleep(1200);
+  // `dialogPresent &&`: without it this check passes on a console that has no
+  // dialog markup at all — `stillOpen()` is false before the keystroke, so
+  // "it is closed afterwards" is true for the wrong reason. Found by running
+  // this file against the commit before the fix, where it passed.
+  const closedByEscape = dialogPresent && !(await stillOpen());
+  check(
+    'Escape closes the dossier',
+    closedByEscape,
+    closedByEscape
+      ? ''
+      : (dialogPresent
+        ? 'the dossier is still on screen after Escape'
+        : 'there was no dialog open, so this proves nothing'),
+  );
+  await shot(page, '69b-hq-dossier-closed-by-escape');
+
+  // -----------------------------------------------------------------------
   // Mass broadcast.
   //
   // Every broadcast HQ ever sent failed: the screen wrote six columns no
@@ -798,21 +882,47 @@ async function writeMark() {
       }
       await sleep(1200);
 
-      const count = await page.evaluate(() => {
-        window.__sweep = [...document.querySelectorAll('button, a[href], [role="button"]')].filter(
-          (b) => !b.disabled && b.offsetParent !== null,
-        );
-        return window.__sweep.length;
+      // WORK THROUGH THE SCREEN BY IDENTITY, AND RE-READ IT AFTER EVERY PRESS.
+      //
+      // This captured `window.__sweep` once per tab and then indexed into it
+      // for the rest of the tab. React re-renders on any state change, so the
+      // FIRST control that changed anything detached every node after it:
+      // `isConnected` went false, the click was skipped, and the rest of that
+      // screen was never pressed — in silence, because a skipped control is
+      // not a failed one.
+      //
+      // It surfaced when three stat tiles in the sidebar became real buttons:
+      // they switch tab, they come early in the DOM, and the sweep's reach
+      // dropped from 145 controls to 88 with every check still passing. The
+      // mobile sweep had already paid for this exact fault and fixed it the
+      // same way (see the note in mobile_interact.js). Re-listing costs a
+      // navigation per effective press and reaches the whole screen.
+      const listControls = () => page.evaluate(() => {
+        window.__sweep = [...document.querySelectorAll('button, a[href], [role="button"]')]
+          .filter((b) => !b.disabled && b.offsetParent !== null);
+        return window.__sweep.map((b) => (b.textContent.replace(/\s+/g, ' ').trim()
+          || b.getAttribute('aria-label') || b.title || '(icon)').slice(0, 48));
       });
+      // Two controls can carry the same label — "VIEW" on every card — so the
+      // key is the label plus how many of that label came before it.
+      const keysFor = (labels) => {
+        const seen = new Map();
+        return labels.map((l) => {
+          const n = (seen.get(l) ?? 0) + 1;
+          seen.set(l, n);
+          return `${l}#${n}`;
+        });
+      };
 
-      for (let i = 0; i < count; i++) {
-        const label = await page.evaluate((idx) => {
-          const b = window.__sweep?.[idx];
-          if (!b || !b.isConnected || b.disabled || b.offsetParent === null) return null;
-          return (b.textContent.replace(/\s+/g, ' ').trim()
-            || b.getAttribute('aria-label') || b.title || '(icon)').slice(0, 48);
-        }, i);
-        if (!label) continue;
+      let labels = await listControls();
+      const pressed = new Set();
+
+      for (let guard = 0; guard < 120; guard += 1) {
+        const keys = keysFor(labels);
+        const i = keys.findIndex((k) => !pressed.has(k));
+        if (i === -1) break;
+        const label = labels[i];
+        pressed.add(keys[i]);
         // Leaving the screen mid-sweep would attribute the next tab's controls
         // to this one, and signing out would end the sweep entirely.
         if (/terminate uplink|sign out|log ?out/i.test(label)) continue;
@@ -846,6 +956,7 @@ async function writeMark() {
           return { html: eval(`(${fn})`)(), url: location.href };
         }, digest.toString());
         const reqBefore = (await control()).log.length;
+        const dialogsBefore = dialogs.length;
 
         const clicked = await page.evaluate((idx) => {
           const b = window.__sweep?.[idx];
@@ -878,13 +989,27 @@ async function writeMark() {
         // apart from a button wired to nothing — which is the distinction that
         // matters, and why the fix went into the component rather than into a
         // suppression list here.
-        const alreadySelected = await page.evaluate((idx) => {
+        // `aria-selected` for a tab, `aria-pressed` for a filter that is
+        // already the applied one. Both are the app SAYING what state it is
+        // in, which is the only way a sweep can tell a control that correctly
+        // does nothing from one wired to nothing — and is why the fix for the
+        // stat tiles went into the component (they now carry `aria-pressed`)
+        // rather than into a suppression list here.
+        const alreadyOn = await page.evaluate((idx) => {
           const b = window.__sweep?.[idx];
-          return b?.getAttribute?.('aria-selected') === 'true';
+          return b?.getAttribute?.('aria-selected') === 'true'
+            || b?.getAttribute?.('aria-pressed') === 'true';
         }, i);
 
         const effect = [];
-        if (alreadySelected) effect.push('already the selected tab');
+        // A control guarded by `confirm()` has acted: it asked. The dialog is
+        // dismissed by the shared browser helper — a harness must not take a
+        // destructive action nobody asked it to take — so the DOM afterwards
+        // looks untouched, which is the right outcome and not a dead control.
+        if (dialogs.length > dialogsBefore) {
+          effect.push(`asked for confirmation: "${dialogs[dialogs.length - 1].message.slice(0, 60)}"`);
+        }
+        if (alreadyOn) effect.push('already the selected state');
         if (blockedByValidation) effect.push('refused by field validation');
         if (after.url !== before.url) effect.push('navigated');
         if (after.html !== before.html) effect.push('changed the page');
@@ -896,6 +1021,15 @@ async function writeMark() {
         // Close anything that opened, so the next click starts from the screen.
         await page.keyboard.press('Escape').catch(() => {});
         await sleep(200);
+
+        // BACK TO THE SCREEN, AND RE-READ IT. A press that changed anything
+        // re-rendered the tree, so every node captured before it is stale;
+        // without this the sweep stopped at the first effective control.
+        if (effect.length) {
+          await openTab(page, tab);
+          await sleep(900);
+        }
+        labels = await listControls();
       }
       await shot(page, `70-sweep-${role}-${tab.toLowerCase().replace(/[^a-z]+/g, '-')}`);
     }
@@ -978,6 +1112,10 @@ async function writeMark() {
         rpcMisses: rpcRefused,
         rpcCalls: ctl.rpcCalls || [],
         browserProblems: problems,
+        // Every native dialog the run met, and which screen it came from. A
+        // blocking confirm() is what ended a run forty checks in with nothing
+        // in the log to say a dialog had ever been on screen.
+        nativeDialogs: dialogs,
       },
       null,
       2,

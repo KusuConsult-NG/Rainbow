@@ -17,6 +17,7 @@ import IncidentReplayPanel from '@/components/IncidentReplayPanel';
 import LiveFeedViewer from '@/components/LiveFeedViewer';
 import TacticalSelect, { SelectOption } from '@/components/TacticalSelect';
 import { usePersistedTheme } from '@/hooks/usePersistedTheme';
+import { useEscapeKey } from '@/hooks/useEscapeKey';
 
 
 import { useToast } from '@/components/ToastProvider';
@@ -30,7 +31,7 @@ import {
   Sun, Moon, X, Sparkles, MapPin, Menu, SignalZero,
 } from 'lucide-react';
 import type { Alert } from './types';
-import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
+import { clusterAlerts, filterAlerts, isLiveIncident } from '@/lib/alert-display';
 import { emptyBoardMeaning, emptyBoardWording } from '@/lib/empty-board';
 import { geoKey, geoMatchesKeyed } from '@/lib/geo-key';
 import UssdProvenancePanel from '@/components/UssdProvenancePanel';
@@ -477,6 +478,21 @@ export default function DashboardPage() {
   const [theme, setTheme] = usePersistedTheme();
   const [timeString, setTimeString] = useState('');
   const [selectedReport, setSelectedReport] = useState<Alert | null>(null);
+
+  // ESCAPE CLOSES WHAT IS ON TOP.
+  //
+  // The console had no keydown handler anywhere, so the dossier — a fixed
+  // overlay over the feed and the map — and the narrow-screen drawer could
+  // only be dismissed with a pointer. The dossier is the surface an operator
+  // works an emergency from, and the one they open by accident most.
+  //
+  // The dossier sits above the drawer, so the drawer only listens while the
+  // dossier is closed: two window listeners fire in registration order, not in
+  // z-order, so precedence has to be said here rather than inside the hook.
+  const closeDossier = useCallback(() => setSelectedReport(null), []);
+  const closeNav = useCallback(() => setNavOpen(false), []);
+  useEscapeKey(selectedReport !== null, closeDossier);
+  useEscapeKey(navOpen && selectedReport === null, closeNav);
   /**
    * The route taken during the incident currently open in the dossier.
    *
@@ -1172,6 +1188,15 @@ export default function DashboardPage() {
   });
 
   const duressCount = sectorAlerts.filter(a => a.status === 'DURESS').length;
+  // THE TILE HAS TO COUNT WHAT ITS FILTER WILL SHOW.
+  //
+  // This read `value={alerts.length}` — every incident in the loaded window,
+  // resolved ones included — under the word ACTIVE, and pressing it set
+  // `filterStatus = 'ACTIVE'`, which is NOT one of the ten statuses an alert
+  // can carry, so it matched nothing and emptied the board. One predicate now
+  // answers both, over the same sector-scoped set the DURESS tile beside it
+  // uses: see `isLiveIncident` in lib/alert-display.ts.
+  const activeCount = sectorAlerts.filter(isLiveIncident).length;
   const smsFallbackCount = sectorAlerts.filter(a => 
     (a.description || '').includes('[OFFLINE_SMS]') || 
     (a.description || '').includes('[SMS]') ||
@@ -1301,6 +1326,13 @@ export default function DashboardPage() {
       {isNarrow && navOpen && (
         <div
           onClick={() => setNavOpen(false)}
+          // A scrim, not a control: everything it does, Escape and the nav
+          // items do. Hidden from the accessibility tree so it is not offered
+          // as something to operate, and declared pointer-only so
+          // `check_console_controls.py` can tell it from the eight clickable
+          // divs on this screen that WERE controls nobody could reach.
+          aria-hidden="true"
+          data-pointer-only="backdrop; Escape closes the drawer"
           style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.6)', zIndex: 4000 }}
         />
       )}
@@ -1308,6 +1340,11 @@ export default function DashboardPage() {
       <aside
         className="tactical-panel glass"
         onClick={() => { if (isNarrow) setNavOpen(false); }}
+        // The container, not a control. Tapping a nav item inside it closes
+        // the drawer on a narrow screen; the items are the controls and carry
+        // their own keyboard behaviour.
+        data-pointer-only="closes the drawer after a nav item is chosen"
+
         style={{
           width: 280,
           display: 'flex',
@@ -1407,9 +1444,26 @@ export default function DashboardPage() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '16px', background: 'var(--input-bg)', borderRadius: 16, border: '1px solid var(--border)' }}>
             <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1.5, marginBottom: 4 }}>UNIT STATUS</p>
-            <StatBar label="DURESS" value={duressCount} color="var(--duress)" onClick={() => { setActiveTab('alerts'); setFilterStatus('DURESS'); }} />
-            <StatBar label="ACTIVE" value={alerts.length} color="var(--warning)" onClick={() => { setActiveTab('alerts'); setFilterStatus('ACTIVE'); }} />
-            <StatBar label="ONLINE" value={agentLocations.length} color="var(--success)" onClick={() => setActiveTab('map')} />
+            {/* `pressed` is the filter state, which these tiles set and said
+                nowhere: a screen reader could not tell which of them was
+                currently applied, and neither could anything else — a filter
+                control that looks identical whether it is on or off is the
+                same defect as the tab that did not say it was selected. */}
+            <StatBar
+              label="DURESS" value={duressCount} color="var(--duress)"
+              pressed={activeTab === 'alerts' && filterStatus === 'DURESS'}
+              onClick={() => { setActiveTab('alerts'); setFilterStatus('DURESS'); }}
+            />
+            <StatBar
+              label="ACTIVE" value={activeCount} color="var(--warning)"
+              pressed={activeTab === 'alerts' && filterStatus === 'ACTIVE'}
+              onClick={() => { setActiveTab('alerts'); setFilterStatus('ACTIVE'); }}
+            />
+            <StatBar
+              label="ONLINE" value={agentLocations.length} color="var(--success)"
+              pressed={activeTab === 'map'}
+              onClick={() => setActiveTab('map')}
+            />
           </div>
         </div>
 
@@ -1495,7 +1549,8 @@ export default function DashboardPage() {
             )}
 
             {smsFallbackCount > 0 && (
-              <div
+              <button
+                type="button"
                 onClick={() => {
                   setActiveTab('alerts');
                   setFilterStatus('SMS_FALLBACK');
@@ -1515,7 +1570,7 @@ export default function DashboardPage() {
               >
                 <Radio size={13} color="#FF9800" className="spin-slow" />
                 <span style={{ fontSize: 10, fontWeight: 900, color: '#FF9800' }}>{smsFallbackCount} SMS</span>
-              </div>
+              </button>
             )}
 
             <button
@@ -2068,8 +2123,29 @@ export default function DashboardPage() {
             justifyContent: 'center',
             zIndex: 9999,
             padding: '24px'
-          }} onClick={() => setSelectedReport(null)}>
-            <div className="tactical-panel glass fade-in" style={{
+          }}
+          onClick={() => setSelectedReport(null)}
+          // The scrim. Escape closes this now (see `useEscapeKey` where
+          // `selectedReport` is declared) and the dossier has its own close
+          // button, so the backdrop is a convenience rather than the only way
+          // out — which is what it was for anybody without a mouse.
+          aria-hidden="true"
+          data-pointer-only="backdrop; Escape and the close button both do this"
+          >
+            <div
+              className="tactical-panel glass fade-in"
+              // It IS a modal dialog: it covers the board, it owns the screen
+              // until it is dismissed, and it is what an operator reads while
+              // deciding. Saying so gives a screen reader the name of the
+              // thing that just took over. Focus is NOT trapped here — that
+              // needs this 500-line inline block to become a component, and
+              // it is recorded in E2E_AUDIT_REPORT.md rather than half-done.
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Incident dossier: ${selectedReport.type || 'emergency'}`}
+              onClick={(e) => e.stopPropagation()}
+              data-pointer-only="keeps a click inside the dialog off the backdrop"
+              style={{
               width: '100%',
               maxWidth: '800px',
               maxHeight: '90vh',
@@ -2081,8 +2157,8 @@ export default function DashboardPage() {
               display: 'flex',
               flexDirection: 'column',
               padding: 0
-            }} onClick={(e) => e.stopPropagation()}>
-              
+            }}>
+
               {/* Header HUD */}
               <div style={{
                 display: 'flex',
@@ -2101,8 +2177,11 @@ export default function DashboardPage() {
                     {isDuress ? 'DURESS CRISIS LOG' : selectedReport.type}
                   </h3>
                 </div>
-                <button 
+                <button
+                  type="button"
                   onClick={() => setSelectedReport(null)}
+                  aria-label="Close the incident dossier"
+                  title="Close (Esc)"
                   style={{
                     background: 'var(--input-bg)',
                     border: '1px solid var(--border)',
@@ -2573,12 +2652,33 @@ function NavItem({ icon, label, active, onClick, badge }: { icon: React.ReactNod
   );
 }
 
-function StatBar({ label, value, color, onClick }: { label: string; value: number; color: string; onClick?: () => void }) {
+/**
+ * A labelled count, which sometimes filters the board when pressed.
+ *
+ * Two elements rather than one: with an `onClick` this is a control and must
+ * be a `<button>` — it was a clickable `<div>`, so the counts that filter the
+ * feed could be read and not operated without a mouse — and with no `onClick`
+ * it is a row of text, which must NOT be focusable. A div that is always a
+ * button lies to a keyboard user in the other direction.
+ */
+function StatBar({ label, value, color, onClick, pressed }: { label: string; value: number; color: string; onClick?: () => void; pressed?: boolean }) {
+  const row = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 12px', borderRadius: '8px', transition: 'background 0.2s' } as const;
+  const labelEl = <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1.5, fontFamily: "var(--font-outfit), sans-serif" }}>{label}</span>;
+  const valueEl = <span style={{ fontSize: 14, fontWeight: 900, color, textShadow: `0 0 10px ${color}44`, fontFamily: "var(--font-outfit), sans-serif" }}>{value}</span>;
+
+  if (!onClick) {
+    return <div style={{ ...row, cursor: 'default' }} className="card-hover">{labelEl}{valueEl}</div>;
+  }
   return (
-    <div onClick={onClick} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: onClick ? 'pointer' : 'default', padding: '6px 12px', borderRadius: '8px', transition: 'background 0.2s' }} className="card-hover">
-      <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1.5, fontFamily: "var(--font-outfit), sans-serif" }}>{label}</span>
-      <span style={{ fontSize: 14, fontWeight: 900, color, textShadow: `0 0 10px ${color}44`, fontFamily: "var(--font-outfit), sans-serif" }}>{value}</span>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={pressed}
+      style={{ ...row, cursor: 'pointer', width: '100%', background: 'none', border: 'none', textAlign: 'left', font: 'inherit' }}
+      className="card-hover"
+    >
+      {labelEl}{valueEl}
+    </button>
   );
 }
 
@@ -2938,9 +3038,22 @@ Respond ONLY with a JSON object with this exact shape:
               const isVideo = u.includes('/video/') || u.endsWith('.mp4') || u.endsWith('.mov') || u.endsWith('.webm');
               const isAudio = u.includes('/raw/') || u.endsWith('.m4a') || u.endsWith('.mp3') || u.endsWith('.wav');
               return (
-                <div
+                /* A LINK, not a button: it opens evidence in a new tab, so a
+                   link is what it is — and it then costs nothing to reach by
+                   keyboard, to open with the middle mouse button, or to copy
+                   the address of. As a clickable div it had none of that, and
+                   `window.open` from a div is also the one shape a popup
+                   blocker treats as suspicious. `rel="noreferrer"` because
+                   this is a Cloudinary URL for an incident and the referrer
+                   would carry the console's own address. */
+                <a
                   key={idx}
-                  onClick={() => window.open(url, '_blank')}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={isVideo ? `Open video evidence ${idx + 1} in a new tab`
+                    : isAudio ? `Play audio evidence ${idx + 1} in a new tab`
+                    : `View image evidence ${idx + 1} in a new tab`}
                   title={isVideo ? 'Click to open video' : isAudio ? 'Click to play audio' : 'Click to view image'}
                   style={{
                     width: 72, height: 72, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', flexShrink: 0,
@@ -2978,7 +3091,7 @@ Respond ONLY with a JSON object with this exact shape:
                       +{alert.media_urls!.length - 6}
                     </div>
                   )}
-                </div>
+                </a>
               );
             })}
           </div>
@@ -3315,15 +3428,24 @@ Respond ONLY with a JSON object with this exact shape:
               return responderList.map((r: any) => {
                 const isSelected = selectedResponders.includes(r.userId);
                 return (
-                  <div
+                  /* A LABEL around the real checkbox, which now does the
+                     toggling itself.
+                     
+                     This row was a clickable div with a checkbox inside it
+                     whose `onChange` was `() => {}` and a comment saying
+                     "Handled by div onClick". So the checkbox was focusable,
+                     looked operable, and did nothing: a dispatcher working by
+                     keyboard could tab onto it, press Space, see no change,
+                     and conclude the roster was broken — WORSE than a plain
+                     div, which at least does not offer itself.
+                     
+                     As a label, clicking anywhere on the row still toggles
+                     (that is what a label does), Space works because the
+                     control is a real checkbox, and a screen reader announces
+                     the officer's name with its checked state instead of
+                     reading an unlabelled checkbox and then some text. */
+                  <label
                     key={r.userId}
-                    onClick={() => {
-                      setSelectedResponders(prev => 
-                        prev.includes(r.userId)
-                          ? prev.filter(id => id !== r.userId)
-                          : [...prev, r.userId]
-                      );
-                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -3342,7 +3464,13 @@ Respond ONLY with a JSON object with this exact shape:
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => {}} // Handled by div onClick
+                        onChange={() => {
+                          setSelectedResponders(prev =>
+                            prev.includes(r.userId)
+                              ? prev.filter(id => id !== r.userId)
+                              : [...prev, r.userId]
+                          );
+                        }}
                         style={{ cursor: 'pointer' }}
                       />
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -3358,7 +3486,7 @@ Respond ONLY with a JSON object with this exact shape:
                     <span style={{ fontSize: 9, fontWeight: 800, color: r.isLive ? 'var(--success)' : 'var(--warning)' }}>
                       {r.isLive ? '● LIVE GPS' : 'READY'}
                     </span>
-                  </div>
+                  </label>
                 );
               });
             })()}

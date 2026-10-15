@@ -845,6 +845,20 @@ jobs:
       - name: Assert every table has one shape on both databases
         run: python3 scripts/check_one_table_one_shape.py
 
+      # `check_control_labels.py` has covered the Flutter app since controls
+      # there were found with empty accessible names. The console had no
+      # equivalent, and ten of its controls were clickable `<div>`s — no role,
+      # no tabIndex, no key handler: usable with a pointer and with nothing
+      # else. Among them the agency desk's incident card, which is the only way
+      # to the escalation log, the evidence, the live feed and both action
+      # buttons on the one surface an outside agency ever sees; and the
+      # responder picker, which had a real checkbox inside whose `onChange` was
+      # `() => {}` — focusable, apparently operable, inert. The console also had
+      # no keydown handler anywhere, so the incident dossier could only be
+      # dismissed with a mouse.
+      - name: Assert every console control is operable and named
+        run: python3 scripts/check_console_controls.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

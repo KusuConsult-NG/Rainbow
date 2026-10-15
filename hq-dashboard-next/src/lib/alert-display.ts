@@ -178,12 +178,43 @@ function isSmsFallback(a: Alert): boolean {
  */
 const geoMatches = geoMatchesKeyed;
 
+/**
+ * An incident that has not been closed out.
+ *
+ * ## Why this is a function and not a status
+ *
+ * The status filter offered **ACTIVE INCIDENTS**, and the UNIT STATUS panel had
+ * an ACTIVE tile beside the DURESS one. Both set `filterStatus = 'ACTIVE'`, and
+ * `'ACTIVE'` is not one of the ten statuses an alert can carry — the union is
+ * PENDING, DISPATCHED, ACKNOWLEDGED, IN_PROGRESS, ON_ROUTE, ON_SITE,
+ * ESCALATED, RESOLVED, DURESS, CANCELLED. The comparison `a.status === 'ACTIVE'`
+ * could therefore never be true, so **both of them emptied the board**: a
+ * commander pressing the one control that says "show me what is happening now"
+ * got nothing at all, which on this console reads as ALL CLEAR.
+ *
+ * The tile made it worse by advertising `alerts.length` — every incident in the
+ * loaded window, resolved ones included — above a filter that would show none
+ * of them. The number, the action and the word each described a different set.
+ *
+ * TypeScript found it, years after the control shipped: the union in
+ * `dashboard/types.ts` was completed by an earlier finding, and once `'ACTIVE'`
+ * had no overlap with it the comparison became an error rather than a
+ * silently-false expression. It is the second defect that union has produced
+ * on contact.
+ */
+export function isLiveIncident(a: Alert): boolean {
+  return a.status !== 'RESOLVED' && a.status !== 'CANCELLED';
+}
+
 export function filterAlerts(alerts: Alert[], filters: AlertFilters): Alert[] {
   return alerts.filter(a => {
     if (filters.status === 'CRITICAL') {
       if (!isCriticalAlert(a)) return false;
     } else if (filters.status === 'SMS_FALLBACK') {
       if (!isSmsFallback(a)) return false;
+    } else if (filters.status === 'ACTIVE') {
+      // Not a status: a state. See `isLiveIncident`.
+      if (!isLiveIncident(a)) return false;
     } else if (filters.status !== 'ALL' && a.status !== filters.status) return false;
 
     // Tier, not assignee. This compared `assigned_to` — a uuid column — against

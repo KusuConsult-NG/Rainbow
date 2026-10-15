@@ -96,8 +96,11 @@ export default function SystemAlertListener({ viewer }: { viewer: AdvisoryViewer
           {activeAlert.message?.toUpperCase()}
         </div>
       </div>
-      <button 
+      <button
+        type="button"
         onClick={() => setActiveAlert(null)}
+        aria-label="Dismiss this system alert"
+        title="Dismiss"
         style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer', opacity: 0.5 }}
       >
         <X size={20} />

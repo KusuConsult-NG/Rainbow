@@ -154,7 +154,15 @@ export default function AgencyAccessManager() {
           Agency Liaison Access Control
         </h3>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={fetchLiaisons} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', color: 'var(--text-muted)' }}>
+          {/* An icon is not a name: this read as "button" and nothing else to
+              a screen reader, and `check_console_controls.py` now fails on it. */}
+          <button
+            type="button"
+            onClick={fetchLiaisons}
+            aria-label="Reload the liaison list"
+            title="Reload the liaison list"
+            style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', color: 'var(--text-muted)' }}
+          >
             <RefreshCw size={14} />
           </button>
           <button

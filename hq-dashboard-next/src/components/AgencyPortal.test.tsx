@@ -113,6 +113,43 @@ describe('AgencyPortal', () => {
   // one answer in the codebase (T-32's order: `by`, then `by_email`, then
   // SYSTEM) and an entry whose time was never written says so instead of
   // rendering the string "Invalid Date".
+  // KEYBOARD. This desk is the whole of an outside agency's access — they have
+  // no console, no feed, no audit screen — and the incident card was a
+  // clickable div, so the escalation log, the evidence, the live feed and both
+  // action buttons sat behind a control a pointer could use and nothing else
+  // could.
+  it('opens an incident from the keyboard, and says whether it is open', async () => {
+    db.setRows('alerts', [{
+      ...incident('a-1', 'POLICE'),
+      // Something that only exists once the card is open, so this proves the
+      // detail was REACHED and not merely that an attribute flipped.
+      escalation_log: [{
+        at: '2026-09-01T12:30:00Z', from_tier: 'LGA', to_tier: 'HQ',
+        by_email: 'hq@operationrainbow.test', reason: 'Handed to the Police',
+      }],
+    }]);
+    const AgencyPortal = await load();
+
+    render(<AgencyPortal {...hqProps} />);
+    await screen.findByText(/Incident for POLICE/);
+
+    const card = screen.getByRole('button', { expanded: false, name: /CIVIL_UNREST/ });
+    card.focus();
+    expect(card).toHaveFocus();
+
+    await userEvent.keyboard('{Enter}');
+
+    // `aria-expanded` is the state the chevron shows visually and said nowhere
+    // else, so a screen reader could not tell an open card from a shut one.
+    expect(screen.getByRole('button', { expanded: true, name: /CIVIL_UNREST/ })).toBeInTheDocument();
+    expect(await screen.findByText(/ESCALATION LOG/)).toBeTruthy();
+    expect(screen.getByText(/Handed to the Police/)).toBeTruthy();
+
+    // And Space shuts it again, because that is what a button does.
+    await userEvent.keyboard(' ');
+    expect(screen.getByRole('button', { expanded: false, name: /CIVIL_UNREST/ })).toBeInTheDocument();
+  });
+
   it('reads an escalation entry the same way the replay panel does', async () => {
     db.setRows('alerts', [{
       ...incident('a-1', 'POLICE'),
