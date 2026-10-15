@@ -1,7 +1,21 @@
 # Applying the migrations to production
 
-Nine migrations are proven in CI on every push and **not yet applied** to the
-production Supabase project:
+**37 migrations** are proven in CI on every push and **not yet applied** to the
+production Supabase project. The complete, generated list — every one of the
+37, in apply order, with what breaks until each runs — is the table in
+`docs/PRODUCTION_DEPLOYMENT.md`, and `scripts/check_runbook_covers_migrations.py`
+fails CI if a migration is added and that table does not describe it.
+
+This file is the **step-by-step** runbook, and the steps below cover the first
+nine — the C-3 least-privilege era, where the order has dependencies and a
+failure needs a human decision. The remaining 28 are ordinary forward
+migrations and go in with the one paste under "the short way", which applies
+all 37.
+
+Read this file before the first paste either way: the RLS migration drops prior
+policies by exact name, and a policy made by hand in the dashboard survives it.
+
+The nine covered one at a time below:
 
 | Order | File | Closes |
 |---|---|---|
@@ -32,8 +46,10 @@ Two pastes, in this order:
 1. **`scripts/rls_production_dryrun.sql`** — read-only, rolls everything back,
    prints a verdict. If it says `>>> DO NOT APPLY`, stop: the PROBLEM lines name
    a hand-made policy that would survive the migration and re-open a table.
-2. **`scripts/apply_all_migrations.sql`** — all nine, in order, finishing with a
-   14-row PASS/FAIL table. Every row PASS means you are done.
+2. **`scripts/apply_all_migrations.sql`** — all 37, in order, finishing with a
+   34-row PASS/FAIL table. Every row PASS means you are done. Both numbers are
+   generated and gated, so if the table you get is a different size, you are
+   not running the file this repository builds.
 
 Both are generated from the migrations and CI fails if either drifts. The
 `apply-all` job runs the second one against a production-shaped PostgreSQL on
@@ -41,9 +57,10 @@ every push — the whole buffer, top to bottom, twice, asserting on its own
 verdict table — so what you paste is a script that has been executed, not just
 concatenated.
 
-Everything below is the same nine migrations one at a time, with the reasoning
-for each. Use it if a step fails, or if you would rather see them go in
-individually.
+Everything below is the first nine of those migrations one at a time, with the
+reasoning for each. Use it if a step fails, or if you would rather see the C-3
+era go in individually — the rest carry no ordering decision a person has to
+make, and the single paste above is the way to apply them.
 
 Everything below runs in **Supabase Dashboard → SQL Editor**, signed in as the
 project owner. Nothing here needs a connection string, and none of it should be

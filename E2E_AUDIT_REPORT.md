@@ -1262,6 +1262,7 @@ only thing that distinguishes a defect from a preference.
 | T-47 | **"Not an emergency" had to be enforced, not labelled.** Two new categories for government property mismanaged, destroyed, abandoned, unsafe or needing repair — and this system treats everything as a kidnapping. `queue_new_incident_notice()` announces every INSERT to the tier it landed at and the drain widens a UNIT notice to the **field responders**, so a culvert filed at 02:00 would push to the handsets of the people who go; `escalate_overdue_alerts()` climbs anything unacknowledged, so by morning a street light would be an HQ-tier incident with three escalations against it, among the night's real emergencies. | ✅ `is_non_emergency(type)` matched on the category before " - " (so every subtype is covered and a new one needs no migration), a BEFORE INSERT trigger files it at the LGA with no responder assigned and records why, and the timeout sweep skips it — built the same way as the two mechanisms that already existed for this (`is_oversight_matter`, `awaiting_human_confirmation`) rather than a third way. It is NOT hidden: still on the board, in the feed, on the map, filterable. `check_non_emergency_categories_agree.py` keeps the app's labels and the SQL's one list — 6 mutations, and its own first version matched the function name as a PREFIX, so a rename that breaks every caller passed. 7 SQL assertions, including that an overdue kidnapping still climbs and an oversight matter still goes to HQ |
 | T-48 | **Every button in every map popup was dead, and our own CSP was why.** The Intelligence Map is the screen the console OPENS on, and a marker's popup is how a dispatcher acts on a pin: DOSSIER, DISPATCH, RESOLVE. The popups are HTML strings, so the buttons carried `onclick="window._hqShowDispatch('…')"` — and `script-src 'self' `'nonce-…' 'strict-dynamic'` has **no** `'unsafe-inline'`: a nonce authorises a `<script>` ELEMENT and cannot authorise an event handler ATTRIBUTE, so Chrome refused all of them from the day that policy shipped. No error reached the operator. Three layers nearly caught it and each measured the wrong half: the sweep logged `changed: NOTHING`, which is a log line and not a check; `csp.test.ts`'s seven tests assert the HEADER, not what the header does to the page; and the component tests asserted the `onclick` attribute and the global SEPARATELY, with a comment explaining that jsdom cannot evaluate an inline handler — so the join was tested nowhere, never worked, and the suite was defending it. | ✅ Delegation: the buttons carry `data-hq-action`/`data-hq-id` and `LiveMap` listens once on its container. Both tests now press the real button and assert the real outcome. `check_no_inline_handlers.py` forbids the `on<event>="…"` attribute form in the console (a React `onClick={fn}` prop is unaffected), and the browser harness opens a popup and asserts it carries its actions as data, zero handler attributes, and that DOSSIER opens the dossier. 2 new console tests (one of them presses an action no popup renders a button for, to prove the listener routes and that the tier it hands on comes from the incident rather than the markup) and one rewritten from asserting the attribute to pressing the button, and `check_no_inline_handlers.py` — 6 shapes it must catch (both cases of the attribute, every event name, spaces round the `=`) and 6 it must allow, among them a camelCase React prop that happens to start with those two letters |
 | T-49 | **The harness reported the agency liaison desk broken, and it was the stand-in.** `fake_supabase.js` rejects a column no migration defines, in full, the way PostgREST does — and read that column list ONCE, at require time. A stand-in started at 13:06 was still answering at 14:28, after T-46 had added `alerts.voice_note_url` and given the agency portal's `select` the new column: `UNKNOWN COLUMN alerts.voice_note_url (read)`, the whole query failed, and the one surface an outside agency ever sees came back with no incidents. Three checks failed naming the card and both its buttons, on code that was fine. Same trap as a stale `next-server` holding :3000 while `.next` is rebuilt underneath it — which is what the five "missing" navigation tabs were, and which has now invalidated two runs. A long-lived process answering from a snapshot does not report an error; it reports the PRODUCT broken, on exactly the screen that depends on the thing that moved. | ✅ The stand-in refills its schema rather than freezing it, and compares a fingerprint of every migration's name, size and mtime before answering — rebuilding, loudly, when it moves; proved both directions against a live stand-in. `check_standin_reads_live_schema.py` keeps the require-time freeze from returning and fails if the refresh is defined but never called — 9 mutations. `interact.js` gained a boot assertion that fails the run on a console serving a build it cannot load, with the remedy in the message |
+| T-50 | **The document the README sends an operator to first described nine of the thirty-seven migrations as the whole list.** `docs/APPLYING_THE_MIGRATIONS.md` — "**Read this before the first one**", per README — opened with *"Nine migrations are proven in CI on every push and not yet applied"*, named those nine, and said the single-paste script applies *"all nine, in order, finishing with a 14-row PASS/FAIL table"*. There are **37** outstanding and the generated script ends in **34** rows. Everything from the last fortnight of this audit — the voice note, non-emergency routing, one table one shape, incident tracks — was absent from it. An operator following it applies nine files, gets a verdict table two and a half times the size they were told to expect, and has no way to tell success from a wrong script. `check_runbook_covers_migrations.py` was written for exactly this drift (it had already caught the other runbook seventeen short) and watched ONE file, so the second one drifted behind it unseen. | ✅ The step-by-step file now states the real total, says which nine of them it walks through one at a time and why (the C-3 era is the part with ordering dependencies and a human decision in it), and points at the generated table that carries all 37. The gate now reads every doc that names migration files: one must carry the complete table, any other must declare its subset and point at that one, and every figure quoted is checked against the repository — including a count spelled out in WORDS, which is refused outright, because the stale claim was "Nine" and no check can verify a word. 5 mutations |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -4761,6 +4762,47 @@ first few presses, actions `dossier, dispatch, resolve`, no handler attributes
 in any popup, and DOSSIER opens the dossier. Which press finds the incident
 depends on how the pins happen to cluster, which is why the loop presses them
 all rather than trusting a position.
+
+### T-50. And the runbook an operator reads first described nine of thirty-seven
+
+Asked plainly whether everything was fixed, the honest answer needed the state
+of the things that are not code — and the first place to look was the
+deployment runbook, because 37 migrations are proven in CI and not applied to
+production.
+
+`docs/PRODUCTION_DEPLOYMENT.md` carries the complete table of all 37, and
+`check_runbook_covers_migrations.py` has gated it since it caught that table
+seventeen migrations short. But README says:
+
+> **Read `docs/APPLYING_THE_MIGRATIONS.md` before the first one** — the RLS
+> migration drops prior policies…
+
+and that file opened with
+
+> Nine migrations are proven in CI on every push and **not yet applied** to the
+> production Supabase project:
+
+followed by nine rows, and then *"all nine, in order, finishing with a 14-row
+PASS/FAIL table"*. The script applies 37 and ends in 34 rows. Every migration
+from the last fortnight of this audit was missing from it: the voice note and
+non-emergency routing of T-46 and T-47, the shape convergence of T-43, the
+incident tracks of the movement work.
+
+The failure mode is not a missing file — it is a confident wrong number. An
+operator pastes `apply_all_migrations.sql`, is told to expect fourteen rows,
+gets thirty-four, and cannot tell whether that means success, a wrong script,
+or a repository that has moved since the instructions were written. Meanwhile
+the nine-row table reads as a complete inventory of what production is missing,
+and it is a quarter of one.
+
+Two documents describing one list, and the gate guarding one of them — the
+gate written because that exact drift had already happened once. So it now
+reads **every** doc that names migration files: one must carry the complete
+table; any other must say which subset it covers and point at the complete one;
+and every figure quoted is checked against the repository. Including a count
+spelled out in words, which is now refused rather than parsed — the stale claim
+was the word "Nine", and a number no check can verify is a number that goes
+stale in silence.
 
 ---
 

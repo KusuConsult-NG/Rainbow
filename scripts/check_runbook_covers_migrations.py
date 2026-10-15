@@ -19,6 +19,23 @@ This is the same class of defect as T-21 and is checked the same way: the list
 is derived from supabase/migrations/, and anything the table omits is named.
 Adding a migration now fails CI until the runbook describes it.
 
+## The second runbook, which this check could not see
+
+It watched ONE file. `docs/APPLYING_THE_MIGRATIONS.md` is the step-by-step
+runbook — the one README tells an operator to read **before the first paste** —
+and it opened with "Nine migrations are proven in CI and not yet applied",
+named those nine, and said the single-paste script applies "all nine, in order,
+finishing with a 14-row PASS/FAIL table". There were thirty-seven outstanding
+and the script ends in thirty-four rows. Every migration from the last fortnight
+of this audit — voice notes, non-emergency routing, one table one shape — was
+absent from the document an operator is sent to first.
+
+Two documents describing one list, and the gate guarding one of them. So this
+now reads every doc that names migration files: one of them must carry the
+complete table, and any other that names a SUBSET must say so and point at the
+complete one, in wording this check can find. A count in prose is checked
+against the generated script wherever it appears.
+
 What is deliberately NOT checked: the wording of a description. A gate that
 diffed prose would be satisfied by a placeholder, and a placeholder in this
 column is worse than a gap, because a gap is visible.
@@ -44,6 +61,26 @@ CLAIMS = {
         re.compile(r'\bends in a (\d+)-row PASS/FAIL table'),
         lambda: _verdict_rows()),
 }
+
+# Every other doc that names migration files. Each must declare itself partial
+# and point at the file that carries the complete table — the stale one claimed
+# to be the whole list.
+OTHER_DOCS = [REPO / 'docs' / 'APPLYING_THE_MIGRATIONS.md']
+
+# "…finishing with a 34-row PASS/FAIL table", in the partial docs' wording.
+ROW_CLAIM = re.compile(r'(\d+)-row PASS/FAIL table')
+# "all 37" / "**37 migrations**" — a count of the outstanding set in prose.
+COUNT_CLAIM = re.compile(r'\ball (\d+), in order\b|\*\*(\d+) migrations\*\*')
+
+# A count SPELLED OUT is a count this check cannot verify, and the stale claim
+# was spelled out: "Nine migrations are proven in CI and not yet applied". So
+# the word form is refused outright rather than parsed — a number nothing can
+# check against the repository is a number that goes stale silently.
+WORD_COUNT = re.compile(
+    r'\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|'
+    r'thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|'
+    r'thirty|forty|fifty)([ -](one|two|three|four|five|six|seven|eight|nine))?'
+    r'\s+migrations\b', re.I)
 
 
 def _verdict_rows() -> int:
@@ -117,6 +154,51 @@ def main() -> int:
                 f'the runbook says {m.group(0)!r} but the verdict table has '
                 f'{want} rows.')
 
+    # Every other doc that names migrations must say it is partial and point
+    # at the complete table, and any figure it quotes must be the real one.
+    for doc in OTHER_DOCS:
+        if not doc.exists():
+            continue
+        other = doc.read_text(encoding='utf-8')
+        named = [f for _, f, _ in ROW.findall(other)]
+        named += re.findall(r'`supabase/migrations/([^`]+\.sql)`', other)
+        if not named:
+            continue
+        rel = doc.relative_to(REPO)
+        covers_all = not [m for m in outstanding if m not in set(named)]
+        if not covers_all:
+            if RUNBOOK.name not in other:
+                problems.append(
+                    f'{rel} names migration files but not all '
+                    f'{len(outstanding)} outstanding ones, and never mentions '
+                    f'{RUNBOOK.name} — so an operator reading it believes '
+                    f'{len(set(named) & set(outstanding))} is the whole list. '
+                    'Either list them all or say which subset this is and '
+                    'where the complete table lives.')
+            if not COUNT_CLAIM.search(other):
+                problems.append(
+                    f'{rel} covers a subset and states no total, so nothing '
+                    'tells the operator how many migrations there are. State '
+                    f'it ({len(outstanding)}) in prose this check can find: '
+                    '"**N migrations**" or "all N, in order".')
+        for m in WORD_COUNT.finditer(other):
+            problems.append(
+                f'{rel} spells a migration count out in words: '
+                f'{m.group(0)!r}. Nothing can check that against '
+                'supabase/migrations/, and the stale claim this gate exists '
+                f'for was exactly that shape. Write the digit ({len(outstanding)}).')
+        for m in COUNT_CLAIM.finditer(other):
+            said = int(m.group(1) or m.group(2))
+            if said != len(outstanding):
+                problems.append(
+                    f'{rel} says {m.group(0)!r}, but {len(outstanding)} '
+                    'migrations are outstanding.')
+        for m in ROW_CLAIM.finditer(other):
+            if int(m.group(1)) != _verdict_rows():
+                problems.append(
+                    f'{rel} says {m.group(0)!r}, but the verdict table has '
+                    f'{_verdict_rows()} rows.')
+
     if problems:
         for p in problems:
             print(f'✗ {p}', file=sys.stderr)
@@ -127,6 +209,9 @@ def main() -> int:
     print(f'✓ the runbook describes all {len(outstanding)} outstanding '
           f'migrations, in order, and its verdict-table row count matches '
           f'({_verdict_rows()})')
+    print(f'✓ {len(OTHER_DOCS)} other doc(s) naming migrations declare which '
+          'subset they cover, point at the complete table, and quote figures '
+          'that match it')
     return 0
 
 
