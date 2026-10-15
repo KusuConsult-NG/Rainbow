@@ -1254,6 +1254,8 @@ only thing that distinguishes a defect from a preference.
 | T-39 | **Choosing Hausa in Settings changed nothing.** There were two providers called `languageProvider`, each with a class called `LanguageNotifier`, and which one a file got depended on its imports: `shared/localization/translations.dart` stores `app_lang` = `'ha'` and is what every translated string watches; `providers/language_provider.dart` stored `app_language` = `'HA'` and was imported by nothing. The Settings screen imported neither — it kept a private `_language` string and wrote `app_language` straight to SharedPreferences — so its "App Language" dropdown was wired to a key no reader has ever heard of, and it offered two of the three languages the app has. The only working control was a flag button on the home screen, three screens into the app. Separately, `Translations.get()` returned the KEY on a miss and two keys were asked for and never defined, both on the citizen's DISPATCHER CHAT screen — so its header read `live_dispatch_channel` and `alert_ref #a1b2c3d4` in every language, English included. | ✅ one `LanguagePicker`, used by Settings and by the first screen of first-run setup so the language can be chosen before the rest of setup is read; the dead provider deleted; the four missing keys added in all three languages; `get()` falls back to English rather than a variable name; 8 Dart tests; `scripts/check_translation_keys.py` in CI — every key asked for exists, every key has every language, one provider, one storage key — mutation-tested including the duplicate provider returning |
 | T-40 | **A sign-out could end a live duress trail, and needed no PIN.** `signOut()` stopped tracking first, deliberately: *"Signing out is the clearest statement a person can make that they are done being observed, and it was the one action that did not stop it."* True of a person signing out of their own phone, and wrong in the one case the duress design exists for. A duress PIN tells the person their alarm is cancelled and KEEPS TRACKING RUNNING because they may still be in danger — and the lock screen offers a sign-out that needs no code at all. So whoever was holding the phone could end the tracking of a live duress alert without knowing any PIN, and all HQ saw was a track going quiet, indistinguishable from a flat battery. Two deliberate rules collided and nothing recorded which won. | ✅ a patrol track still stops on sign-out; an SOS track runs until the incident closes or the twelve-hour ceiling expires; `20261020000000` adds `alerts.device_signed_out_at` so an operator reads "handset signed out at 19:42, tracking continues" rather than inferring a dead battery, shown in the dossier and on the forensic timeline; 10 Dart tests and 2 SQL assertions |
 | T-41 | **The system told you when it gave up waiting for you, not when the emergency arrived.** `notification_outbox` was built so a TIMEOUT escalation could not move an incident in silence — its header says "the whole point of the timeout is the case where nobody is watching". Nothing queued a notice when an alert was **INSERTED**. The only paths to a phone were a human pressing DISPATCH or ESCALATE on the console, and the timeout job. So a citizen's SOS reached a responder only if that responder happened to have the app open and in the foreground; a phone in a pocket learned nothing until a dispatcher acted or the unit's two-minute window expired. There is no trigger on `alerts` INSERT except the timestamp one and the oversight router, and nothing in `alert_service.dart` notifies anybody. | ✅ `20261022000000` queues a `NEW_INCIDENT` notice on INSERT, addressed to `NEW.assigned_tier` read from the column — so the oversight trigger's routing of a complaint to HQ is honoured and a complaint is never announced to the command it is about; the drain widens the UNIT audience for this kind to the field responders, who are the ones who go, and says "has just been reported" rather than the escalation wording; the trigger swallows its own failure so an SOS is never refused because a notice could not be written. 10 console tests and 6 SQL assertions, one of which files an emergency with the outbox renamed out from under it |
+| T-42 | **The forensic replay read the story, not the record.** `IncidentReplayPanel` — the per-incident timeline somebody opens to ask what happened and in what order — built its escalation events by string-matching `ai_summary`, the free-text note a human escalation appends. `escalate_overdue_alerts()` appends to `escalation_log` and writes no prose, so **every automatic escalation was missing**: the moves nobody chose, at 02:00, because nobody answered — the entries a review exists to find. They were on the Audit History screen the whole time, because `audit_trail()` reads the log. Every escalation also carried `updated_at`, so UNIT → WARD → LGA → HQ produced three events with one time, in no order, with the chat messages sent between them on the wrong side; and the actor was the literal `'Tactical Command'` while the log records who did it — T-32, one screen later. | ✅ `lib/incident-timeline.ts` owns the reading of an entry and three screens share it: the replay panel parses no prose at all, the agency desk (the only history an outside agency ever gets) and the audit screen take the same actor order and the same timestamp wording. A manual escalation present in both the log and the summary is counted once; `[MULTI-UNIT DISPATCH]` is still read from prose, declared, because a dispatch has no log of its own. An entry with no `at` now reads `TIME NOT RECORDED` instead of "Invalid Date" and is placed last with a note saying why. 33 console tests, and `check_history_reads_the_record.py` compares the actor order on both sides of the language boundary — 14 mutations, 3 shapes that must stay allowed |
+| T-43 | **The same table, two shapes, and the column that said why was on only one of them.** Three of the four agency tables are created TWICE, by two files with different column lists and `CREATE TABLE IF NOT EXISTS` on both — so the second is a no-op and the winner is whichever ran first. The v3/v4 era was applied to production by hand and is excluded from every replay, so **production** carries `detail`, `sent_by`, `target_lga`, `acknowledged_at`, `resolved_at` and no `created_at`, while **every database this repository can build** carries `created_at` and none of those five. `/api/notify-agency` — whose own comment calls `agency_notifications` "the only durable record of whether an agency was told" — therefore wrote the intersection and dropped `result.detail`, the one field that says WHY a handover to the Police or the Army failed (`HTTP 502`, a timeout, "no contact configured"). And nothing read the table at all: the console sets `escalated_to_agency` the moment an operator presses escalate, so "handed to the Army" and "the Army was told" were the same line on the screen and different facts in the database. Invisible to both schema gates (they compare objects, not columns) and to the browser harness (the stand-in UNIONS every definition it finds). | ✅ `20261023000000` converges the shapes with `ADD COLUMN IF NOT EXISTS`, backfilling `created_at` from `sent_at`/`submitted_at`/`deployed_at` rather than from the migration's clock; the route writes `detail`, `sent_by` and `target_lga`; the incident replay now SHOWS each leg, with `SKIPPED` rendered as "NOT USED", a handover with no delivery row called out as such, and a delivery log that could not be READ saying so rather than showing none. `check_one_table_one_shape.py` replays both worlds and compares every table's effective shape — 7 mutations, 3 shapes that must stay allowed, one exception recorded with its reason; `agency_delivery_behaviour_test.sql` proves it on real PostgreSQL in 5 assertions |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -3942,6 +3944,289 @@ been deleted by whoever added that notice.
 Changing somebody else's assertion is worth doing carefully and worth declaring
 plainly, which is why it is in this document rather than only in a commit
 message.
+
+---
+
+### T-42. The replay read the story, not the record
+
+The screen is `IncidentReplayPanel` — "Incident Replay Log", the per-incident
+forensic timeline, opened from an incident's dossier. It is where somebody asks
+what happened to this emergency and in what order.
+
+It built its escalation events like this:
+
+```ts
+if (line.includes('[ESCALATED TO') || line.includes('[COMMAND ESCALATION]')) {
+  combined.push({ type: 'ESCALATION', actor: 'Tactical Command',
+                  timestamp: alert.updated_at || alert.created_at, notes: line });
+}
+```
+
+`line` is a line of `ai_summary` — the free-text column the console and the
+handset append a human-readable note to when somebody escalates. Three things
+follow from reading the story instead of the record, and the first is the
+serious one:
+
+**Every automatic escalation was missing.** `escalate_overdue_alerts()` appends
+an entry to `escalation_log` and does not touch `ai_summary`. So the
+escalations nobody chose — the ones that happened because nobody answered, at
+02:00, which are the entries a review exists to find — appeared nowhere on the
+replay of the incident they happened to. They were not lost: `audit_trail()`
+reads the log, so the Audit History screen had them all along. One screen knew
+and the other did not, and the one that did not is the one you open when you
+want to know about *this* incident.
+
+**Every escalation carried `updated_at`.** An incident that climbed UNIT → WARD
+→ LGA → HQ produced three events with one timestamp — the last update, not the
+times of the moves. The sort is chronological, so three identical keys ordered
+by nothing, and the chat messages sent between those moves landed on the wrong
+side of them. A timeline whose order is wrong is worse than no timeline: it is
+read as evidence.
+
+**The actor was a literal.** `'Tactical Command'` for every escalation, while
+the log records who did it. This is T-32 exactly — `audit_trail()` attributed
+every human action to SYSTEM because it read only `by` while both clients write
+`by_email` — one screen later. The fix there was to read the actor out of the
+entry; nobody came back for this screen.
+
+#### Why the prose parse had to go, rather than be added to
+
+The obvious patch is to keep the string match and read the log as well. That
+double-counts: both clients write `escalation_log` **and** append a line to
+`ai_summary` for the same escalation, so every manual escalation would appear
+twice, interleaved with its own duplicate. The log is the record; the summary
+line is a rendering of it. A test pins that a manual escalation present in both
+places is counted once.
+
+`[MULTI-UNIT DISPATCH]` is still read out of `ai_summary`, deliberately and
+declared in the module: a dispatch has **no structured log of its own**.
+Inventing a record for it on the way to the screen would be worse than reading
+the prose, and the gap is worth closing in the database, where every other
+event lives. The gate exempts that one marker in that one file.
+
+#### What came out of it
+
+`hq-dashboard-next/src/lib/incident-timeline.ts` now owns the reading of an
+escalation entry, and three screens share it:
+
+* the **replay panel**, which no longer parses prose at all;
+* the **agency desk** (`AgencyPortal`), which renders the same log for an
+  outside agency — the only history a sister agency ever gets, since they have
+  no console, no feed and no audit screen;
+* the **audit screen**, for the timestamp wording alone.
+
+Two smaller things fell out of writing it down. An entry whose `at` was never
+written is a real shape — nothing validates the log's keys, and `audit_trail()`
+already coalesces for it — and both the agency desk and the panel formatted it
+straight into `new Date(...)`, which renders the string **"Invalid Date"**. That
+reads as a broken console rather than as a gap in the record, so `stampLabel`
+says `TIME NOT RECORDED` and the event is placed last with a note saying where
+it was placed and why. And the panel's resolution event named
+`'Field Commander'` when `resolved_by` was null — the same invention as T-32's
+`'Responder'`, on the same screen.
+
+`scripts/check_history_reads_the_record.py` keeps all of it: nobody may *match*
+the escalation markers (writing them is fine — that is what the dossier shows),
+`entryActor` must read the same keys in the same order as `audit_trail()` in
+SQL, and no screen may format a log entry's time without the one helper. The
+actor order is extracted from both sides and compared, so a change to either
+fails rather than quietly giving the console and the audit screen different
+answers about who acted. Fourteen mutations, including the T-32 regression on
+either side of the language boundary; three legitimate shapes that must not be
+flagged.
+
+---
+
+### A harness that could only press what started above the fold
+
+Not a defect in the app, and worth recording because it nearly hid one.
+
+Adding the language picker to Settings (T-39) made two assertions fail —
+"Settings offers a way to lock the phone deliberately" and "the lock screen
+offers a way out that needs no code" — although nothing about the lock had
+changed. Flutter builds semantics for the slivers it has *rendered*: the
+viewport plus a couple of hundred pixels of cache. One new card of about 150px
+pushed "Lock This Phone" past that extent, so it was not in the DOM, `tap`
+could not see it, and the check read as **the app does not offer this**.
+
+A harness that can only press what starts above the fold silently stops
+covering a screen the moment anything is added to the top of it. There were
+already three copies of a scroll-until-visible loop inline in the file, none of
+which moved the pointer first — a wheel event goes to whatever is under the
+pointer, and the pointer starts at (0, 0), the app bar, which does not scroll.
+They worked only because something earlier in the run happened to leave the
+mouse over the body. `bringIntoView` is now the one definition, pointer parked
+over the list, and the lock assertion says whether the control was never found
+or found and dead. Fixing it also made five assertions about the lock screen —
+the panic button on it, the four routes a locked phone cannot be walked into —
+run again rather than being skipped inside `if (lockOpened)`.
+
+The same change surfaced a real defect in the picker, two hops away. The sweep
+reported `/home/"English"` as a control that did nothing. It was not on the home
+screen at all: the sweep wanders into Settings, because those screens are pushed
+by the Navigator without changing the hash, so the recovery `go('/home')` is a
+no-op and the route label stays behind. And the chip was behaving correctly —
+pressing the language already in use calls `setLanguage(english)`, the
+provider's state does not change, nothing rebuilds.
+
+What was wrong is that the chip could not SAY it was the chosen one. The
+`Semantics` was inside the `InkWell`, which split four facts across two nodes:
+the outer one carried the button role and the tap, the inner one the name and
+the selection. Anything reading the node it is about to press — a screen
+reader, this sweep — saw a button with no selection state and a press that
+changed nothing, which is indistinguishable from a broken control. The report
+subtype rows had settled this already: one `Semantics(button: true, selected:
+…, label: …)` carrying all of it. The picker now matches them, a Dart test
+pins each flag on the named node (it fails against the split version), and the
+sweep exempts an already-chosen option the way it already exempted a disabled
+control and the nav item for the screen you are on.
+
+---
+
+### T-43. The same table, two shapes, and the column that said why was on only one of them
+
+Found by following a loose end rather than by a test: `agency_notifications` is
+written by `/api/notify-agency` and read by nothing. Pulling on that produced
+the more serious thing underneath it.
+
+Three of the four agency tables are created **twice** in this history, by two
+files with different column lists and `CREATE TABLE IF NOT EXISTS` on both:
+
+| table | first definition | second |
+|---|---|---|
+| `agency_notifications` | `20260722000000_v3_telemetry_geofence` — 10 columns | `20260812000000_agency_tables` — 7 |
+| `agency_action_reports` | `20260723000000_v4_mesh_broadcast` — 14 | `20260812000000_agency_tables` — 15 |
+| `agency_deployments` | `20260723000000_v4_mesh_broadcast` — 10 | `20260812000000_agency_tables` — 10 |
+
+The second definition is a no-op, so the shape a database gets is whichever
+file ran first. The v2–v6 era was applied to production **by hand** and written
+down afterwards; it cannot be replayed (v2 calls `auth.jwt()` before the shim
+defines it), so `verify_rls_migration.sh`, `bootstrap_staging.sql` and
+`apply_all_migrations.sql` all exclude it. The split is therefore exact, and it
+runs in both directions:
+
+* **production** has `detail`, `sent_by`, `target_lga`, `acknowledged_at` and
+  `resolved_at`, and no `created_at`;
+* **every database this repository can build** has `created_at`, and none of
+  those five.
+
+Nothing could have told us, and three things that look as though they should
+have all share one blind spot:
+
+* `check_schema_convergence.py` compares the *objects* the two histories
+  create, not their columns. It was written for "a policy that exists only on
+  production", and a column of a table both histories create is invisible to
+  it.
+* `check_schema_drift.py` — the gate whose whole subject is "a column no
+  migration creates" — accumulates columns with
+  `tables.setdefault(table, set()).add(...)`, so it holds the **union** of both
+  definitions. `detail` is in that union, so writing it would have passed the
+  gate and failed on staging.
+* the local Supabase stand-in builds its column set the same way, which is the
+  right call for a fake that must not refuse a column production has — and
+  means the browser harness accepts a column that exists on neither database.
+
+A union is the correct answer to "might this column exist somewhere?" and the
+wrong answer to "does every database have it?", and nothing was asking the
+second question.
+
+#### What it cost
+
+`/api/notify-agency` is the handover: HQ escalates an incident to the Police,
+the Army or the DSS, the route sends an SMS and/or posts a signed webhook, and
+then writes one row per leg — including the legs it skipped. Its own comment:
+
+> Every leg, including the skipped ones: this table is the only durable record
+> of whether an agency was told, and a row set that omits the channels nobody
+> used cannot answer that question later.
+
+It wrote `method` and `status` and dropped `result.detail` — the only field
+that says **why**: `HTTP 502`, a timeout's message, "no contact configured".
+Writing it would have worked in production and failed everywhere else with a
+42703, on the one path that records whether an outside agency was reached, so
+the route wrote the intersection of the two shapes and the reason went to a
+`console.error` on the server.
+
+And nothing read the table at all. The console sets `escalated_to_agency` the
+moment an operator presses escalate, and that is what every screen showed. So
+"handed to the Army" and "the Army was told" were the same line on the screen
+and different facts in the database — which is T-38 one layer out: there the
+handset's filter had no branch for a liaison while HQ's console showed the
+handover as done; here the delivery itself may never have happened and the
+console still shows it as done.
+
+#### What came out of it
+
+`20261023000000_one_table_one_shape.sql` adds every column one definition has
+and the other lacks, with `ADD COLUMN IF NOT EXISTS` throughout: on production
+that is `created_at` on three tables and nothing else. `created_at` is
+**backfilled** from the column that records the real time — `sent_at`,
+`submitted_at`, `deployed_at` — rather than stamped with the migration's clock,
+because a delivery log whose timestamps all read "the day we fixed the schema"
+is worse than one with a null. The null is honest.
+
+The route then writes `detail`, `sent_by` and `target_lga`.
+
+And the record is now **read**, on the incident replay, which is where somebody
+asks what happened to this emergency. Each leg appears as its own event —
+`POLICE · SMS FAILED — HTTP 502 · handed over by hq@…` — with `SKIPPED`
+rendered as `WEBHOOK NOT USED`, because skipped is not a delivery and the
+wording has to keep saying so on the screen as well as in the route.
+
+Two cases that are easy to get wrong, and are tested:
+
+* **a handover with no delivery row at all** is an event of its own, saying so
+  — "handed to ARMY and NO delivery attempt is on record". With
+  `escalated_to_agency` set and no rows, a timeline that simply shows nothing
+  reads as a handover that went perfectly;
+* **a delivery log that could not be READ** says that instead. The read is
+  command-only under RLS, and a timeline missing its delivery lines because the
+  read was refused looks identical to one where every leg succeeded. It is the
+  empty-board rule again: an empty board that could not ask is the same lie as
+  an empty board. The notice is scoped to an incident that WAS handed over,
+  though: on a ward commander's screen the read is refused for every incident
+  they open, and a warning that fires on every incident is a warning people
+  stop reading — with no handover, the refusal hides nothing.
+
+`scripts/check_one_table_one_shape.py` closes the class rather than the
+instance. It replays the migrations in apply order for **both** worlds —
+production with the hand-applied era, a repo-built database without it —
+computes each table's effective shape (first `CREATE TABLE` wins, every later
+`ADD COLUMN` adds), and fails if the two disagree or if any definition claims a
+column no database ends up with. Seven mutations, including an `ADD COLUMN`
+written for the wrong table and a comma list split so only the first column is
+added; three legitimate shapes that must not be flagged, among them a second
+definition that is a strict subset of the first.
+
+One exception is recorded with its reason: `phase1_foundation.sql` describes a
+different `telemetry` — a surrogate `id`, `UNIQUE (user_id)` and an `alert_id`,
+i.e. a **track** of positions — while the initial schema creates it first with
+`user_id` as the primary key, one current position per person, which is what
+`background_tracking_service.dart` upserts into and what the responder feed
+streams with `primaryKey: ['user_id']`. The track arrived later as its own
+table, `incident_tracks`. Adding two unused columns to a live table to make a
+dead definition true would be worse than leaving it; the gate makes somebody
+say so rather than letting it pass unnoticed.
+
+#### What is still open
+
+Nothing retries. `20260722000000` creates
+`idx_agency_notifications_status … WHERE status = 'FAILED'` and its comment
+says "(retry jobs)"; there is no retry job. A failed handover is now visible to
+HQ on the incident replay, where somebody can pick up a phone, and that is the
+difference between a silent failure and a known one — but the obvious next step
+is to drain these the way `notification_outbox` is drained, with the same
+backoff and the same `attempts` column, rather than to invent a second
+mechanism. That is a piece of work with real decisions in it (how many times do
+you re-send an SMS about an emergency, and to whom does it escalate when the
+agency's own channel is down), not a line of code, so it is named here rather
+than guessed at.
+
+`scripts/agency_delivery_behaviour_test.sql` proves it on a real PostgreSQL:
+all ten columns present, a leg that records its own reason, a skipped channel
+recorded as a skipped channel, the deployment's stand-down time, and — as
+characterisation, so a later widening is deliberate — that command reads the
+delivery log while an agency liaison and a citizen do not.
 
 ---
 
