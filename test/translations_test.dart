@@ -129,5 +129,55 @@ void main() {
       }
       handle.dispose();
     });
+
+    testWidgets('the chip for the current language says it is the chosen one',
+        (tester) async {
+      // ONE node with all of it: the button role, the name, the selection and
+      // the tap. The first version split those across two nodes — the InkWell
+      // outside carried the role and the tap, the Semantics inside the name and
+      // the selection — and the consequence was not academic. Pressing the
+      // chip for the language already in use is MEANT to do nothing: the
+      // provider's state does not change and nothing rebuilds. Anything reading
+      // the node it is about to press (a screen reader, the browser harness's
+      // dead-control sweep) saw a button with no selection state and a press
+      // that changed nothing, which is indistinguishable from a broken
+      // control. It was reported as one.
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(const ProviderScope(
+        child: MaterialApp(home: Scaffold(body: LanguagePicker())),
+      ));
+      await tester.pumpAndSettle();
+
+      // `containsSemantics`, not `matchesSemantics`: the latter asserts every
+      // property it was NOT given is absent, and an InkWell brings its own
+      // (focusable, enabled). The claim here is about four facts being on ONE
+      // node, not about the node having nothing else.
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('English')),
+        isSemantics(
+          label: 'English',
+          isButton: true,
+          hasSelectedState: true,
+          isSelected: true,
+          hasTapAction: true,
+        ),
+        reason: 'the button role, the name, the selection and the tap are not '
+            'all on the node that carries the name',
+      );
+
+      // And the other two say they are NOT the chosen one, on the same node.
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('Hausa')),
+        isSemantics(
+          label: 'Hausa',
+          isButton: true,
+          hasSelectedState: true,
+          isSelected: false,
+          hasTapAction: true,
+        ),
+      );
+
+      handle.dispose();
+    });
   });
 }

@@ -107,18 +107,29 @@ class _LanguageChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // InkWell outside so the node keeps its button role and its tap; Semantics
-    // inside to NAME it, with the Text's own label excluded so a screen reader
-    // does not read the language twice. Named for the LANGUAGE, not for a flag:
-    // `check_control_labels.py` exists because controls here had empty
-    // accessible names, and an emoji is not a name.
-    return InkWell(
+    // ONE semantics node carrying all four facts: that this is a button, what
+    // it is called, whether it is the current language, and the tap. Named for
+    // the LANGUAGE, not for a flag — `check_control_labels.py` exists because
+    // controls here had empty accessible names, and an emoji is not a name.
+    //
+    // The first version put the Semantics INSIDE the InkWell, which split those
+    // facts across two nodes: the outer one had the button role and the tap,
+    // the inner one the label and the selection. A screen reader announces
+    // "English" and then, separately, "selected" — and the browser harness,
+    // which reads the node it is about to press, saw a button with no selection
+    // state and reported the chip for the one language already in use as a
+    // control that does nothing. Pressing the chosen option IS meant to do
+    // nothing; the node has to say it is the chosen option. Same shape as the
+    // report subtype rows, which had this settled already.
+    return Semantics(
+      button: true,
+      label: language.label,
+      selected: selected,
+      excludeSemantics: true,
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Semantics(
-        label: language.label,
-        selected: selected,
-        excludeSemantics: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
