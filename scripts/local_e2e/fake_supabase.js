@@ -25,7 +25,52 @@ const http = require('http');
 const crypto = require('crypto');
 const path = require('path');
 const { tables, PEOPLE, PASSWORD, DOMAIN } = require('./fixtures');
-const { columns: schema, relationships, defaults: columnDefaults } = require('./schema').build();
+const buildSchema = require('./schema');
+
+// The schema is held in containers that are REFILLED rather than replaced, so
+// every reference below keeps working when the migrations change under a
+// stand-in that is already running. See `refreshSchema`.
+const schema = {};
+const relationships = {};
+const columnDefaults = {};
+let loadedGeneration = '';
+
+function refreshSchema(reason) {
+  const built = buildSchema.build();
+  for (const target of [schema, relationships, columnDefaults]) {
+    for (const key of Object.keys(target)) delete target[key];
+  }
+  Object.assign(schema, built.columns);
+  Object.assign(relationships, built.relationships);
+  Object.assign(columnDefaults, built.defaults);
+  loadedGeneration = buildSchema.generation();
+  if (reason) {
+    console.log(
+      `[fake] ${reason}: schema REBUILT — ${Object.keys(schema).length} tables, `
+      + `alerts has ${(schema.alerts || []).length} columns`,
+    );
+  }
+}
+refreshSchema();
+
+/**
+ * Re-read the migrations when they have changed on disk.
+ *
+ * A stand-in left running across a migration otherwise rejects the column that
+ * migration adds, exactly as it rejects one that does not exist — and the
+ * screen built on it comes back empty while the harness names the screen. One
+ * `stat` per file, at most once a second, and nothing is read unless the
+ * fingerprint has moved.
+ */
+let lastChecked = 0;
+function refreshSchemaIfStale() {
+  const now = Date.now();
+  if (now - lastChecked < 1000) return;
+  lastChecked = now;
+  if (buildSchema.generation() !== loadedGeneration) {
+    refreshSchema('supabase/migrations/ changed while this stand-in was running');
+  }
+}
 
 const PORT = Number(process.env.FAKE_SUPABASE_PORT || 54321);
 
@@ -366,6 +411,11 @@ const server = http.createServer(async (req, res) => {
   };
 
   log.push({ method: req.method, path: url.pathname, search: url.search });
+
+  // Before anything is answered from the schema, make sure the schema is the
+  // one on disk. A migration applied while this process was up must not read
+  // back as a column that does not exist.
+  refreshSchemaIfStale();
 
   if (req.method === 'OPTIONS') return send(204, null);
 

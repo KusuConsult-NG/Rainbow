@@ -859,6 +859,49 @@ jobs:
       - name: Assert every console control is operable and named
         run: python3 scripts/check_console_controls.py
 
+      # Every scripted button in every map popup was dead from the day the CSP
+      # shipped. The popups are built as HTML strings, so their buttons carried
+      # `onclick="window._hqDossier('<id>')"` — and `script-src 'self'
+      # 'nonce-…' 'strict-dynamic'` has no `'unsafe-inline'`: a nonce can
+      # authorise a `<script>` element and CANNOT authorise an event handler
+      # ATTRIBUTE, so Chrome refused all of them. DOSSIER, DISPATCH and RESOLVE
+      # did nothing on the screen the console opens on. `csp.test.ts` asserts
+      # the header, not what the header does to the page, and the component
+      # tests asserted the `onclick` attribute and the global separately —
+      # defending the halves of a join that never worked.
+      # The two non-emergency categories live in the app's Dart and the
+      # routing lives in SQL, matched on the category before " - ". A category
+      # renamed on one side and not the other means a report of a destroyed
+      # culvert is filed as an emergency: pushed to the field responders at
+      # 02:00 and escalated to HQ by morning. This gate was written with T-47
+      # and was wired into nothing — found by checking that every
+      # `scripts/check_*.py` is actually run by this file.
+      - name: Assert the non-emergency categories agree with the SQL
+        run: python3 scripts/check_non_emergency_categories_agree.py
+
+      - name: Assert no inline event handler the CSP will refuse
+        run: python3 scripts/check_no_inline_handlers.py
+
+      # The local Supabase stand-in rejects a column no migration defines, in
+      # full, the way PostgREST does. It read that column list once, at require
+      # time — so a stand-in left running across a migration rejected the
+      # column that migration had just added, the whole query failed, and the
+      # screen built on it came back empty while the run reported the SCREEN
+      # broken. Three checks failed naming the agency liaison desk on code that
+      # was fine. Same trap as a stale `next-server` holding :3000 while
+      # `.next` is rebuilt underneath it, which has invalidated two runs.
+      - name: Assert the stand-in answers from the migrations as they are now
+        run: python3 scripts/check_standin_reads_live_schema.py
+
+      # `check_non_emergency_categories_agree.py` was written with T-47,
+      # mutation-tested six ways, and wired into nothing — so a category
+      # renamed on one side only would have sailed through, and a destroyed
+      # culvert would have been filed as an emergency. A gate nothing runs does
+      # not fail; it reports nothing, forever, and reads as coverage. This asks
+      # the question that found it.
+      - name: Assert every gate in scripts/ is actually run
+        run: python3 scripts/check_every_gate_runs.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

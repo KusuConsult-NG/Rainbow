@@ -210,6 +210,40 @@ describe('LiveMap', () => {
     expect(button, 'a PENDING incident must be dispatchable from the map').not.toBeUndefined();
   });
 
+  it('routes an action it was not given a button for, with the tier from the incident', async () => {
+    // The listener switches on `data-hq-action`, and `escalate` is a branch no
+    // popup currently renders a button for — the global it replaces
+    // (`window._hqEscalate(id, tier)`) was installed by this component and
+    // called from nowhere at all, so the only caller it ever had would have
+    // been passing a tier invented at the call site.
+    //
+    // This presses a button carrying that action to prove two things: the
+    // listener is a real router rather than one handler per popup, and the
+    // tier it hands on comes from the INCIDENT. A string in the markup is not
+    // a fact about where the incident currently sits.
+    const LiveMap = await load();
+    const escalated: Array<[string, string]> = [];
+    const { container } = render(
+      <LiveMap
+        alerts={[alert('a-1', 9.9167, 8.8917, { assigned_tier: 'LGA' } as Partial<Alert>)]}
+        agents={[]}
+        onResolve={noop}
+        onEscalate={(ids, tier) => escalated.push([String(ids), tier])}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(markerCount(container)).toBeGreaterThan(0), { timeout: 5000 });
+
+    const popup = await openPopup(container);
+    const button = document.createElement('button');
+    button.setAttribute('data-hq-action', 'escalate');
+    button.setAttribute('data-hq-id', 'a-1');
+    popup.appendChild(button);
+    button.click();
+
+    await waitFor(() => expect(escalated).toEqual([['a-1', 'LGA']]), { timeout: 2000 });
+  });
+
   it('opens the full dossier for the incident clicked', async () => {
     const LiveMap = await load();
     const opened: string[] = [];
@@ -230,13 +264,25 @@ describe('LiveMap', () => {
       (b) => b.textContent === 'DOSSIER',
     ) as HTMLButtonElement;
     expect(button).not.toBeUndefined();
-    // The button carries the call, and the handler it names does the work. The
-    // two halves are asserted separately because jsdom evaluates an inline
-    // `onclick` in its own global scope, which is not the one vitest gives the
-    // test — a real click is covered by the browser harness
-    // (scripts/local_e2e), where there is a real window.
-    expect(button.getAttribute('onclick')).toBe("window._hqDossier('a-1')");
-    (window as unknown as { _hqDossier: (id: string) => void })._hqDossier('a-1');
+    // A REAL CLICK, all the way through.
+    //
+    // This used to assert the two halves separately — that the button carried
+    // `onclick="window._hqDossier('a-1')"`, and that calling that global did
+    // the work — with a comment explaining that jsdom evaluates an inline
+    // handler in its own global scope, so the join could not be tested here
+    // and was left to the browser harness. The browser harness pressed it,
+    // recorded "nothing", and that was not a failing check: the console's own
+    // CSP (`script-src` with no `'unsafe-inline'`) refuses inline event
+    // handlers, so the join NEVER WORKED and neither half said so.
+    //
+    // The button now carries `data-hq-action` and the map listens once, which
+    // is CSP-safe and clickable in jsdom, so the whole path is one assertion.
+    expect(button.getAttribute('onclick')).toBeNull();
+    expect(button.getAttribute('data-hq-action')).toBe('dossier');
+    expect(button.getAttribute('data-hq-id')).toBe('a-1');
+
+    button.click();
+
     expect(opened).toEqual(['a-1']);
   });
 

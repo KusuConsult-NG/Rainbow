@@ -743,6 +743,34 @@ async function writeMark() {
   // could not reach them at all; `check_console_controls.py` gates that
   // statically, and this is the half a static check cannot make: that the key
   // actually closes the thing in a browser.
+  // DID THE CONSOLE EVEN LOAD?
+  //
+  // Asserted here rather than assumed, because a run against a half-served
+  // build produced EIGHT findings about controls instead of one about the
+  // build: three map buttons "did nothing", five nav entries were "not
+  // found", and the real cause was a `next start` still holding :3000 while
+  // the build underneath it had been replaced — every chunk request answering
+  // 500, the app's JavaScript never running, and the error boundary showing
+  // CONSOLE FAILED. The port check said 200 and the sweep carried on.
+  //
+  // Two hours went into chasing control-level explanations for an environment
+  // fault. A harness that cannot load the app must say THAT.
+  const booted = await page.evaluate(() => ({
+    failed: /CONSOLE FAILED/i.test(document.body.innerText || ''),
+    controls: [...document.querySelectorAll('button, a[href], [role="button"]')]
+      .filter((b) => !b.disabled && b.offsetParent !== null).length,
+  }));
+  check(
+    'the console loaded its own JavaScript',
+    !booted.failed && booted.controls > 5,
+    booted.failed
+      ? 'the page shows CONSOLE FAILED — the app\'s JS did not run. Usually a '
+        + 'stale server: a `next start` holding the port while .next was '
+        + 'rebuilt under it. Stop it first (pkill -f next-server), then build, '
+        + 'then start. Every finding below this line is suspect.'
+      : `${booted.controls} operable controls on the dashboard`,
+  );
+
   state.screen = 'hq:dossier-keyboard';
   const stillOpen = () => page.evaluate(
     () => !!document.querySelector('[role="dialog"][aria-modal="true"]'),
@@ -797,6 +825,131 @@ async function writeMark() {
         : 'there was no dialog open, so this proves nothing'),
   );
   await shot(page, '69b-hq-dossier-closed-by-escape');
+
+  // -----------------------------------------------------------------------
+  // THE MAP POPUP'S OWN BUTTONS.
+  //
+  // The Intelligence Map is the screen this console opens on, and a marker's
+  // popup is how a dispatcher acts on a pin. Those buttons carried
+  // `onclick="window._hqDossier('…')"`, and this console's CSP is
+  // `script-src 'self' 'nonce-…' 'strict-dynamic'` with no `'unsafe-inline'`:
+  // a nonce cannot authorise an event handler ATTRIBUTE, so the browser
+  // refused every one of them. DOSSIER, DISPATCH and RESOLVE were dead from
+  // the day that policy shipped.
+  //
+  // Nothing caught it. The sweep pressed them and logged "nothing", which is
+  // not a failing check; `csp.test.ts` asserts the header, not what the header
+  // does to the page; and the component tests asserted the `onclick`
+  // attribute and the global SEPARATELY, because jsdom cannot evaluate an
+  // inline handler — so the join was never tested anywhere, and it never
+  // worked. This is the join, in a browser, with the real policy applied.
+  state.screen = 'hq:map-popup';
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle2' });
+  await sleep(4000);
+
+  // Opening one takes some finding, and the first two versions of this did not
+  // do it.
+  //
+  // The markers are CLUSTERED, and a cluster icon carries the same
+  // `.leaflet-marker-icon` class as a single incident — pressing one ZOOMS the
+  // map and opens nothing. Pressing the first icon and reporting `true`
+  // therefore asserted that A MARKER EXISTED, which is not the same claim as a
+  // popup being open: the two checks after it ran against no popup at all and
+  // failed with "no DOSSIER control in the popup", which reads exactly like
+  // the defect this block exists to catch and is not it.
+  //
+  // Stopping at the first popup was still wrong. The RESPONDERS are markers
+  // too, and theirs is a status card with no actions on it — so the run
+  // reported "actions: none" having opened Sgt. Danjuma Yusuf.
+  //
+  // So: press markers until an INCIDENT popup is open, which is the one that
+  // offers actions, and keep every popup seen on the way — because a handler
+  // attribute on a responder's card is refused by the same policy and belongs
+  // in the same failure.
+  const popup = await (async () => {
+    const seen = [];
+    let markers = 0;
+    for (let pass = 0; pass < 12; pass++) {
+      markers = await page.evaluate((i) => {
+        document.querySelector('.leaflet-popup-close-button')?.click();
+        const icons = [...document.querySelectorAll('.leaflet-marker-icon')];
+        if (!icons.length) return 0;
+        icons[i % icons.length].dispatchEvent(
+          new MouseEvent('click', { bubbles: true, cancelable: true, view: window }),
+        );
+        return icons.length;
+      }, pass);
+      if (!markers) break;
+      await sleep(1100);
+      const open = await page.evaluate(() => {
+        const content = document.querySelector('.leaflet-popup .leaflet-popup-content');
+        if (!content) return null;
+        return {
+          actions: [...content.querySelectorAll('[data-hq-action]')]
+            .map((b) => b.getAttribute('data-hq-action')),
+          // Every HTML event handler attribute starts with `on`, and this
+          // console's CSP refuses all of them.
+          inline: [...content.querySelectorAll('*')]
+            .filter((e) => [...e.attributes].some((a) => /^on[a-z]+$/i.test(a.name)))
+            .map((e) => e.tagName.toLowerCase()),
+          text: (content.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60),
+        };
+      });
+      if (!open) continue;        // a cluster: it zoomed, and spread the pins
+      seen.push(open);
+      if (open.actions.length) return { found: open, seen, markers, pass: pass + 1 };
+    }
+    return { found: null, seen, markers };
+  })();
+
+  const inlineAnywhere = popup.seen.flatMap((p) => p.inline);
+  check(
+    'a map marker opens an incident popup, with its actions on it',
+    !!popup.found,
+    popup.found
+      ? `opened on press ${popup.pass} of 12; ${popup.markers} marker icon(s); `
+        + `${popup.seen.length} popup(s) seen`
+      : (popup.markers
+        ? `pressed every one of ${popup.markers} marker icon(s) over 12 passes `
+          + `and got ${popup.seen.length} popup(s), none with an action on it`
+          + (popup.seen.length ? `: ${popup.seen.map((p) => p.text).join(' | ')}` : '')
+        : 'no marker icons on the map at all'),
+  );
+  check(
+    'the popup carries its actions as data, not as inline handlers',
+    !!popup.found
+      && popup.found.actions.includes('dossier')
+      && inlineAnywhere.length === 0,
+    popup.found
+      ? `actions: ${popup.found.actions.join(', ') || 'none'}`
+        + (inlineAnywhere.length
+          ? `; ${inlineAnywhere.length} inline handler(s) on <`
+            + `${[...new Set(inlineAnywhere)].join('>, <')}> — each one the CSP refuses`
+          : '; no handler attributes in any popup')
+      : 'no popup with actions to look at',
+  );
+
+  const dossierFromMap = await page.evaluate(() => {
+    const b = document.querySelector('.leaflet-popup [data-hq-action="dossier"]');
+    if (!b) return false;
+    b.click();
+    return true;
+  });
+  await sleep(2000);
+  const dossierOpenedFromMap = await page.evaluate(
+    () => !!document.querySelector('[role="dialog"][aria-modal="true"]'),
+  );
+  check(
+    'DOSSIER on a map popup opens the incident',
+    dossierFromMap && dossierOpenedFromMap,
+    dossierFromMap
+      ? (dossierOpenedFromMap ? '' : 'pressed, and no dossier opened — the '
+        + 'handler never ran (an inline handler the CSP refuses, or no listener)')
+      : 'no DOSSIER control in the popup',
+  );
+  await shot(page, '69c-hq-dossier-from-the-map');
+  await page.keyboard.press('Escape');
+  await sleep(800);
 
   // -----------------------------------------------------------------------
   // Mass broadcast.
@@ -936,6 +1089,11 @@ async function writeMark() {
         const external = await page.evaluate((idx) => {
           const b = window.__sweep?.[idx];
           const href = b?.getAttribute?.('href') || '';
+          // `tel:` and `mailto:` hand off to the operating system, so in a
+          // browser they change nothing — which the sweep reported as a dead
+          // control. The CALL button on a map popup is a `tel:` link, and it
+          // is the app working: there is a number, and pressing it dials.
+          if (/^(tel|mailto|sms):/i.test(href)) return true;
           return /^https?:/i.test(href) && !href.includes('127.0.0.1');
         }, i);
         if (external) {

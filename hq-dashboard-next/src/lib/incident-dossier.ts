@@ -615,13 +615,34 @@ export function incidentPopupHtml(alert: Alert, opts: PopupOptions): string {
          )}</p>`
     : '';
 
-  const button = (label: string, bg: string, onclick: string) =>
-    `<button onclick="${onclick}" style="flex:1 1 auto;min-width:74px;padding:7px 10px;background:${bg};color:#fff;border:none;border-radius:7px;font-size:10px;font-weight:800;letter-spacing:0.5px;cursor:pointer">${label}</button>`;
+  /**
+   * DATA ATTRIBUTES, NOT `onclick`.
+   *
+   * These buttons carried `onclick="window._hqDossier('…')"`, and the console's
+   * own Content Security Policy is `script-src 'self' 'nonce-…'
+   * 'strict-dynamic'` with no `'unsafe-inline'` — deliberately, for the reasons
+   * written out at length in `lib/csp.ts`. A nonce cannot apply to an inline
+   * EVENT HANDLER attribute, so the browser refuses every one of them:
+   *
+   *   Refused to execute inline event handler because it violates the
+   *   following Content Security Policy directive: "script-src …"
+   *
+   * So every scripted action in a map popup — DOSSIER, DISPATCH, RESOLVE —
+   * was dead on the console's landing screen, from the day that policy
+   * shipped. The CSP is right; the popup was never revisited.
+   *
+   * `LiveMap` now listens once on the map container and reads these
+   * attributes, which is CSP-safe and also removes the four `window._hq*`
+   * globals the old arrangement needed. `scripts/check_no_inline_handlers.py`
+   * fails on the next `onclick=` written into an HTML string.
+   */
+  const button = (label: string, bg: string, action: string) =>
+    `<button type="button" data-hq-action="${action}" data-hq-id="${escapeHtml(id)}" style="flex:1 1 auto;min-width:74px;padding:7px 10px;background:${bg};color:#fff;border:none;border-radius:7px;font-size:10px;font-weight:800;letter-spacing:0.5px;cursor:pointer">${label}</button>`;
 
   const actions = [
-    button('DOSSIER', '#4F46E5', `window._hqDossier('${id}')`),
-    canDispatch(alert.status) ? button('DISPATCH', '#0277BD', `window._hqShowDispatch('${id}')`) : '',
-    canResolve(alert.status) ? button('RESOLVE', '#1B5E20', `window._hqResolve('${id}')`) : '',
+    button('DOSSIER', '#4F46E5', 'dossier'),
+    canDispatch(alert.status) ? button('DISPATCH', '#0277BD', 'dispatch') : '',
+    canResolve(alert.status) ? button('RESOLVE', '#1B5E20', 'resolve') : '',
     isDiallable(reporter.contact)
       ? `<a href="tel:${escapeHtml(reporter.contact.replace(/[^\d+]/g, ''))}" style="flex:1 1 auto;min-width:74px;padding:7px 10px;background:#0F766E;color:#fff;border-radius:7px;font-size:10px;font-weight:800;letter-spacing:0.5px;text-align:center;text-decoration:none">CALL</a>`
       : '',

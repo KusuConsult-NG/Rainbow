@@ -1260,6 +1260,8 @@ only thing that distinguishes a defect from a preference.
 | T-45 | **"ACTIVE INCIDENTS" emptied the board.** `'ACTIVE'` is not one of the ten statuses an alert can carry, and two controls set it: the status dropdown's ACTIVE INCIDENTS option and the ACTIVE tile in the UNIT STATUS panel. `filterAlerts` compares `a.status !== filters.status`, so both filtered the board down to **nothing, always** — the one control that says *show me what is happening now* produced an empty feed, which on this console is what reads as ALL CLEAR (T-33 is the finding about a board that cannot say why it is empty; this is a control whose only possible effect was to produce one). The tile was wrong twice: it advertised `alerts.length`, every incident in the window with resolved ones included, above a filter that would show none of them. Found by the TYPECHECKER while making the tile keyboard-operable for T-44 — and it could only speak because an earlier finding had completed the status union, making the comparison an error instead of a silently-false expression. | ✅ `isLiveIncident()` (not RESOLVED, not CANCELLED) in `alert-display.ts`, used by both the filter branch and the tile's count, so the number and the action cannot disagree again; the count is sector-scoped like the DURESS tile beside it; the tiles carry `aria-pressed` for the filter they apply. 2 tests, one of which fails against the old comparison |
 | T-46 | **The one path for somebody who cannot type threw away what they said.** AI VOICE REPORT ran speech-to-text, filed the TRANSCRIPT, and recorded no audio — and `if (_transcription.trim().isEmpty) return;` meant a recogniser that is offline or has never heard Hausa or Pidgin produced *"No voice input recorded"* and **filed nothing at all**, from somebody speaking perfectly clearly. The other microphone path kept the file but uploaded it into `media_urls` — the evidence list — so a responder's card said "3 attachments" with no way to tell one was a person speaking, and it wrote `[AUDIO_REPORT] voice message recorded` into the narrative field, so that marker arrived at HQ as the incident's description. Neither screen could PLAY it: both handed the url to the platform (`launchUrl`, a browser tab), which on a handset means leaving the app mid-incident — past a re-entry lock that can then demand a code — and for a Cloudinary `/raw/` link is often a download. There was no audio-player dependency in the app at all. | ✅ `alerts.voice_note_url` + `voice_note_seconds`: the reporter's voice in its own column, with its length so a responder on a weak connection knows what they are about to pull. `VoiceNoteService` records FIRST and treats the transcript as a bonus, discards a sub-second mis-tap, and caps at the ten minutes the row's own CHECK allows. `VoiceNotePlayer` plays it in the app and says when it failed and why; the console uses `<audio controls preload="metadata">`. Shown above the evidence on the responder's screen, the HQ dossier and the agency desk — a liaison has that desk and nothing else. 11 Dart tests, 8 console tests |
 | T-47 | **"Not an emergency" had to be enforced, not labelled.** Two new categories for government property mismanaged, destroyed, abandoned, unsafe or needing repair — and this system treats everything as a kidnapping. `queue_new_incident_notice()` announces every INSERT to the tier it landed at and the drain widens a UNIT notice to the **field responders**, so a culvert filed at 02:00 would push to the handsets of the people who go; `escalate_overdue_alerts()` climbs anything unacknowledged, so by morning a street light would be an HQ-tier incident with three escalations against it, among the night's real emergencies. | ✅ `is_non_emergency(type)` matched on the category before " - " (so every subtype is covered and a new one needs no migration), a BEFORE INSERT trigger files it at the LGA with no responder assigned and records why, and the timeout sweep skips it — built the same way as the two mechanisms that already existed for this (`is_oversight_matter`, `awaiting_human_confirmation`) rather than a third way. It is NOT hidden: still on the board, in the feed, on the map, filterable. `check_non_emergency_categories_agree.py` keeps the app's labels and the SQL's one list — 6 mutations, and its own first version matched the function name as a PREFIX, so a rename that breaks every caller passed. 7 SQL assertions, including that an overdue kidnapping still climbs and an oversight matter still goes to HQ |
+| T-48 | **Every button in every map popup was dead, and our own CSP was why.** The Intelligence Map is the screen the console OPENS on, and a marker's popup is how a dispatcher acts on a pin: DOSSIER, DISPATCH, RESOLVE. The popups are HTML strings, so the buttons carried `onclick="window._hqShowDispatch('…')"` — and `script-src 'self' `'nonce-…' 'strict-dynamic'` has **no** `'unsafe-inline'`: a nonce authorises a `<script>` ELEMENT and cannot authorise an event handler ATTRIBUTE, so Chrome refused all of them from the day that policy shipped. No error reached the operator. Three layers nearly caught it and each measured the wrong half: the sweep logged `changed: NOTHING`, which is a log line and not a check; `csp.test.ts`'s seven tests assert the HEADER, not what the header does to the page; and the component tests asserted the `onclick` attribute and the global SEPARATELY, with a comment explaining that jsdom cannot evaluate an inline handler — so the join was tested nowhere, never worked, and the suite was defending it. | ✅ Delegation: the buttons carry `data-hq-action`/`data-hq-id` and `LiveMap` listens once on its container. Both tests now press the real button and assert the real outcome. `check_no_inline_handlers.py` forbids the `on<event>="…"` attribute form in the console (a React `onClick={fn}` prop is unaffected), and the browser harness opens a popup and asserts it carries its actions as data, zero handler attributes, and that DOSSIER opens the dossier. 2 new console tests (one of them presses an action no popup renders a button for, to prove the listener routes and that the tier it hands on comes from the incident rather than the markup) and one rewritten from asserting the attribute to pressing the button, and `check_no_inline_handlers.py` — 6 shapes it must catch (both cases of the attribute, every event name, spaces round the `=`) and 6 it must allow, among them a camelCase React prop that happens to start with those two letters |
+| T-49 | **The harness reported the agency liaison desk broken, and it was the stand-in.** `fake_supabase.js` rejects a column no migration defines, in full, the way PostgREST does — and read that column list ONCE, at require time. A stand-in started at 13:06 was still answering at 14:28, after T-46 had added `alerts.voice_note_url` and given the agency portal's `select` the new column: `UNKNOWN COLUMN alerts.voice_note_url (read)`, the whole query failed, and the one surface an outside agency ever sees came back with no incidents. Three checks failed naming the card and both its buttons, on code that was fine. Same trap as a stale `next-server` holding :3000 while `.next` is rebuilt underneath it — which is what the five "missing" navigation tabs were, and which has now invalidated two runs. A long-lived process answering from a snapshot does not report an error; it reports the PRODUCT broken, on exactly the screen that depends on the thing that moved. | ✅ The stand-in refills its schema rather than freezing it, and compares a fingerprint of every migration's name, size and mtime before answering — rebuilding, loudly, when it moves; proved both directions against a live stand-in. `check_standin_reads_live_schema.py` keeps the require-time freeze from returning and fails if the refresh is defined but never called — 9 mutations. `interact.js` gained a boot assertion that fails the run on a console serving a build it cannot load, with the remedy in the message |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -4564,6 +4566,201 @@ two new ones would have been swept by nothing, while the check that says
 *"every reporting category can be selected"* went on passing. It now reads the
 labels out of `alert_categories.dart` and throws if it parses fewer than ten,
 because a sweep that silently tests almost nothing is worse than one that fails.
+
+---
+
+## Chasing two reports from the console sweep
+
+The sweep's own log said three map popup controls did nothing and five
+navigation tabs were missing. One was the most consequential defect in this
+pass. The other four — plus three more that appeared while proving the first —
+were the harness lying about the product, in two different ways, both of them
+the same shape.
+
+### T-48. Every button in every map popup was dead, and the CSP was why
+
+The Intelligence Map is the screen this console opens on. A marker's popup is
+how a dispatcher acts on a pin: **DOSSIER**, **DISPATCH**, **RESOLVE**, CALL.
+The popups are built as HTML strings, so their buttons carried
+
+```html
+<button onclick="window._hqShowDispatch('aaaa1111-…-a004')">DISPATCH</button>
+```
+
+and `LiveMap` installed four `window._hq*` functions for them to reach.
+
+`src/lib/csp.ts` sets `script-src 'self' 'nonce-…' 'strict-dynamic'`, with no
+`'unsafe-inline'` — deliberately, and that file writes out at length why. A
+nonce authorises a `<script>` ELEMENT. It cannot authorise an inline event
+handler ATTRIBUTE: those need `'unsafe-inline'` (or CSP3's `'unsafe-hashes'`),
+so Chrome refuses them outright. The probe says it in one line:
+
+```
+DISPATCH: control={"tag":"BUTTON","onclick":"window._hqShowDispatch('…a004')"}
+  changed: NOTHING
+  - Refused to execute inline event handler because it violates the following
+    Content Security Policy directive: "script-src …"
+```
+
+So from the day that policy shipped, pressing DOSSIER, DISPATCH or RESOLVE on
+any pin on the landing screen did nothing at all. No error reached the
+operator; the console does not read its own CSP reports. CALL was a false
+positive in the sweep's log — it is a `tel:` link, and a link that leaves the
+page changes nothing the sweep can see.
+
+**Three layers each nearly caught it, and each measured the wrong half.**
+
+* The browser sweep pressed them and recorded `changed: NOTHING` — which is a
+  line in a log, not a failing check. It also reported the same labels as
+  working on a *second* popup, because state from earlier presses leaked
+  between them.
+* `csp.test.ts` has seven tests, and asserts the **header**: that
+  `script-src` has no `'unsafe-inline'`, that the nonce is per-response. Every
+  one of them passes. None of them asks what the header does to the page.
+* `LiveMap.test.tsx` and `incident-dossier.test.ts` asserted the two halves
+  **separately** — that the button carried the `onclick` string, and that
+  calling `window._hqDossier` did the work — with a comment explaining that
+  jsdom evaluates an inline handler in its own global scope, so the join could
+  not be tested there. The join never worked. The suite was defending it.
+
+That is the lesson worth keeping: a policy test that reads the policy is not a
+test of the policy. Two tests that each assert one end of a connection assert
+nothing about the connection, and a comment saying why it cannot be tested is
+where a defect goes to live.
+
+The fix is delegation. The popup's buttons carry `data-hq-action` and
+`data-hq-id`; `LiveMap` listens **once**, on the map container, and switches on
+the action. CSP-safe, no globals, and — the point — clickable in a test, so
+both tests now press the real button and assert the real outcome.
+`check_no_inline_handlers.py` forbids the `on<event>="…"` attribute form
+anywhere in the console's source (a React `onClick={fn}` prop is a function
+reference and is unaffected, which is why the gate matches the quoted-attribute
+shape rather than the word). And the browser harness now opens a popup and
+asserts that it carries its actions as data, that it carries zero handler
+attributes, and that DOSSIER opens the dossier — the join, in a browser, with
+the real policy applied.
+
+### The five missing navigation tabs were a stale build
+
+An old `next-server` held `:3000` while `.next` was rebuilt underneath it.
+Every chunk request then 500s, the console renders `CONSOLE FAILED`, and the
+health check still answers 200 — so the run went on and reported five missing
+nav tabs on two roles. Served properly, the LGA desk has all five
+(Intelligence Map, Incident Feed, Mission History, Communications & Broadcast,
+Inter-Agency Command) and the police liaison has both of its own.
+
+This has now invalidated two runs, and `run.sh` already refuses to start when
+either port is taken for exactly this reason. So `interact.js` gained a boot
+assertion — **the console loaded its own JavaScript** — which fails the run on
+`CONSOLE FAILED` or on a dashboard with five or fewer operable controls, and
+says in the failure message how to free the port and rebuild. A run that
+cannot tell a broken product from a broken harness is not evidence of either.
+
+### T-49. The stand-in answered from a schema that no longer existed
+
+Then, while proving T-48, the same trap sprang again in a different process.
+Three checks failed naming the agency liaison desk: its incident card could not
+be expanded, DEPLOY was not offered, no action report could be filed. The
+screen was empty, and the code was fine.
+
+`fake_supabase.js` rejects a column no migration defines — in full, with a 400,
+taking the whole query with it, because that is what PostgREST does and an
+entire class of this system's defects was a screen naming a column that did not
+exist. It read that column list **once**, at require time:
+
+```js
+const { columns: schema } = require('./schema').build();
+```
+
+The stand-in answering the run had been started at 13:06. At 14:12, T-46 added
+`alerts.voice_note_url` and gave the agency portal's `select` the new column.
+At 14:28 that stand-in was still answering, from 13:06's migrations:
+
+```
+[fake] UNKNOWN COLUMN alerts.voice_note_url (read) — rejected, as PostgREST would
+```
+
+One rejected column, and the liaison desk — the only surface an outside agency
+ever sees — came back with no incidents at all.
+
+The same cause explains the one other oddity in that run's log: a bare
+`400 Bad Request` on the police liaison desk, which is the same screen with
+`agency = POLICE`. With the stand-in restarted, the run reports zero unknown
+columns and the desk works.
+
+It is the stale `next-server` again, one process over: a long-lived server
+answering from a snapshot of something that has since moved does not report an
+error. It reports the **product** broken, convincingly, on precisely the screen
+that depends on the thing that moved. Twice in one afternoon, from two
+different processes, and both times the failure named a real screen and three
+real controls.
+
+So the stand-in now holds its schema in containers it REFILLS rather than
+replaces, and compares a fingerprint of `supabase/migrations/` — every file's
+name, size and mtime — before answering anything from it, at most once a
+second. When it moves, it rebuilds and says so. Proved both directions against
+a live stand-in: withdraw the migration and the column is rejected again,
+restore it and it is accepted, each move logged —
+
+```
+[fake] supabase/migrations/ changed …: schema REBUILT — 20 tables, alerts has 48 columns
+[fake] UNKNOWN COLUMN alerts.voice_note_url (read) — rejected, as PostgREST would
+[fake] supabase/migrations/ changed …: schema REBUILT — 20 tables, alerts has 50 columns
+```
+
+`check_standin_reads_live_schema.py` keeps the require-time freeze from coming
+back, and fails if the refresh exists but nothing in the request path calls it
+— 9 mutations.
+
+What it deliberately does not do is re-run the FIXTURE self-check on a
+mid-flight rebuild. That check — a fixture row naming a column the migrations
+do not define — still runs only at boot, so a migration that renames a column
+the fixtures use is caught on the next start rather than mid-run. Restarting
+the stand-in is the normal path (`run.sh` refuses to start while either port is
+held, for this family of reasons); the refresh exists so that the abnormal one
+cannot report a lie.
+
+### And the new check was wrong twice before it was right
+
+The assertion written to catch T-48 reported PASS while the two checks after it
+failed with *no DOSSIER control in the popup*, which reads exactly like the
+defect and was not it. Twice, for two different reasons, and both are worth
+writing down because both are the same mistake in different clothes.
+
+The first version:
+
+```js
+const marker = document.querySelector('.leaflet-marker-icon');
+if (!marker) return false;
+marker.dispatchEvent(new MouseEvent('click', …));
+return true;                  // "a map marker opens its popup"
+```
+
+The markers are **clustered**, a cluster icon carries the same
+`.leaflet-marker-icon` class as a single incident, and pressing one zooms the
+map and opens nothing. `return true` asserted that a marker EXISTED. A thing
+being present is not the same as a thing being visible — the third time that
+sentence has had to be written in this report, and the first time about one of
+my own checks.
+
+The second version pressed markers until a popup was open, and stopped at the
+first one. The **responders** are markers too, and theirs is a status card with
+no actions on it, so the run reported `actions: none` having opened
+
+```
+Sgt. Danjuma Yusuf  STATUS: ON_ROUTE  BATTERY: 62% | NET: WIFI
+```
+
+Both versions were measuring something adjacent to the claim and reporting it
+as the claim. It now presses markers until an **incident** popup is open — the
+one that offers actions — says which press opened it and how many popups it
+saw, and keeps every popup seen on the way, because a handler attribute on a
+responder's card is refused by the same policy and belongs in the same failure.
+With that, on a correctly served console: an incident popup opened within the
+first few presses, actions `dossier, dispatch, resolve`, no handler attributes
+in any popup, and DOSSIER opens the dossier. Which press finds the incident
+depends on how the pins happen to cluster, which is why the loop presses them
+all rather than trusting a position.
 
 ---
 
