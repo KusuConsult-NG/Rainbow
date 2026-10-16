@@ -12,6 +12,7 @@ import 'package:rainbow_app/app.dart';
 import 'package:rainbow_app/core/config/app_config.dart';
 import 'package:rainbow_app/core/providers/tactical_provider_observer.dart';
 import 'package:rainbow_app/core/startup/startup_failure.dart';
+import 'package:rainbow_app/core/net/resolving_http_overrides.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/services/alert_service.dart';
@@ -39,6 +40,23 @@ void main() {
     // loads a blank page and stops there" — which is what an installed APK
     // did. This replaces it with a screen that names the failure.
     installReadableErrorWidget();
+
+    // SECOND, and before anything opens a socket.
+    //
+    // A handset in Plateau, showing four bars of 4G, could not resolve the
+    // backend's hostname: "No address associated with hostname, errno = 7" —
+    // an EMPTY answer from the device's resolver, not a missing name. The
+    // same hostname loaded in Chrome on the same phone, because Chrome can
+    // resolve over its own DNS-over-HTTPS while Flutter goes through the
+    // system getaddrinfo(). A Private DNS profile, a filtering carrier
+    // resolver or a VPN all produce that split.
+    //
+    // Nobody reporting an emergency is going to be told to open Settings, so
+    // the app carries its own resolver and uses it only when the device's
+    // has already said no. `dart:io` holds its WebSocket client in a
+    // `static final`, so this has to be installed before the first socket or
+    // the realtime channel keeps the unmodified one for the session.
+    ResolvingHttpOverrides.install();
 
     FlutterError.onError = (details) {
       FlutterError.presentError(details);

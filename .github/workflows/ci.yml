@@ -1010,6 +1010,18 @@ jobs:
       - name: Assert no message blames a phone without asking it
         run: python3 scripts/check_no_blame_without_evidence.py
 
+      # The same missing DNS again, and this time fixed rather than reported.
+      # A handset on 4G could not resolve the backend — errno 7, an EMPTY
+      # answer from the device's resolver — while Chrome on the same phone
+      # loaded it, because Chrome resolves over DNS-over-HTTPS and Flutter
+      # goes through the system getaddrinfo(). Nobody reporting an emergency
+      # can be asked to go and fix Private DNS, so the app resolves the name
+      # itself. The obvious way to make that work is to stop checking the
+      # certificate, which would turn a DNS workaround into a hole in an app
+      # carrying duress PINs and the locations of people in danger.
+      - name: Assert the DNS fallback cannot weaken a connection
+        run: python3 scripts/check_dns_fallback_is_safe.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

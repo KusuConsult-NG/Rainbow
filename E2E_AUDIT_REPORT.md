@@ -7905,3 +7905,107 @@ spends the credibility that makes the next report — the true one — worth
 acting on. Two earlier findings in this report (T-49, T-52) are the same
 failure in different clothes: a check answering confidently from a snapshot
 that had stopped being true.
+
+### T-57. The app asked a citizen to fix their DNS
+
+The operator's words, and the whole brief:
+
+> **i just want users to signup using their phone number and use the app to
+> send alert how you will fix it is non of my propblem**
+
+That is the right answer to what had been offered. The handset could not
+resolve the backend —
+
+```
+SocketException: Failed host lookup: '<project>.supabase.co'
+(OS Error: No address associated with hostname, errno = 7)
+```
+
+— and the advice was *"Settings → Network & Internet → Private DNS."* That is
+a sentence for an engineer. The person it was aimed at is reporting a
+kidnapping at two in the morning. An emergency app whose front door needs the
+user to understand DNS over TLS does not have a front door.
+
+#### What errno 7 actually says
+
+Not "no such name". It is an **empty answer**: the resolver was reached, asked
+for the address records, and returned none. The same hostname opened in Chrome
+**on the same handset** answered at once — because Chrome can resolve over its
+own DNS-over-HTTPS, while Flutter goes through the system `getaddrinfo()`. A
+Private DNS profile, a carrier resolver filtering cloud hostnames, or a VPN
+that intercepts system DNS all produce exactly that split.
+
+So nothing was wrong with the app, the project, or the phone's connection.
+One resolver on the device was lying by omission, and the one the app happened
+to use was that one.
+
+#### What was done
+
+`lib/core/net/` — the app carries its own resolver and uses it **only after**
+the device's has already failed. `ResolvingHttpOverrides` is installed in
+`main()` before anything opens a socket, so every `HttpClient` the process
+creates goes through one connection factory, including the one `dart:io` keeps
+for WebSockets — which is how the Supabase realtime channel connects, and
+which is the connection that failed.
+
+Three things in it were checked against the SDK rather than assumed, because
+each of them silently ships broken or insecure if guessed:
+
+* **With a `connectionFactory` installed and a direct connection, `dart:io`
+  does not wrap the socket in TLS.** The `SecureSocket.startConnect` call sits
+  in the `else` branch that runs only when there is no factory
+  (`_http/http_impl.dart:2693`). So the factory negotiates TLS itself. Guess
+  wrong here and the app ships plaintext.
+* **With a proxy, `dart:io` builds the CONNECT tunnel and secures it itself**,
+  so the factory hands back a plain socket in that case. Securing it there
+  would put a TLS handshake inside a TLS handshake.
+* **`ConnectionTask.fromSocket` is a static method, not a named constructor.**
+  `ConnectionTask<Socket>.fromSocket(...)` does not compile — caught by the
+  compiler, which is the cheap way to be wrong.
+
+**Nothing about security is relaxed.** The socket is opened to the resolved
+*address*; TLS is then negotiated against the *hostname*, via
+`SecureSocket.secure(socket, host: name)`, so SNI and certificate validation
+are exactly what they were. The fallback resolvers are addressed by literal IP
+— `1.1.1.1` and `8.8.8.8` — so reaching them needs no DNS, which is the point,
+and both carry their own address in the certificate's SANs so that connection
+is verified too.
+
+**The system resolver is always tried first.** On a healthy network nothing
+changes and no DNS-over-HTTPS request is ever sent. A fallback that ran first
+would put a public resolver in the path of every emergency in Plateau.
+
+#### Coverage
+
+`test/doh_resolver_test.dart`, 12 tests, **and the end-to-end one needs no
+network at all**: a stub resolver and a stub service on loopback, and a
+request for a `.invalid` name that cannot resolve by definition. It arrives at
+the service. That is the whole mechanism — system lookup fails, the fallback
+answers, the socket opens to the address it gave — proved on a machine with
+DNS switched off.
+
+The other cases it pins, each of which is a way to be subtly useless:
+
+| case | why it matters |
+| --- | --- |
+| a CNAME before the A record | Supabase hostnames are CNAMEs; taking `Answer[0]` returns a name, not an address, so the fallback would do nothing on exactly the hostnames it exists for |
+| NOERROR with no answer | the fault being worked around, arriving from the public resolver too |
+| a healthy name | the fallback is never consulted — asserted, not assumed |
+| a refused port | reported as itself; retrying a refused port through another resolver just makes the citizen wait |
+| no resolver answers | the ORIGINAL error stands, so the message the citizen gets is still "cannot resolve" and not an error from the workaround |
+
+`scripts/check_dns_fallback_is_safe.py`, 5 mutations, all caught: a `secure()`
+that loses `host:`, a `badCertificateCallback` that accepts, a resolver named
+by hostname, a plaintext resolver, and the overrides never being installed.
+
+#### What this does not fix
+
+If the filtering is by IP or by SNI rather than by name, resolving the name
+differently changes nothing. That is one ten-minute test on the affected
+handset, and if it comes back that way the answer is a custom domain on the
+project — which is a purchase and a DNS record, not code.
+
+And sign-in still needs the SMS provider switched on in the Supabase project.
+`describeOtpSendFailure` has said so in plain words since T-53; it is the
+other thing standing between a citizen and an account, and it is not
+reachable from here either.
