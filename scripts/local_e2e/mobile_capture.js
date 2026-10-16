@@ -557,31 +557,110 @@ async function semanticsText(page) {
   // This stand-in applies no RLS, which is why no run caught this: the Police
   // liaison was shown four incidents never handed to the Police. Empty against
   // production, wrong here, green in both.
-  const HANDED = {
-    police: { to_us: 'convoy stopped at mushere', to_them: 'roadblock on the mangu road' },
-    army: { to_us: 'roadblock on the mangu road', to_them: 'convoy stopped at mushere' },
-  };
-  for (const [role, { to_us, to_them }] of Object.entries(HANDED)) {
-    const feed = (feedText[role] || '').toLowerCase();
-    check(
-      `${role} liaison: the incident handed to their agency is on their handset`,
-      feed.includes(to_us),
-      feed.includes(to_us)
-        ? 'delivered, and its LGA is not their posting'
-        : `NOT delivered. feed was: ${feed.replace(/\s+/g, ' ').slice(0, 160)}`,
-    );
-    check(
-      `${role} liaison: the incident handed to the other agency is not`,
-      !feed.includes(to_them),
-      !feed.includes(to_them) ? 'withheld' : 'another agency\'s incident is on their feed',
-    );
-    check(
-      `${role} liaison: incidents handed to nobody are not on their handset`,
-      !feed.includes('armed men at the junction'),
-      !feed.includes('armed men at the junction')
-        ? 'withheld — their posting is not what makes an incident theirs'
-        : 'an incident escalated to nobody reached an outside agency',
-    );
+  // READ THE STAND-IN, DO NOT TRUST THE FIXTURE.
+  //
+  // This block used to name the incidents by hand: a005 is the Army's, a006 is
+  // the Police's, and a001 ("Armed men at the junction") is handed to nobody.
+  // That was true of `fixtures.js` and false by the time this pass ran.
+  //
+  // `interact.js` runs first, against the same stand-in, and it presses the
+  // console's real controls — including ESCALATE, on whichever incident owns
+  // the first ESCALATE button on the feed. Polled every ten seconds during a
+  // run, a001 went:
+  //
+  //     PENDING -> DISPATCHED -> RESOLVED -> PENDING -> ESCALATED('ALL')
+  //
+  // and was never restored. The agency it lands on is not pinned either: the
+  // harness picks ARMY if the modal offers it, POLICE if not, and the form's
+  // own default ('ALL') when it finds no select at all. So on some runs a001
+  // really is handed to the Police — and this pass then reported the Police
+  // liaison seeing it as "an incident escalated to nobody reached an outside
+  // agency", which was a failure of the assertion, not of the app.
+  //
+  // The rule worth asserting does not depend on any of that: an incident
+  // reaches a liaison if and only if it is escalated to THEIR agency. So read
+  // what the stand-in holds at this moment and assert that.
+  const liveAlerts = await fetch(
+    'http://127.0.0.1:54321/rest/v1/alerts?select=description,escalated_to_agency,status,assigned_to,assigned_responders',
+  ).then((r) => r.json()).catch(() => null);
+
+  check(
+    'the stand-in can still be read, so the liaison rules are checked against real state',
+    Array.isArray(liveAlerts) && liveAlerts.length > 0,
+    Array.isArray(liveAlerts)
+      ? `${liveAlerts.length} alert(s) read back`
+      : 'could not read alerts from the stand-in — the checks below would be vacuous',
+  );
+
+  if (Array.isArray(liveAlerts) && liveAlerts.length) {
+    // A description short enough to appear by accident is not a probe. Nothing
+    // in the fixtures is this short; the guard is here so that adding one does
+    // not silently turn a safety check into a coin toss.
+    const probe = (a) =>
+      (a.description || '').trim().replace(/\.$/, '').toLowerCase();
+    const usable = liveAlerts.filter((a) => probe(a).length >= 12);
+    const handedTo = (a) =>
+      (a.escalated_to_agency || '').trim().toUpperCase();
+
+    for (const [role, agency] of [['police', 'POLICE'], ['army', 'ARMY']]) {
+      const feed = (feedText[role] || '').toLowerCase();
+      const uid = byKey(role).id;
+
+      // An incident DISPATCHED to this officer by name is theirs whatever it
+      // was escalated to — `alertReaches` rule 1, before the agency rule — and
+      // the console pass dispatches a real incident to a real responder on
+      // every run. Counting one of those as a leak would be the same mistake
+      // in the other direction: an assertion that fails on correct behaviour.
+      const assignedToThem = (a) =>
+        a.assigned_to === uid ||
+        (Array.isArray(a.assigned_responders) && a.assigned_responders.includes(uid));
+
+      const theirs = usable.filter((a) => handedTo(a) === agency);
+      const notTheirs = usable.filter(
+        (a) => handedTo(a) !== agency && !assignedToThem(a),
+      );
+
+      // THE SAFETY PROPERTY. Nothing that was not handed to this agency may be
+      // on this agency's handset — whatever it was handed to instead, and
+      // whoever is posted where.
+      const leaked = notTheirs.filter((a) => feed.includes(probe(a)));
+      check(
+        `${role} liaison: only what was handed to ${agency} is on their handset`,
+        leaked.length === 0,
+        leaked.length === 0
+          ? `${notTheirs.length} incident(s) not handed to ${agency}, none of them on the feed`
+          : leaked
+              .map((a) => `"${probe(a)}" is handed to ${JSON.stringify(a.escalated_to_agency)} and is on the feed`)
+              .join('; '),
+      );
+
+      // THE DELIVERY PROPERTY, and only for incidents still open: an incident
+      // the console pass resolved is legitimately off the feed, and asserting
+      // it is present would re-introduce exactly the fixture assumption this
+      // block exists to remove.
+      const open = theirs.filter((a) => (a.status || '').toUpperCase() !== 'RESOLVED');
+      if (open.length) {
+        const delivered = open.filter((a) => feed.includes(probe(a)));
+        check(
+          `${role} liaison: what was handed to ${agency} reaches their handset`,
+          delivered.length === open.length,
+          delivered.length === open.length
+            ? `${open.length} open incident(s) handed to ${agency}, all delivered`
+            : open
+                .filter((a) => !feed.includes(probe(a)))
+                .map((a) => `"${probe(a)}" was handed to ${agency} and is NOT on the feed`)
+                .join('; '),
+        );
+      } else {
+        // Not silent: a run where nothing is open for this agency has proved
+        // the withholding rule and nothing about delivery, and the summary
+        // should say so rather than imply both were checked.
+        console.log(
+          `  (no open incident is currently handed to ${agency}; ` +
+          'delivery to that liaison was not exercised this run)',
+        );
+      }
+    }
   }
 
   // Each rung of the chain must identify itself. HQ used to read "OPERATIONAL

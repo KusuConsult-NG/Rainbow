@@ -7809,3 +7809,99 @@ then the handset is reporting itself offline and that is a new finding, not
 this one. And the underlying `Failed host lookup` from T-53 is unchanged
 either way: whether `<project>.supabase.co` resolves is not knowable from this
 container and remains the operator's to check.
+
+### T-56. The harness cried leak, and the leak was the harness
+
+A full `scripts/local_e2e/run.sh` failed one check out of twenty-eight:
+
+```
+FAILED:
+  - police liaison: incidents handed to nobody are not on their handset
+    (an incident escalated to nobody reached an outside agency)
+```
+
+Read plainly, that is an outside agency being shown an incident nobody handed
+them — confidentiality, not cosmetics. It is also the one thing
+`lib/services/alert_audience.dart` exists to prevent, and the code says it
+cannot happen:
+
+```dart
+if (officer.isLiaison) {
+  final handedTo = (alert['escalated_to_agency'] as String? ?? '').trim().toUpperCase();
+  return handedTo.isNotEmpty && handedTo == officer.agency;
+}
+```
+
+An empty value returns false, and it **returns** rather than falling through to
+the place rules. CI was green on the same script. Two things that cannot both
+be true.
+
+#### What it actually was
+
+`mobile_capture.js` ran on its own against a fresh stand-in: **28/28 passed.**
+So the failure was state-dependent, which pointed at the pass that runs before
+it. `interact.js` presses the console's real controls against the same
+stand-in, and `mobile_capture.js` never resets it.
+
+Polling the incident in question — `a001`, *"Armed men at the junction"*,
+which ships with `escalated_to_agency: null` — every ten seconds through a
+console pass:
+
+| time | escalated_to_agency | status |
+| --- | --- | --- |
+| 20:52:14 | `None` | PENDING |
+| 20:52:44 | `None` | DISPATCHED |
+| 20:52:54 | `None` | RESOLVED |
+| 20:53:04 | `None` | PENDING |
+| **20:57:45** | **`'ALL'`** | **ESCALATED** |
+| 20:57:55 | `'ALL'` | RESOLVED |
+
+The console pass escalates the very incident the handset pass asserts was
+handed to nobody. Which incident it lands on is not pinned — it clicks the
+first ESCALATE button on the feed — and neither is the agency:
+
+```js
+const opt = [...sel.options].find((o) => /army/i.test(o.textContent))
+  || [...sel.options].find((o) => /police/i.test(o.textContent));
+```
+
+ARMY if the modal offers it, POLICE if not, and the form's own default
+(`'ALL'`) when no select is found. This run wrote `'ALL'`, which matches no
+liaison, so the checks would have passed. A run that writes `'POLICE'` hands
+`a001` to the Police liaison **for real** — and the handset pass then reports
+the app obeying its own rule as a confidentiality breach.
+
+So the assertion was not describing the app. It was describing `fixtures.js`,
+twenty minutes after something else had edited the data out from under it.
+
+#### What was done
+
+The checks now read the stand-in's state **at the moment they assert**, and
+test the rule rather than the fixture: *only what was handed to this agency is
+on this agency's handset*. That statement is true whatever ran before.
+
+Two refinements, both of which would otherwise be new false positives:
+
+* **Delivery is only asserted for incidents still open.** The console pass
+  resolves things. An incident it resolved is legitimately off the feed, and
+  demanding its presence would re-introduce the same fixture assumption
+  pointing the other way. When nothing is open for an agency the run says so
+  out loud rather than implying both halves were checked.
+* **Incidents dispatched to the liaison by name are excluded.** `alertReaches`
+  rule 1 — "theirs by name: the lead, or one of the dispatched team" — admits
+  those ahead of the agency rule, and the console pass dispatches a real
+  incident to a real officer on every run.
+
+#### What this was not
+
+No handset was ever shown an incident it should not have been. The app's
+liaison rule was correct throughout, in Dart and in SQL, and
+`check_alert_audience_agrees.py` holding the two in step was correct too. The
+defect was in this repository's own evidence.
+
+That is worth recording rather than quietly fixing. A harness that reports a
+confidentiality breach where there is none is not a harmless false alarm: it
+spends the credibility that makes the next report — the true one — worth
+acting on. Two earlier findings in this report (T-49, T-52) are the same
+failure in different clothes: a check answering confidently from a snapshot
+that had stopped being true.
