@@ -1,16 +1,18 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:rainbow_app/core/router/safe_pop.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/constants/alert_categories.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
+import 'package:rainbow_app/core/router/safe_pop.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
 /// Documentation for this public member.
 
-class ReportSubtypeScreen extends StatefulWidget {
+class ReportSubtypeScreen extends ConsumerStatefulWidget {
   /// Documentation for this public member.
   const ReportSubtypeScreen({required this.categoryInfo, super.key});
 
@@ -18,20 +20,24 @@ class ReportSubtypeScreen extends StatefulWidget {
   final AlertCategoryInfo categoryInfo;
 
   @override
-  State<ReportSubtypeScreen> createState() => _ReportSubtypeScreenState();
+  ConsumerState<ReportSubtypeScreen> createState() => _ReportSubtypeScreenState();
 }
 
-class _ReportSubtypeScreenState extends State<ReportSubtypeScreen> {
+class _ReportSubtypeScreenState
+    extends ConsumerState<ReportSubtypeScreen> {
   String? _selected;
 
   @override
   Widget build(BuildContext context) {
+    final lang = ref.watch(languageProvider);
     final cat = widget.categoryInfo;
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const RainbowAppBar(
-        title: 'REPORT PROTOCOL',
-        subtitle: 'SELECT SPECIFIC INCIDENT TYPE',
+      // No longer `const`: the title is read from the language the citizen
+      // chose, which is not known at compile time.
+      appBar: RainbowAppBar(
+        title: Translations.get('rpt_protocol', lang),
+        subtitle: Translations.get('rpt_select_specific', lang),
         showBack: true,
       ),
       body: Column(
@@ -62,7 +68,7 @@ class _ReportSubtypeScreenState extends State<ReportSubtypeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'TACTICAL CATEGORY',
+                        Translations.get('rpt_tactical_category', lang),
                         style: GoogleFonts.outfit(
                           fontSize: 9,
                           fontWeight: FontWeight.w900,
@@ -95,7 +101,7 @@ class _ReportSubtypeScreenState extends State<ReportSubtypeScreen> {
                       border: Border.all(color: AppColors.outline),
                     ),
                     child: Text(
-                      'CHANGE',
+                      Translations.get('rpt_change', lang),
                       style: GoogleFonts.outfit(
                         fontSize: 10,
                         fontWeight: FontWeight.w900,
@@ -114,7 +120,7 @@ class _ReportSubtypeScreenState extends State<ReportSubtypeScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
               children: [
                 Text(
-                  'IDENTIFY INCIDENT TYPE',
+                  Translations.get('rpt_identify_type', lang),
                   style: GoogleFonts.outfit(
                     fontSize: 10,
                     fontWeight: FontWeight.w900,
@@ -176,8 +182,8 @@ class _ReportSubtypeScreenState extends State<ReportSubtypeScreen> {
             ),
             child: Text(
               _selected == null
-                  ? 'IDENTIFICATION REQUIRED'
-                  : 'INITIATE TACTICAL REPORT',
+                  ? Translations.get('rpt_identification_required', lang)
+                  : Translations.get('rpt_initiate', lang),
               style: GoogleFonts.outfit(
                 fontWeight: FontWeight.w900,
                 fontSize: 13,

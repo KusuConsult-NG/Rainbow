@@ -151,7 +151,7 @@ def main() -> int:
     # copy of the original four, so when the v2–v5 era was written down as
     # migration files the split inherited them from apply_all_migrations.sql and
     # part 01 failed outright on `auth.jwt() does not exist`.
-    expected = len(migration_sets.outstanding()) + 1  # + VERIFY
+    expected = len(migration_sets.in_the_paste()) + 1  # + VERIFY
     if len(found) != expected:
         print(
             f"found {len(found)} sections but expected {expected} "

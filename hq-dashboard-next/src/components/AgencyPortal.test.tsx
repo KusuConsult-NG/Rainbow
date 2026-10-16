@@ -107,6 +107,76 @@ describe('AgencyPortal', () => {
     expect(screen.queryByText(/Incident for POLICE/)).not.toBeInTheDocument();
   });
 
+  // The escalation log on this desk is the only history a sister agency gets:
+  // they have no console, no feed and no audit screen. It is read with the
+  // same three functions as the HQ replay panel, so "who escalated this" has
+  // one answer in the codebase (T-32's order: `by`, then `by_email`, then
+  // SYSTEM) and an entry whose time was never written says so instead of
+  // rendering the string "Invalid Date".
+  // KEYBOARD. This desk is the whole of an outside agency's access — they have
+  // no console, no feed, no audit screen — and the incident card was a
+  // clickable div, so the escalation log, the evidence, the live feed and both
+  // action buttons sat behind a control a pointer could use and nothing else
+  // could.
+  it('opens an incident from the keyboard, and says whether it is open', async () => {
+    db.setRows('alerts', [{
+      ...incident('a-1', 'POLICE'),
+      // Something that only exists once the card is open, so this proves the
+      // detail was REACHED and not merely that an attribute flipped.
+      escalation_log: [{
+        at: '2026-09-01T12:30:00Z', from_tier: 'LGA', to_tier: 'HQ',
+        by_email: 'hq@operationrainbow.test', reason: 'Handed to the Police',
+      }],
+    }]);
+    const AgencyPortal = await load();
+
+    render(<AgencyPortal {...hqProps} />);
+    await screen.findByText(/Incident for POLICE/);
+
+    const card = screen.getByRole('button', { expanded: false, name: /CIVIL_UNREST/ });
+    card.focus();
+    expect(card).toHaveFocus();
+
+    await userEvent.keyboard('{Enter}');
+
+    // `aria-expanded` is the state the chevron shows visually and said nowhere
+    // else, so a screen reader could not tell an open card from a shut one.
+    expect(screen.getByRole('button', { expanded: true, name: /CIVIL_UNREST/ })).toBeInTheDocument();
+    expect(await screen.findByText(/ESCALATION LOG/)).toBeTruthy();
+    expect(screen.getByText(/Handed to the Police/)).toBeTruthy();
+
+    // And Space shuts it again, because that is what a button does.
+    await userEvent.keyboard(' ');
+    expect(screen.getByRole('button', { expanded: false, name: /CIVIL_UNREST/ })).toBeInTheDocument();
+  });
+
+  it('reads an escalation entry the same way the replay panel does', async () => {
+    db.setRows('alerts', [{
+      ...incident('a-1', 'POLICE'),
+      escalation_log: [
+        {
+          at: '2026-09-01T12:30:00Z',
+          from_tier: 'WARD',
+          to_tier: 'LGA',
+          by_email: 'ward.commander@operationrainbow.test',
+          reason: 'No unit free in the ward',
+        },
+        // No `at`. Nothing validates the log's keys, and `audit_trail()`
+        // already falls back for exactly this shape.
+        { from_tier: 'LGA', to_tier: 'HQ', by: 'SYSTEM', reason: 'TIMEOUT' },
+      ],
+    }]);
+    const AgencyPortal = await load();
+
+    const { container } = render(<AgencyPortal {...hqProps} />);
+    await userEvent.click(await screen.findByText(/Incident for POLICE/));
+
+    expect(await screen.findByText(/WARD → LGA/)).toBeInTheDocument();
+    expect(container.textContent).toContain('ward.commander@operationrainbow.test');
+    expect(container.textContent).toContain('TIME NOT RECORDED');
+    expect(container.textContent).not.toContain('Invalid Date');
+  });
+
   it('acknowledges a report and re-reads', async () => {
     db.setRows('alerts', []);
     db.setRows('agency_action_reports', [
@@ -161,5 +231,67 @@ describe('AgencyPortal', () => {
     // The tile is `<div><div>{value}</div><div>UNREAD REPORTS</div></div>`.
     const tile = screen.getByText('UNREAD REPORTS').parentElement!;
     expect(within(tile).getByText('1')).toBeInTheDocument();
+  });
+});
+
+describe('whose desk this is', () => {
+  // The dashboard renders this component before it knows whose console it is.
+  // `userRole` is declared `useState('HQ_OFFICER')` — a command role — so until
+  // the `profiles.role` read returns, `consoleAccess` reports the command
+  // console and the dashboard passes `isHq: true` with no agency. That is the
+  // flash `consoleAccess`'s own doc comment says it exists to prevent (T-34,
+  // T-35), and these are the props it hands over meanwhile.
+  const unresolved = {
+    userRole: 'HQ_OFFICER',
+    userAgency: undefined,
+    isHq: true,
+    userEmail: 'liaison@army.mil.ng',
+    userId: 'l-1',
+  };
+  const armyLiaison = {
+    ...unresolved,
+    userRole: 'ARMY_LIAISON',
+    userAgency: 'ARMY',
+    isHq: false,
+  };
+
+  beforeEach(() => {
+    db.setRows('alerts', [incident('a-1', 'POLICE'), incident('a-2', 'ARMY')]);
+  });
+
+  it('an Army liaison whose role arrived late is not left on the Police desk', async () => {
+    const AgencyPortal = await load();
+    const { rerender } = render(<AgencyPortal {...unresolved} />);
+    // While the role is unknown the portal must not name a desk at all: the
+    // first agency in the list is not a guess worth making.
+    rerender(<AgencyPortal {...armyLiaison} />);
+
+    expect(await screen.findByText(/NIGERIAN ARMY/)).toBeInTheDocument();
+    expect(screen.queryByText(/NIGERIA POLICE FORCE/)).not.toBeInTheDocument();
+    // And the data is theirs. The portal reading the Police desk for an Army
+    // liaison does not fail loudly — RLS returns no rows and the portal
+    // reports the Police as having no incidents, no personnel and no
+    // deployments, on the only screen this role has.
+    expect(await screen.findByText(/Incident for ARMY/)).toBeInTheDocument();
+    expect(screen.queryByText(/Incident for POLICE/)).not.toBeInTheDocument();
+  });
+
+  it('says it does not know yet rather than naming an agency', async () => {
+    const AgencyPortal = await load();
+    render(<AgencyPortal {...unresolved} isHq={false} />);
+    // A non-HQ account with no agency is not the Police. It used to default to
+    // `'POLICE'` literally, in both branches.
+    await waitFor(() =>
+      expect(screen.queryByText(/Loading agency data/i)).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/NIGERIA POLICE FORCE/)).not.toBeInTheDocument();
+    expect(screen.getByText(/RESOLVING/i)).toBeInTheDocument();
+  });
+
+  it('an HQ operator still gets a desk and a switcher', async () => {
+    const AgencyPortal = await load();
+    render(<AgencyPortal {...unresolved} userRole="HQ_COMMAND" />);
+    expect(await screen.findByText(/NIGERIA POLICE FORCE/)).toBeInTheDocument();
+    expect(screen.getByRole('tablist', { name: 'Agency' })).toBeInTheDocument();
   });
 });

@@ -1127,9 +1127,9 @@ uses — is installed locally, so the Dart results are reproducible with
 | Check | Result |
 |---|---|
 | `flutter analyze` | ✅ **0 errors, 0 warnings** (was 39 errors / 54 warnings) — **warnings now blocking**; 9 info rules promoted to `error`; 551 infos remain behind three documented exemptions |
-| `flutter test` | ✅ **571 passed** as of 2026-10-06 (was 77 at PR #1; 51 passed / 1 skipped at audit) |
+| `flutter test` | ✅ **638 passed** as of 2026-10-07 (was 571 on 2026-10-06, 77 at PR #1; 51 passed / 1 skipped at audit) |
 | `tsc --noEmit` | ✅ pass |
-| `vitest` (HQ console) | ✅ **654 passed**, 5 skipped — the console had no test suite at audit |
+| `vitest` (HQ console) | ✅ **732 passed**, 5 skipped as of 2026-10-07 (654 on 2026-10-06) — the console had no test suite at audit |
 | SQL behaviour harness | ✅ green against real PostgreSQL 16 — `scripts/verify_rls_migration.sh`, 238+ assertions |
 | `eslint` | ✅ **0 errors**, 15 warnings (was 21 errors) |
 | `next build` | ✅ pass (previously failed outright) |
@@ -1240,6 +1240,32 @@ only thing that distinguishes a defect from a preference.
 | T-14 | **The repository and production had different schemas.** The v2–v6 era was applied by hand and cannot be replayed, so no database this repository could build had `alerts.lga/ward/pu`, `profiles.lga/ward/sector_id`, `normalise_lga()`, the `updated_at` trigger, or the telemetry policy. It decided a 428C9 column name, hid T-1 from a passing assertion, and put a **wrong conclusion into a code comment** in `dashboard/page.tsx` — which stated three columns do not exist when all three do on production. | ✅ `20261017000000` brings the behaviour-affecting objects into the history; `scripts/check_schema_convergence.py` keeps them there, with two unreferenced v5 functions recorded as known differences rather than propagated |
 | T-15 | **Adding a Dart comment above a ward's `id:` silently removed that ward from the generated tactical map.** The sync script's regex was not comment-tolerant and reported no error. | ✅ regexes fixed and a 207-ward count assertion added |
 | T-16 | **The demonstration seed used invented geography** — "Bokkos Central", "Mangu Central" — which exist in no INEC ward list and in neither of the project's own files. Rows that look right and behave wrong: unselectable by the ward filter, refused by RLS to the commander whose area they were in. | ✅ real INEC names; `sync_tactical_map.py --check` fails CI on any place the seed names that the map lacks. The three genuinely orphaned wards (BWALL, DAMWAI, KADUNU) were resolved against INEC sources, not guessed |
+| T-28 | **The HQ escalation menu wrote agency codes nothing answers to.** Four of its six destinations — `NPF`, `MILITARY`, `RAINBOW`, `VGN` — came from the list that badges Operation Rainbow's own staff, not from the six codes the liaison roles, the agency portal and the contact variables all use. Handing an incident to the Police stored `'NPF'`: the Police portal asks for `'POLICE'` and never showed it, `/api/notify-agency` answered `400 Unknown agency`, and the operator was told "Escalation Sent". `FRSC` and `OPSH`, the only two this deployment has contacts for, were not on the menu. Separately, the notification route counted `SKIPPED` as success, so with nothing configured it answered `200 {"success":true}` having told nobody. | ✅ one list in `agencies.ts`; a delivery verdict that only counts a send; the operator is told when an agency was not reached; `scripts/check_one_agency_vocabulary.py` in CI, run against the old menu and failing on it by name |
+| T-29 | **Every mass advisory reached every user.** `SystemAlertListener`, which wraps every screen in the app, filtered on `target_type` / `target_value` — columns the console does not write — so its `'ALL'` default let everything through. An advisory for citizens of one ward appeared on every officer's handset, while `BroadcastHud` on the same phone correctly did not show it. Expiry was never checked either. | ✅ the banner now calls `broadcastReaches()`, the same tested function the HUD uses; 17 widget tests, 6 of which fail against the old filter |
+| T-30 | **Every mobile credential gate scanned `.env.example`; the file that ships is `.env`.** `pubspec.yaml` declares `.env` as a Flutter asset, so it is bundled verbatim and extracts with `unzip`. The template declared zero credential-shaped keys and all three gates passed, while a release build made by this repository's own harness carried `AGENT_DEFAULT_PASS=staging-only-password` in `build/web/assets/.env` — the T-20 name, removed in PR #61, that two of those gates exist to keep out. `scripts/local_e2e/provision_env.sh` wrote it back, and asserted it was non-empty: a liveness check on a key nothing has read since. No real credential leaked; the shape did. | ✅ the script deletes it rather than writing it, marks the file as harness-provisioned, and CI now scans the BUNDLED asset instead of the template — run against the artefact as built (fails, naming it) and against the fixed file (passes) |
+| T-31 | **The local stand-in implemented no database functions, and the run was green over it.** It routed `/rest/v1/<table>` and had no route for `/rest/v1/rpc/<fn>`, so every `.rpc()` came back `400 relation "public.rpc/<fn>" does not exist` — seven browser-reachable functions, including the one the Forensic Audit screen is built on and the one that issues a handset's SMS fallback key on every sign-in. The console's own `report.json` recorded `[AUDIT_TRAIL_ERR]` while the run reported 46/46 and filed a photograph of the empty screen as evidence it renders. | ✅ an RPC router with the seven implemented, `501 FAKE_NO_RPC` naming anything that is not, and `rpcMisses` asserted by both harnesses so a refusal fails the run |
+| T-32 | **The audit trail attributed every human action to SYSTEM.** `audit_trail()` read the actor from `by`, which only the SQL writers set; both the console and the app write `by_email` — the key the column's own comment has documented since `20260722000000`. So every escalation an officer performed read as the system's, and the machine's were the only accurate attributions on a screen whose purpose is to say who did what. The behaviour test planted `"by":"SYSTEM"`, the one shape that worked, and never asserted the actor. | ✅ `20261019000000` reads `by` then `by_email` (both exist on production and the log is append-only, so neither can be rewritten); both shapes and a no-actor entry asserted in SQL, and the browser run asserts the operator is named |
+| T-33 | **C-6 was unanswerable for three reasons and two had quietly stopped being true.** The row said no Google CLI was installed and that the network policy denied the endpoint. `gcloud` 570.0.0 is in the container, and the Cloud Functions API answers `401 UNAUTHENTICATED` — a request that arrived and was refused for want of a credential, which is not what a blocked CONNECT looks like. | ✅ blocker narrowed to one credential, and `scripts/is_the_old_backend_deployed.sh` answers it: three outcomes by exit code, the two never-hardened endpoints marked, `allUsers` bindings called out, deletion commands printed, nothing deleted and no function ever called |
+| T-34 | **The console was command until proven otherwise.** `userRole` in `dashboard/page.tsx` is declared `useState('HQ_OFFICER')` — a COMMAND role — and the console body is gated on `authLoading`, which the auth effect clears after a `profiles` read it issues concurrently with the role read. Whichever returns first wins, so whenever the auth effect wins, the console's first visible render has `isHqUser` true. The advisory banner I had just given targeting reads that as "sees everything, because they sent it", so for that window every console user was shown every live advisory, including ones addressed to other agencies and to citizens: the T-29 leak reopened on the console by a default value. Found by reading my own fix, not by a test — every test sets the role up front, which is the one thing the real client cannot do. | ✅ superseded by T-35's fix, which is the same defect at its source: the role is `null` until the `profiles` read lands, so every consumer is protected at once rather than one guard per surface. 4 tests naming the unresolved viewer |
+| T-35 | **`consoleAccess` was written to stop exactly this, and was never given the chance.** Its doc comment says an unknown role must get the smallest console because *"a default of 'show everything' would flash the whole command console at an agency liaison on every page load"* — and that `userRole` is `''` while the profile loads. It was `useState('HQ_OFFICER')`, and a second path then set it from `u.user_metadata?.role || 'HQ_COMMAND'` — user-writable metadata (H-7) falling back to the top of the command chain. So the function was never handed an unknown role and its `RESOLVING ACCESS` branch was unreachable despite being under test. Worse than a default left unwritten: the console body is gated on `authLoading`, and the effect that clears it is the same one that claimed `'HQ_COMMAND'` on its way there, before its own `profiles` read. The effect that opened the door claimed command walking through it. Clicking the agency tab in that window mounted `AgencyPortal` with `isHq` true and no agency, and a `useState` initialiser runs once: an Army liaison was frozen on the **Police** desk for the life of the mount, with the HQ-only switcher gone when their real role arrived. RLS correctly returned nothing, so the portal reported the Police as having no incidents, no personnel and no deployments — on the only screen that role has. `userAgency \|\| 'POLICE'` put the same guess in the non-HQ branch. | ✅ the role is `null` until `profiles.role` says otherwise, the `user_metadata` reader is deleted, and the portal derives its desk instead of freezing it — an account with no agency is told so rather than shown somebody else's empty desk; 3 component tests, 2 of which fail against the old code, and the gate rewritten around the default with 16 mutations, each caught |
+| T-36 | **The one layer that refused to guess a place was overruled by the layer that displays it.** `AlertService` writes `geo_lga` NULL rather than infer a jurisdiction — "submitting without jurisdiction rather than guessing one" — and the responder feed filter treats a null LGA as reaching everybody. Five screens named one anyway: a responder's card read **PLATEAU · HQ · UNIT**, and `· UNIT` on nearly every card since there is no polling unit from coordinates; the dispatch roster read **JOS**, which is not one of Plateau's seventeen LGAs, and only statewide command — the account dispatching across all seventeen — could see it; the console dossier read **STATE HQ** three lines above a guard that DROPS an absent ward; a map card read **PU: SECTOR HQ**; and the AI triage prompt was told **LGA: STATE HQ** where the Type, Ward and Description lines around it all say `N/A`. Found by sweeping for the shape after T-35, not by a test. The same sweep found the console storing `sender_role: actor.role \|\| 'HQ_COMMAND'` on an incident chat message and the forensic replay naming an unattributed message as from `Responder`/`AGENT` — T-32 with the attribution running the other way. | ✅ one tested place-label module per codebase (`place_label.dart`, `place-label.ts`), 20 tests; a missing segment is dropped and nothing is named that was not recorded; the chat stores `UNKNOWN` rather than Command, asserted by a test that fails against the old code; `scripts/check_no_invented_places.py` in CI, which flags a place fallback only where it is RENDERED — so the clustering sentinel and the fail-open escalation argument are untouched — with 12 mutations, 7 caught and 5 correctly allowed |
+| T-37 | **The screen that sets the statewide escalation policy could not tell "could not read it" from "here it is", and offered to save either way.** `SystemConfig` loaded the three timeouts with `.then(({ data }) => ...)`, destructuring `data` and dropping `error`. A refused or failed read left its own seeded placeholders — 2 / 5 / 10 — on screen with nothing saying the read had not happened; the component has an `error` state and only the SAVE path ever set it. Save **upserts all three keys**, so an operator who saw those numbers, changed one field and pressed Save replaced the live policy with placeholders. The migration seeds exactly 2 / 5 / 10, so it looked right until somebody had changed them — the only point at which it mattered. Also: a key with no row merged over the placeholder and read as configured; `Number(row.value)` on a TEXT column gave `NaN`, which `String()` would have written back as the literal "NaN"; and the three labels were not associated with their inputs. | ✅ a three-state load — loading / failed / ready — that names the reason, shows no values it did not read, and **disables Save**, because this form writes all three and must not overwrite a baseline it has not seen; a missing key is named as not configured rather than shown as live; a non-numeric stored value is a fault with the key quoted, not a NaN; labels wired with `htmlFor`. 7 component tests, all 7 failing against the old code. Then, found while checking the fix against the job that reads these rows: the form accepted **any** number its input produced, so an operator could save a ward timeout of `0` or `2.5` and read it back as the policy — while `tier_timeout_minutes()` casts `raw::INTEGER` and rejects `<= 0`, discarding it and using the seeded value. The screen and the job disagreed about what the row means. ✅ the form now refuses what the job would throw away, naming the rule; 9 component tests; `scripts/check_escalation_defaults_agree.py` reads the three fallbacks and the lower bound out of the SQL and asserts the console and every seed agree, with 11 mutations, each caught |
+| T-38 | **The word "liaison" appeared nowhere in `lib/`, and the handset answered an agency liaison from their own posting.** `alert_is_ours()` hands a liaison exactly `escalated_to_agency = liaison_agency()` and nothing else. **Both** of the handset's filters — the `.where()` inside `alertsStreamProvider`, which four test files override so it had no test of its own, and a second pass at build time — had no branch for a liaison. The first fell through to the place rules and compared each incident's location to where that officer is based; the second applied `tierCanSee()`, Operation Rainbow's internal command ladder, on which a liaison has no rung, so every incident with a tier owning it outranked them — which is every incident they are ever handed. An incident handed to the Army is then invisible to the Army liaison unless it happens to be in their LGA, while HQ's console shows the handover as done and `/api/notify-agency` reports it sent. T-28 was "escalating an incident to the Police reached nobody, by three paths at once"; this is a fourth, on the device the officer carries. No harness run caught it because the stand-in applies no RLS, so it failed the other way there — the Police liaison was shown four incidents handed to nobody — and because the one ARMY fixture sits in the Army liaison's own posting, so the place rules admitted it by coincidence. The same filter was stricter than RLS in two more places: an incident with no LGA (which `alert_in_my_area()` grants to all staff, "an emergency nobody can see is worse than one seen too widely") and one HQ delegated to an LGA by name — which the old filter's own comment claimed, over code that read only `geo_lga`. | ✅ the rule is `lib/services/alert_audience.dart`, tested — 35 tests where there were none — and mirrors `alert_is_ours()` clause by clause; a second fixture incident is handed to the POLICE in BOKKOS so the harness can tell the column from the posting; 3 browser assertions per liaison; `scripts/check_alert_audience_agrees.py` in CI holds the rule on both sides, with 16 mutations, each caught |
+| T-39 | **Choosing Hausa in Settings changed nothing.** There were two providers called `languageProvider`, each with a class called `LanguageNotifier`, and which one a file got depended on its imports: `shared/localization/translations.dart` stores `app_lang` = `'ha'` and is what every translated string watches; `providers/language_provider.dart` stored `app_language` = `'HA'` and was imported by nothing. The Settings screen imported neither — it kept a private `_language` string and wrote `app_language` straight to SharedPreferences — so its "App Language" dropdown was wired to a key no reader has ever heard of, and it offered two of the three languages the app has. The only working control was a flag button on the home screen, three screens into the app. Separately, `Translations.get()` returned the KEY on a miss and two keys were asked for and never defined, both on the citizen's DISPATCHER CHAT screen — so its header read `live_dispatch_channel` and `alert_ref #a1b2c3d4` in every language, English included. | ✅ one `LanguagePicker`, used by Settings and by the first screen of first-run setup so the language can be chosen before the rest of setup is read; the dead provider deleted; the four missing keys added in all three languages; `get()` falls back to English rather than a variable name; 8 Dart tests; `scripts/check_translation_keys.py` in CI — every key asked for exists, every key has every language, one provider, one storage key — mutation-tested including the duplicate provider returning |
+| T-40 | **A sign-out could end a live duress trail, and needed no PIN.** `signOut()` stopped tracking first, deliberately: *"Signing out is the clearest statement a person can make that they are done being observed, and it was the one action that did not stop it."* True of a person signing out of their own phone, and wrong in the one case the duress design exists for. A duress PIN tells the person their alarm is cancelled and KEEPS TRACKING RUNNING because they may still be in danger — and the lock screen offers a sign-out that needs no code at all. So whoever was holding the phone could end the tracking of a live duress alert without knowing any PIN, and all HQ saw was a track going quiet, indistinguishable from a flat battery. Two deliberate rules collided and nothing recorded which won. | ✅ a patrol track still stops on sign-out; an SOS track runs until the incident closes or the twelve-hour ceiling expires; `20261020000000` adds `alerts.device_signed_out_at` so an operator reads "handset signed out at 19:42, tracking continues" rather than inferring a dead battery, shown in the dossier and on the forensic timeline; 10 Dart tests and 2 SQL assertions |
+| T-41 | **The system told you when it gave up waiting for you, not when the emergency arrived.** `notification_outbox` was built so a TIMEOUT escalation could not move an incident in silence — its header says "the whole point of the timeout is the case where nobody is watching". Nothing queued a notice when an alert was **INSERTED**. The only paths to a phone were a human pressing DISPATCH or ESCALATE on the console, and the timeout job. So a citizen's SOS reached a responder only if that responder happened to have the app open and in the foreground; a phone in a pocket learned nothing until a dispatcher acted or the unit's two-minute window expired. There is no trigger on `alerts` INSERT except the timestamp one and the oversight router, and nothing in `alert_service.dart` notifies anybody. | ✅ `20261022000000` queues a `NEW_INCIDENT` notice on INSERT, addressed to `NEW.assigned_tier` read from the column — so the oversight trigger's routing of a complaint to HQ is honoured and a complaint is never announced to the command it is about; the drain widens the UNIT audience for this kind to the field responders, who are the ones who go, and says "has just been reported" rather than the escalation wording; the trigger swallows its own failure so an SOS is never refused because a notice could not be written. 10 console tests and 6 SQL assertions, one of which files an emergency with the outbox renamed out from under it |
+| T-42 | **The forensic replay read the story, not the record.** `IncidentReplayPanel` — the per-incident timeline somebody opens to ask what happened and in what order — built its escalation events by string-matching `ai_summary`, the free-text note a human escalation appends. `escalate_overdue_alerts()` appends to `escalation_log` and writes no prose, so **every automatic escalation was missing**: the moves nobody chose, at 02:00, because nobody answered — the entries a review exists to find. They were on the Audit History screen the whole time, because `audit_trail()` reads the log. Every escalation also carried `updated_at`, so UNIT → WARD → LGA → HQ produced three events with one time, in no order, with the chat messages sent between them on the wrong side; and the actor was the literal `'Tactical Command'` while the log records who did it — T-32, one screen later. | ✅ `lib/incident-timeline.ts` owns the reading of an entry and three screens share it: the replay panel parses no prose at all, the agency desk (the only history an outside agency ever gets) and the audit screen take the same actor order and the same timestamp wording. A manual escalation present in both the log and the summary is counted once; `[MULTI-UNIT DISPATCH]` is still read from prose, declared, because a dispatch has no log of its own. An entry with no `at` now reads `TIME NOT RECORDED` instead of "Invalid Date" and is placed last with a note saying why. 33 console tests, and `check_history_reads_the_record.py` compares the actor order on both sides of the language boundary — 14 mutations, 3 shapes that must stay allowed |
+| T-43 | **The same table, two shapes, and the column that said why was on only one of them.** Three of the four agency tables are created TWICE, by two files with different column lists and `CREATE TABLE IF NOT EXISTS` on both — so the second is a no-op and the winner is whichever ran first. The v3/v4 era was applied to production by hand and is excluded from every replay, so **production** carries `detail`, `sent_by`, `target_lga`, `acknowledged_at`, `resolved_at` and no `created_at`, while **every database this repository can build** carries `created_at` and none of those five. `/api/notify-agency` — whose own comment calls `agency_notifications` "the only durable record of whether an agency was told" — therefore wrote the intersection and dropped `result.detail`, the one field that says WHY a handover to the Police or the Army failed (`HTTP 502`, a timeout, "no contact configured"). And nothing read the table at all: the console sets `escalated_to_agency` the moment an operator presses escalate, so "handed to the Army" and "the Army was told" were the same line on the screen and different facts in the database. Invisible to both schema gates (they compare objects, not columns) and to the browser harness (the stand-in UNIONS every definition it finds). | ✅ `20261023000000` converges the shapes with `ADD COLUMN IF NOT EXISTS`, backfilling `created_at` from `sent_at`/`submitted_at`/`deployed_at` rather than from the migration's clock; the route writes `detail`, `sent_by` and `target_lga`; the incident replay now SHOWS each leg, with `SKIPPED` rendered as "NOT USED", a handover with no delivery row called out as such, and a delivery log that could not be READ saying so rather than showing none. `check_one_table_one_shape.py` replays both worlds and compares every table's effective shape — 7 mutations, 3 shapes that must stay allowed, one exception recorded with its reason; `agency_delivery_behaviour_test.sql` proves it on real PostgreSQL in 5 assertions |
+| T-44 | **The console could be read without a mouse and not operated.** `check_control_labels.py` has gated the Flutter app since controls there were found with empty accessible names; the console had no equivalent, and ten of its controls were clickable `<div>`s with no role, no `tabIndex` and no key handler. Among them the **agency desk's incident card** — the only way to the escalation log, the evidence, the live feed and both action buttons, on the one surface an outside agency ever sees — and the **responder picker**, which was worse than unreachable: it held a real `<input type="checkbox">` whose `onChange` was `() => {}` ("Handled by div onClick"), so a dispatcher working by keyboard could tab onto an officer, press Space, see nothing change, and conclude the roster was broken. The evidence thumbnails called `window.open` from a div. And there was **no `keydown` handler anywhere**, so the incident dossier — a fixed overlay over the feed and the map — could only be dismissed with a pointer. | ✅ real `<button>`/`<a>`/`<label>` elements where that is what they are (the picker is now a label around the real checkbox, which does the toggling itself); the card carries `aria-expanded`, stating a fact only the chevron's shape had; Escape closes the dossier and the drawer, with precedence expressed by the caller because two `window` listeners fire in registration order, not z-order; the dossier is a named `role="dialog"` (focus is NOT trapped — recorded as open rather than half-done). `check_console_controls.py` requires operability and a name, with backdrops declaring `data-pointer-only="<reason>"` in the markup — 8 mutations, 8 shapes allowed. Its first version was VACUOUS for every button with an inline handler (`[^>]*?` stops at the `>` inside `() => {}`); the brace-aware rewrite immediately found four more unnamed buttons, every one of them a dismiss control. The console browser pass now opens the dossier, finds its close control by accessible name, and presses Escape |
+| T-45 | **"ACTIVE INCIDENTS" emptied the board.** `'ACTIVE'` is not one of the ten statuses an alert can carry, and two controls set it: the status dropdown's ACTIVE INCIDENTS option and the ACTIVE tile in the UNIT STATUS panel. `filterAlerts` compares `a.status !== filters.status`, so both filtered the board down to **nothing, always** — the one control that says *show me what is happening now* produced an empty feed, which on this console is what reads as ALL CLEAR (T-33 is the finding about a board that cannot say why it is empty; this is a control whose only possible effect was to produce one). The tile was wrong twice: it advertised `alerts.length`, every incident in the window with resolved ones included, above a filter that would show none of them. Found by the TYPECHECKER while making the tile keyboard-operable for T-44 — and it could only speak because an earlier finding had completed the status union, making the comparison an error instead of a silently-false expression. | ✅ `isLiveIncident()` (not RESOLVED, not CANCELLED) in `alert-display.ts`, used by both the filter branch and the tile's count, so the number and the action cannot disagree again; the count is sector-scoped like the DURESS tile beside it; the tiles carry `aria-pressed` for the filter they apply. 2 tests, one of which fails against the old comparison |
+| T-46 | **The one path for somebody who cannot type threw away what they said.** AI VOICE REPORT ran speech-to-text, filed the TRANSCRIPT, and recorded no audio — and `if (_transcription.trim().isEmpty) return;` meant a recogniser that is offline or has never heard Hausa or Pidgin produced *"No voice input recorded"* and **filed nothing at all**, from somebody speaking perfectly clearly. The other microphone path kept the file but uploaded it into `media_urls` — the evidence list — so a responder's card said "3 attachments" with no way to tell one was a person speaking, and it wrote `[AUDIO_REPORT] voice message recorded` into the narrative field, so that marker arrived at HQ as the incident's description. Neither screen could PLAY it: both handed the url to the platform (`launchUrl`, a browser tab), which on a handset means leaving the app mid-incident — past a re-entry lock that can then demand a code — and for a Cloudinary `/raw/` link is often a download. There was no audio-player dependency in the app at all. | ✅ `alerts.voice_note_url` + `voice_note_seconds`: the reporter's voice in its own column, with its length so a responder on a weak connection knows what they are about to pull. `VoiceNoteService` records FIRST and treats the transcript as a bonus, discards a sub-second mis-tap, and caps at the ten minutes the row's own CHECK allows. `VoiceNotePlayer` plays it in the app and says when it failed and why; the console uses `<audio controls preload="metadata">`. Shown above the evidence on the responder's screen, the HQ dossier and the agency desk — a liaison has that desk and nothing else. 11 Dart tests, 8 console tests |
+| T-47 | **"Not an emergency" had to be enforced, not labelled.** Two new categories for government property mismanaged, destroyed, abandoned, unsafe or needing repair — and this system treats everything as a kidnapping. `queue_new_incident_notice()` announces every INSERT to the tier it landed at and the drain widens a UNIT notice to the **field responders**, so a culvert filed at 02:00 would push to the handsets of the people who go; `escalate_overdue_alerts()` climbs anything unacknowledged, so by morning a street light would be an HQ-tier incident with three escalations against it, among the night's real emergencies. | ✅ `is_non_emergency(type)` matched on the category before " - " (so every subtype is covered and a new one needs no migration), a BEFORE INSERT trigger files it at the LGA with no responder assigned and records why, and the timeout sweep skips it — built the same way as the two mechanisms that already existed for this (`is_oversight_matter`, `awaiting_human_confirmation`) rather than a third way. It is NOT hidden: still on the board, in the feed, on the map, filterable. `check_non_emergency_categories_agree.py` keeps the app's labels and the SQL's one list — 6 mutations, and its own first version matched the function name as a PREFIX, so a rename that breaks every caller passed. 7 SQL assertions, including that an overdue kidnapping still climbs and an oversight matter still goes to HQ |
+| T-48 | **Every button in every map popup was dead, and our own CSP was why.** The Intelligence Map is the screen the console OPENS on, and a marker's popup is how a dispatcher acts on a pin: DOSSIER, DISPATCH, RESOLVE. The popups are HTML strings, so the buttons carried `onclick="window._hqShowDispatch('…')"` — and `script-src 'self' `'nonce-…' 'strict-dynamic'` has **no** `'unsafe-inline'`: a nonce authorises a `<script>` ELEMENT and cannot authorise an event handler ATTRIBUTE, so Chrome refused all of them from the day that policy shipped. No error reached the operator. Three layers nearly caught it and each measured the wrong half: the sweep logged `changed: NOTHING`, which is a log line and not a check; `csp.test.ts`'s seven tests assert the HEADER, not what the header does to the page; and the component tests asserted the `onclick` attribute and the global SEPARATELY, with a comment explaining that jsdom cannot evaluate an inline handler — so the join was tested nowhere, never worked, and the suite was defending it. | ✅ Delegation: the buttons carry `data-hq-action`/`data-hq-id` and `LiveMap` listens once on its container. Both tests now press the real button and assert the real outcome. `check_no_inline_handlers.py` forbids the `on<event>="…"` attribute form in the console (a React `onClick={fn}` prop is unaffected), and the browser harness opens a popup and asserts it carries its actions as data, zero handler attributes, and that DOSSIER opens the dossier. 2 new console tests (one of them presses an action no popup renders a button for, to prove the listener routes and that the tier it hands on comes from the incident rather than the markup) and one rewritten from asserting the attribute to pressing the button, and `check_no_inline_handlers.py` — 6 shapes it must catch (both cases of the attribute, every event name, spaces round the `=`) and 6 it must allow, among them a camelCase React prop that happens to start with those two letters |
+| T-49 | **The harness reported the agency liaison desk broken, and it was the stand-in.** `fake_supabase.js` rejects a column no migration defines, in full, the way PostgREST does — and read that column list ONCE, at require time. A stand-in started at 13:06 was still answering at 14:28, after T-46 had added `alerts.voice_note_url` and given the agency portal's `select` the new column: `UNKNOWN COLUMN alerts.voice_note_url (read)`, the whole query failed, and the one surface an outside agency ever sees came back with no incidents. Three checks failed naming the card and both its buttons, on code that was fine. Same trap as a stale `next-server` holding :3000 while `.next` is rebuilt underneath it — which is what the five "missing" navigation tabs were, and which has now invalidated two runs. A long-lived process answering from a snapshot does not report an error; it reports the PRODUCT broken, on exactly the screen that depends on the thing that moved. | ✅ The stand-in refills its schema rather than freezing it, and compares a fingerprint of every migration's name, size and mtime before answering — rebuilding, loudly, when it moves; proved both directions against a live stand-in. `check_standin_reads_live_schema.py` keeps the require-time freeze from returning and fails if the refresh is defined but never called — 9 mutations. `interact.js` gained a boot assertion that fails the run on a console serving a build it cannot load, with the remedy in the message |
+| T-50 | **The document the README sends an operator to first described nine of the thirty-seven migrations as the whole list.** `docs/APPLYING_THE_MIGRATIONS.md` — "**Read this before the first one**", per README — opened with *"Nine migrations are proven in CI on every push and not yet applied"*, named those nine, and said the single-paste script applies *"all nine, in order, finishing with a 14-row PASS/FAIL table"*. There are **37** outstanding and the generated script ends in **34** rows. Everything from the last fortnight of this audit — the voice note, non-emergency routing, one table one shape, incident tracks — was absent from it. An operator following it applies nine files, gets a verdict table two and a half times the size they were told to expect, and has no way to tell success from a wrong script. `check_runbook_covers_migrations.py` was written for exactly this drift (it had already caught the other runbook seventeen short) and watched ONE file, so the second one drifted behind it unseen. | ✅ The step-by-step file now states the real total, says which nine of them it walks through one at a time and why (the C-3 era is the part with ordering dependencies and a human decision in it), and points at the generated table that carries all 37. The gate now reads every doc that names migration files: one must carry the complete table, any other must declare its subset and point at that one, and every figure quoted is checked against the repository — including a count spelled out in WORDS, which is refused outright, because the stale claim was "Nine" and no check can verify a word. 5 mutations |
+| T-51 | **The other policy PUBLIC could reach — on the incident table, twelve lines above the comment explaining the defect.** *(Scope corrected the same day: I described this as live on production from a three-column query output that did not include `roles`. A later query with that column returned zero rows on the database checked, where the policy does not exist at all. The CODE defect below is real and proven on real PostgreSQL; which databases carry it is not something this repository can answer, and I wrote as though it could — the same "checked against the repository rather than the database" mistake this report records as a defect elsewhere.)* A policy query returned two rows: `alerts_select_geo_lga_scoped` and `telemetry_select_geo_lga_scoped`. The second was known — it had sat on a live database as the single policy reaching PUBLIC and was repaired by `20261016000000`. Both are created by `20260725000000_v6_geo_lga_scoping_staging.sql`, twelve lines apart: the telemetry one is written `TO authenticated`, the **alerts** one with no `TO` clause at all — and PostgreSQL records that as **TO PUBLIC**, which includes `anon`. That is a policy naming the anonymous key over the incident table: the reporter, their phone number, what they said, where they are. The earlier fix had written *"TO authenticated is not decoration"* into that very file, directly beneath the policy that still lacked it; nobody looked at the sibling. Three structural reasons it survived: `20260813` drops 98 policies BY NAME and cannot name one from a later file (0 occurrences of `geo_lga_scoped` in it); the v6 file is STAGING_ONLY so it is not in the paste at all, so only a database it was run on by hand can have these policies — and that era was applied by hand somewhere, which is why `20261016000000` exists; and the verifier asserts no policy reaches anon or public **at the end of the full replay**, which passes because `20261006000000` drops this policy on the way to a narrower one, so a database that ran v6 and has not had `20261006` applied sits in the MIDDLE, which no assertion described. Where the policy is present and open, one layer stands in the way: the table-level REVOKE from `anon`. | ✅ `TO authenticated` added at the source so no new database creates it open, plus `20261025000000_the_other_policy_public_could_reach.sql` to repair the one that exists. It runs `ALTER POLICY … TO authenticated` — roles and nothing else — because a database carrying this policy got it BY HAND and the first draft's drop-and-recreate would have imposed this repository's `USING` text on a copy whose body may differ by a character, rewriting a read path as a side effect of closing an anon hole. Idempotent, a no-op both where the policy is already scoped and where `20261006` has replaced it, and it ends by naming anything still reaching anon or public. `check_every_policy_names_its_roles.py` now requires every `CREATE POLICY` in the repository to WRITE its `TO` clause — any roles, even `TO public`, because the rule is that the intent is visible; silence means PUBLIC and reads like nothing. The 43 policies of the v2–v6 and phase1 era are grandfathered as an exact frozen inventory, so a new policy in an old file still fails. 10 mutations, and 5 SQL assertions that read `pg_policies.roles` — the state, not the text — including a planted TO-PUBLIC probe, because the earlier version of this claim passed every run for weeks while the telemetry policy was open |
+| T-52 | **"What a production database still needs" was a list of filenames, and I repeated it to the operator all day as the top blocker.** `migration_sets.outstanding()` had that sentence as its docstring and this body: `all_files()` minus a hand-maintained exclusion set. Nothing updates it when a migration is applied anywhere, so it answered a question about a DATABASE with a fact about a DIRECTORY. Both runbooks opened with *"N migrations are proven in CI on every push and **not yet applied** to the production Supabase project"*, T-50 added a gate that ENFORCED that wording, and I named it first on every list of what was left — "the agency liaison desks return nothing against production until they go in". Then the operator ran `which_migrations_are_applied.sql`: **32 of the 38 were already applied**, everything through `20261015`. Six were genuinely missing. The number was out by a factor of six, in the direction that makes a deployment look impossible — and the one real consequence I had predicted was buried under 32 that were not. | ✅ The concept is now `in_the_paste()`: what the paste carries, which is a fact about this repository and checkable here. Both runbooks say that instead, and send the operator to `which_migrations_are_applied.sql` for what their own database needs — the gate now REFUSES the words "not yet applied" in front of a count, requires that pointer in any doc naming migrations, and skips backticked quotations so a doc explaining the defect can quote it. Two of its three new mutations are sentences I wrote myself two hours earlier. Also: the probe labelled `20261023000000` "APPLIED PARTWAY, look here first" at 5 of 8 — but that is a CONVERGENCE migration, and the 5 present are production's own pre-existing columns while the 3 missing are the ones it adds, so the file written to handle a divergent database was reported as the worst case. It now says "PARTLY PRESENT: either applied partway, or a convergence migration whose objects already existed here" |
+| T-53 | **The language picker worked perfectly and the app did not speak the language.** Everything around it was right: the picker persisted to the one preference key, was reachable from Settings and the home app bar, both controls wrote through the one provider, and `check_translation_keys.py` confirmed every key requested was defined in all three languages. **Five files in the whole app asked the table for anything** — the picker, the home screen, the voice dialog, the category list, the dispatcher chat. A citizen who chose HAUSA got a Hausa home screen and an English emergency: the situation chooser, the subtype list, the live SOS screen, the confirmation, the safe-zone map and the lock screen all had the English string written into the widget. Nothing could have caught it — a key-integrity check asks whether the keys that ARE requested are defined, and a screen requesting none passes it perfectly. The table being complete and the screen being translated are two claims and only the first had a gate. | ✅ 71 keys added across Hausa and Nigerian Pidgin, and the four screens a citizen walks during an emergency wired to them: the situation chooser, the subtype list, the live SOS screen and the confirmation. 8 widget tests that pump each screen with the language set and assert on the STRING ON SCREEN — reverting one hardcoded label fails two of them — plus one that reads `languagesFor(key)` rather than `get()`, because `get()` falls back to English and would let a half-translated key pass. `PENDING`, `DISPATCHED`, `ACKNOWLEDGED`, `ON_ROUTE`, `ON_SITE` and `RESOLVED` are deliberately NOT in the table and a test asserts it: they look like labels on the SOS screen and they are `alerts.status` compared by string, so translating one would leave a citizen reading LOCATION BROADCASTING with a squad beside them. `check_citizen_screens_speak_the_language.py` is a RATCHET — converted screens must stay at zero hardcoded labels, the four remaining are capped at their current counts (98 strings), and the cap can only fall. 3 mutations, including raising a cap to hide new work |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -1711,12 +1737,790 @@ jobs: the runner notice in these same annotations says `ubuntu-latest` migrates
 to Ubuntu 26 on 2026-10-19, and a silent environment change under a suite nobody
 can currently run is the last thing this project needs.
 
+### T-28. Escalating an incident to the Police reached nobody, by three paths at once
+
+Found on 2026-10-07, in a passing run. The browser harness escalates an
+incident, asserts the write, and prints what it wrote:
+
+```
+PASS  ESCALATE writes an escalation to alerts
+      — {"severity":"CRITICAL","status":"ESCALATED","escalated_to_agency":"NPF", …
+```
+
+`NPF` is not a code anything in this system answers to.
+
+**An agency code is a value in `alerts.escalated_to_agency`.** Five files
+declared the set and four agreed:
+
+| file | name | values |
+|---|---|---|
+| `console-access.ts` | `AGENCY_CODES` | POLICE ARMY DSS NSCDC FRSC OPSH |
+| `AgencyPortal.tsx` | `AGENCIES` | POLICE ARMY DSS NSCDC FRSC OPSH |
+| `AgencyAccessManager.tsx` | `AGENCIES` | POLICE ARMY DSS NSCDC FRSC OPSH |
+| `notify-agency/route.ts` | `AGENCY_CONTACTS` | POLICE ARMY DSS NSCDC FRSC OPSH |
+| **`dashboard/page.tsx`** | **seven `<option>` literals** | **NPF MILITARY NSCDC DSS RAINBOW VGN** |
+
+The fifth is the escalation menu — the only one of the five an operator ever
+touches. It had been written from `STATE_SECURITY_AGENCIES`, which is the list
+that badges **Operation Rainbow's own staff** with their parent organisation,
+and is a different question: a liaison account, a portal and a phone number
+exist for the six codes, and for `RAINBOW` (us) and `VGN` (vigilante outfits)
+none of the three does.
+
+So HQ hands a kidnapping to "👮‍♂️ NIGERIA POLICE FORCE (NPF TACTICAL CELL)" and
+`escalated_to_agency` is set to `'NPF'`. Then, in the same action:
+
+1. **The Police liaison never sees it.** `AgencyPortal` loads a liaison's whole
+   desk with `.eq('escalated_to_agency', agency)` where `agency` comes from
+   their role — `POLICE_LIAISON` → `POLICE`. The incident is filed under `NPF`,
+   so their incident list, their deployments and their action-report form are all
+   about a different value. Nothing errors; the desk is simply empty.
+2. **No SMS and no webhook leave the building.** `/api/notify-agency` answers
+   `400 Unknown agency 'NPF'`.
+3. **The operator is told it worked.** The POST was fired and discarded with
+   `.catch(console.warn)`, and the toast read **"Escalation Sent — Handed off to
+   NPF Command (ALL)"**.
+
+Four of the menu's six destinations behaved that way. `DSS` and `NSCDC` happened
+to spell the same in both lists and worked. `FRSC` and `OPSH` — the two the
+`.env.example`, the configuration report and the liaison roles are all built
+around — **could not be chosen at all**.
+
+#### Why 679 unit tests and 79 browser assertions passed over it
+
+Every test was written in the vocabulary of the four sides that agreed.
+`alert-actions.test.ts` escalates to `'DSS'`, `'NSCDC'` and `'POLICE'`;
+`AgencyPortal.test.tsx` and the browser fixtures use `'ARMY'` and `'POLICE'`.
+The one assertion that touched the real control asked only whether *something*
+was written:
+
+```js
+check('ESCALATE writes an escalation to alerts',
+      !!got && (got.rows[0]?.escalated_to_agency || …));
+```
+
+A value being present is not the same as a value being meaningful, which is the
+same shape as the panel that was present and invisible in PR #71.
+
+#### And the notification endpoint called nothing a success
+
+Separately, and worse because it is what a correctly-named escalation hits on
+this deployment today:
+
+```ts
+const allSent = results.every(r => r.status === 'SENT' || r.status === 'SKIPPED');
+return NextResponse.json({ success: allSent, … }, { status: allSent ? 200 : 207 });
+```
+
+`SKIPPED` is what the SMS leg records when there is no Termii key or no liaison
+phone. With neither configured — and `scripts/what_is_not_configured.py` reports
+all twelve agency contact variables and `TERMII_API_KEY` blank — the whole
+results array is `[{SMS, SKIPPED}]`, and `every()` over it is `true`. The
+endpoint answered **`200 {"success": true}`** to a request that notified nobody.
+
+The webhook leg made that harder to see rather than wrong: with no URL
+configured it pushed **no result at all**, so neither the response nor the
+`agency_notifications` audit row recorded that the channel existed and was not
+used. An operator reading the table later could not tell a webhook that was
+never attempted from one that was never configured.
+
+Two further faults in the same file, found while fixing it:
+
+* **An unsigned webhook was sent.** With `RAINBOW_WEBHOOK_SECRET` unset,
+  `X-Rainbow-Auth` went out as the empty string. Either the agency refuses it —
+  and we have just reported `SENT` for a request that was thrown away — or it
+  accepts it, and the endpoint accepts forged escalations from anyone who knows
+  the URL. It now refuses to send, and says why.
+* **The contact table was a module-level `const`**, so it captured
+  `process.env` when the server started. A liaison number added in the Railway
+  variables appeared to take effect and did not until the next deploy.
+
+#### What changed
+
+* `src/lib/agencies.ts` owns the vocabulary — codes, names, colours, icons, a
+  type guard — and the escalation menu, the liaison form, the portal and the
+  contact lookup are all built from it. `console-access.ts` re-exports it so
+  existing callers are unchanged.
+* `deliveryVerdict()` in the notification route distinguishes four outcomes, and
+  only a `SENT` counts as delivery: **200** delivered, **207** partially,
+  **502** a configured channel refused, **503** nothing is configured for that
+  agency. Each detail line names the agency and the variables to set.
+* `escalateAlert` **awaits** the notification and returns the outcome beside the
+  escalation's own. It still never fails the escalation on a notification
+  failure — an operator told "Escalation Failed" escalates again and the
+  incident collects duplicate handovers — but the two facts are now reported
+  separately. The toast says **"Escalation Recorded"**, and a second,
+  warning-level toast says **"POLICE NOT NOTIFIED"** with the reason when the
+  agency was not reached.
+* All three fetches are **bounded** — 20s from the browser, 8s each to Termii
+  and to the agency's own webhook endpoint. Awaiting the notification is what
+  makes the console able to tell the truth about it, and it is also what would
+  otherwise leave a dispatcher watching a spinner during an escalation while a
+  third party's endpoint hangs. A timeout reports "could not tell whether they
+  were notified", which is the honest answer and the one that gets somebody to
+  pick up the phone.
+* `scripts/check_one_agency_vocabulary.py`, in CI: `agencies.ts` is the only
+  file that may spell the list out; no retired code may be used as an agency;
+  the escalation menu may not hard-code an option value at all; and
+  `.env.example` and `what_is_not_configured.py` must cover exactly those six
+  codes and no others. It separates the two concepts explicitly — three files
+  are exempted **by name, with a reason**, because they own the staff-badge list
+  and a blanket skip is what let the menu drift. Tightened once after writing it:
+  the dashboard was exempted as a whole file, which left 3,500 lines in which a
+  retired code could sit outside the menu, so it is scanned line by line with
+  only the visibly staff-badge lines allowed; and "a new copy anywhere" was
+  `>= 4` of the six, a round number picked to clear the lists it was imagining,
+  where the evidence says no legitimate file names more than **one** — so it is
+  `> 1`, the same rule the consumers are held to. Both mutation-tested.
+* The browser harness now asserts the stored code is one the portal and the
+  notifier both know, names it when it is not, and asserts the console says
+  the agency was **not** notified rather than claiming it was.
+
+#### Proven, not asserted
+
+* 26 new tests on the route, 6 on `escalateAlert`, 21 on the vocabulary.
+  Mutation-tested: restoring `SKIPPED`-counts-as-success fails two of them, and
+  dropping the webhook's skipped audit row fails a third.
+* The guard was run against the original menu and fails on `NPF` and `MILITARY`
+  by name.
+* Console suite **732 passed**, 5 skipped (was 679); `tsc --noEmit`, `eslint`
+  (0 errors, 0 warnings) and `next build` all pass; all eleven `check_*.py`
+  gates pass.
+
+#### A harness fault found while proving it, which cost more than the fix
+
+The browser run passed, then failed 30 of 46 checks twice, then passed again,
+over code that never changed in between. `run.sh` started the console with
+`npm start`, which forks `sh -c next start`, so the PID it killed on exit was
+the **wrapper** and `next-server` kept :3000. The next run could not bind,
+exited, and the health check two lines down was answered by the server still
+running from before — while `npm run build` had replaced its `.next` directory
+underneath it. Every screen rendered blank, no page error was logged, and the
+cause was invisible from the output.
+
+Next is now started directly, so the PID is the server's own, and the script
+**refuses to start** if either port is already in use, naming what to kill. A
+run that silently exercises a different build is worse than no run, which is the
+same reason `verify_apply_all.sh` was made to fail on an error anywhere in the
+buffer (T-12).
+
+One thing this does **not** prove: that a real agency webhook endpoint accepts
+what we send it. There is no agency endpoint to send to — all twelve contact
+variables are blank on this deployment, which is the condition the 503 exists to
+report honestly instead of hiding.
+
+### T-29. Every advisory went to everyone, from the one surface nobody had looked at
+
+Found in the same sweep, by asking the reverse question: the console's broadcast
+composer offers five targeting controls — audience, agency, LGA, ward, polling
+unit — so who reads them?
+
+There are **two** readers of `system_alerts` in the app, and only one of them
+had been fixed:
+
+| surface | where | targeting |
+|---|---|---|
+| `BroadcastHud` | the citizen home screen and the responder dashboard | `broadcastProvider` → `broadcastReaches()` — audience, LGA, ward, PU, expiry |
+| `SystemAlertListener` | **every screen in the app**, from `MaterialApp.router`'s builder in `app.dart` | its own filter |
+
+The second one read `target_type` and `target_value`. The console writes neither
+— it writes `target_audience`, `target_lga`, `target_ward`, `target_pu` — so:
+
+```dart
+final targetType = doc['target_type'] as String? ?? 'ALL';   // always 'ALL'
+if (userRole == 'HQ_OFFICER' || targetType == 'ALL') return true;
+```
+
+…returned `true` for **every advisory the console has ever sent**, to every user,
+on every screen. An advisory composed for *citizens of Gindiri ward* appeared as
+a full-width banner on every officer's handset in Plateau State, while the HUD on
+the same phone's dashboard correctly did not show it.
+
+Three more faults in the same twelve lines:
+
+* `geo_lgas` and `geo_wards` — plural — are read from the profile and no
+  migration defines either, so both lists were always empty. The `LGA` and
+  `WARD` branches below the fail-open line could only ever have refused.
+* **Expiry was never checked.** The stream filters `is_active` only, so a
+  withdrawn-by-time advisory stayed on screen indefinitely. `broadcastReaches`
+  drops it.
+* Agency targeting is read by neither surface. `target_agency` is written by the
+  composer and by nothing else, and read nowhere — see below.
+
+**This is the same defect `broadcast_targeting.dart` was created to fix.** Its
+own header says so: *"only ever checked audience and expiry — reading
+`target_type`, which the HQ console never wrote … Geographic scope was not
+checked at all, so an advisory for one ward went to the whole state."* That fix
+landed in `broadcastProvider` and this second reader of the same table was
+missed, which is why the file now has one caller fewer and a pure function with
+two.
+
+**Fixed** by deleting the second filter: the banner calls `broadcastReaches()`
+with a `BroadcastRecipient` built from the profile's singular geo columns, keeps
+the dismissed-first rule, and keeps HQ's deliberate see-everything pass-through.
+`isResponder` follows the same rule `resolveRole` applies — anything that is not
+`CITIZEN` or `USER`.
+
+**Proven** by `test/system_alert_targeting_test.dart`: 17 widget tests, every
+fixture shaped the way `MassBroadcast.tsx` actually inserts a row. A CITIZENS
+advisory is refused to a responder, a JOS NORTH advisory is refused in MANGU, a
+ward advisory is refused in the neighbouring ward, an expired and a withdrawn
+advisory are both refused, a recipient with no place recorded still receives a
+scoped warning (deliberate — see `broadcastReaches`), HQ still sees an advisory
+addressed elsewhere, and a legacy row carrying only `target_type` still arrives.
+The existing dismiss tests were written against `target_type` and still pass,
+which is the back-compatibility path rather than a coincidence.
+
+#### The legacy place column: a defect I talked myself into, and the fixture that sold it
+
+Recorded because the reasoning was convincing and wrong, and the next person to
+look at `broadcast_targeting.dart` will have the same thought.
+
+`broadcastAudience()` falls back from `target_audience` to the legacy
+`target_type`. There is no fallback for `target_value`, and `broadcastReaches()`
+reads geography only from `target_lga` / `target_ward` / `target_pu`. The initial
+schema paired `target_type` with `target_value`, and the old
+`SystemAlertListener` read that pair as a PLACE — `target_type == 'LGA'`, then
+`target_value` as the LGA name. Meanwhile `20260903000002` carried `target_type`
+into `target_audience` and said in its own comment that it was doing so "rather
+than leaving them to the reader's fallback forever".
+
+So: a reader existed for the place encoding, the reconciliation migrated the
+audience and not the place, and the obvious conclusion is that every legacy
+place-scoped advisory is now delivered statewide. That is what I wrote down as
+the next thing to fix.
+
+**It is not true, because nothing has ever written `target_value`.** Across the
+whole history of this repository the column appears exactly twice outside the
+SQL: in that reader, and in a column inventory in `MassBroadcast.test.tsx`. The
+old mobile broadcast screen wrote an AUDIENCE into `target_type` —
+`'CITIZENS'`, `'AGENTS'`, `'ALL'` — and never a place. The console has always
+written the canonical columns. The place half of the pair was read for a scheme
+no writer implemented, which is why the migration had nothing to carry across.
+
+Adding the fallback would therefore have scoped live advisories by a column that
+is empty on every row that exists. The reasoning is now written into
+`broadcastAudience()`'s doc comment, so the question is answered where it gets
+asked.
+
+#### What made it convincing was a fixture describing an impossible row
+
+`scripts/local_e2e/fixtures.js` seeded exactly the row I had just concluded
+could not exist:
+
+```js
+target_audience: 'ALL',
+target_type: 'LGA',
+target_value: 'JOS NORTH',
+```
+
+A fixture for a shape no writer can produce is worse than no fixture. It is also
+self-contradictory — `'ALL'` says everybody and `'LGA'`/`'JOS NORTH'` says one
+place — and `target_audience: 'ALL'` is what won, so the advisory went to
+everyone and the geography in it was decoration.
+
+Replaced with the two shapes that do exist, and each is now asserted in the
+browser:
+
+* **canonically scoped**, as both composers write today, and scoped to a WARD.
+  Every fixture person works in NARAGUTA except the ARMY liaison, who is in
+  PANYAM — so one advisory separates the eight roles.
+* **a genuine legacy row**, the audience in `target_type` and nothing else, as
+  the old mobile screen wrote one.
+
+Three assertions in `mobile_capture.js`: the ward advisory reaches all seven
+roles posted to that ward; it does **not** reach the liaison posted to the next
+one; and the legacy row still reaches its audience through the fallback. They
+discriminate — the ward-scoped row carries no `target_type` at all, so under the
+pre-T-29 filter it defaulted to `'ALL'` and would have reached the Army too.
+
+This is the first end-to-end coverage T-29's fix has had. Until now it was
+proven by seventeen widget tests and nothing else, and the browser run's own
+advisory fixture was one the filter could not meaningfully be tested against.
+
+Observed, in a real browser against a release build of the app:
+
+```
+PASS  a ward-scoped advisory reaches everybody posted to that ward
+        — 7 role(s) in NARAGUTA all saw it
+PASS  and does not reach the liaison posted to another ward
+        — the ARMY liaison in PANYAM was not shown it
+PASS  a legacy advisory addressed by target_type still reaches its audience
+        — the AGENTS advisory reached a responder through the legacy column
+19/19 checks passed, 211 mobile screenshots
+```
+
+The screens pass is 19/19 now, from 14/15 at the start of this work: fourteen
+page errors fixed, the RPC refusal caught, and these three.
+
+#### Closed: `target_agency` had no reader because the console's banner had no targeting
+
+Left open above as needing a decision about who an advisory is for. It did not:
+the question answers itself once you look at the surface agency liaisons
+actually use.
+
+`SystemAlertListener` in the console docked the newest live advisory under the
+header and applied **no targeting at all** — only `is_active` and expiry. The
+composer offers five targeting controls and this surface honoured none of them,
+so:
+
+* an advisory addressed to **CITIZENS** docked under an HQ operator's header.
+  The file's own comment warns that "an advisory that is no longer true is worse
+  than none, because operators calibrate against it"; one that was never theirs
+  is the same fault with a different cause;
+* an advisory addressed to **one agency** appeared on every other agency's
+  liaison screen — and `console-access.ts` exists precisely to stop a liaison
+  from an outside agency seeing what is not theirs. This was the one surface
+  that ignored it;
+* an advisory scoped to one LGA or ward went to every console user in the state.
+
+So `target_agency` was never waiting on a product decision. Agency liaisons have
+console accounts and not handsets, which is why the mobile side has no agency
+reader and never needed one; the console is the surface an agency-addressed
+advisory was always for, and it was the surface throwing the targeting away.
+
+`src/lib/advisory-targeting.ts` decides it now, deliberately mirroring
+`broadcastReaches` in the app so the composer means one thing on a console and
+on a handset: the canonical audience with a fallback to the legacy
+`target_type`, place scoping that fails **open** on a viewer whose own posting is
+unknown, an unrecognised audience treated as ALL rather than dropped, and the
+expiry rules that were inline before. Two deliberate differences, both because
+the surfaces differ — `CITIZENS` reaches nobody on a console, and agency scoping
+exists here and nowhere else. Command still sees everything: they compose
+advisories and withdraw them.
+
+27 unit tests, and three assertions in the browser run.
+
+#### The first version of the browser assertion passed for the wrong reason
+
+Worth recording, because the failure is what taught me the surface.
+
+The console docks **one** banner — the newest advisory the viewer is addressed
+by — and the two seeded advisories had the legacy row newer. So every console
+role was shown IT, the ward-scoped row was invisible to the test, and
+*"the Army liaison was not shown the ward advisory"* passed while proving
+nothing: their absence was indistinguishable from a banner rendering nothing at
+all. What exposed it was the other half of the pair failing — HQ, the LGA
+command and the Police liaison all read `absent` for an advisory HQ should see
+unconditionally, which is impossible if the surface works.
+
+Fixed in the fixture and in the assertion. The ward advisory is now the newer
+row, so it is what the people it names actually see; and the Army liaison is
+asserted to be shown the **other** advisory, which is what makes their absence
+from the first one a scoping decision rather than silence.
+
+#### Giving the column a reader made the composer's own list a live defect
+
+T-28 found the HQ escalation menu writing `NPF`, `MILITARY`, `RAINBOW` and `VGN`
+— staff badges, not agency codes — and the broadcast composer was doing the same
+thing. It was **exempted** from
+`scripts/check_one_agency_vocabulary.py` on the explicit grounds that its agency
+control was "read by nothing at all", with a note that the exemption goes when
+that is closed.
+
+Closing it is what made the exemption dangerous. With a reader in place,
+`advisoryReaches` compares `target_agency` against the viewer's liaison
+agency — so an advisory addressed to "NIGERIA POLICE FORCE (NPF)" would have
+matched no liaison and reached nobody but command: exactly the escalation-menu
+defect, in the one file the guard had been told to look away from. The composer
+is built from `AGENCY_LIST`'s canonical codes now, and `RAINBOW` and `VGN` are
+gone for the reason they are not escalation destinations either — Operation
+Rainbow's own staff are addressed by `target_audience: AGENTS`, and no vigilante
+outfit has a console account to read an advisory with.
+
+**And removing the exemption did not add coverage.** The guard passed a mutation
+that put `NPF` and `MILITARY` straight back, because the file had simply dropped
+out of every check rather than becoming subject to them — it was never in
+`CONSUMERS`. Adding it there is what closed the hole, and the mutation now fails
+naming both codes. Three times in this session a guard has needed
+mutation-testing to show it guarded anything; this is the one where the edit
+looked complete and was not.
+
+### T-30. The gate watched the template; the shipped artefact carried the name
+
+With a Flutter SDK installed in this container for the first time, the mobile
+half of `scripts/local_e2e/run.sh` could be run here — a release web build of the
+app, driven in a real browser. Having the build, the obvious thing to do with it
+is read it, because every mobile credential gate in this repository checks
+**source**:
+
+```
+scan 'TERMII_API_KEY|CLOUDINARY_API_SECRET|HMAC_SECRET'            lib/ .env.example
+scan '[A-Z_]*(PASS|PASSWORD|PIN|SECRET|TOKEN)[A-Z_]*[[:space:]]*=' .env.example
+scan 'AGENT_DEFAULT_PASS|agentDefaultPass'                         lib/ .env.example
+```
+
+All three pass. `.env.example` declares **zero** credential-shaped keys. Then,
+out of `build/web/assets/.env` in a build this repository's own harness had just
+made:
+
+```
+DEMO_CITIZEN_PASS=<set>
+AGENT_DEFAULT_PASS=<set>
+```
+
+`pubspec.yaml` declares `.env` as a Flutter **asset**, so that file is what
+ships: bundled verbatim, extractable with `unzip`. `AGENT_DEFAULT_PASS` is the
+name from T-20 — one password shared by every staff account, read out of the
+bundled `.env`, published inside the APK. It was removed in PR #61, and **two
+gates exist specifically to stop it coming back**.
+
+It came back through the gap between the two files. `.env.example` is the
+template; `.env` is the asset; the gates read the template. And the thing writing
+the asset was `scripts/local_e2e/provision_env.sh` — the harness's own
+provisioning script — which still did
+
+```bash
+set_key AGENT_DEFAULT_PASS "staging-only-password"
+...
+for key in DEMO_CITIZEN_EMAIL DEMO_CITIZEN_PASS AGENT_DEFAULT_PASS; do   # assert non-empty
+```
+
+so it not only wrote the dead name, it **failed the run if the value was
+missing** — a liveness assertion on a key nothing has read since PR #61.
+Confirmed by listing every `.env` key the app actually reads: eight, and that is
+not one of them.
+
+**What this is and is not.** The value is `staging-only-password`, and it
+authenticates nothing: the account exists only in `scripts/local_e2e/fixtures.js`
+and a throwaway staging project. No real credential leaked. What leaked is the
+*shape*: a checkout that has run the harness — which is the normal state of a
+developer's checkout — bundles a working demo credential and a name the project
+has spent a commit removing, into the artefact that goes to a handset. T-20 is
+what that looks like when the value is real.
+
+**Three changes, smallest first.**
+
+* `provision_env.sh` no longer writes `AGENT_DEFAULT_PASS`, and **deletes** it
+  if present rather than refusing to run: every checkout that has run the old
+  script still has the line, and a `.env` is never regenerated from the template
+  once it exists, so refusing would have stranded exactly the checkouts this is
+  meant to clean. The non-empty assertions drop with it, and a post-condition
+  fails only if the delete stops working.
+* It writes a marker line into `.env` — *"PROVISIONED FOR THE LOCAL END-TO-END
+  RUN — do not build a release from this file"* — so the next person to read the
+  artefact knows why a demo password is in it.
+* CI now scans **what was bundled**, not the template: a step in the
+  `mobile-screens` job reads `build/web/assets/.env` after the build and fails on
+  any credential-shaped key other than `DEMO_CITIZEN_PASS`, which the app reads
+  to offer the demo login. It is the only job that builds the app with the asset,
+  so it is the only place the real file exists.
+
+**Proven both ways.** The new gate was run against the artefact as it was
+actually built — it fails, naming `AGENT_DEFAULT_PASS` — and against the file the
+fixed script produces, where it passes. The template, which is all the old gates
+ever saw, is identical in both cases.
+
+#### Swept for more of the same shape, and found none
+
+T-28 and T-29 are both "two sides of one name disagreed", so the obvious
+question is how many more there are. Three mechanical sweeps, run against the
+whole repository:
+
+* **A column an app writes that nothing reads.** Three candidates, all false:
+  `agency_action_reports.hq_acknowledged_at`, `agency_deployments.deployment_note`
+  and `agency_notifications.sent_at` are read through `select('*')`, which the
+  sweep could not see. (`system_alerts.target_agency` is the one real instance,
+  recorded under T-29.)
+* **A column an app reads that nothing writes** — the T-29 signature exactly,
+  since `target_type` exists in the schema and so passes
+  `check_schema_drift.py`. One hit: `profiles.badge_number`, read in four
+  places and written only by `scripts/seed_staging.js` and the browser
+  fixtures, never by `/api/admin/provision` or the liaison form. Chased and
+  **dismissed**: the console's "Badge ID" field resolves to an email local part
+  (`${badgeId}@operationrainbow.plateau.gov.ng`), not to this column, so
+  sign-in does not depend on it, and all four readers fall back to
+  `full_name || email`. The column is decorative for any account created
+  through the console.
+* **A realtime subscription on a table that is not in the publication**, which
+  fires nothing and reports no error — the fault behind "three realtime
+  subscriptions were never going to fire". All six console channels and all
+  five mobile `.stream()` tables are members: `alerts`, `telemetry`,
+  `chat_messages`, `system_alerts`, `profiles`, `agency_action_reports`,
+  `agency_deployments`, `sim_channel_events`, `agency_notifications`.
+
+None of the three was worth a new CI gate — the first two would have cost three
+false positives and one dismissal for one real finding, and the third has
+nothing to catch. Recorded because the next person to ask the same question
+should not have to re-run them.
+
+### T-31. The stand-in answered no database function, and a green run photographed the empty screen
+
+Running the mobile half of `scripts/local_e2e/run.sh` for the first time in this
+container — a release web build of the app, driven in a real browser — turned the
+suite red. Two findings came out of it, and only one was the app's.
+
+#### The stand-in implemented no RPC at all
+
+`scripts/local_e2e/fake_supabase.js` routes `/rest/v1/<table>`. It had no route
+for `/rest/v1/rpc/<function>`, so every `.rpc()` call fell through to the table
+router, which took the whole path segment as a relation name:
+
+```
+POST /rest/v1/rpc/register_sms_device
+400 {"code":"42P01","message":"relation \"public.rpc/register_sms_device\" does not exist"}
+```
+
+Sixteen functions are called across the two apps. Seven are reachable from a
+browser, and all seven were refused in every run there has ever been:
+
+| function | called by | what was refused |
+|---|---|---|
+| `audit_trail` | `AuditLogs.tsx` | the whole Forensic Audit screen |
+| `latest_ai_report` | the dossier | the persisted AI debrief (T-7's whole point) |
+| `ussd_report_credibility` | the dossier's provenance panel | how much to believe a USSD report |
+| `confirm_ussd_report`, `mark_false_report` | the dossier's controls | both writes |
+| `register_sms_device` | every mobile sign-in | the encrypted SMS fallback key |
+| `revoke_sms_device_keys` | mobile sign-out | retiring it |
+
+**The console's own report file held the proof the whole time**, in
+`local_e2e_screenshots/report.json`:
+
+```
+('hq:audit', 'Failed to load resource: the server responded with a status of 400')
+('hq:audit', '[AUDIT_TRAIL_ERR] [object Object]')
+('hq:dossier', 'Failed to load resource: the server responded with a status of 400')
+```
+
+recorded in `browserProblems`, which nothing asserts on. The run reported
+**46/46** and filed `20-hq-07-audit.png` — a photograph of an empty panel — as
+evidence that the Forensic Audit screen renders. This is the fault PR #71
+described in a different place: *a thing being present is not the same as a thing
+being visible*. Here a thing that could not load at all was present, and nothing
+looked.
+
+`register_sms_device` deserves its own line, because the app swallows its failure
+on purpose — *"Never fatal. A device with no SMS key still works normally; it just
+has one fewer way to reach HQ when the data connection dies."* So nothing on
+screen changed, the harness reported 15/15, and **the encrypted SMS fallback has
+never once been provisioned in a browser run**.
+
+**Fixed in three parts.**
+
+* An RPC router, with the seven browser-reachable functions implemented over the
+  same in-memory tables as everything else. `register_sms_device` returns
+  `\x…`-prefixed hex, because that is how PostgREST renders BYTEA and how the app
+  decodes it — base64 here would have produced a key the ingest route could never
+  match.
+* Anything **not** implemented now answers `501 FAKE_NO_RPC` naming itself and
+  pointing at `RPCS` in the stand-in, instead of lying about a missing relation.
+* `rpcMisses` is recorded on the control plane and **asserted** by both the
+  console and the mobile harness: *"every database function the app called was
+  answered, not refused"*. A refusal is a failure now, because an unimplemented
+  function and a working screen are the same screenshot.
+
+And one fixture change, because the fix alone would still have photographed an
+empty panel: every fixture alert carried an empty `escalation_log`, so
+`audit_trail()` — which exists to flatten exactly that — had nothing to return.
+`a005`, which is `status: ESCALATED` and `escalated_to_agency: ARMY` with no
+history at all, now carries the three entries its own status implies, shaped
+exactly as `escalateAlert` writes them.
+
+#### The mobile screens pass was red for a reason that was not the app
+
+Fourteen page errors, two per staff role and none for the citizen:
+
+```
+mobile:unit:signin  TypeError: Cannot read properties of null (reading 'toString')
+```
+
+The frames land in `main.dart.js` inside Flutter's own web keyboard engine — the
+block that reads `event.key`, `event.location` and `event.keyCode` and looks the
+pair up in `kWebLogicalLocationMap`. In dart2js, a null-assertion compiles to a
+`.toString` on the value, so `map[key][location]` had returned null.
+
+Instrumenting every key event during a real sign-in found it, after a **wrong
+first guess** — Shift for the `@` in the badge, which turned out to be
+synthesised correctly and reproduced nothing. The real cause:
+
+```
+keydown  key=-  code=NumpadSubtract  location=3   ← numpad, mapped
+keypress key=-  code=NumpadSubtract  location=3
+keyup    key=-  code=NumpadSubtract  location=1   ← "the left-hand one of a pair"
+```
+
+`page.keyboard.type` releases `-` with **location 1**, which no minus key has.
+`kWebLogicalLocationMap['-']` holds locations 0 and 3, so the lookup misses and
+the engine throws. The password is `staging-only-password`: two hyphens, two
+errors, and the citizen — who types only digits — got none.
+
+So it is the test driver synthesising an event no keyboard produces, not a defect
+in this app. The flow now types through `Input.insertText` (`sendCharacter`),
+which inserts the text and fires the `input` event Flutter's field listens to
+with no key events at all. Verified: sign-in reaches `#/agent-dashboard` and
+`#/home` with **zero** page errors, for staff and citizen alike.
+
+`scripts/check_one_mobile_login.py` had to be taught the new shape — its
+signature for "the sign-in flow is here" was the typing CALL, so changing the
+mechanism read as the flow having been deleted. Mutation-tested after the change:
+actually removing the flow is still caught.
+
+#### What the fixed run reports
+
+The whole suite, end to end, for the first time in this container: **305
+assertions, no failures**, and `run.sh` exits 0. Re-run after the advisory
+targeting work below, which changed shared fixtures and a console component six
+other passes depend on: **311 assertions, no failures, exit 0** — verified rather
+than reasoned about, because checking two passes in isolation is not checking
+the suite.
+
+| pass | before | after |
+|---|---|---|
+| console screens | 46/46, with the audit screen refused and photographed empty | **52/52** — the refusal, the audit rows, the actor, and the three advisory assertions |
+| console controls | 33/33 | **36/36** |
+| mobile screens | 14/15, fourteen page errors | **19/19**, clean — `register_sms_device` answered for all eight roles, plus the three advisory assertions added after that run |
+| mobile controls | never run in this container | **36/36**, 225 controls exercised |
+| camera and microphone | never run in this container | **17/17** |
+| messaging round trip | never run in this container | **17/17** |
+| per-tier controls | never run in this container | **83/83** |
+| the whole command chain | never run in this container | **51/51** |
+
+`2 function(s) answered` on the mobile passes is `register_sms_device` and
+`revoke_sms_device_keys`; `1 function(s) answered` on the console's control sweep
+is `mark_false_report`. All three were refused before this.
+
+The bottom five rows are the part no CI run has ever reached either — Actions has
+been refused for billing since 2026-10-06 (T-17, T-27) — so until this run, the
+only evidence that the mobile app's controls, its live stream, its messaging and
+the command chain worked in a browser was a previous session's local run of an
+earlier build.
+
+One caveat from the first attempt is now settled rather than left standing: the
+same assertion added to the console's control sweep had not run, because I edited
+`interact.js` after `run.sh` had already launched it. It ran this time, and the
+sweep reports 36/36 with `every database function a control called was answered,
+not refused`.
+
+And a fourth harness fault, which was mine and cost the run it was introduced in.
+`register_sms_device()` writes to `sms_device_keys`, a table the fixtures had
+never declared, so the key existed in `tables` and not in the startup snapshot
+`PRISTINE`. The next `/reset-data` did `push(...fresh[name])` on a name the
+snapshot had never heard of — an uncaught exception **inside the control
+server's request handler**, which kills the whole stand-in. The harness that was
+mid-run got `UND_ERR_SOCKET: other side closed`, and the suite aborted after its
+fifth pass, forty-five minutes in, with a stack trace pointing at a `fetch` in
+`user_features.js` that had nothing to do with the cause. Four passes had
+already reported **136 assertions and no failures** by then, so the aborted run
+was still evidence — but of the four passes it reached, not of the suite.
+
+Fixed twice over, deliberately: the fixtures declare the table, which is the
+real fix; and the reset loop empties an unknown table instead of throwing,
+because the cost of being wrong in that handler is every result after the
+mistake. Reproduced first — register a key, reset, watch it die — then verified
+the same sequence leaves it alive and still answering.
+
+### T-32. The audit trail attributed every human action to the system
+
+Found immediately after T-31, because fixing the stand-in made the Forensic Audit
+screen legible for the first time and the rows read wrong.
+
+`audit_trail()` takes the actor from one key:
+
+```sql
+coalesce(nullif(e.entry ->> 'by', ''), 'SYSTEM')
+```
+
+and **nothing a person does writes `by`**:
+
+| writer | key | actor shown |
+|---|---|---|
+| `escalate_overdue_alerts()` — the timeout job | `by` | SYSTEM ✓ |
+| the notification-outbox trigger | `by` | SYSTEM ✓ |
+| `confirm_ussd_report()`, `mark_false_report()` | `by` | the uuid ✓ |
+| `alert-actions.ts escalateAlert` — the HQ console | **`by_email`** | SYSTEM ✗ |
+| `agent_dashboard_screen.dart` — a responder's handset | **`by_email`** | SYSTEM ✗ |
+
+So the list inverted responsibility. Every escalation an officer performed — from
+the HQ console or from their own handset — was attributed to the system, and the
+only accurate attributions on the screen were the machine's own. A reader could
+not tell an automatic timeout from a commander's decision, and the commander's
+decision is the one somebody is later asked to account for.
+
+The reader is also what disagreed with the documented shape. The column comment
+on `alerts.escalation_log`, written in `20260722000000`, has said so since the
+beginning:
+
+```
+'Append-only structured log: [{from_tier, to_tier, to_officer_id,
+ to_officer_name, reason, notes, by_email, at}]'
+```
+
+**Why not change the writers.** Production holds entries of both shapes, written
+across this schema's whole life, and the log is append-only — a chain of custody
+that gets rewritten is not one. Both keys have to stay readable. `20261019000000`
+reads `by` first, so the SQL writers' explicit value keeps precedence, then
+`by_email`, then `SYSTEM`. `CREATE OR REPLACE` only; no data is touched.
+
+**Why the behaviour test did not catch it.** `scripts/oversight_behaviour_test.sql`
+plants its fixture as
+`{"from_tier":"UNIT","to_tier":"WARD","reason":"TIMEOUT","by":"SYSTEM",…}` — the
+machine's shape, the one key that worked — and asserted the action and the tiers
+and never the actor. It now plants **both** shapes and asserts the actor for each,
+plus an entry carrying no actor at all, which must still appear as SYSTEM rather
+than be dropped.
+
+The browser run asserts the same thing from the other end: *"the audit screen names
+the officer who escalated it, not SYSTEM"*, against the HQ operator's own address
+in the fixture history.
+
+### T-33. C-6 was unanswerable for three reasons; two of them stopped being true
+
+C-6 — a second backend, deleted from this repository in PR #58 but never
+confirmed undeployed — has been the longest-running unknown in this document.
+Four of its endpoints answer with no credential and two were never hardened:
+`validateAgentAccessCode`, which returns a working staff email and password to
+whoever asks, and `triggerSLASweep`, which escalates every open alert.
+
+It was unanswerable for three stated reasons: no Google credential, neither CLI
+installed, and an environment network policy that denied the endpoint with a 403
+on CONNECT. **Two of those are no longer true**, and nobody would have noticed
+without checking, because the row said so and rows go stale:
+
+| blocker | then | now |
+|---|---|---|
+| a CLI | neither installed | `gcloud` 570.0.0 is in the container |
+| the network | 403 on CONNECT to `cloudfunctions.net` | the **API** host answers; `…/v2/projects/rainbow-97f1e/locations/-/functions` returns `401 UNAUTHENTICATED` |
+| a credential | absent | **still absent — this is the whole remaining blocker** |
+
+A 401 from Google is a request that arrived and was refused for want of
+credentials. A network policy refusing to carry it looks different, and that is
+what the row described.
+
+#### And a script, because the command was never the hard part
+
+The report has said since the beginning that `gcloud functions list --project
+rainbow-97f1e` settles it. True, and not enough: the answer is a list of names,
+and what an operator needs is which of those names are the dangerous two,
+whether the PLATFORM is serving them to the public — an IAM binding, which the
+code being "hardened" says nothing about — and what to run next.
+
+`scripts/is_the_old_backend_deployed.sh` answers all three and distinguishes
+three outcomes by exit code: **2** not answered (no credential, and it says that
+is the only missing input), **0** nothing deployed, **1** deployed, with the
+never-hardened two marked `!!!`, any `allUsers` binding called out, and the
+deletion commands printed.
+
+It deletes nothing — deleting a deployed function is irreversible and is the
+operator's call — and it **never calls a function**. That is the part worth
+stating: probing is the obvious way to check whether these are live and it is
+not available, because `seedMockData` writes ten CRITICAL alerts including
+DURESS ones, so a probe manufactures the emergencies the system exists to
+report, and `triggerSLASweep` moves every open alert up a tier. The script asks
+the Cloud Functions and IAM APIs what EXISTS and nothing else.
+
+Both verdict paths were exercised against a stubbed `gcloud`, which is the only
+way to reach them without a credential — and that caught a real bug in the one
+that matters most: in the clean-bill-of-health message, `` `seedMockData` `` sat
+inside a double-quoted bash string, so the backticks ran it as a command and the
+word vanished from the output. A corrupted all-clear is the worst line in the
+script to get wrong, and it would have shipped.
+
 ### Open, and not closeable from the repository
 
 | # | Finding | Status |
 |---|---|---|
-| T-17 | **GitHub Actions jobs are refused before a runner is assigned — an account billing condition.** (This row said "has not run since 2026-09-29"; wrong — see T-27. Run #392 passed at 16:30 on 2026-10-06, and runs have been created continuously since.) Every job in every run completes in about two seconds with `runner_id: 0`, no runner name and no logs — nothing picks the jobs up. Not a failing test: an Actions or billing condition on the account. | 🔴 **open, and now load-bearing.** Moving to Railway removed the one structural protection App Hosting gave (a secret marked RUNTIME-only, absent during `next build`). The CI job that greps `.next/static` for key material is what remains between this deployment and C-1 recurring, and it is switched off. Fifty merges landed with every gate unexercised, which is how T-10, T-11, T-12 and T-13 survived |
-| C-6 | an abandoned second backend, if still deployed | 🟠 unchanged, and **downgraded 2026-10-06**: it writes to Firestore, which nothing in the shipping code reads (13 mentions across `lib/` and `hq-dashboard-next/src/`, all comments, no imports). Cleanup with a billing and data-at-rest tail, not a live hole. `gcloud functions list --project rainbow-97f1e` settles it |
+| T-17 | **GitHub Actions jobs are refused before a runner is assigned.** *(Corrected 2026-10-16: this row said "an account billing condition" and named billing as the cause in every summary I gave. The operator said there is no billing prompt on the account, and they are right that I never established one — the API returns no reason. What IS established, and re-verified today on run #517: 12 jobs created with correct names, so the workflow file parsed and expanded; `runner_id: 0`, `runner_name: ""`, no `steps` array; `total_ms: 0` billable across all 12; the check run carries empty `output.title`, `summary` and `text`. The repository is PRIVATE and owned by a personal account, so Actions minutes are metered rather than unlimited as they are for a public repo. That is as far as the evidence goes: no runner is assigned, and the reason is not visible from any API this session can reach.)** (This row said "has not run since 2026-09-29"; wrong — see T-27. Run #392 passed at 16:30 on 2026-10-06, and runs have been created continuously since.) Every job in every run completes in about two seconds with `runner_id: 0`, no runner name and no logs — nothing picks the jobs up. Not a failing test, not the workflow file, and nothing in this repository can fix it: the jobs are never scheduled. Where to look, in order — the account's Actions usage for the month (github.com/settings/billing), then the repository's Settings → Actions → General permissions. | 🔴 **open, and now load-bearing.** Moving to Railway removed the one structural protection App Hosting gave (a secret marked RUNTIME-only, absent during `next build`). The CI job that greps `.next/static` for key material is what remains between this deployment and C-1 recurring, and it is switched off. Fifty merges landed with every gate unexercised, which is how T-10, T-11, T-12 and T-13 survived | **Still open on 2026-10-10, and now measured rather than inferred.** Run #458 (push, `224ceb8`) and #459 (pull_request, same head): all twelve jobs `conclusion: failure`, every one with `runner_id: 0`, no runner name, no steps, and logs returning 404 — and `get_workflow_run_usage` reports **`total_ms: 0` for all twelve**, so not one of them consumed a millisecond of runner time. Eleven finished in 2 seconds and the Flutter job in 38, which is the same refusal with a longer queue gap, not a job that ran. The base branch is red identically: run #443 on `main`'s own head (`2c5b5a6`) failed in 4 seconds. So every gate in this repository has now been unexercised by CI for four days, and the only evidence any of them pass is the local runs recorded above.
+| C-6 | an abandoned second backend, if still deployed | 🟠 unchanged, and **downgraded 2026-10-06**: it writes to Firestore, which nothing in the shipping code reads (13 mentions across `lib/` and `hq-dashboard-next/src/`, all comments, no imports). Cleanup with a billing and data-at-rest tail, not a live hole. `gcloud functions list --project rainbow-97f1e` settles it | **The blocker narrowed on 2026-10-11, from three things to one.** The row above and C-6's own section say no Google CLI is installed and that the environment's network policy denies the endpoint. Both are now out of date: `gcloud` 570.0.0 is in the audit container, and `https://cloudfunctions.googleapis.com/v2/projects/rainbow-97f1e/locations/-/functions` answers **`401 UNAUTHENTICATED`** — Google refusing a request that arrived, not a policy refusing to carry it. The only missing input is a credential with read access to the project; a VIEWER role answers the question. `scripts/is_the_old_backend_deployed.sh` does the rest.
 | T-18 | **Citizen sign-in has no SMS provider.** `signInWithOtp` is refused outright unless the Supabase project has one, so every citizen sign-in fails. | 🔴 open — a blocker, not a checklist item. `docs/PRODUCTION_DEPLOYMENT.md` §2b |
 | T-19 | **One staff account exists**, so dispatch has nobody to send. The nine unacknowledged incidents on the live board are an empty roster, not a broken pipeline. | 🔴 open |
 
@@ -2069,6 +2873,2252 @@ clear the warnings, drop `--no-fatal-warnings`; then the infos, then
    hand-created dashboard policies will not be dropped. Not on production until
    staging is green.
 3. **Review Supabase logs** for prior anonymous reads of `profiles` and `telemetry`.
+
+### T-34. The console was command until proven otherwise
+
+Found by re-reading the fix for T-29's console half, which was about forty
+minutes old. There is no harness run behind this one and no screenshot: the
+window it opens is a few hundred milliseconds wide and every test in the repo
+closes it before the first assertion, by setting the role up front.
+
+`SystemAlertListener` now decides who a mass advisory is for, and the dashboard
+hands it the viewer's identity:
+
+```tsx
+<SystemAlertListener viewer={{ agency: access.agency, isCommand: isHqUser, ... }} />
+```
+
+`isHqUser` comes from `userRole`, and `userRole` is declared:
+
+```tsx
+const [userRole, setUserRole] = useState('HQ_OFFICER');
+```
+
+HQ_OFFICER is a command role. `isCommand` is the one field in that object that
+short-circuits every other rule — command composes advisories and withdraws
+them, so command sees all of them regardless of who they were addressed to.
+
+How long that lasts needs stating precisely, because it is not "until the role
+read returns". The console body is gated on `authLoading`, and the effect that
+clears it issues its own `profiles` read — concurrent with, and independent of,
+the role effect's read of the same row. Whichever request returns first wins. If
+the role read wins there is no window at all; if the auth effect wins, the
+console's first visible render is as command. T-35 found the sharper half: that
+same effect set the role from `user_metadata` *before* its read, so when it won
+the race the first render was command by an active claim rather than by a
+default left unwritten.
+
+In that window **every** console user was command: a Police liaison was shown the
+advisory addressed to the Army, and the one addressed to citizens of one ward,
+and then they disappeared when their actual role arrived.
+
+That is T-29 — "every mass advisory reached every user" — reproduced on the
+console, by the fix for it, through a default value. Which is the lesson worth
+keeping: the targeting was correct, every one of its 27 tests passed, and the
+defect was entirely in what the caller knew at the time it asked.
+
+A default is a claim about the unknown case, and `'HQ_OFFICER'` claims the most
+privileged thing available. It is a reasonable default for the thing it was
+written for — chrome, so the console does not flicker through a reduced layout
+on every load — and a dangerous one the moment a filter reads it. Nothing marked
+the difference.
+
+So the console first recorded whether it knew:
+
+```tsx
+const [roleResolved, setRoleResolved] = useState(false);
+...
+agency: roleResolved ? access.agency : null,
+isCommand: roleResolved && isHqUser,
+```
+
+**That fix is gone, and T-35 is why.** Reading the surrounding code afterwards
+turned up the same default feeding a second surface, and then the far more
+damning fact that `consoleAccess` was written to prevent precisely this and had
+never been given an unknown role to work with. Guarding one consumer at a time
+was the wrong altitude: the role is read in a dozen places. It is `null` until
+the `profiles` read lands now, which makes `access.agency` null and `isHqUser`
+false meanwhile without any guard at the call site. The two lines above became
+dead logic that read as the thing protecting you, so they were removed.
+
+What survives from this finding is the shape of the leak and the four tests
+below. Withholding both identity fields leaves the most restricted viewer the
+filter has: no agency, not command. Statewide advisories still dock — an unscoped advisory is addressed to
+whoever is looking, and the person at the console is somebody — and nothing
+addressed to an agency or to citizens does. One of the four new tests states that
+as a property rather than a case: whatever the profile read turns out to say, the
+viewer can only *gain* advisories, never lose them, so nothing is shown early
+that the resolved role would have withheld.
+
+**The first fix was incomplete, and where it leaked is the more interesting
+half.** Two code paths set the role, and I marked both resolved. The second is:
+
+```tsx
+setUserRole(u.user_metadata?.role || 'HQ_COMMAND');
+```
+
+`user_metadata` in Supabase is writable **by the user it belongs to** — that is
+finding H-7, "role source user-writable", from the original audit. A role an
+account can set for itself must not be what decides that account is command and
+may read every advisory in the state. And the fallback is `'HQ_COMMAND'`, so an
+account with no role in its metadata at all asserts the top of the chain. Only
+`profiles.role` resolves it now: that is what `requireRole` reads with admin
+privileges and what the RLS policies key on.
+
+Worth stating plainly, because the two halves of this fix point opposite ways and
+look like an inconsistency somebody will tidy up:
+
+> Unknown PLACE fails open. Unknown IDENTITY fails closed.
+
+Withholding a warning from somebody inside the affected area costs more than
+showing it to somebody outside, so a viewer with no LGA recorded is delivered to.
+Showing one agency's advisory to another agency's liaison is the leak itself, so a
+viewer whose agency is not yet known is delivered nothing that was addressed to an
+agency. The app had already learned the identity half once, in the responder tier
+filter: *you cannot be assigned something when we do not know who you are.*
+
+`scripts/check_identity_resolved_before_scoping.py` was written for this finding
+and then rewritten for T-35, around the default rather than the one consumer. It
+is described there.
+
+The check has now failed on its own explanation twice, which is worth recording
+because the second failure is the subtler bug. It scans for `user_metadata` and
+found it in the comment *recording why that path was deleted*. The first version
+did not strip comments at all. The second stripped them a line at a time — and a
+line in the middle of a `/** ... */` block has no comment marker on it, so a
+doc comment sailed straight through. It now blanks comments across the whole
+file in one pass, replacing each character with a space so the newlines survive
+and a failure message still points at the right line. A check that cannot tell
+prose about a hazard from the hazard punishes whoever documents it.
+
+### T-35. The guard was written, documented, tested — and unreachable
+
+T-34 was fixed by gating the one consumer I had just written. Reading the code
+around it afterwards turned this up, and it is the same defect one level up.
+
+`src/lib/console-access.ts` is the module that answers "what may this account
+reach". Its doc comment:
+
+> An unknown role gets the smallest possible console rather than the largest:
+> **while the profile is still loading, `userRole` is `''`**, and a default of
+> "show everything" would flash the whole command console at an agency liaison
+> on every page load before settling.
+
+Every clause of that is right except the premise. `userRole` was never `''`:
+
+```tsx
+const [userRole, setUserRole] = useState('HQ_OFFICER');   // a COMMAND role
+...
+setUserRole(u.user_metadata?.role || 'HQ_COMMAND');       // user-writable (H-7)
+```
+
+So `consoleAccess` was **never once handed an unknown role**. Its "Unknown, or
+still loading" branch — `tabs: ['map', 'alerts']`, subtitle `RESOLVING ACCESS` —
+was unreachable for its entire life.
+
+The second line is the one that makes this more than a stale default. The
+console body never renders until `authLoading` clears, and the effect that
+clears it is the same effect that called `setUserRole(u.user_metadata?.role ||
+'HQ_COMMAND')` — **before** its own `profiles` read, and before clearing the
+gate. So the effect that opened the door claimed a command role walking through
+it. The role effect is a second, concurrent read of the same `profiles` row, and
+whichever request returns first wins: if the role read wins there is no window,
+and if the auth effect wins the console's first visible render is as command,
+with certainty rather than by accident. The declared `'HQ_OFFICER'` default is
+the same claim one step earlier, and is exactly what would be left if the
+metadata line were deleted without fixing the default — which is why both go.
+
+What renders in that window is the whole command navigation: statewide map,
+incident feed, history, broadcast composer, Inter-Agency Command, admin, audit,
+settings, uninstall, SIM — for an agency liaison.
+
+Two tests in `console-access.test.ts` asserted that branch and passed. They were
+testing a function, correctly, and nothing was testing whether the caller could
+ever reach it. This is the report's own recurring signature — *a thing being
+present is not the same as a thing being visible* — in the one place that is
+hardest to see it, a tested branch.
+
+#### The second consumer: a liaison locked onto the Police desk
+
+The agency tab is rendered during the flash, because command's tab list includes
+it. Clicking it mounts `AgencyPortal`, which began:
+
+```tsx
+const [selectedAgency, setSelectedAgency] = useState<string>(
+  isHq ? (AGENCIES[0].code) : (userAgency || 'POLICE')
+);
+```
+
+A `useState` initialiser runs **once**. In that window `isHq` is true and
+`userAgency` is undefined, so the desk is seeded to `AGENCIES[0].code` —
+`'POLICE'`. When the real role lands, `isHq` goes false, and the agency switcher
+is `{isHq && ...}`, so the one control that could have moved them is removed.
+
+An **Army** liaison is then on the **Police** desk for the life of the mount,
+with no way off short of a reload. The four queries run `.eq('agency','POLICE')`;
+RLS does its job and returns nothing; `loadAgencyData` catches and returns empty
+lists by design, so the portal renders the Nigeria Police Force heading over "no
+incidents", `0/0` personnel, no reports and no deployments. Their own agency's
+incidents, roster and deployments are invisible, on the only screen their role
+has — and nothing anywhere says the desk is not theirs.
+
+The non-HQ branch's `userAgency || 'POLICE'` is the same guess written out
+literally, and it needs no race at all: any account with no agency — sector
+command, a responder at a desk — that opens that tab is shown the Police desk,
+empty.
+
+Worth being precise about the severity, because RLS is doing its job throughout:
+**no data crossed an agency boundary.** What crossed was the claim. The console
+told a liaison, in a heading and four empty panels, that another agency has
+nothing going on. That is the same class as the finding this report records
+about the alert badge — *"a badge that says nothing when it could not ask is the
+same lie as an empty board"* — and the console's own comment on the SIM badge
+says it in the opposite direction: *"a failed count must not read as zero"*.
+
+#### The fix is the default, not the guards
+
+The role is read in a dozen places in `page.tsx`. Guarding them one at a time is
+what T-34 did and it does not scale, so:
+
+```tsx
+const [userRole, setUserRole] = useState<string | null>(null);
+```
+
+`consoleAccess(null)` now returns what it was written to return. `isHqUser` is
+false, `access.agency` is null, and the smallest console does not include the
+agency tab at all — so the portal cannot be mounted in that window, and T-34's
+two guards became dead logic and were removed. The viewer literal reads
+`agency: access.agency, isCommand: isHqUser` again, protected by the role rather
+than by a flag beside it.
+
+The `user_metadata` line is **deleted** rather than left as presentation. With
+the role null-until-known, a path that sets it from metadata the account can
+write would immediately re-claim command — and its fallback was `'HQ_COMMAND'`,
+so an account with no role in its metadata asserted the top of the chain. The
+`profiles` read is the only writer now. An account whose profile has no role
+keeps the smallest console, which is the truth about it: RLS would refuse that
+account anyway.
+
+`AgencyPortal` derives its desk instead of freezing it:
+
+```tsx
+const [hqSelection, setHqSelection] = useState<string>(AGENCIES[0].code);
+const selectedAgency: string | null = isHq ? hqSelection : (userAgency || null);
+```
+
+HQ chooses; a liaison does not, because it is their own. `null` means we do not
+know whose desk this is, and nothing is read or subscribed for it — the portal
+says so instead, and points at the remedy ("ask HQ to grant agency access").
+
+#### Coverage
+
+Three component tests in `AgencyPortal.test.tsx`, two of which fail against the
+old code — one re-rendering with the resolved liaison props and asserting the
+desk follows (it stayed on the Police desk), one asserting a non-HQ account with
+no agency is not shown a real agency's name (it was shown the Police). The third
+is the HQ case, which must keep its desk and its switcher.
+
+`scripts/check_identity_resolved_before_scoping.py` was rewritten around the
+default. Five claims at the source — the role state starts `null`, exactly one
+thing sets it, that one setter reads `profile.role`, nothing in the console reads
+`user_metadata`, and `consoleAccess` is handed the role with no `||` putting one
+back — and three at the surfaces this was caught at: the advisory viewer's
+identity fields come from the role and its place fields are not conditional on
+identity, `advisoryReaches` still treats an unknown agency as "not this agency",
+and `AgencyPortal` neither seeds state from `userAgency` nor falls back to a
+literal agency code.
+
+Sixteen mutations, each caught and each named by the check that caught it,
+including the original defect restored verbatim, a *non*-command default
+(`'RESPONDER'` — still a claim about an account we know nothing about), the
+`user_metadata` reader returning, `consoleAccess(userRole || 'HQ_OFFICER')`, and
+both halves of the portal's frozen desk.
+
+One mutation was **not** caught on the first run, and it is the one I would have
+missed by hand: gating a place field on identity
+(`geoWard: isHqUser ? ... : null`). The check required place to be read from
+`userProfile`, which that mutation still did. Place failing open and identity
+failing closed is the asymmetry this whole finding turns on, and a check that
+only holds one end of it is not holding the thing that matters.
+
+### T-36. Three layers, and only the display guessed
+
+Found by sweeping for the shape of T-35 — a value invented where none was
+recorded — rather than by a test. No test was going to find it: every fixture
+has a jurisdiction.
+
+`AlertService` is unusually careful about this. Its comment:
+
+> The reporter's profile is deliberately NOT a fallback here. Filing an
+> incident against the address someone registered at is how a report from Mangu
+> is routed to a unit in Jos, and it would be indistinguishable afterwards from
+> a measured position. C-5 was this mistake with coordinates; this is the same
+> mistake with jurisdiction.
+
+and when the coordinates do not resolve to a Plateau LGA it logs "submitting
+without jurisdiction rather than guessing one" and writes NULL. The responder
+feed filter agrees: `alert['geo_lga'] == null` reaches everybody, because an
+unknown place must fail open.
+
+Then the screens:
+
+| where | what it rendered |
+|---|---|
+| responder's incident card | `${geo_lga ?? 'PLATEAU'} · ${geo_ward ?? 'HQ'} · ${geo_pu ?? 'UNIT'}` |
+| dispatch roster | `Role: ${role ?? 'RESPONDER'} · ${geo_lga ?? 'JOS'}` |
+| console incident dossier | `LGA / Sector: {geo_lga \|\| 'STATE HQ'}` |
+| console map card | `PU: {geo_pu \|\| 'SECTOR HQ'}` |
+| AI triage prompt | `- LGA: ${geo_lga \|\| 'STATE HQ'}` |
+| staff directory | `Sector: {geo_lga \|\| 'STATEWIDE HQ'}` |
+
+Three layers — writer, filter, display — and the two that were careful are the
+two nobody needed to be careful about. Nothing downstream of a correct writer
+and a correct filter was going to catch this.
+
+#### What each one costs
+
+**`· UNIT` on nearly every card.** `geo_pu` is null on essentially every
+GPS-originated incident, by design: "there is no polling unit from coordinates,
+and there cannot be. A PU arrives only when the reporter picks one." So the
+third segment was fabricated on almost every incident in the feed, which
+devalues the whole line — a responder learns the place text is unreliable and
+stops reading it, including on the incidents where it is exact.
+
+**`PLATEAU · HQ · UNIT`.** Three place names, none measured, for an incident
+whose jurisdiction did not resolve. "HQ" reads as a ward and suggests the
+incident is at a headquarters.
+
+**`JOS`.** Not one of Plateau's seventeen LGAs — they are JOS NORTH, JOS SOUTH,
+JOS EAST and fourteen others. T-16 is the finding about invented geography in
+the seed data ("rows that look right and behave wrong: unselectable by the ward
+filter, refused by RLS to the commander whose area they were in"); this is the
+same thing at runtime. And it is reachable for exactly one kind of account:
+`assignableResponders` returns true for a statewide commander before it compares
+LGAs, so the officers with no posting appear only on the list of the account
+that dispatches across all seventeen LGAs and most needs the label to be true.
+
+**`LGA: STATE HQ` in a prompt.** The model's priority and unit recommendation
+were conditioned on a location nobody measured. The lines immediately around it
+read `- Type: ${a.type || 'N/A'}`, `- Ward: ${a.geo_ward || 'N/A'}`,
+`- Description: ${a.description || 'No description provided'}`. The right answer
+was already written three times in the same template.
+
+**`STATE HQ` in the dossier.** Three lines below it:
+`{selectedReport.geo_ward && (...)}` — an absent ward is DROPPED. The same block
+drops one missing place and names another.
+
+That is the pattern worth keeping from this finding: in four of the five cases
+the honest wording was already present in the same file, often on an adjacent
+line. Nobody decided to invent a place. Each `??` was written on its own, by
+somebody filling in a template, and the question "what if this is null" was
+answered locally and differently each time.
+
+#### The same sweep, on people
+
+Two more, which are the same fault about an actor rather than a place:
+
+```ts
+sender_name: actor.name || actor.email || 'HQ DISPATCH',
+sender_role: actor.role || 'HQ_COMMAND',
+```
+
+That is a **write**, into `chat_messages` — the operational thread attached to
+an incident. A message from an operator the console cannot name was stored as
+having been sent by HQ Command. T-32 was this fault with the attribution
+running the other way: the audit trail called every human action SYSTEM. And
+the app side had already learned it, in a comment three lines long:
+
+> the thread carried HQ_COMMAND from one writer and RESPONDER from another for
+> the same person. The profile role is the answer everywhere now, with the
+> coarse enum only as a fallback for a session whose profile has not loaded.
+
+The console side had not. With T-35's fix the console's `actor.role` is `null`
+until the `profiles` read lands, so the window in which this fires is explicit.
+
+And on the read side, `IncidentReplayPanel` — the forensic timeline, the screen
+whose whole purpose is saying who did what — rendered an unattributed message as
+`actor: 'Responder', role: 'AGENT'`. Two facts about an author nobody recorded,
+on the one screen that must not have any.
+
+#### The fix
+
+One tested module per codebase, deliberately a pair, because the same incident
+must read the same way on a handset and at HQ:
+`lib/services/place_label.dart` and
+`hq-dashboard-next/src/lib/place-label.ts`. Twenty tests between them. The rules
+are short:
+
+* show what is recorded, joined;
+* a missing segment is **dropped**, not filled — `JOS NORTH · NARAGUTA`;
+* when nothing is recorded, say so: `JURISDICTION NOT RESOLVED`;
+* `null`, `''` and whitespace all mean "not recorded", because a reader cannot
+  tell them apart;
+* and in a context whose neighbouring lines say `N/A`, say `N/A`.
+
+Nothing is lost by refusing to name a place: the coordinates are what the map
+plots and they are measured. It is the jurisdiction that is unknown, and that is
+what these lines were always about.
+
+The chat now stores `UNKNOWN` for an author it cannot name, asserted by a test
+that fails against the old code, and the replay renders `UNKNOWN` rather than
+promoting an unattributed message to a responder.
+
+#### The check, and the two things it refuses to flag
+
+`scripts/check_no_invented_places.py` flags a literal fallback on a place field
+**only where the fallback is being rendered** — inside a `${...}` or a JSX
+expression. That distinction is the whole design, because the identical `||` in
+a non-rendering position is often right:
+
+* `alert-display.ts` builds a clustering key from `alert.geo_lga || 'STATE'`. A
+  sentinel, never displayed, and it groups unlocated reports of one type
+  together, which is what it is for.
+* `escalateAlert(id, selectedReport.geo_lga || 'ALL')` escalates an unlocated
+  incident to everybody — the documented fail-open on place.
+
+Neither is flagged and neither needs an exemption, because neither is inside a
+string shown to anybody. My first version of this check had no such rule, named
+`role`, `full_name` and `badge_number` among its fields, and reported
+**31 violations** — of which most were placeholders for a missing display name
+and two were the legitimate cases above. A check that cries wolf 25 times to
+catch 6 defects does not get run twice, so it was narrowed to the claim it can
+actually defend.
+
+One literal is allowed by name, with its reason recorded in the check:
+`'Sector'`, from `${userProfile?.geo_lga || 'Sector'} Monitoring`. That reads
+"SECTOR MONITORING" — a possessive in a panel heading where an LGA name would
+go, not a claim about where anything is. `'SECTOR HQ'` is a different thing and
+is still flagged, which one of the mutations proves: the allowance is an exact
+match, not a substring.
+
+Twelve mutations. Seven caught — all five original defects restored verbatim,
+one freshly invented place in a shape nobody has written, and `Sector HQ`
+attempting to hide behind the allowance. Five correctly **allowed** — the
+clustering sentinel, the fail-open escalation argument, an honest wording, and a
+defect quoted inside a comment. That last one is the third time this session a
+check has had to learn the difference between prose about a hazard and the
+hazard; this one blanked comments from the start, having been written after the
+other two learned it.
+
+### T-37. A policy form that could not tell a failed read from a value
+
+Found by sweeping for T-35's other half — a `useState` initialiser holding a
+value that something else is supposed to replace.
+
+`SystemConfig` sets the statewide escalation policy: how long an incident waits
+at polling-unit, ward and LGA level before it climbs. The SQL escalation
+watchdog reads those three `app_config` rows. The screen loaded them like this:
+
+```tsx
+const [thresholds, setThresholds] = useState<Config>({ POLLING_UNIT: 2, WARD: 5, LGA: 10 });
+
+useEffect(() => {
+  supabase.from('app_config').select('key, value').in('key', [...])
+    .then(({ data }) => {
+      if (data && data.length > 0) { ... setThresholds(prev => ({ ...prev, ...cfg })); }
+    });
+}, []);
+```
+
+`error` is destructured away. On a refused or failed read `data` is null, the
+`if` is skipped, and the form sits there showing **2 / 5 / 10**. The component
+has an `error` state. Only the save path ever set it.
+
+That is this repository's own rule, from a comment two hundred lines into the
+dashboard:
+
+> A failed count must not read as zero: a badge that says nothing when it could
+> not ask is the same lie as an empty board.
+
+#### Why this is worse than a badge
+
+Save upserts **all three keys**. So:
+
+1. the read fails;
+2. the operator sees 2 / 5 / 10 and believes that is the live policy;
+3. they change the ward timeout to 8 and press Save;
+4. all three rows are written — and the polling-unit and LGA timeouts, which
+   they never touched and never saw, are replaced by this build's placeholders.
+
+The statewide escalation policy is silently reset by a form whose read failed.
+And the reason nobody noticed is the detail that makes this finding: the
+migration seeds exactly `('escalation_timeout_pu','2')`,
+`('escalation_timeout_ward','5')`, `('escalation_timeout_lga','10')`. The
+placeholders match the seed, so on a fresh database the screen is right even
+when the read fails. It only becomes a lie after somebody has changed a
+value — which is the only circumstance in which anybody needs the screen to be
+true.
+
+#### Three more in the same ten lines
+
+* **A key with no row merged over the placeholder.** `setThresholds(prev =>
+  ({ ...prev, ...cfg }))` leaves the placeholder in place for any key the
+  response did not carry, so a timeout that had never been configured read as
+  though it had. The migration seeds all three, so a missing row means the
+  migration has not been applied here — worth saying out loud, not worth
+  papering over.
+* **`Number(row.value)` on a TEXT column.** `Number('ten')` is `NaN`, which
+  renders as an empty number input, and `String(NaN)` — the literal `"NaN"` —
+  is what Save would have written back into the column the watchdog reads.
+* **The labels were not associated with their inputs.** No `htmlFor`, no `id`:
+  three unlabelled number boxes to a screen reader, on the page that sets the
+  escalation policy. The tests found this before they found anything else —
+  three of them failed on "no form control was found associated to that label"
+  rather than on the defect they were written for.
+
+#### The fix
+
+One `Load` state instead of a value pretending to be one:
+
+```ts
+type Load =
+  | { status: 'loading' }
+  | { status: 'failed'; reason: string }
+  | { status: 'ready'; missing: readonly string[] };
+```
+
+Nothing is shown that was not read. A failed read names its reason and
+**disables Save**, with the reason given on screen: this form writes all three
+timeouts and must not replace a policy it has not seen. A missing key is named
+as not configured, with the value shown labelled as this build's default rather
+than the live policy, and Save stays available because setting it is the
+remedy. A non-numeric stored value is a fault, reported with the key and the
+value quoted, rather than a NaN quietly on its way back to the database.
+
+The rule, which is the part worth carrying: **do not offer to save what you
+could not read.**
+
+#### Why there is no gate for this one
+
+The obvious sweep is "a read whose `error` is discarded", and in the console
+there are **27** of them. Most are deliberate: `AgencyPortal.loadAgencyData`
+documents its own choice — "On failure it returns an EMPTY snapshot rather than
+throwing, so the portal clears its spinner and says 'no incidents' instead of
+spinning forever" — and a judgement about how a display degrades is not
+something a regex should be overruling. (T-35 is the case where that particular
+judgement turned out to cost something, and it was fixed there by not reading
+the wrong desk in the first place.)
+
+What separates a defect from a degradation is whether the read becomes the
+**baseline for a write**. Sweeping for that — a component that both reads a
+table and upserts it — found exactly two in the console:
+`SystemConfig` and `AgencyAccessManager`. The second handles its read error and
+records why it has to:
+
+> return `[]` on error, and the panel then said "No agency liaisons
+> registered"
+
+So the one screen in the console that reads to write was the one that did not
+check, and the sweep is the evidence that there is nothing else of the kind to
+gate. Seven component tests hold it instead, all seven of which fail against
+the previous version.
+
+#### The second half, found by checking the fix against the job
+
+Having fixed the form, the obvious question was whether it now agrees with the
+thing that reads those rows. `tier_timeout_minutes()` in
+`20260928000000_command_chain_escalation.sql` is the only reader, and it is
+careful in a way the form was not:
+
+```sql
+  BEGIN
+    parsed := raw::INTEGER;
+  EXCEPTION WHEN others THEN
+    parsed := NULL;
+  END;
+
+  IF parsed IS NULL OR parsed <= 0 THEN
+    parsed := CASE upper(tier) WHEN 'UNIT' THEN 2 WHEN 'WARD' THEN 5 WHEN 'LGA' THEN 10 END;
+  END IF;
+```
+
+with the reason given above it: "A missing or malformed setting must not
+silently mean 'escalate immediately' (a timeout of 0) or 'never escalate' (NULL
+treated as infinite). Both are dangerous defaults for an emergency queue."
+
+The form accepted anything its `type="number"` input would produce. So an
+operator could set the ward timeout to `0`, or to `2.5`, and it was stored, read
+back on the next visit, and displayed as the live policy — while the job cast
+it, failed, and used 5. **T-28 and T-29's signature again: two sides of one
+name, each internally consistent.** And the more valuable half is that it runs
+the other way too — my own "not configured" wording said the displayed value was
+"this build's default, not the live policy", which was wrong, because the job
+falls back to exactly the same number. It IS the effective timeout; it is simply
+not written down. Both halves of that depend on three numbers and one lower
+bound agreeing across a TypeScript file and a SQL file, and nothing was checking.
+
+So the form now refuses a value the job would discard, saying which rule it
+breaks, and `scripts/check_escalation_defaults_agree.py` reads the policy out of
+the SQL rather than assuming it: the tier→key mapping, the three fallbacks, the
+`<= 0` rejection and the `raw::INTEGER` cast, then asserts the console declares
+the same numbers and the same minimum, and that every migration and operator
+script seeding those rows seeds the same values.
+
+Eleven mutations, each caught — including a fallback changed on one side only,
+the console accepting `0` again, the job dropping its cast, a tier losing its
+fallback (which the SQL comment says means "never escalate"), a console timeout
+nothing reads, and a seed drifting from the fallback.
+
+The eleventh is a note on writing checks rather than on this code. Dropping a
+tier's fallback made the first version of the check die with a `KeyError` in its
+seed loop. It "caught" the mutation, in the sense that the exit code was
+non-zero — and a traceback tells a contributor nothing except that the check is
+broken. Everything after the first block reads the console *against* the SQL, so
+it now reports and stops when the SQL side cannot be read completely, rather
+than carrying a half-read policy forward.
+
+### T-38. The handset asked where a liaison works, not what was handed to them
+
+Found while explaining a number in a harness log. Every role reached 22 of 25
+mobile routes, and the Army liaison's dashboard rendered 372 characters of
+semantics where the Police liaison's rendered 788 — two accounts of the same
+kind, one with less than half the content.
+
+The explanation turned out to be the defect. **The word "liaison" does not
+appear anywhere in `lib/`.** Six agencies send liaison officers; the database
+has `is_liaison()` and `liaison_agency()`, the console has `agencyOf()`,
+`console-access.ts` and `AgencyPortal`, the fixtures create liaison accounts
+that sign into the app, and the harness screenshots 22 routes for each of them.
+The Flutter app had no concept of one at all.
+
+What the database says, from `20261006000000_alerts_scoped_to_posting.sql`:
+
+```sql
+-- alert_is_ours()
+-- An outside agency: only what was handed to them.
+OR (public.is_liaison()
+    AND upper(COALESCE(p_alert.escalated_to_agency, '')) = public.liaison_agency());
+```
+
+Exactly the incidents escalated to their agency, and nothing else. What the
+handset did:
+
+```dart
+// 3. LGA Commanders -> ...
+if (role.contains('LGA')) { ... }
+// 4. Ward Commanders -> ...
+if (role.contains('WARD')) { ... }
+// 5. PU / Beat Responders -> Show alerts in their PU, Ward, LGA, or unassigned
+if (sameGeo(aGeoPu, geoPu)) return true;
+```
+
+`ARMY_LIAISON` matches none of the role tests, so it fell through to rule 5 and
+was answered by **where that officer is based**. An incident handed to the Army
+reaches the Army liaison only if it happens to be in their LGA — and a liaison
+is posted somewhere specific while incidents happen across the state. HQ's
+console shows the handover as done; `/api/notify-agency` reports it sent; the
+device the officer carries shows nothing.
+
+T-28 was "escalating an incident to the Police reached nobody, by three paths at
+once". This is a fourth path, and the one on the hardware.
+
+#### Why no run had caught it, twice over
+
+Both reasons are worth recording, because each would have hidden it on its own.
+
+**The stand-in has no RLS.** `fake_supabase.js` serves every row, so against the
+harness the filter failed in the opposite direction: the Police liaison, posted
+to JOS NORTH where four of the five fixture incidents are, was shown four
+incidents escalated to **nobody**. Empty against production, wrong against the
+stand-in, and 19/19 green in both — because the mobile pass asserts that routes
+render, not what is on them.
+
+**The one ARMY fixture is in the Army liaison's own posting.** `a005` is
+escalated to the ARMY and sits in MANGU/PANYAM/PU-11, which is exactly where the
+Army liaison is posted — its comment says so, "another agency's LGA, so
+cross-agency and cross-tier scoping is visible". So even a test that checked the
+Army liaison's feed would have passed: the place rules admitted the row by
+coincidence of geography. A fixture that makes a filter look right is harder to
+spot than one that makes it look wrong.
+
+So the fixtures now carry `a006`: handed to the **POLICE**, in **BOKKOS**, while
+the Police liaison is posted to JOS NORTH. Only a filter that reads
+`escalated_to_agency` can deliver it, and only a filter that reads it keeps the
+four incidents handed to nobody out of a liaison's feed. Three assertions per
+liaison, in `mobile_capture.js`: the incident handed to their agency is on their
+handset, the one handed to the other agency is not, and the ones handed to
+nobody are not.
+
+#### The first fix was incomplete, and only the browser found out
+
+Fixing the stream filter, with 35 unit tests behind it, looked complete. The
+browser harness came back with both liaisons' feeds **completely empty** — worse
+than before — and that is the only reason the second filter was ever looked at.
+
+```dart
+if (!tierCanSee(
+  viewerTier: assignedTierLabel(auth.tier),
+  alertTier: alert['assigned_tier'] as String?,
+)) return false;
+```
+
+`tierCanSee` is `tierRank(viewerTier) >= tierRank(alertTier)`. A liaison's tier
+is `ResponderTier.unknown`, which ranks below everything, and an incident handed
+to an outside agency always has a Rainbow tier owning it — so this reads "a
+liaison sees nothing that was ever assigned to anybody". The stream filter had
+started delivering the row and this one dropped it on the way to the screen.
+
+The ladder itself is right, and its comment says what it is for: "OWNER TIER AND
+EVERYONE ABOVE... Geography still scopes WHERE an officer looks; the tier now
+scopes WHAT they are shown of it." It is Operation Rainbow's own chain of
+command. The mistake is applying it to somebody outside that chain — the same
+mistake as answering them from their posting, in a different vocabulary.
+
+Two filters, neither knowing what a liaison is, and 35 passing unit tests over
+the one I had found. The lesson is not "write more unit tests": a unit test
+proves a function and a browser proves a screen, and the thing that reaches a
+person is the screen.
+
+#### The rule had no test, and that is structural
+
+It was a `.where()` inside a `StreamProvider`, and
+`alertsStreamProvider.overrideWith(...)` appears in four test files — every test
+that touches the feed replaces the closure the rule lived in. So the decision
+about which emergencies reach a responder's handset had **no test at all**,
+while `broadcast_targeting.dart` and `assignable_responders.dart` — the same kind
+of decision — were both extracted and tested long ago. It is
+`lib/services/alert_audience.dart` now, with 35 tests.
+
+The contrast with the other half of the same rule is the sharpest thing in this
+finding. `production_readiness_behaviour_test.sql` has asserted the database's
+side since it was written, and asserted it **completely**: a liaison reads the
+incident escalated to their agency, does not read one escalated to another
+agency, does not read one escalated to nobody, and cannot resolve either of the
+two that are not theirs — with the reason recorded, *"reading the board is a
+confidentiality problem, but resolving somebody else's live emergency is an
+operational one."* Three cases, both directions, for SELECT and UPDATE.
+
+Nothing anywhere asserted the client's side. The same rule, written twice, one
+copy under test and one copy unreachable by any test in the repository — and the
+untested copy is the one on the device an officer carries into the field.
+
+#### The asymmetry, which is the general lesson
+
+RLS decides access. This filter decides what is worth putting in front of
+somebody, so a polling-unit officer is not handed the whole state. It may
+therefore be **more** permissive than RLS harmlessly — the extra rows never
+arrive — but it must never be **stricter**, because anything it drops that the
+database deliberately granted is an emergency somebody was meant to see.
+
+Reading it against `alert_is_ours()` clause by clause found two more places
+where it was stricter:
+
+* **An incident with no LGA.** `alert_in_my_area()` tests the LGA alone —
+  "Unlocated incidents fail OPEN. See the note above: an emergency nobody can
+  see is worse than one seen too widely" — while the handset required LGA, ward
+  AND polling unit to all be absent. So an incident with a ward but no LGA was
+  granted by the database to every officer in the state and shown by the handset
+  only to that ward's.
+* **An incident delegated to an LGA by name.** HQ hands one down by setting
+  `assigned_tier` and naming a target LGA in the last escalation entry;
+  `alert_delegated_to_my_lga()` grants it to that LGA's staff whatever the
+  incident's own location says. The handset never read it — and the old filter's
+  comment **claimed** it: *"LGA Commanders -> Show alerts matching LGA,
+  unassigned, or escalated to LGA"*, over four lines of code that read only
+  `geo_lga`. A documented behaviour that was never implemented, which is this
+  report's most frequent single finding.
+
+  Honest about the size of this one: the target LGA is usually the LGA the
+  incident is in, and then the place rule already matched. It bites when they
+  differ, which is why an incident is delegated across a boundary in the first
+  place.
+
+And one place where being broader is deliberate, now recorded in the code so
+nobody tidies it: `commandsWholeState` tests `role.contains('HQ')` while
+`commands_whole_state()` is the exact set `('HQ_COMMAND','HQ_OFFICER','ADMIN')`.
+Narrowing the Dart to those three literals is the change that would drop rows
+from a deployment using any other HQ role name.
+
+#### The check
+
+`scripts/check_alert_audience_agrees.py` holds the rule on both sides: that
+`alert_is_ours()` still scopes a liaison to `escalated_to_agency`, that
+`is_liaison()` and both client copies still read the agency off the `_LIAISON`
+role suffix rather than from `profiles.agency` (a decorative badge, T-28), that
+`alertReaches()` has a liaison branch which **returns** rather than falling
+through, that the branch runs before any place rule, that the unlocated and
+delegated grants are honoured, that `delegatedLga()` reads the **last**
+escalation entry as the SQL does, and that BOTH of the handset's filters ask for
+the answer instead of computing it again — the build-time pass included, and
+before `tierCanSee()`, since answering a liaison after the command ladder has
+already refused them is no answer at all.
+
+Eighteen mutations, each caught. Two of them were holes in the check rather than
+in the code, and both are the same kind of mistake:
+
+* A liaison branch mutated to `if (handed == ours) return true;` — which still
+  falls through for every other row — passed a check that only asked whether the
+  branch contained a `return`. The branch has to be exhaustive, so the check now
+  requires its **last statement** to be the return.
+* Renaming `alert_delegated_to_my_lga` to `..._unused` was caught, but reported
+  as "no longer reads `to_lga`" — because the regex matched the `COMMENT ON
+  FUNCTION` statement, which has no body. Anchored on `CREATE OR REPLACE` now.
+  A check that fires for the wrong reason is a check that will one day not fire
+  for the right one.
+
+### T-39. Two providers with one name, and a dropdown wired to neither
+
+Found by answering a direct question — "does the Hausa work well?" — rather than
+by a sweep. The translations themselves are good: 38 strings in English, Hausa
+and Pidgin, and the Hausa is real (`NEMI TAIMAKO`, `DANNA DOMIN NEMEN DAUKI`),
+not machine filler.
+
+The wiring was not.
+
+```dart
+// lib/shared/localization/translations.dart
+final languageProvider = StateNotifierProvider<LanguageNotifier, AppLanguage>(...)
+//   prefs.setString('app_lang', language.code)   →  'ha'
+
+// lib/providers/language_provider.dart
+final languageProvider = StateNotifierProvider<LanguageNotifier, String>(...)
+//   prefs.setString('app_language', lang)        →  'HA'
+```
+
+**Two providers with the same name, two classes with the same name, two storage
+keys, two value formats.** Which one a file gets depends on which it imports.
+Every screen that actually reads a translated string imports the first.
+`lib/providers/language_provider.dart` was imported by **nobody**.
+
+And `settings_screen.dart` imported neither. It kept a private `_language`
+string and wrote `app_language` directly:
+
+```dart
+String _language = 'EN';
+...
+await prefs.setString('app_language', lang);
+```
+
+So the "App Language" row in Settings — the obvious place to look for it —
+changed nothing at all. It also offered English and Hausa, while the enum, the
+table and the home screen's flag menu all have three languages. Pidgin was
+implemented and unreachable from Settings.
+
+The second half is sharper. `Translations.get()` was:
+
+```dart
+return _keys[key]?[lang] ?? key;
+```
+
+A miss returns the key. And two keys were asked for and never defined:
+
+```dart
+title: Translations.get('live_dispatch_channel', currentLang),
+subtitle: '${Translations.get('alert_ref', currentLang)} #...',
+```
+
+Both on `dispatcher_chat_screen.dart` — the screen a citizen opens to talk to a
+dispatcher during an emergency. Its header read **`live_dispatch_channel`** and
+**`alert_ref #a1b2c3d4`**, in every language including English, and had done
+since those lines were written. Nothing caught it because a missing key fails in
+the only way that matters: the screen renders, the suite is green, and the
+defect is visible only to the person reading it.
+
+#### The fix, and why it is one widget
+
+`LanguagePicker`, used by Settings and by the first screen of first-run setup —
+the language should be chosen before the rest of setup is read, and the only
+working control was three screens further in. The dead provider is deleted
+rather than left to be imported by accident. `get()` falls back to English for a
+key that exists in some languages, because a half-translated string should read
+as English and not as a variable name; a key that does not exist at all still
+returns itself, loudly, and CI is what stops one shipping.
+
+`scripts/check_translation_keys.py` holds five claims: every key the app asks
+for is defined, every defined key has every language in the enum, nothing
+declares a second `languageProvider` or `LanguageNotifier`, the language is
+stored under one preference key, and every control that changes it goes through
+that one provider. Two controls are fine — a picker in Settings and in setup, a
+flag menu in the home app bar — as long as they write the same place; a control
+bound to a different store is the defect, not a second control. That distinction
+had to be made twice: the check's first version demanded a single caller and
+flagged both the home screen's legitimate menu and `tts_service.dart`'s
+`_flutterTts.setLanguage('en-US')`, which is the speech engine's voice and
+nothing to do with this.
+
+Worth saying plainly about scope: 42 keys over four screens is not a translated
+app. What was broken was the wiring, and that is fixed; translating the rest is
+content work, and the check now makes a half-added key fail CI rather than
+appear on somebody's screen as a variable name.
+
+### T-40. Two deliberate rules collided, and the captor won
+
+The duress design is careful and documented. A duress PIN tells the person their
+alarm has been cancelled and deliberately leaves tracking running, because they
+may still be in danger; the screen treats the duress and safe outcomes
+identically so that a captor watching cannot tell which code was entered; and
+`sosTrackingMaxAge` caps it at twelve hours, because an earlier version left it
+running for the life of the install.
+
+The sign-out path is also careful and documented:
+
+> Signing out is the clearest statement a person can make that they are done
+> being observed, and it was the one action that did not stop it.
+
+That comment is the fix for a real defect — tracking used to survive a sign-out
+— and it is right about a person signing out of their own phone.
+
+It is wrong about the one case the duress design exists for. The lock screen
+offers a sign-out that needs no code; the browser harness asserts exactly that
+("the lock screen offers a way out that needs no code"), and it is there for a
+borrowed phone. So:
+
+* duress PIN → "your alarm is cancelled", tracking **continues**;
+* sign-out → tracking **stops**, no PIN, no code, one tap from the lock screen.
+
+Whoever is holding that phone can end the tracking of a live duress alert
+without knowing anything. And HQ sees a track go quiet, which is what a flat
+battery looks like, and what being out of coverage looks like.
+
+Neither rule is wrong on its own. Nothing in the code recorded which one wins
+where they meet, so the more recently written one did.
+
+#### What changed
+
+A **responder's** patrol track still stops on sign-out: they are going off duty,
+and the privacy argument applies in full. An **SOS** track keeps running until
+the incident closes or the twelve-hour ceiling expires — the ceiling that
+already exists for precisely this reason.
+
+The decision is made from one question, `activeSosAlertId()`, which answers null
+for a patrol track, for nothing being tracked, for an expired track, and for a
+failure to read the store. That last one is not a compromise, and it is worth
+spelling out because the first version got it the other way round: the
+background isolate learns its own mode from the **same** SharedPreferences, so a
+store that cannot be read means nothing is telling it to be on an SOS track, and
+the privacy rule applies. The first version treated a read failure as "assume an
+emergency is open", which broke two existing tests in
+`tracking_consent_test.dart` — and those tests were right.
+
+And the loss of the app is now a fact rather than an inference.
+`alerts.device_signed_out_at` is written by the handset in the window before its
+session is cleared, so `alerts_update_own_or_ours` covers it
+(`reported_by = auth.uid()`), best-effort, because a phone being switched off
+must not have its sign-out blocked on a network write. One column, not a
+message: a handset must not be able to write prose onto an operator's screen,
+which is the rule `sim_channel_events` states for itself. The console shows it in
+the incident dossier — "Handset signed out at 19:42. Location tracking is still
+running — the app is gone, the trail is not" — and on the forensic replay
+timeline, where the question a review asks is *when did we lose the app* and a
+gap in the track cannot answer it.
+
+No new CI gate for this one. `flutter test` already fails if the branch goes,
+and a script that re-asserts what a test asserts is maintenance without
+coverage.
+
+### Restating a function is only safe against its current definition
+
+Not a finding in the product — a near miss in my own work, recorded because the
+next person to touch that function will make the same move.
+
+The LGA→ward hand-down needed one clause added to `alert_is_ours()`. That
+function has been replaced twice. `20261006000000` restates it as a flat `OR`
+and explains why:
+
+> Restated here so a replica built from these files in order gets the same
+> result whichever migration ran last.
+
+and `20261015000000` then **wrapped it in a `CASE`** whose first branch is
+exclusive:
+
+```sql
+SELECT CASE
+  WHEN public.is_oversight_matter(p_alert.type) THEN
+    public.commands_whole_state() OR p_alert.reported_by = auth.uid()
+  ELSE
+    ...
+END;
+```
+
+A complaint about security personnel reaches HQ and the complainant and nobody
+else, because the ordinary clauses would hand it to the accused's own command.
+
+I copied the restatement idiom from `20261006000000` — the older generation —
+and so dropped that `CASE`. 712 Dart tests and 786 console tests passed.
+`scripts/oversight_behaviour_test.sql` failed on a real PostgreSQL:
+
+```
+FAIL: the WARD COMMAND of the ward it was filed in can read a complaint
+      about security personnel
+```
+
+The lesson is narrow and worth keeping: a `CREATE OR REPLACE` is a statement
+about the function's **current** definition, and the only way to know which that
+is, is to replay the history. Reading the migration that introduced the function
+tells you what it used to be. The migration now says this at the point where the
+next person will copy it, and `ward_handdown_behaviour_test.sql` asserts
+structurally that the oversight branch is still there — because whoever adds the
+next clause will copy whichever version of the function they happen to open.
+
+It is also the clearest case this document has for why the SQL behaviour tests
+run against a real database rather than being trusted to review. Nothing a
+client test could do would have found this.
+
+### T-41. The outbox was built for the second notification, not the first
+
+Found by checking a sentence rather than code: "when an alert is sent out,
+responders get alerted immediately and can respond." Most of that is true — the
+handset's feed is a Supabase realtime stream, so an open app shows a new
+incident at once — and the word that fails is *immediately*, for the phone in
+somebody's pocket.
+
+`notification_outbox` exists because of a defect that is the same shape as this
+one. Its header:
+
+> `escalate_overdue_alerts()` runs every minute under pg_cron and climbs any
+> unacknowledged incident one rung when its tier has held it too long... But it
+> only ever UPDATED the row. Every notification in this system is sent from
+> `alert-actions.ts`, which runs when a human presses ESCALATE or DISPATCH. So
+> an incident that climbed to the LGA at 02:00 because nobody at the ward
+> answered was moved into another tier's queue in complete silence, and was only
+> seen if somebody happened to have the console open. **The whole point of the
+> timeout is the case where nobody is watching.**
+
+Every word of that applies to the first report, more strongly. And the outbox is
+written in exactly two places, both inside `escalate_overdue_alerts()`, both
+with `kind = 'TIER_ESCALATION'`. The triggers on `alerts` are the `updated_at`
+stamp and the oversight router. `alert_service.dart` mentions no push at all.
+
+So:
+
+* a responder with the app open and in the foreground: sees it at once;
+* a responder with the app closed, or backgrounded, or the screen off: **nothing**
+  until a dispatcher presses DISPATCH, or the polling unit's two-minute window
+  expires and the timeout escalates it to the ward — at which point the WARD is
+  paged about an incident the unit was never told about.
+
+The system notified you when it gave up waiting for you, and not when the
+emergency arrived. That is the shape of the gap, and it is why this is a finding
+rather than a feature request: the machinery to do it was already built, already
+tested, and pointed at the second notification instead of the first.
+
+#### Three decisions worth recording
+
+**Who is told.** The tier the row lands at, read from `NEW.assigned_tier` rather
+than hardcoded as `'UNIT'`. That is not defensive style, it is the difference
+between honouring the oversight rule and routing around it: the BEFORE INSERT
+trigger `route_oversight_to_hq_trg` sets `assigned_tier := 'HQ'` for a complaint
+against security personnel, so reading the column means a complaint is announced
+to HQ and never to the local command it is about. A hardcoded `'UNIT'` would
+have been a way past that rule through a door nobody was watching.
+
+Then the drain widens the audience for this kind, at the unit only, to the field
+responders. They hold no tier, so `rolesForTier` does not name them, and a new
+emergency that reaches only the unit commander's phone is waiting on one person
+to be awake. Widened for this kind alone: an escalation arriving at the LGA is a
+message to a desk, and copying every responder in the LGA on it is how people
+turn off the notifications they do need. The module's own constraint holds —
+"an officer who would be refused the row by row-level security must not be sent
+a push about it" — because `alert_in_my_area()` gives a field responder their
+whole LGA, so their own polling unit is well inside it.
+
+**What it says.** `escalationMessage` read "was not acknowledged in time and has
+come up to WARD". True of a timeout and false of an emergency just filed: an
+officer reading that on a new SOS learns that somebody already had it and did
+nothing, which nobody did. A new incident says "has just been reported".
+
+**What happens if the notice cannot be queued.** This trigger sits on the hot
+path of the one thing the system exists to do. It catches its own failure and
+raises a WARNING, so the SOS is filed either way, and it is SECURITY DEFINER so
+the insert does not depend on a citizen being able to write the outbox. The
+assertion that proves it renames `notification_outbox` out from under the
+trigger, files an emergency, and checks the alert landed and no notice did:
+
+```
+PASS: an SOS is filed even when no notice can be queued
+PASS: the notice is lost and the report is not
+```
+
+An emergency that reaches the database silently beats one refused because a
+notice could not be written.
+
+#### One existing assertion narrowed, which needs saying out loud
+
+`oversight_behaviour_test.sql` asserted that **no** outbox row existed for a
+complaint — "they would page the accused's own commander". My trigger queues
+one, and the run went red.
+
+The assertion was written when the outbox had one kind. Zero rows was a
+consequence of `awaiting_human_confirmation()` holding a complaint out of the
+escalation ladder, not an independent rule that a complaint must never be
+announced to anybody. HQ is who a complaint is routed *to*, and a complaint
+nobody is told about sits in a queue until somebody looks — which is the silence
+this whole mechanism exists to end.
+
+So it now says what it always meant, and more strictly: no escalation notice for
+a complaint, **and** nothing about a complaint addressed anywhere but HQ. The
+second clause is new and catches more than the original did — a future notice
+addressed to the ward would fail it, where the old "count = 0" test would have
+been deleted by whoever added that notice.
+
+Changing somebody else's assertion is worth doing carefully and worth declaring
+plainly, which is why it is in this document rather than only in a commit
+message.
+
+---
+
+### T-42. The replay read the story, not the record
+
+The screen is `IncidentReplayPanel` — "Incident Replay Log", the per-incident
+forensic timeline, opened from an incident's dossier. It is where somebody asks
+what happened to this emergency and in what order.
+
+It built its escalation events like this:
+
+```ts
+if (line.includes('[ESCALATED TO') || line.includes('[COMMAND ESCALATION]')) {
+  combined.push({ type: 'ESCALATION', actor: 'Tactical Command',
+                  timestamp: alert.updated_at || alert.created_at, notes: line });
+}
+```
+
+`line` is a line of `ai_summary` — the free-text column the console and the
+handset append a human-readable note to when somebody escalates. Three things
+follow from reading the story instead of the record, and the first is the
+serious one:
+
+**Every automatic escalation was missing.** `escalate_overdue_alerts()` appends
+an entry to `escalation_log` and does not touch `ai_summary`. So the
+escalations nobody chose — the ones that happened because nobody answered, at
+02:00, which are the entries a review exists to find — appeared nowhere on the
+replay of the incident they happened to. They were not lost: `audit_trail()`
+reads the log, so the Audit History screen had them all along. One screen knew
+and the other did not, and the one that did not is the one you open when you
+want to know about *this* incident.
+
+**Every escalation carried `updated_at`.** An incident that climbed UNIT → WARD
+→ LGA → HQ produced three events with one timestamp — the last update, not the
+times of the moves. The sort is chronological, so three identical keys ordered
+by nothing, and the chat messages sent between those moves landed on the wrong
+side of them. A timeline whose order is wrong is worse than no timeline: it is
+read as evidence.
+
+**The actor was a literal.** `'Tactical Command'` for every escalation, while
+the log records who did it. This is T-32 exactly — `audit_trail()` attributed
+every human action to SYSTEM because it read only `by` while both clients write
+`by_email` — one screen later. The fix there was to read the actor out of the
+entry; nobody came back for this screen.
+
+#### Why the prose parse had to go, rather than be added to
+
+The obvious patch is to keep the string match and read the log as well. That
+double-counts: both clients write `escalation_log` **and** append a line to
+`ai_summary` for the same escalation, so every manual escalation would appear
+twice, interleaved with its own duplicate. The log is the record; the summary
+line is a rendering of it. A test pins that a manual escalation present in both
+places is counted once.
+
+`[MULTI-UNIT DISPATCH]` is still read out of `ai_summary`, deliberately and
+declared in the module: a dispatch has **no structured log of its own**.
+Inventing a record for it on the way to the screen would be worse than reading
+the prose, and the gap is worth closing in the database, where every other
+event lives. The gate exempts that one marker in that one file.
+
+#### What came out of it
+
+`hq-dashboard-next/src/lib/incident-timeline.ts` now owns the reading of an
+escalation entry, and three screens share it:
+
+* the **replay panel**, which no longer parses prose at all;
+* the **agency desk** (`AgencyPortal`), which renders the same log for an
+  outside agency — the only history a sister agency ever gets, since they have
+  no console, no feed and no audit screen;
+* the **audit screen**, for the timestamp wording alone.
+
+Two smaller things fell out of writing it down. An entry whose `at` was never
+written is a real shape — nothing validates the log's keys, and `audit_trail()`
+already coalesces for it — and both the agency desk and the panel formatted it
+straight into `new Date(...)`, which renders the string **"Invalid Date"**. That
+reads as a broken console rather than as a gap in the record, so `stampLabel`
+says `TIME NOT RECORDED` and the event is placed last with a note saying where
+it was placed and why. And the panel's resolution event named
+`'Field Commander'` when `resolved_by` was null — the same invention as T-32's
+`'Responder'`, on the same screen.
+
+`scripts/check_history_reads_the_record.py` keeps all of it: nobody may *match*
+the escalation markers (writing them is fine — that is what the dossier shows),
+`entryActor` must read the same keys in the same order as `audit_trail()` in
+SQL, and no screen may format a log entry's time without the one helper. The
+actor order is extracted from both sides and compared, so a change to either
+fails rather than quietly giving the console and the audit screen different
+answers about who acted. Fourteen mutations, including the T-32 regression on
+either side of the language boundary; three legitimate shapes that must not be
+flagged.
+
+---
+
+### A harness that could only press what started above the fold
+
+Not a defect in the app, and worth recording because it nearly hid one.
+
+Adding the language picker to Settings (T-39) made two assertions fail —
+"Settings offers a way to lock the phone deliberately" and "the lock screen
+offers a way out that needs no code" — although nothing about the lock had
+changed. Flutter builds semantics for the slivers it has *rendered*: the
+viewport plus a couple of hundred pixels of cache. One new card of about 150px
+pushed "Lock This Phone" past that extent, so it was not in the DOM, `tap`
+could not see it, and the check read as **the app does not offer this**.
+
+A harness that can only press what starts above the fold silently stops
+covering a screen the moment anything is added to the top of it. There were
+already three copies of a scroll-until-visible loop inline in the file, none of
+which moved the pointer first — a wheel event goes to whatever is under the
+pointer, and the pointer starts at (0, 0), the app bar, which does not scroll.
+They worked only because something earlier in the run happened to leave the
+mouse over the body. `bringIntoView` is now the one definition, pointer parked
+over the list, and the lock assertion says whether the control was never found
+or found and dead. Fixing it also made five assertions about the lock screen —
+the panic button on it, the four routes a locked phone cannot be walked into —
+run again rather than being skipped inside `if (lockOpened)`.
+
+The same change surfaced a real defect in the picker, two hops away. The sweep
+reported `/home/"English"` as a control that did nothing. It was not on the home
+screen at all: the sweep wanders into Settings, because those screens are pushed
+by the Navigator without changing the hash, so the recovery `go('/home')` is a
+no-op and the route label stays behind. And the chip was behaving correctly —
+pressing the language already in use calls `setLanguage(english)`, the
+provider's state does not change, nothing rebuilds.
+
+What was wrong is that the chip could not SAY it was the chosen one. The
+`Semantics` was inside the `InkWell`, which split four facts across two nodes:
+the outer one carried the button role and the tap, the inner one the name and
+the selection. Anything reading the node it is about to press — a screen
+reader, this sweep — saw a button with no selection state and a press that
+changed nothing, which is indistinguishable from a broken control. The report
+subtype rows had settled this already: one `Semantics(button: true, selected:
+…, label: …)` carrying all of it. The picker now matches them, a Dart test
+pins each flag on the named node (it fails against the split version), and the
+sweep exempts an already-chosen option the way it already exempted a disabled
+control and the nav item for the screen you are on.
+
+---
+
+### T-43. The same table, two shapes, and the column that said why was on only one of them
+
+Found by following a loose end rather than by a test: `agency_notifications` is
+written by `/api/notify-agency` and read by nothing. Pulling on that produced
+the more serious thing underneath it.
+
+Three of the four agency tables are created **twice** in this history, by two
+files with different column lists and `CREATE TABLE IF NOT EXISTS` on both:
+
+| table | first definition | second |
+|---|---|---|
+| `agency_notifications` | `20260722000000_v3_telemetry_geofence` — 10 columns | `20260812000000_agency_tables` — 7 |
+| `agency_action_reports` | `20260723000000_v4_mesh_broadcast` — 14 | `20260812000000_agency_tables` — 15 |
+| `agency_deployments` | `20260723000000_v4_mesh_broadcast` — 10 | `20260812000000_agency_tables` — 10 |
+
+The second definition is a no-op, so the shape a database gets is whichever
+file ran first. The v2–v6 era was applied to production **by hand** and written
+down afterwards; it cannot be replayed (v2 calls `auth.jwt()` before the shim
+defines it), so `verify_rls_migration.sh`, `bootstrap_staging.sql` and
+`apply_all_migrations.sql` all exclude it. The split is therefore exact, and it
+runs in both directions:
+
+* **production** has `detail`, `sent_by`, `target_lga`, `acknowledged_at` and
+  `resolved_at`, and no `created_at`;
+* **every database this repository can build** has `created_at`, and none of
+  those five.
+
+Nothing could have told us, and three things that look as though they should
+have all share one blind spot:
+
+* `check_schema_convergence.py` compares the *objects* the two histories
+  create, not their columns. It was written for "a policy that exists only on
+  production", and a column of a table both histories create is invisible to
+  it.
+* `check_schema_drift.py` — the gate whose whole subject is "a column no
+  migration creates" — accumulates columns with
+  `tables.setdefault(table, set()).add(...)`, so it holds the **union** of both
+  definitions. `detail` is in that union, so writing it would have passed the
+  gate and failed on staging.
+* the local Supabase stand-in builds its column set the same way, which is the
+  right call for a fake that must not refuse a column production has — and
+  means the browser harness accepts a column that exists on neither database.
+
+A union is the correct answer to "might this column exist somewhere?" and the
+wrong answer to "does every database have it?", and nothing was asking the
+second question.
+
+#### What it cost
+
+`/api/notify-agency` is the handover: HQ escalates an incident to the Police,
+the Army or the DSS, the route sends an SMS and/or posts a signed webhook, and
+then writes one row per leg — including the legs it skipped. Its own comment:
+
+> Every leg, including the skipped ones: this table is the only durable record
+> of whether an agency was told, and a row set that omits the channels nobody
+> used cannot answer that question later.
+
+It wrote `method` and `status` and dropped `result.detail` — the only field
+that says **why**: `HTTP 502`, a timeout's message, "no contact configured".
+Writing it would have worked in production and failed everywhere else with a
+42703, on the one path that records whether an outside agency was reached, so
+the route wrote the intersection of the two shapes and the reason went to a
+`console.error` on the server.
+
+And nothing read the table at all. The console sets `escalated_to_agency` the
+moment an operator presses escalate, and that is what every screen showed. So
+"handed to the Army" and "the Army was told" were the same line on the screen
+and different facts in the database — which is T-38 one layer out: there the
+handset's filter had no branch for a liaison while HQ's console showed the
+handover as done; here the delivery itself may never have happened and the
+console still shows it as done.
+
+#### What came out of it
+
+`20261023000000_one_table_one_shape.sql` adds every column one definition has
+and the other lacks, with `ADD COLUMN IF NOT EXISTS` throughout: on production
+that is `created_at` on three tables and nothing else. `created_at` is
+**backfilled** from the column that records the real time — `sent_at`,
+`submitted_at`, `deployed_at` — rather than stamped with the migration's clock,
+because a delivery log whose timestamps all read "the day we fixed the schema"
+is worse than one with a null. The null is honest.
+
+The route then writes `detail`, `sent_by` and `target_lga`.
+
+And the record is now **read**, on the incident replay, which is where somebody
+asks what happened to this emergency. Each leg appears as its own event —
+`POLICE · SMS FAILED — HTTP 502 · handed over by hq@…` — with `SKIPPED`
+rendered as `WEBHOOK NOT USED`, because skipped is not a delivery and the
+wording has to keep saying so on the screen as well as in the route.
+
+Two cases that are easy to get wrong, and are tested:
+
+* **a handover with no delivery row at all** is an event of its own, saying so
+  — "handed to ARMY and NO delivery attempt is on record". With
+  `escalated_to_agency` set and no rows, a timeline that simply shows nothing
+  reads as a handover that went perfectly;
+* **a delivery log that could not be READ** says that instead. The read is
+  command-only under RLS, and a timeline missing its delivery lines because the
+  read was refused looks identical to one where every leg succeeded. It is the
+  empty-board rule again: an empty board that could not ask is the same lie as
+  an empty board. The notice is scoped to an incident that WAS handed over,
+  though: on a ward commander's screen the read is refused for every incident
+  they open, and a warning that fires on every incident is a warning people
+  stop reading — with no handover, the refusal hides nothing.
+
+`scripts/check_one_table_one_shape.py` closes the class rather than the
+instance. It replays the migrations in apply order for **both** worlds —
+production with the hand-applied era, a repo-built database without it —
+computes each table's effective shape (first `CREATE TABLE` wins, every later
+`ADD COLUMN` adds), and fails if the two disagree or if any definition claims a
+column no database ends up with. Seven mutations, including an `ADD COLUMN`
+written for the wrong table and a comma list split so only the first column is
+added; three legitimate shapes that must not be flagged, among them a second
+definition that is a strict subset of the first.
+
+One exception is recorded with its reason: `phase1_foundation.sql` describes a
+different `telemetry` — a surrogate `id`, `UNIQUE (user_id)` and an `alert_id`,
+i.e. a **track** of positions — while the initial schema creates it first with
+`user_id` as the primary key, one current position per person, which is what
+`background_tracking_service.dart` upserts into and what the responder feed
+streams with `primaryKey: ['user_id']`. The track arrived later as its own
+table, `incident_tracks`. Adding two unused columns to a live table to make a
+dead definition true would be worse than leaving it; the gate makes somebody
+say so rather than letting it pass unnoticed.
+
+#### What is still open
+
+Nothing retries. `20260722000000` creates
+`idx_agency_notifications_status … WHERE status = 'FAILED'` and its comment
+says "(retry jobs)"; there is no retry job. A failed handover is now visible to
+HQ on the incident replay, where somebody can pick up a phone, and that is the
+difference between a silent failure and a known one — but the obvious next step
+is to drain these the way `notification_outbox` is drained, with the same
+backoff and the same `attempts` column, rather than to invent a second
+mechanism. That is a piece of work with real decisions in it (how many times do
+you re-send an SMS about an emergency, and to whom does it escalate when the
+agency's own channel is down), not a line of code, so it is named here rather
+than guessed at.
+
+`scripts/agency_delivery_behaviour_test.sql` proves it on a real PostgreSQL:
+all ten columns present, a leg that records its own reason, a skipped channel
+recorded as a skipped channel, the deployment's stand-down time, and — as
+characterisation, so a later widening is deliberate — that command reads the
+delivery log while an agency liaison and a citizen do not.
+
+---
+
+### T-44. The console could be read without a mouse and not operated
+
+`check_control_labels.py` has gated the Flutter app since controls there were
+found with empty accessible names. The HQ console had no equivalent, and ten of
+its controls were clickable `<div>`s — no `role`, no `tabIndex`, no key
+handler. A pointer could use them. A keyboard could not, nor a screen reader,
+nor the voice control an officer might be using with one hand on a radio.
+
+Four of the ten are worth naming:
+
+* **The agency desk's incident card.** Expanding it is the only way to the
+  escalation log, the evidence, the live feed and both action buttons — on the
+  one surface an outside agency ever sees, since they have no console, no feed
+  and no audit screen. It is now a `<button>` with `aria-expanded`, which is
+  also the first time the open/shut state was stated anywhere but in the
+  chevron's shape.
+* **The responder picker**, which a dispatcher assigns an emergency with. This
+  one was *worse* than unreachable: inside the clickable div sat a real
+  `<input type="checkbox">` whose `onChange` was `() => {}`, with a comment
+  saying "Handled by div onClick". So the checkbox was focusable, looked
+  operable, and did nothing. A dispatcher working by keyboard could tab onto an
+  officer's row, press Space, see no change, and conclude the roster was
+  broken. The row is now a `<label>` around the real checkbox, which does the
+  toggling itself: clicking anywhere on the row still works, Space works
+  because the control is a checkbox, and a screen reader announces the
+  officer's name with its checked state instead of reading an unlabelled
+  checkbox and then some unrelated text.
+* **The evidence thumbnails**, on both the dossier and the agency desk. They
+  called `window.open` from a div: no keyboard, no middle-click, no address to
+  copy, and the one shape a popup blocker treats as suspicious. They are links
+  now, which is what they always were.
+* **The counts that filter the board.** `StatBar` renders a `<button>` when it
+  has an `onClick` and a plain row when it does not — a div that is always a
+  button lies to a keyboard user in the other direction.
+
+And the console had **no `keydown` handler anywhere**. The incident dossier is
+a fixed overlay over the feed and the map, and an operator opens it on the
+wrong report often, because the cards are a dense list during an incident. The
+only ways out were its close button and a click on the backdrop. Escape now
+closes it, and the narrow-screen drawer too.
+
+#### The two things the fix is careful about
+
+`useEscapeKey` takes an `enabled` flag, and the dossier/drawer precedence is
+expressed by the *caller*: `navOpen && selectedReport === null`. Two listeners
+on `window` fire in **registration order, not in z-order**, so the overlay that
+mounted first would otherwise win, and no `stopPropagation` inside a handler
+can reorder that. A test pins it both ways round.
+
+The dossier is now `role="dialog" aria-modal="true"` with a name. Focus is
+**not** trapped and not moved into it — that is the other half of a modal
+dialog, and doing it properly means turning a 500-line inline block into a
+component. It is recorded here as open rather than half-done, and the gate
+deliberately does not claim to check it.
+
+#### The gate found four more, and its first version was vacuous
+
+`scripts/check_console_controls.py` requires that an element with an `onClick`
+is either natively interactive or carries both a `role` and a `tabIndex`, and
+that every `<button>` has a name. A backdrop and a `stopPropagation` wrapper
+are neither, so each declares `data-pointer-only="<reason>"` **in the markup** —
+not in a list of line numbers in the gate, which would rot the moment anything
+moved, and the reason is then in front of the next person reading the JSX.
+
+Its first version matched a button with `<button\b([^>]*?)>`, and an
+attribute's value can contain the character that ends a tag:
+
+```tsx
+<button onClick={() => {}}>
+```
+
+`[^>]*?` stops at the `>` of the arrow, so for **every button with an inline
+handler** — which is most of them — the rule read `{}}><X /></button>` as the
+button's children, found the stray `>`, and concluded there was a name. The
+rule passed on an icon-only button with no label, which is the one thing it
+exists to catch. Mutation-testing said so, and the fix is a brace-aware
+scanner that knows a `>` inside braces or quotes is not the end of a tag.
+
+With that fixed it immediately found **four more** unnamed buttons, and all
+four are dismiss controls: the dossier's own close button, the system-alert
+banner's, the tactical select's clear, and the toast's. The class of control a
+keyboard user needs most was exactly the class the broken regex hid.
+
+Eight mutations caught, eight legitimate shapes allowed — among them a button
+whose name is a ternary of two phrases, a div that carries both a role and a
+tabIndex, and a clickable div inside a comment.
+
+`scripts/local_e2e/interact.js` closes the half a static check cannot reach: in
+a real browser it opens the dossier, asserts it is a named dialog, finds the
+close control **by its accessible name** rather than by its glyph, presses
+Escape, and asserts the dialog is gone.
+
+#### Three things the harness had to learn to see this
+
+**It could only press what started above the fold — the console version.** The
+sweep captured its control list once per tab and then indexed into it. React
+re-renders on any state change, so the FIRST control that changed anything
+detached every node after it: the click was skipped, and a skipped control is
+not a failed one. It had been pressing 145 of the screens' controls and
+reporting a clean sweep. Converting three sidebar stat tiles into real buttons
+dropped it to **88 with every check still passing**, because the tiles switch
+tab and come early in the DOM. The mobile sweep had already paid for this and
+fixed it the same way: work through the screen by identity, and re-read it after
+every press.
+
+**Then it reached a native dialog and died.** `AgencyAccessManager` asks
+`confirm('Revoke portal access for …?')` before deactivating a liaison, and a
+`confirm()` blocks the page's main thread until something answers it. Every
+`page.evaluate` after it timed out; the run ended on
+`ProtocolError: Runtime.callFunctionOn timed out`, forty checks in, with nothing
+in the log to say a dialog had ever been on screen. The old sweep never got
+there. Dialogs are now **dismissed** by the shared browser helper — accepting
+would revoke a liaison's access mid-run and change the data later checks read,
+and a harness must not take a destructive action nobody asked for — and
+recorded, so a control that asks for confirmation counts as having acted rather
+than being reported dead.
+
+**And one of the new checks passed for the wrong reason.** "Escape closes the
+dossier" read `!(await stillOpen())`, where `stillOpen()` looks for
+`[role="dialog"][aria-modal="true"]`. On a console with no dialog markup at all
+that is false before the keystroke, so the check passed — which is what running
+the new harness against the commit *before* the fix revealed. It is now gated on
+the dialog having been open: a check whose pass condition is satisfied by the
+thing it tests not existing is worse than no check, because it reports
+confidence.
+
+---
+
+### T-45. "ACTIVE INCIDENTS" emptied the board
+
+Found by the typechecker, while making the stat tiles keyboard-operable for
+T-44. Converting `StatBar` into a `<button>` meant writing a count beside its
+filter, and the moment those two sat on the same line the compiler said:
+
+```
+error TS2367: This comparison appears to be unintentional because the types
+'"PENDING" | "DISPATCHED" | "ACKNOWLEDGED" | "IN_PROGRESS" | "ON_ROUTE" |
+ "ON_SITE" | "ESCALATED" | "RESOLVED" | "DURESS" | "CANCELLED"'
+and '"ACTIVE"' have no overlap.
+```
+
+`'ACTIVE'` is not a status an alert can have. And two controls set it:
+
+* the status dropdown's **ACTIVE INCIDENTS** option, on the Incident Feed and
+  on Mission History;
+* the **ACTIVE** tile in the UNIT STATUS panel, beside DURESS.
+
+`filterAlerts` compares `a.status !== filters.status`, so both filtered the
+board down to **nothing, always**. The one control that says *show me what is
+happening now* produced an empty feed — and on this console an empty feed is
+the thing that reads as ALL CLEAR. T-33 is the finding about an empty board
+that cannot say why it is empty; this is a control whose only possible effect
+was to produce one.
+
+The tile was wrong twice over: it advertised `alerts.length` — every incident
+in the loaded window, **resolved ones included** — above a filter that would
+show none of them. The number, the action and the word each described a
+different set.
+
+#### Why it survived
+
+Nothing could see it. The status filter has always had two values that are not
+statuses — `CRITICAL` and `SMS_FALLBACK` — each handled by its own branch, so
+a third one looked like more of the same to a reader. There is no test that
+asserts a filter returns anything, only tests that it returns the right rows
+for the values somebody thought to test. And the browser sweep pressed the tile
+and recorded "nothing", every run, in a line nobody reads unless a check fails
+— which it did not, because the tile was a `<div>` and the sweep only collects
+`button, a[href], [role=button]`. Making it a button is what put it in front of
+the check.
+
+The compiler could only speak because of an earlier finding: the status union
+in `dashboard/types.ts` was completed when `ESCALATED` and `IN_PROGRESS` turned
+out to be written by `alert-actions.ts` and missing from the type. Before that,
+the union was incomplete and `'ACTIVE'` was merely one more string it had not
+heard of. **The second defect that one union has produced on contact.**
+
+#### The fix
+
+`isLiveIncident(a)` — not RESOLVED and not CANCELLED — in `alert-display.ts`,
+used by the filter branch and by the tile's count, so the number and the action
+cannot disagree again. The tile also counts over `sectorAlerts`, the same
+sector-scoped set the DURESS tile beside it uses; it was reading the unscoped
+window.
+
+Two tests, one of which fails against the old comparison. And the tiles now
+carry `aria-pressed` for the filter they apply — which is what a filter control
+owes a screen reader, and what let the browser sweep tell "already applied"
+from "wired to nothing".
+
+---
+
+## Asked for: a voice note, and a report that is not an emergency
+
+Two requests from the operator, built together because they meet in the same
+place — a report from somebody who cannot type, about something that is not an
+emergency. Both uncovered defects on the way in, which are the interesting part.
+
+### T-46. The one path for somebody who cannot type threw away what they said
+
+The app has a control called **AI VOICE REPORT / TALK TO REPORT**. It is the
+only path built for a person who cannot type. It ran speech-to-text and filed
+the **transcript**, and the audio was never recorded at all. Two consequences,
+both worst for the person it exists for:
+
+```dart
+if (_transcription.trim().isEmpty) {
+  setState(() { _errorMessage = Translations.get('no_voice_input', lang); });
+  return;                       // ← nothing is filed. At all.
+}
+```
+
+* **A silent recogniser meant a silent report.** An Android speech recogniser
+  that is offline, or has never heard Hausa or Pidgin, returns an empty string
+  from somebody speaking perfectly clearly — and this told them *"No voice
+  input recorded"* and filed nothing. The person who most needs the app to
+  listen was the one it refused.
+* **Even when it worked, their voice was gone.** Nobody downstream could judge
+  for themselves. The keyword triage that graded the report is English-only
+  (`gun`, `fire`, `riot`, `blood`), so a report spoken in Hausa matched nothing
+  and filed at MEDIUM — and there was no recording for an operator to listen to
+  and grade properly.
+
+The other path that touched a microphone — the recorder in the report details
+screen — kept the file but uploaded it into **`media_urls`**, the EVIDENCE
+list, next to photographs. So a responder's card said "3 attachments" with no
+way to tell that one of them was a person speaking, and the console drew it as
+a 72px thumbnail with a musical note on it. It also wrote the placeholder
+`[AUDIO_REPORT] voice message recorded` **into the narrative field** — the
+field the reporter was meant to type in — so that string arrived at HQ as the
+incident's description, and an operator read a marker instead of a report.
+
+#### What it is now
+
+`alerts.voice_note_url` and `voice_note_seconds` are the reporter's own voice,
+in their own column, because a voice note is not one of several attachments —
+it is the report. The duration travels with the url so a responder on a metered
+or weak connection knows whether they are about to pull eight seconds or two
+minutes before they press play.
+
+`VoiceNoteService` records first and treats the transcript as a bonus, so a
+voice note survives a failed transcription, no network, and a recogniser that
+has never heard the language being spoken. It discards a recording under a
+second — an empty voice note on an incident is worse than none, because a
+responder presses play, hears nothing, and cannot tell that from a file that
+failed to upload — and caps at the ten minutes the database's own
+`alerts_voice_note_seconds_sane` constraint allows, so a recording cannot be
+made that the row would refuse to describe.
+
+**It plays in the app now.** Both screens that could show a recording handed
+the url to the platform and hoped: the responder's mission intel drew a
+microphone with **TAP TO PLAY** under it and called `launchUrl()`, and the
+console opened a browser tab. On a handset that means leaving Operation Rainbow
+mid-incident — and this app has a re-entry lock that engages when it has been
+away from the foreground, so playing a voice note could cost a responder a code
+prompt to get back to the incident they were working. Whether it played at all
+depended on what the phone does with an `.m4a` url, which for a Cloudinary
+`/raw/` link is often a download. There was no audio-player dependency in the
+app at all.
+
+A shared `VoiceNotePlayer` plays it in the card, and says which state it is in
+— loading, playing, paused, and the one that matters, **failed, with the
+reason**. A play button that does nothing and says nothing is how a responder
+concludes a reporter sent silence. On the console it is `<audio controls>`,
+whose play button, scrubber, volume and keyboard interface would otherwise all
+have to be built and none of which would be better, with `preload="metadata"`
+so opening a dossier does not pull every recording on it.
+
+The voice note is above the evidence on the responder's screen, on the HQ
+dossier and on the **agency desk** — a liaison has that desk and nothing else,
+so a report filed by somebody who could not type has to be audible there.
+
+### T-47. "Not an emergency" had to be enforced, not labelled
+
+The second request was a general report: government property mismanaged,
+destroyed, abandoned, unsafe, needing repair. Two new categories — **Public
+property** and **Public service** — with six subtypes each.
+
+The hard part is that this system is built to treat everything as a kidnapping,
+and two mechanisms would have picked up a street light and run with it:
+
+* `queue_new_incident_notice()` announces every INSERT to the tier it landed
+  at, and the drain widens a UNIT notice to the **field responders** — the
+  people who physically go. A broken culvert filed at 02:00 would push to their
+  handsets.
+* `escalate_overdue_alerts()` climbs anything unacknowledged one rung per
+  timeout. Nobody acknowledges a street light at 02:00, so by morning it would
+  be an HQ-tier incident with three escalations against it, sitting among the
+  night's actual emergencies.
+
+Both are right for an emergency and wrong for this. The mechanism for "handle
+this differently" already existed twice — `is_oversight_matter()` routes a
+complaint about an officer to HQ, `awaiting_human_confirmation()` holds an
+unconfirmed keypad report out of the ladder — so this is built the same way
+rather than a third way. `is_non_emergency(type)` matches on the CATEGORY, the
+part of `type` before `' - '`, so every subtype is covered and a new one added
+to the app needs no migration. A BEFORE INSERT trigger files it at the **LGA**
+— the local authority whose property it is — clears any responder assignment,
+and records why on the escalation log. The timeout sweep skips it.
+
+What it deliberately does **not** do is hide it. The report is a normal row on
+the board, in the feed, on the map, with its own category: an operator can see
+it, filter to it and act on it. *Not an emergency* means not paged and not
+climbed; it does not mean not seen. Something nobody is shown is something
+nobody fixes, which is how a thing ends up abandoned in the first place.
+
+#### Two lists that are one list
+
+The labels are load-bearing: the app files `type` = `'<label> - <subtype>'` and
+the database matches the label. If they drift, the failure is silent and at
+night — a category the app can file and the database does not recognise is
+routed, paged and escalated exactly like a kidnapping.
+`scripts/check_non_emergency_categories_agree.py` fails when they disagree in
+either direction, and when the app files one of them at a priority that is not
+LOW. Six mutations, including a rename on each side; one is recorded as out of
+scope with the reason (the ladder is the SQL behaviour test's subject, not the
+gate's).
+
+Its own first version had the bug it exists to prevent: the regex matched
+`is_non_emergency` as a **prefix**, so renaming the function to
+`is_non_emergency_renamed` — which breaks every caller — passed the check.
+Mutation-testing caught it; anchoring on the opening parenthesis fixed it.
+
+#### And the harness was testing ten of twelve
+
+`mobile_interact.js` held the ten category labels as a list in the file. The
+two new ones would have been swept by nothing, while the check that says
+*"every reporting category can be selected"* went on passing. It now reads the
+labels out of `alert_categories.dart` and throws if it parses fewer than ten,
+because a sweep that silently tests almost nothing is worse than one that fails.
+
+---
+
+## Chasing two reports from the console sweep
+
+The sweep's own log said three map popup controls did nothing and five
+navigation tabs were missing. One was the most consequential defect in this
+pass. The other four — plus three more that appeared while proving the first —
+were the harness lying about the product, in two different ways, both of them
+the same shape.
+
+### T-48. Every button in every map popup was dead, and the CSP was why
+
+The Intelligence Map is the screen this console opens on. A marker's popup is
+how a dispatcher acts on a pin: **DOSSIER**, **DISPATCH**, **RESOLVE**, CALL.
+The popups are built as HTML strings, so their buttons carried
+
+```html
+<button onclick="window._hqShowDispatch('aaaa1111-…-a004')">DISPATCH</button>
+```
+
+and `LiveMap` installed four `window._hq*` functions for them to reach.
+
+`src/lib/csp.ts` sets `script-src 'self' 'nonce-…' 'strict-dynamic'`, with no
+`'unsafe-inline'` — deliberately, and that file writes out at length why. A
+nonce authorises a `<script>` ELEMENT. It cannot authorise an inline event
+handler ATTRIBUTE: those need `'unsafe-inline'` (or CSP3's `'unsafe-hashes'`),
+so Chrome refuses them outright. The probe says it in one line:
+
+```
+DISPATCH: control={"tag":"BUTTON","onclick":"window._hqShowDispatch('…a004')"}
+  changed: NOTHING
+  - Refused to execute inline event handler because it violates the following
+    Content Security Policy directive: "script-src …"
+```
+
+So from the day that policy shipped, pressing DOSSIER, DISPATCH or RESOLVE on
+any pin on the landing screen did nothing at all. No error reached the
+operator; the console does not read its own CSP reports. CALL was a false
+positive in the sweep's log — it is a `tel:` link, and a link that leaves the
+page changes nothing the sweep can see.
+
+**Three layers each nearly caught it, and each measured the wrong half.**
+
+* The browser sweep pressed them and recorded `changed: NOTHING` — which is a
+  line in a log, not a failing check. It also reported the same labels as
+  working on a *second* popup, because state from earlier presses leaked
+  between them.
+* `csp.test.ts` has seven tests, and asserts the **header**: that
+  `script-src` has no `'unsafe-inline'`, that the nonce is per-response. Every
+  one of them passes. None of them asks what the header does to the page.
+* `LiveMap.test.tsx` and `incident-dossier.test.ts` asserted the two halves
+  **separately** — that the button carried the `onclick` string, and that
+  calling `window._hqDossier` did the work — with a comment explaining that
+  jsdom evaluates an inline handler in its own global scope, so the join could
+  not be tested there. The join never worked. The suite was defending it.
+
+That is the lesson worth keeping: a policy test that reads the policy is not a
+test of the policy. Two tests that each assert one end of a connection assert
+nothing about the connection, and a comment saying why it cannot be tested is
+where a defect goes to live.
+
+The fix is delegation. The popup's buttons carry `data-hq-action` and
+`data-hq-id`; `LiveMap` listens **once**, on the map container, and switches on
+the action. CSP-safe, no globals, and — the point — clickable in a test, so
+both tests now press the real button and assert the real outcome.
+`check_no_inline_handlers.py` forbids the `on<event>="…"` attribute form
+anywhere in the console's source (a React `onClick={fn}` prop is a function
+reference and is unaffected, which is why the gate matches the quoted-attribute
+shape rather than the word). And the browser harness now opens a popup and
+asserts that it carries its actions as data, that it carries zero handler
+attributes, and that DOSSIER opens the dossier — the join, in a browser, with
+the real policy applied.
+
+### The five missing navigation tabs were a stale build
+
+An old `next-server` held `:3000` while `.next` was rebuilt underneath it.
+Every chunk request then 500s, the console renders `CONSOLE FAILED`, and the
+health check still answers 200 — so the run went on and reported five missing
+nav tabs on two roles. Served properly, the LGA desk has all five
+(Intelligence Map, Incident Feed, Mission History, Communications & Broadcast,
+Inter-Agency Command) and the police liaison has both of its own.
+
+This has now invalidated two runs, and `run.sh` already refuses to start when
+either port is taken for exactly this reason. So `interact.js` gained a boot
+assertion — **the console loaded its own JavaScript** — which fails the run on
+`CONSOLE FAILED` or on a dashboard with five or fewer operable controls, and
+says in the failure message how to free the port and rebuild. A run that
+cannot tell a broken product from a broken harness is not evidence of either.
+
+### T-49. The stand-in answered from a schema that no longer existed
+
+Then, while proving T-48, the same trap sprang again in a different process.
+Three checks failed naming the agency liaison desk: its incident card could not
+be expanded, DEPLOY was not offered, no action report could be filed. The
+screen was empty, and the code was fine.
+
+`fake_supabase.js` rejects a column no migration defines — in full, with a 400,
+taking the whole query with it, because that is what PostgREST does and an
+entire class of this system's defects was a screen naming a column that did not
+exist. It read that column list **once**, at require time:
+
+```js
+const { columns: schema } = require('./schema').build();
+```
+
+The stand-in answering the run had been started at 13:06. At 14:12, T-46 added
+`alerts.voice_note_url` and gave the agency portal's `select` the new column.
+At 14:28 that stand-in was still answering, from 13:06's migrations:
+
+```
+[fake] UNKNOWN COLUMN alerts.voice_note_url (read) — rejected, as PostgREST would
+```
+
+One rejected column, and the liaison desk — the only surface an outside agency
+ever sees — came back with no incidents at all.
+
+The same cause explains the one other oddity in that run's log: a bare
+`400 Bad Request` on the police liaison desk, which is the same screen with
+`agency = POLICE`. With the stand-in restarted, the run reports zero unknown
+columns and the desk works.
+
+It is the stale `next-server` again, one process over: a long-lived server
+answering from a snapshot of something that has since moved does not report an
+error. It reports the **product** broken, convincingly, on precisely the screen
+that depends on the thing that moved. Twice in one afternoon, from two
+different processes, and both times the failure named a real screen and three
+real controls.
+
+So the stand-in now holds its schema in containers it REFILLS rather than
+replaces, and compares a fingerprint of `supabase/migrations/` — every file's
+name, size and mtime — before answering anything from it, at most once a
+second. When it moves, it rebuilds and says so. Proved both directions against
+a live stand-in: withdraw the migration and the column is rejected again,
+restore it and it is accepted, each move logged —
+
+```
+[fake] supabase/migrations/ changed …: schema REBUILT — 20 tables, alerts has 48 columns
+[fake] UNKNOWN COLUMN alerts.voice_note_url (read) — rejected, as PostgREST would
+[fake] supabase/migrations/ changed …: schema REBUILT — 20 tables, alerts has 50 columns
+```
+
+`check_standin_reads_live_schema.py` keeps the require-time freeze from coming
+back, and fails if the refresh exists but nothing in the request path calls it
+— 9 mutations.
+
+What it deliberately does not do is re-run the FIXTURE self-check on a
+mid-flight rebuild. That check — a fixture row naming a column the migrations
+do not define — still runs only at boot, so a migration that renames a column
+the fixtures use is caught on the next start rather than mid-run. Restarting
+the stand-in is the normal path (`run.sh` refuses to start while either port is
+held, for this family of reasons); the refresh exists so that the abnormal one
+cannot report a lie.
+
+### And the new check was wrong twice before it was right
+
+The assertion written to catch T-48 reported PASS while the two checks after it
+failed with *no DOSSIER control in the popup*, which reads exactly like the
+defect and was not it. Twice, for two different reasons, and both are worth
+writing down because both are the same mistake in different clothes.
+
+The first version:
+
+```js
+const marker = document.querySelector('.leaflet-marker-icon');
+if (!marker) return false;
+marker.dispatchEvent(new MouseEvent('click', …));
+return true;                  // "a map marker opens its popup"
+```
+
+The markers are **clustered**, a cluster icon carries the same
+`.leaflet-marker-icon` class as a single incident, and pressing one zooms the
+map and opens nothing. `return true` asserted that a marker EXISTED. A thing
+being present is not the same as a thing being visible — the third time that
+sentence has had to be written in this report, and the first time about one of
+my own checks.
+
+The second version pressed markers until a popup was open, and stopped at the
+first one. The **responders** are markers too, and theirs is a status card with
+no actions on it, so the run reported `actions: none` having opened
+
+```
+Sgt. Danjuma Yusuf  STATUS: ON_ROUTE  BATTERY: 62% | NET: WIFI
+```
+
+Both versions were measuring something adjacent to the claim and reporting it
+as the claim. It now presses markers until an **incident** popup is open — the
+one that offers actions — says which press opened it and how many popups it
+saw, and keeps every popup seen on the way, because a handler attribute on a
+responder's card is refused by the same policy and belongs in the same failure.
+With that, on a correctly served console: an incident popup opened within the
+first few presses, actions `dossier, dispatch, resolve`, no handler attributes
+in any popup, and DOSSIER opens the dossier. Which press finds the incident
+depends on how the pins happen to cluster, which is why the loop presses them
+all rather than trusting a position.
+
+### T-50. And the runbook an operator reads first described nine of thirty-seven
+
+Asked plainly whether everything was fixed, the honest answer needed the state
+of the things that are not code — and the first place to look was the
+deployment runbook, because 37 migrations are proven in CI and not applied to
+production.
+
+`docs/PRODUCTION_DEPLOYMENT.md` carries the complete table of all 37, and
+`check_runbook_covers_migrations.py` has gated it since it caught that table
+seventeen migrations short. But README says:
+
+> **Read `docs/APPLYING_THE_MIGRATIONS.md` before the first one** — the RLS
+> migration drops prior policies…
+
+and that file opened with
+
+> Nine migrations are proven in CI on every push and **not yet applied** to the
+> production Supabase project:
+
+followed by nine rows, and then *"all nine, in order, finishing with a 14-row
+PASS/FAIL table"*. The script applies 37 and ends in 34 rows. Every migration
+from the last fortnight of this audit was missing from it: the voice note and
+non-emergency routing of T-46 and T-47, the shape convergence of T-43, the
+incident tracks of the movement work.
+
+The failure mode is not a missing file — it is a confident wrong number. An
+operator pastes `apply_all_migrations.sql`, is told to expect fourteen rows,
+gets thirty-four, and cannot tell whether that means success, a wrong script,
+or a repository that has moved since the instructions were written. Meanwhile
+the nine-row table reads as a complete inventory of what production is missing,
+and it is a quarter of one.
+
+Two documents describing one list, and the gate guarding one of them — the
+gate written because that exact drift had already happened once. So it now
+reads **every** doc that names migration files: one must carry the complete
+table; any other must say which subset it covers and point at the complete one;
+and every figure quoted is checked against the repository. Including a count
+spelled out in words, which is now refused rather than parsed — the stale claim
+was the word "Nine", and a number no check can verify is a number that goes
+stale in silence.
+
+### T-51. The other policy PUBLIC could reach
+
+> **Correction, written the same day.** The paragraphs below originally said
+> this policy was open **on production**. That was not established, and the
+> rest of this entry is the record of how I came to assert it anyway.
+>
+> The operator pasted a policy query's output: two rows, three columns —
+> `policyname`, `tablename`, `cmd`. **No `roles` column.** I recognised one of
+> the two names as a policy a production paste had once reported as `{public}`,
+> read the file that creates both, saw the missing `TO` clause on the other,
+> and described a live exposure. Every step of that is sound except the one
+> that matters: nothing in front of me said what roles that database had
+> recorded.
+>
+> A later query — with `roles`, filtering for `anon` or `public` — returned
+> **zero rows** on the database checked, and `alerts_select_geo_lga_scoped`
+> does not exist on it at all.
+>
+> So: the **code defect is real and proven**. `20260725…` creates that policy
+> with no `TO` clause, PostgreSQL records such a policy as TO PUBLIC, and the
+> verifier now plants exactly that and watches the repair close it. Any
+> database that ran that file has it open. **Which databases those are is not
+> something this repository can answer**, and I wrote as though it could.
+>
+> That is the error this report keeps describing in other people's work. The
+> header of `20261017000000` lists it as a defect in its own right: a comment
+> in `dashboard/page.tsx` "wrong because it was checked against the repository
+> rather than the database". I did the same thing, in the entry about policies,
+> while quoting the file that says so. A file is evidence about a file. Only a
+> query is evidence about a database — and a query missing the column in
+> question is not evidence either.
+>
+> What follows is unchanged except where it claimed to know a live database's
+> state. The fix, the gate and the assertions stand on their own.
+
+The query output that started this, as it was handed to me — three columns, and
+not the one that decides anything:
+
+```
+alerts_select_geo_lga_scoped    | alerts    | SELECT
+telemetry_select_geo_lga_scoped | telemetry | SELECT
+```
+
+The second is known. `20261016000000_telemetry_policy_is_not_public.sql` exists
+because a production paste reported it as the one policy reaching PUBLIC —
+*"and it was this, alone"*, says its header.
+
+The first is its twin, and nothing had ever looked at it.
+
+Both are created by `20260725000000_v6_geo_lga_scoping_staging.sql`, twelve
+lines apart. The telemetry one is written `TO authenticated`. The alerts one
+was written:
+
+```sql
+CREATE POLICY "alerts_select_geo_lga_scoped"
+  ON public.alerts
+  FOR SELECT
+  USING ( … )          -- no TO clause
+```
+
+and PostgreSQL records a policy with no `TO` clause as **TO PUBLIC**, where
+PUBLIC includes `anon`. `alerts` is the incident table: the reporter's name and
+phone number, what they said, where they are.
+
+The part that should be uncomfortable is where the lesson was already written.
+Fixing the telemetry twin put this comment into that same file, on the policy
+immediately below the defective one:
+
+> `TO authenticated` is not decoration. Without it PostgreSQL records the
+> policy as TO PUBLIC, PUBLIC includes anon, and
+> `20260813000000_rls_least_privilege.sql` cannot drop it by name because that
+> migration predates this file. A production database carried it as the single
+> policy reaching anon for weeks.
+
+Twelve lines above that paragraph sat a policy with exactly that defect, on a
+more sensitive table. The fix had been reasoned out, written down, and
+committed next to the thing it also described — and the sibling was never
+checked. "The single policy reaching anon" was two.
+
+#### Three structural reasons it survived
+
+None of them is carelessness, which is why it needs a gate rather than a
+resolution to be careful:
+
+* `20260813000000_rls_least_privilege.sql` drops prior policies **by exact
+  name** — 98 of them — and cannot name a policy from a file written after it.
+  Checked: 0 occurrences of `geo_lga_scoped` in that migration.
+* `20260725…_staging.sql` is `STAGING_ONLY`: it is **not in the production
+  paste at all**, so a database can only have these policies if that file was
+  run on it by hand — and the v2–v6 era was applied by hand somewhere, which is
+  why `20261016000000` exists. A file excluded from the deployment can still
+  have shaped a database the deployment runs against, and the repository cannot
+  tell you which.
+* `verify_rls_migration.sh` asserts that no policy reaches anon or public **at
+  the end of the full replay** — and passes, because `20261006000000` drops
+  this policy on its way to the narrower `alerts_select_own_or_ours`. The end
+  state is clean. A database that ran the v6 file and has not yet had
+  `20261006` applied is in the **middle**, where the policy exists and that
+  drop has not happened, and nothing in this repository described the middle.
+
+Where the policy IS present and open, one layer stands in the way: `20260813`
+REVOKEs the table privileges from `anon`, so the policy has nothing to permit.
+One `GRANT`, or one click in the dashboard's table editor, and the only thing
+between the anonymous key and every incident on that board is a policy that
+says yes. On the database the operator checked, the question does not arise —
+the policy is not there, and nothing reaches anon or public.
+
+#### How to tell, on any given database
+
+Not from this repository. From the database, with the column that decides it:
+
+```sql
+SELECT tablename, policyname, cmd, roles::text
+  FROM pg_policies
+ WHERE schemaname = 'public'
+   AND ('anon' = ANY(roles) OR 'public' = ANY(roles));
+```
+
+Zero rows is the answer you want. A policy listed there names the anonymous
+key, whatever its name suggests.
+
+#### What was done
+
+Three things, because the defect has three lives — the file, the database that
+already ran it, and the next person to write a policy.
+
+**The source.** `TO authenticated` added to the v6 alerts policy, so no
+database built from this repository ever creates it open.
+
+**The database that already has it.**
+`20261025000000_the_other_policy_public_could_reach.sql` runs
+`ALTER POLICY … TO authenticated`: it changes the policy's **roles and nothing
+else**. Idempotent, and a no-op in two different ways on purpose — where the
+policy is already scoped, and where `20261006` has already replaced it — and it
+ends by naming any policy still reaching anon or public, because the next one
+should not need a production query to find.
+
+The first draft of that file dropped the policy and recreated it from the
+expression in the v6 migration, the way `20261016000000` does for the twin.
+That is wrong here, and quietly so. **Production's copy of this policy was
+applied by hand**, so the only thing known about its body is that it was once
+pasted from that file. Recreating it imposes this repository's text on a
+database whose version may differ by a character — and that expression decides
+which officer may read which incident. A repair for an `anon` exposure has no
+business rewriting a read path as a side effect. `ALTER POLICY` also leaves no
+window in which the table carries no policy, which a drop followed by a failing
+recreate would.
+
+(Worth recording against `20261016000000`, which is applied to nothing yet: it
+*does* drop and recreate the telemetry policy from the repo's text, whenever it
+finds one. That is convergence rather than a defect — the repository becoming
+the source of truth for a hand-made object — but it is a decision, and it was
+not a stated one.)
+
+That repair branch is the one a replay cannot reach, since on a repo-built
+database the policy is already gone. So the verifier now **plants production's
+shape**: it creates the policy with no `TO` clause, confirms PostgreSQL
+recorded it as `{public}`, reads `pg_policies.qual`, applies the migration, and
+asserts both that the roles came back `{authenticated}` **and that the `USING`
+expression is byte-identical** — which is the whole point of the change, and
+the only place a rewritten read path would have shown. Then it removes the
+plant, so the end state is still the repository's own. Shipping the repair
+without that would have been shipping an untested branch to the only database
+that needs it.
+
+**The next policy.** `check_every_policy_names_its_roles.py` requires every
+`CREATE POLICY` in the repository to write its `TO` clause. Any roles will do —
+`TO authenticated`, `TO service_role`, even `TO public` — because the rule is
+that the intent is **visible**. Silence is the defect: it means PUBLIC and it
+reads like nothing. The 43 policies of the v2–v6 and phase1 era are
+grandfathered as an exact frozen inventory of (file, policy) pairs, so adding a
+new policy to an old file still fails, and so does renaming one. 10 mutations,
+including the loophole its own test needed: `policy_roles_behaviour_test.sql`
+plants a `TO PUBLIC` policy deliberately, to prove its sweep can detect one, so
+a probe is exempt only when it is named `zz_…` **and** dropped in the same file
+— a probe left behind on a real database still fails.
+
+And five SQL assertions that read `pg_policies.roles` rather than the text of a
+migration, because what a file says and what the database recorded are the two
+things this finding is about.
+
+### T-52. The number I led with all day was a count of filenames
+
+The operator asked what was left. I gave a list, and the first item on it —
+every time I was asked, in four separate messages — was this:
+
+> **37 migrations are not applied to production.** This is the urgent one. […]
+> against production as it stands, the police and army liaison desks return
+> *nothing*.
+
+Then they ran `scripts/which_migrations_are_applied.sql` against the database.
+**Thirty-two of the thirty-eight were already applied** — every migration
+through `20261015000000`. Six were genuinely missing.
+
+#### Where the number came from
+
+```python
+def outstanding() -> list[str]:
+    """What a production database still needs, in filename (timestamp) order."""
+    return [n for n in all_files() if n not in NOT_OUTSTANDING]
+```
+
+A docstring making a claim about a database, over a body that lists a
+directory minus a hand-maintained exclusion set. Nothing updates that set when
+a migration is applied somewhere, because nothing in a repository can know
+that it was.
+
+And it travelled, as a wrong number with a confident source does. Both
+runbooks opened with *"N migrations are proven in CI on every push and **not
+yet applied** to the production Supabase project"*. T-50 — four hours earlier,
+in this same session — found one of those runbooks naming nine of thirty-seven
+and added a gate to keep them in agreement. **The gate made both of them
+repeat the false claim in unison.** I hardened the wrong sentence and called
+it a fix.
+
+The irony is exact and worth stating plainly: T-49 is my own finding that a
+long-lived process answering from a stale snapshot *"does not report an error
+— it reports the PRODUCT broken, convincingly"*. T-51's correction is me
+asserting a database's policy state from a file. This is the third one in a
+day, and the biggest, because it set the operator's priorities: the single most
+consequential thing I told them was the deployment, and six-sevenths of it was
+already done.
+
+#### The one part that was right, and what it cost
+
+`alerts.voice_note_url` and `voice_note_seconds` really are missing from that
+database, and `AgencyPortal.tsx` really does name them in its `select` — so
+the agency liaison desk really does return nothing there, right now, exactly as
+T-49 predicted. That is a live, one-paste fix. It was sitting in a list of
+thirty-eight, thirty-two of which were noise, and the noise was mine.
+
+#### What was done
+
+`outstanding()` is now `in_the_paste()`, documenting what it actually computes:
+the migrations the paste carries. That is a fact about this repository, it is
+checkable here, and it is the right input for building `apply_all_migrations.sql`.
+
+The paste being idempotent is what makes this a reporting defect rather than a
+deployment one. Every statement is `IF NOT EXISTS`, `OR REPLACE` or guarded by
+an explicit check, and `verify_apply_all.sh` applies the whole bundle **twice**
+on every push to prove it. Pasting all 38 was always safe. Knowing which six
+are missing is not about safety — it is about being able to tell afterwards
+whether anything changed, and about not burying a real break under 32
+non-problems.
+
+Both runbooks now describe the paste and send the operator to the query, and
+`check_runbook_covers_migrations.py` enforces the distinction rather than the
+old claim:
+
+* the words "not yet applied" in front of a count are **refused** — the
+  figure is the paste's size, and no file here can see a database;
+* any doc naming migration files must point at
+  `which_migrations_are_applied.sql`, so a count of the paste always arrives
+  with the way to ask your own database;
+* backticked quotations and fenced blocks are skipped, because a document
+  explaining this defect has to be able to quote it — the first version of the
+  check failed on my own description of the mistake.
+
+Two of its three new mutations are sentences I wrote two hours earlier.
+
+#### How it ended, the same evening
+
+The operator pasted the six, in timestamp order, and ran the probe again:
+
+```
+20261018000000_the_mirrors_and_two_dead_functions_are_gone  | 7 of 7 removed
+20261020000000_a_handset_that_leaves_mid_emergency          | 1 of 1 present
+20261021000000_an_lga_can_hand_an_incident_to_a_ward        | 1 of 1 present
+20261022000000_a_new_emergency_tells_the_unit               | 1 of 1 present
+20261023000000_one_table_one_shape                          | 8 of 8 present
+20261024000000_a_voice_note_…                               | 4 of 4 present
+
+every object in every migration is as it should be — nothing to apply
+```
+
+So the deployment this report called its top blocker for weeks took one paste,
+once somebody asked the database instead of the repository. The thirty-two
+already-applied migrations were never the obstacle; the belief that they were
+is what the obstacle was made of.
+
+The combined file was tested before it was handed over, which is the part worth
+keeping as practice: a database was built with every other migration applied
+and exactly those six missing, the probe was run to confirm it reported those
+six **and only those six**, the file was pasted, the probe came back clean, and
+then it was pasted a second time to prove it changed nothing. Handing an
+operator an untested bundle to run against production, having just written
+three findings about asserting things one has not checked, would have been a
+fourth.
+
+Nine migrations remain *"not detectable"* by object existence — they create
+policies, a storage bucket, a trigger and a publication rather than tables,
+columns and functions. `scripts/rls_inventory.sql` covers the policy ones, and
+a single read-only query settles all nine at once against a known-good
+reference of eight rows.
+
+#### And the probe over-alarmed on the one migration built for this
+
+`20261023000000_one_table_one_shape` reported `5 of 8 present — APPLIED
+PARTWAY, look here first`. It had never been applied at all. It is a
+**convergence** migration — it exists because production and every repo-built
+database had the same tables with different columns (T-43) — so it adds columns
+with `ADD COLUMN IF NOT EXISTS`, and the 5 it found were production's own
+`detail`, `sent_by`, `target_lga`, `acknowledged_at` and `resolved_at`. The 3
+missing were the `created_at` columns it adds. The file written to handle a
+divergent database was reported as the worst case on precisely the database it
+was written for.
+
+The summary line no longer picks a reading: *"PARTLY PRESENT: either applied
+partway, or a convergence migration whose objects already existed here. Read
+its `missing` rows below"* — which is where the two cases separate, since a
+partial failure leaves an arbitrary subset and a convergence migration leaves
+exactly what that database never had.
 
 ---
 

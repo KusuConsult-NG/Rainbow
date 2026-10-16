@@ -75,6 +75,20 @@ const server = http.createServer((req, res) => {
   fs.createReadStream(file).pipe(res);
 });
 
+/**
+ * What the stand-in recorded. Only used for the RPC claim below, which is why
+ * this file never needed it before — and is why the claim was never made.
+ */
+async function control() {
+  return new Promise((resolve) => {
+    http.get('http://127.0.0.1:54322/', (res) => {
+      let d = '';
+      res.on('data', (c) => (d += c));
+      res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve({}); } });
+    }).on('error', () => resolve({}));
+  });
+}
+
 /** The app's visible text, read out of the semantics tree. */
 async function semanticsText(page) {
   return page.evaluate(() => {
@@ -351,7 +365,11 @@ async function semanticsText(page) {
   // responder app, and only three of the eight had ever been rendered.
   const ROLES = ['citizen', 'responder', 'unit', 'ward', 'lga', 'hq', 'police', 'army'];
   const coverage = new Map();   // route -> the roles that reached it
+  const feedText = {};          // role -> the mission feed as rendered
+  const setupText = {};         // role -> the first screen of first-run setup
   const roleReport = {};
+  /** role -> which seeded advisory was on screen. See the block in the loop. */
+  const advisoryReport = {};
 
   // /splash and /login only exist while signed OUT: once there is a session the
   // router correctly redirects away from both, so no signed-in role can ever
@@ -399,8 +417,23 @@ async function semanticsText(page) {
     if (!signedIn) { roleReport[role] = { landed, reached: [] }; continue; }
 
     // The dashboard banner names the tier; grab it before walking the routes.
-    const banner = (await semanticsText(page)).split('\n').map((l) => l.trim())
+    const landingText = await semanticsText(page);
+    const banner = landingText.split('\n').map((l) => l.trim())
       .find((l) => /COMMAND|OPERATIONAL UNIT|CITIZEN/.test(l)) || '';
+
+    // WHICH ADVISORY REACHED THIS PERSON.
+    //
+    // `SystemAlertListener` wraps every screen, so an advisory addressed to this
+    // role is on the landing screen. Two are seeded: one scoped to NARAGUTA
+    // ward, and one legacy row carrying its audience in `target_type` and
+    // addressed to AGENTS. Every fixture person is in NARAGUTA except the ARMY
+    // liaison, who is in PANYAM — so the pair tells the roles apart, and the
+    // assertions below are the only end-to-end check of T-29 outside the widget
+    // tests.
+    advisoryReport[role] = {
+      ward: /naraguta junction/i.test(landingText),
+      legacyAgents: /radio discipline/i.test(landingText),
+    };
 
     const reached = [];
     let n = 0;
@@ -425,7 +458,22 @@ async function semanticsText(page) {
       await page.screenshot({ path: path.join(OUT, `${name}.png`) });
       shots.push(`${name}.png`);
       const here = (await page.evaluate(() => window.location.hash)).replace(/^#/, '');
-      const chars = (await semanticsText(page)).length;
+      const screenText = await semanticsText(page);
+      const chars = screenText.length;
+      // WHICH INCIDENTS THIS OFFICER'S MISSION FEED SHOWS. Asserted after the
+      // loop: the word "liaison" appeared nowhere in lib/, so the feed filter
+      // had no branch for one and answered them from their own POSTING.
+      if (route === '/agent-dashboard' && here === route) {
+        feedText[role] = screenText;
+      }
+      // THE LANGUAGE CONTROL ON THE FIRST SCREEN OF SETUP. Asserted after the
+      // loop: the picker in Settings wrote `app_language` = 'HA' while every
+      // translated string watches `app_lang` = 'ha', so choosing Hausa changed
+      // nothing, and the only working control was a flag button three screens
+      // further in.
+      if (route === '/onboarding-permissions' && here === route) {
+        setupText[role] = screenText;
+      }
       if (here === route && chars > 0) {
         reached.push(route);
         if (!coverage.has(route)) coverage.set(route, []);
@@ -451,6 +499,68 @@ async function semanticsText(page) {
       ? `never rendered: ${never.map(([r, , f]) => `${r} (${f})`).join(', ')}`
       : `${coverage.size}/${ROUTES.length}`,
   );
+
+  // THE LANGUAGE CAN BE CHOSEN BEFORE THE REST OF SETUP IS READ.
+  //
+  // Everything below the picker on that screen is read by somebody who may not
+  // read English. The only language control used to be a flag button on the
+  // home screen, which is three screens past here, and the one in Settings was
+  // wired to a key no reader has ever heard of.
+  const setup = (setupText.citizen || '').toLowerCase();
+  for (const language of ['english', 'hausa', 'pidgin']) {
+    check(
+      `first-run setup offers ${language}`,
+      setup.includes(language),
+      setup.includes(language)
+        ? 'on the first screen, before anything it has to explain'
+        : `not offered. screen was: ${setup.replace(/\s+/g, ' ').slice(0, 160)}`,
+    );
+  }
+
+  // AN OUTSIDE AGENCY SEES WHAT WAS HANDED TO THEM, AND ONLY THAT.
+  //
+  // RLS says so — `alert_is_ours()` gives a liaison exactly
+  // `escalated_to_agency = liaison_agency()` — and the handset's filter had no
+  // branch for a liaison at all, so it fell through to the place rules and
+  // answered them from their own posting.
+  //
+  // Both fixtures are needed to see it. a005 is handed to the ARMY and sits in
+  // MANGU/PANYAM/PU-11, which is exactly where the Army liaison is posted, so
+  // the old filter admitted it by coincidence. a006 is handed to the POLICE and
+  // is in BOKKOS while the Police liaison is posted to JOS NORTH, so only a
+  // filter that reads the column can deliver it — and the four incidents handed
+  // to NOBODY are all in JOS NORTH, so only a filter that reads the column
+  // keeps them out.
+  //
+  // This stand-in applies no RLS, which is why no run caught this: the Police
+  // liaison was shown four incidents never handed to the Police. Empty against
+  // production, wrong here, green in both.
+  const HANDED = {
+    police: { to_us: 'convoy stopped at mushere', to_them: 'roadblock on the mangu road' },
+    army: { to_us: 'roadblock on the mangu road', to_them: 'convoy stopped at mushere' },
+  };
+  for (const [role, { to_us, to_them }] of Object.entries(HANDED)) {
+    const feed = (feedText[role] || '').toLowerCase();
+    check(
+      `${role} liaison: the incident handed to their agency is on their handset`,
+      feed.includes(to_us),
+      feed.includes(to_us)
+        ? 'delivered, and its LGA is not their posting'
+        : `NOT delivered. feed was: ${feed.replace(/\s+/g, ' ').slice(0, 160)}`,
+    );
+    check(
+      `${role} liaison: the incident handed to the other agency is not`,
+      !feed.includes(to_them),
+      !feed.includes(to_them) ? 'withheld' : 'another agency\'s incident is on their feed',
+    );
+    check(
+      `${role} liaison: incidents handed to nobody are not on their handset`,
+      !feed.includes('armed men at the junction'),
+      !feed.includes('armed men at the junction')
+        ? 'withheld — their posting is not what makes an incident theirs'
+        : 'an incident escalated to nobody reached an outside agency',
+    );
+  }
 
   // Each rung of the chain must identify itself. HQ used to read "OPERATIONAL
   // UNIT" here — the top of the chain wearing the label of an untiered
@@ -482,6 +592,80 @@ async function semanticsText(page) {
   );
 
 
+  // AN ADVISORY REACHES THE WARD IT NAMES, AND NOT THE NEXT ONE.
+  //
+  // T-29: this banner wraps every screen in the app and had its own targeting
+  // filter, reading `target_type` / `target_value` — columns the console does
+  // not write — so the default let EVERY advisory through to EVERY user. It
+  // calls `broadcastReaches()` now, the same function the HUD uses, and this is
+  // the only check of that outside the widget tests.
+  //
+  // The seeded advisory is scoped to NARAGUTA, where every fixture person works
+  // except the ARMY liaison, who is in PANYAM. Under the old filter the row —
+  // which carries no `target_type` at all, because no writer has ever written
+  // one — defaulted to 'ALL' and would have reached the Army too, so this fails
+  // on the old code and passes on the new.
+  const inWard = ROLES.filter((r) => r !== 'army');
+  const missedWard = inWard.filter((r) => advisoryReport[r] && !advisoryReport[r].ward);
+  check(
+    'a ward-scoped advisory reaches everybody posted to that ward',
+    missedWard.length === 0,
+    missedWard.length
+      ? `did not reach: ${missedWard.join(', ')}`
+      : `${inWard.length} role(s) in NARAGUTA all saw it`,
+  );
+  check(
+    'and does not reach the liaison posted to another ward',
+    advisoryReport.army ? advisoryReport.army.ward === false : false,
+    advisoryReport.army
+      ? (advisoryReport.army.ward
+          ? 'the ARMY liaison in PANYAM was shown a NARAGUTA advisory'
+          : 'the ARMY liaison in PANYAM was not shown it')
+      : 'the ARMY liaison never signed in, so this proves nothing',
+  );
+
+  // AND A LEGACY ROW STILL ARRIVES, TO THE RIGHT AUDIENCE.
+  //
+  // The old mobile broadcast screen wrote the audience into `target_type`, and
+  // `broadcastAudience()` falls back to it. That is the one legacy path that is
+  // real — the place half of the legacy pair was never written by anything — and
+  // it had no end-to-end coverage. The ARMY liaison is a responder outside
+  // NARAGUTA, so the ward advisory does not reach them and this one does, which
+  // is what makes the two distinguishable in a one-banner-at-a-time surface.
+  check(
+    'a legacy advisory addressed by target_type still reaches its audience',
+    advisoryReport.army ? advisoryReport.army.legacyAgents === true : false,
+    advisoryReport.army
+      ? (advisoryReport.army.legacyAgents
+          ? 'the AGENTS advisory reached a responder through the legacy column'
+          : 'a row carrying its audience in target_type reached nobody')
+      : 'the ARMY liaison never signed in, so this proves nothing',
+  );
+
+  // EVERY DATABASE FUNCTION THE APP CALLED MUST HAVE BEEN ANSWERED.
+  //
+  // `SmsDeviceKey` calls `register_sms_device()` on every sign-in, and the
+  // stand-in had no RPC router at all — so the call came back
+  // `400 relation "public.rpc/register_sms_device" does not exist` for all eight
+  // roles. The app treats that as non-fatal on purpose ("a device with no SMS
+  // key still works normally"), so nothing on screen changed and this harness
+  // reported 15/15: the encrypted SMS fallback has never once been provisioned
+  // in a browser run.
+  //
+  // A refusal is now a failure, because "the function is not implemented" and
+  // "the feature works" are indistinguishable from the outside.
+  const ctl = await control();
+  const misses = [...new Set(ctl.rpcMisses || [])];
+  check(
+    'every database function the app called was answered, not refused',
+    misses.length === 0,
+    misses.length
+      ? `refused: ${misses.join(', ')}`
+        + ' — implement it in RPCS in scripts/local_e2e/fake_supabase.js'
+      : `none refused; ${new Set((ctl.rpcCalls || []).map((c) => c.fn)).size}`
+        + ' function(s) answered',
+  );
+
   const fatal = problems.filter(
     (p) => p.kind === 'pageerror' || /uncaught|cannot read|is not a function/i.test(p.text),
   );
@@ -502,6 +686,9 @@ async function semanticsText(page) {
           'the mobile screens render and route at phone size; NOT an Android/iOS build, ' +
           'and NOT row-level security',
         coverage: Object.fromEntries([...coverage].map(([k, v]) => [k, v])),
+        advisories: advisoryReport,
+        rpcMisses: misses,
+        rpcCalls: ctl.rpcCalls || [],
         roles: roleReport,
         checks,
         screenshots: shots,

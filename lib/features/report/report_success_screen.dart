@@ -1,11 +1,13 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 
-class ReportSuccessScreen extends StatelessWidget {
+class ReportSuccessScreen extends ConsumerWidget {
   const ReportSuccessScreen({
     required this.alertId,
     required this.isOffline,
@@ -18,7 +20,8 @@ class ReportSuccessScreen extends StatelessWidget {
   final String reportType;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lang = ref.watch(languageProvider);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -41,7 +44,9 @@ class ReportSuccessScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               Text(
-                isOffline ? 'REPORT QUEUED LOCALLY' : 'REPORT TRANSMITTED',
+                isOffline
+                    ? Translations.get('rpt_queued_locally', lang)
+                    : Translations.get('rpt_transmitted', lang),
                 style: GoogleFonts.outfit(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -51,7 +56,7 @@ class ReportSuccessScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Incident Reference ID:',
+                Translations.get('rpt_reference_id', lang),
                 style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 13),
               ),
               const SizedBox(height: 4),
@@ -91,7 +96,12 @@ class ReportSuccessScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 14),
                       Text(
-                        isOffline ? 'QUEUED IN OFFLINE STORAGE' : 'RECEIVED BY COMMAND CENTER',
+                        isOffline
+                            ? Translations.get('rpt_queued_offline', lang)
+                            : Translations.get(
+                                'rpt_received_by_command',
+                                lang,
+                              ),
                         style: GoogleFonts.outfit(
                           fontSize: 13,
                           fontWeight: FontWeight.w900,
@@ -129,7 +139,7 @@ class ReportSuccessScreen extends StatelessWidget {
                         ),
                       ),
                       child: Text(
-                        'REPORT ANOTHER',
+                        Translations.get('rpt_report_another', lang),
                         style: GoogleFonts.outfit(
                           fontWeight: FontWeight.bold,
                           color: AppColors.primary,
@@ -150,7 +160,7 @@ class ReportSuccessScreen extends StatelessWidget {
                         ),
                       ),
                       child: Text(
-                        'RETURN TO MAP',
+                        Translations.get('rpt_return_to_map', lang),
                         style: GoogleFonts.outfit(
                           fontWeight: FontWeight.bold,
                           color: Colors.white,

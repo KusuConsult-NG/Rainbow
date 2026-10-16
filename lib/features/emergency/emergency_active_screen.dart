@@ -2,7 +2,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +19,7 @@ import 'package:rainbow_app/services/alert_media.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
 import 'package:rainbow_app/services/live_stream_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
 import 'package:rainbow_app/shared/widgets/safety_feedback_dialog.dart';
 
@@ -135,7 +135,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
     if (alertId == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Wait for SOS alert confirmation before streaming live.')),
+          SnackBar(content: Text(_t('eme_wait_before_stream'))),
         );
       }
       return;
@@ -150,7 +150,9 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              success ? '🔴 LIVE STREAM BROADCASTING TO HQ' : 'Failed to start live stream',
+              success
+                  ? '🔴 ${_t('eme_broadcast_live')}'
+                  : _t('eme_stream_failed'),
             ),
             backgroundColor: success ? AppColors.danger : AppColors.surfaceContainerHighest,
           ),
@@ -259,6 +261,12 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
     );
   }
 
+  /// The language this citizen chose, for the labels on this screen.
+  AppLanguage get _lang => ref.watch(languageProvider);
+
+  /// Shorthand for a translated label on this screen.
+  String _t(String key) => Translations.get(key, _lang);
+
   @override
   Widget build(BuildContext context) {
     final emergencyState = ref.watch(emergencyProvider);
@@ -336,7 +344,9 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                               ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange))
                               : const Icon(Icons.camera_alt_rounded, size: 16, color: Colors.orange),
                           label: Text(
-                            _isCapturingEvidence ? 'CAPTURING...' : 'PHOTO EVIDENCE',
+                            _isCapturingEvidence
+                                ? _t('eme_capturing')
+                                : _t('eme_photo_evidence'),
                             style: GoogleFonts.outfit(
                               color: Colors.orange,
                               fontWeight: FontWeight.w800,
@@ -361,7 +371,9 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                             color: Colors.white,
                           ),
                           label: Text(
-                            _isLiveStreaming ? 'STOP STREAM' : 'BROADCAST LIVE',
+                            _isLiveStreaming
+                                ? _t('eme_stop_stream')
+                                : _t('eme_broadcast_live'),
                             style: GoogleFonts.outfit(
                               color: Colors.white,
                               fontWeight: FontWeight.w800,
@@ -410,7 +422,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'EMERGENCY ACTIVE',
+                _t('eme_active'),
                 style: GoogleFonts.outfit(
                   color: AppColors.emergency,
                   fontWeight: FontWeight.w900,
@@ -419,7 +431,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                 ),
               ),
               Text(
-                'LIVE TELEMETRY',
+                _t('eme_live_telemetry'),
                 style: GoogleFonts.outfit(
                   color: AppColors.textDim,
                   fontSize: 10,
@@ -478,37 +490,37 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                 .eq('id', alertId)
             : const Stream.empty(),
         builder: (context, snapshot) {
-          var statusText = 'Establishing tactical data link...';
-          var statusTitle = 'SIGNAL ESTABLISHED';
+          var statusText = _t('eme_link_establishing');
+          var statusTitle = _t('eme_signal_established');
           var titleColor = AppColors.onBackground;
 
           if (snapshot.hasData && snapshot.data!.isNotEmpty) {
             final alert = snapshot.data!.first;
             final status = (alert['status'] as String? ?? 'PENDING').toUpperCase();
             if (status == 'DISPATCHED') {
-              statusTitle = 'SQUAD DISPATCHED';
-              statusText = 'Tactical team dispatched to your location';
+              statusTitle = _t('eme_squad_dispatched');
+              statusText = _t('eme_squad_dispatched_desc');
               titleColor = AppColors.accent;
             } else if (status == 'ACKNOWLEDGED' || status == 'ON_ROUTE') {
-              statusTitle = 'RESPONDERS EN ROUTE';
-              statusText = 'Units en route to your position';
+              statusTitle = _t('eme_en_route');
+              statusText = _t('eme_en_route_desc');
               titleColor = AppColors.primary;
             } else if (status == 'ON_SITE') {
-              statusTitle = 'RESPONDERS ON SITE';
-              statusText = 'Tactical team arrived at your location';
+              statusTitle = _t('eme_on_site');
+              statusText = _t('eme_on_site_desc');
               titleColor = AppColors.success;
             } else if (status == 'RESOLVED') {
-              statusTitle = 'INCIDENT SECURED';
-              statusText = 'Emergency resolved and area secured';
+              statusTitle = _t('eme_secured');
+              statusText = _t('eme_secured_desc');
               titleColor = AppColors.success;
             } else {
-              statusTitle = 'LOCATION BROADCASTING';
-              statusText = 'Alert transmitted · Command HQ triaging...';
+              statusTitle = _t('eme_broadcasting');
+              statusText = _t('eme_broadcasting_triaging');
               titleColor = AppColors.primary;
             }
           } else if (_showMap) {
-            statusTitle = 'LOCATION BROADCASTING';
-            statusText = 'Emergency alert active · Command HQ notified';
+            statusTitle = _t('eme_broadcasting');
+            statusText = _t('eme_broadcasting_notified');
             titleColor = AppColors.primary;
           }
 
@@ -576,7 +588,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'SCANNING FOR SIGNAL...',
+                        _t('eme_scanning'),
                         style: GoogleFonts.outfit(
                           color: AppColors.emergency,
                           fontWeight: FontWeight.w900,
@@ -619,7 +631,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
       child: Row(
         children: [
           _TelemetryItem(
-            label: 'LATITUDE',
+            label: _t('eme_latitude'),
             value: locAsync.when(
               data: (pos) => pos?.latitude.toStringAsFixed(5) ?? '---',
               loading: () => '---',
@@ -627,7 +639,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
             ),
           ),
           _TelemetryItem(
-            label: 'LONGITUDE',
+            label: _t('eme_longitude'),
             value: locAsync.when(
               data: (pos) => pos?.longitude.toStringAsFixed(5) ?? '---',
               loading: () => '---',
@@ -635,7 +647,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
             ),
           ),
           _TelemetryItem(
-            label: 'ACCURACY',
+            label: _t('eme_accuracy'),
             value: locAsync.when(
               data: (pos) => pos != null ? '${pos.accuracy.toInt()}m' : '---',
               loading: () => '---',
@@ -703,8 +715,8 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                       const SizedBox(width: 12),
                       Text(
                         _cancelController.value > 0.1
-                            ? 'VERIFYING SAFETY...'
-                            : 'HOLD TO CANCEL SOS',
+                            ? _t('eme_verifying_safety')
+                            : _t('eme_hold_to_cancel'),
                         style: GoogleFonts.outfit(
                           color: _cancelController.value > 0.5
                               ? Colors.white
@@ -771,6 +783,8 @@ class _TacticalPinVerification extends ConsumerStatefulWidget {
 
 class _TacticalPinVerificationState
     extends ConsumerState<_TacticalPinVerification> {
+  /// Shorthand for a translated label on this sheet.
+  String _t(String key) => Translations.get(key, ref.watch(languageProvider));
   String pin = '';
   bool _verifying = false;
 
@@ -811,7 +825,7 @@ class _TacticalPinVerificationState
             ),
             const SizedBox(height: 32),
             Text(
-              'SECURITY VERIFICATION',
+              _t('eme_security_verification'),
               style: GoogleFonts.outfit(
                 color: AppColors.emergency,
                 fontWeight: FontWeight.w900,
@@ -821,7 +835,7 @@ class _TacticalPinVerificationState
             ),
             const SizedBox(height: 8),
             Text(
-              'Enter tactical PIN to confirm safety status',
+              _t('eme_enter_pin'),
               style: GoogleFonts.outfit(
                 color: AppColors.textSecondary,
                 fontSize: 13,
@@ -939,13 +953,12 @@ class _TacticalPinVerificationState
         Navigator.of(context).pop();
         widget.onVerified();
       case CancelOutcome.unset:
-        _say('No emergency PIN is set for this account. '
-            'Set one under Settings → Emergency PIN.');
+        _say('${_t('eme_no_pin_set')}${_t('eme_set_pin_hint')}');
       case CancelOutcome.locked:
-        _say('Too many attempts. PIN entry is locked for 15 minutes.');
+        _say(_t('eme_pin_locked'));
         setState(() => pin = '');
       case CancelOutcome.error:
-        _say('Could not verify the PIN — check your connection and try again.');
+        _say(_t('eme_pin_unverified'));
       case CancelOutcome.invalid:
       case CancelOutcome.notFound:
         unawaited(HapticFeedback.vibrate());
@@ -1022,6 +1035,7 @@ class _DispatcherChatButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final alertId = ref.watch(emergencyProvider).alertId;
+    String t(String key) => Translations.get(key, ref.watch(languageProvider));
 
     return SizedBox(
       width: double.infinity,
@@ -1035,7 +1049,9 @@ class _DispatcherChatButton extends ConsumerWidget {
               },
         icon: const Icon(Icons.headset_mic_rounded, size: 18),
         label: Text(
-          alertId == null ? 'AWAITING DISPATCH LINK' : 'CONTACT HQ DISPATCHER',
+          alertId == null
+              ? t('eme_awaiting_dispatch_link')
+              : t('eme_contact_dispatcher'),
           style: GoogleFonts.outfit(
             fontWeight: FontWeight.w900,
             fontSize: 12,

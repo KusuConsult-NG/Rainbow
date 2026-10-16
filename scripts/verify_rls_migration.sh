@@ -66,6 +66,8 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/mesh_ingest_behaviour_test.sql \
    "$REPO"/scripts/alert_category_behaviour_test.sql \
    "$REPO"/scripts/alert_scoping_behaviour_test.sql \
+   "$REPO"/scripts/ward_handdown_behaviour_test.sql \
+   "$REPO"/scripts/new_incident_notice_behaviour_test.sql \
    "$REPO"/scripts/notification_outbox_behaviour_test.sql \
    "$REPO"/scripts/escalation_targets_behaviour_test.sql \
    "$REPO"/scripts/geo_key_behaviour_test.sql \
@@ -75,6 +77,9 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/ai_reports_behaviour_test.sql \
    "$REPO"/scripts/oversight_behaviour_test.sql \
    "$REPO"/scripts/schema_convergence_behaviour_test.sql \
+   "$REPO"/scripts/agency_delivery_behaviour_test.sql \
+   "$REPO"/scripts/non_emergency_behaviour_test.sql \
+   "$REPO"/scripts/policy_roles_behaviour_test.sql \
    "$REPO"/scripts/why_is_the_board_empty.sql \
    "$REPO"/scripts/why_did_my_insert_fail.sql \
    "$REPO"/scripts/which_migrations_are_applied.sql \
@@ -390,6 +395,16 @@ echo "▶ Applying 20261015000000_oversight_and_debrief.sql"
 psql_run "-f $PGROOT/20261015000000_oversight_and_debrief.sql" >/dev/null
 psql_run "-f $PGROOT/20261015000000_oversight_and_debrief.sql" >/dev/null
 
+# audit_trail() took the actor from `by`, which only the SQL writers set — both
+# apps write `by_email`, so every escalation a PERSON performed was attributed to
+# SYSTEM. Applied here, right after the migration that creates the function,
+# because the oversight assertions below are what caught it and they have to run
+# against the fixed one.
+echo "▶ Applying 20261019000000_the_audit_trail_names_who_acted.sql"
+psql_run "-f $PGROOT/20261019000000_the_audit_trail_names_who_acted.sql" >/dev/null
+echo "▶ Re-applying it (must be idempotent)"
+psql_run "-f $PGROOT/20261019000000_the_audit_trail_names_who_acted.sql" >/dev/null
+
 # The single policy on a live database that PUBLIC could reach. Applied twice,
 # like the rest, because the operator repairing a database may well paste it
 # twice and a DROP/CREATE pair has to survive that.
@@ -423,11 +438,170 @@ echo "▶ Applying 20261018000000_the_mirrors_and_two_dead_functions_are_gone.sq
 psql_run "-f $PGROOT/20261018000000_the_mirrors_and_two_dead_functions_are_gone.sql" >/dev/null
 psql_run "-f $PGROOT/20261018000000_the_mirrors_and_two_dead_functions_are_gone.sql" >/dev/null
 
+# One nullable column, so that a handset leaving mid-emergency is a fact an
+# operator can read rather than a gap in a track they have to infer. Applied
+# twice, like every other one here: `ADD COLUMN IF NOT EXISTS` must be
+# re-runnable, because the runbook tells an operator to paste these by hand.
+echo "▶ Applying 20261020000000_a_handset_that_leaves_mid_emergency.sql"
+psql_run "-f $PGROOT/20261020000000_a_handset_that_leaves_mid_emergency.sql" >/dev/null
+psql_run "-f $PGROOT/20261020000000_a_handset_that_leaves_mid_emergency.sql" >/dev/null
+
+# The chain only ever climbed. This is the sideways move an LGA commander never
+# had: hand the incident to a ward they command, by name.
+echo "▶ Applying 20261021000000_an_lga_can_hand_an_incident_to_a_ward.sql"
+psql_run "-f $PGROOT/20261021000000_an_lga_can_hand_an_incident_to_a_ward.sql" >/dev/null
+psql_run "-f $PGROOT/20261021000000_an_lga_can_hand_an_incident_to_a_ward.sql" >/dev/null
+
+# Its own file, and run HERE rather than inside alert_scoping_behaviour_test.sql
+# — that one runs earlier in the replay, before this migration exists, where
+# the assertions passed for the wrong reason and then failed with "function
+# does not exist".
+# The outbox was built for the timeout escalation and nothing queued anything
+# when an alert was INSERTED, so a report reached a responder only if they had
+# the app open.
+echo "▶ Applying 20261022000000_a_new_emergency_tells_the_unit.sql"
+psql_run "-f $PGROOT/20261022000000_a_new_emergency_tells_the_unit.sql" >/dev/null
+psql_run "-f $PGROOT/20261022000000_a_new_emergency_tells_the_unit.sql" >/dev/null
+
+echo "▶ Asserting a new emergency tells the unit it landed in"
+NI_OUT=$(psql_run "-f $PGROOT/new_incident_notice_behaviour_test.sql" 2>&1) && NI_RC=0 || NI_RC=$?
+echo "$NI_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$NI_RC" -ne 0 ] || echo "$NI_OUT" | grep -q "ERROR"; then
+  echo "$NI_OUT"; echo "✗ new incident notice assertions failed"; exit 1
+fi
+
+echo "▶ Asserting an LGA commander can hand an incident across to a ward"
+WH_OUT=$(psql_run "-f $PGROOT/ward_handdown_behaviour_test.sql" 2>&1) && WH_RC=0 || WH_RC=$?
+echo "$WH_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$WH_RC" -ne 0 ] || echo "$WH_OUT" | grep -q "ERROR"; then
+  echo "$WH_OUT"; echo "✗ ward hand-down assertions failed"; exit 1
+fi
+
 echo "▶ Asserting the schema now behaves the way production's does"
 CONV_OUT=$(psql_run "-f $PGROOT/schema_convergence_behaviour_test.sql" 2>&1) && CONV_RC=0 || CONV_RC=$?
 echo "$CONV_OUT" | grep -E "PASS|FAIL|NOTE|ERROR" || true
 if [ "$CONV_RC" -ne 0 ]; then
   echo "$CONV_OUT"; echo "✗ schema convergence assertions failed"; exit 1
+fi
+
+# Three of the four agency tables are created twice, by two files with
+# different column lists and IF NOT EXISTS on both — so THIS database, which
+# excludes the hand-applied v3/v4 era, had `created_at` and none of the five
+# columns production has. Applied twice like the rest: the runbook tells an
+# operator to paste it, and a backfill that runs twice must not change anything
+# the second time.
+echo "▶ Applying 20261023000000_one_table_one_shape.sql"
+psql_run "-f $PGROOT/20261023000000_one_table_one_shape.sql" >/dev/null
+psql_run "-f $PGROOT/20261023000000_one_table_one_shape.sql" >/dev/null
+
+echo "▶ Asserting the delivery log of a handover to an outside agency"
+AGD_OUT=$(psql_run "-f $PGROOT/agency_delivery_behaviour_test.sql" 2>&1) && AGD_RC=0 || AGD_RC=$?
+echo "$AGD_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$AGD_RC" -ne 0 ] || echo "$AGD_OUT" | grep -q "ERROR"; then
+  echo "$AGD_OUT"; echo "✗ agency delivery assertions failed"; exit 1
+fi
+
+# A voice note from somebody who cannot type, and a report about government
+# property that must not page a patrol at 02:00 or climb to HQ by morning.
+# Applied twice, like every other one here: the runbook tells an operator to
+# paste these by hand.
+echo "▶ Applying 20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency.sql"
+psql_run "-f $PGROOT/20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency.sql" >/dev/null
+psql_run "-f $PGROOT/20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency.sql" >/dev/null
+
+echo "▶ Asserting a report about public property is not treated as an emergency"
+NE_OUT=$(psql_run "-f $PGROOT/non_emergency_behaviour_test.sql" 2>&1) && NE_RC=0 || NE_RC=$?
+echo "$NE_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$NE_RC" -ne 0 ] || echo "$NE_OUT" | grep -q "ERROR"; then
+  echo "$NE_OUT"; echo "✗ non-emergency assertions failed"; exit 1
+fi
+
+# The other policy PUBLIC could reach. `alerts_select_geo_lga_scoped` was
+# created by 20260725 (staging-only, applied to production BY HAND) with no TO
+# clause, which PostgreSQL records as TO PUBLIC — twelve lines above its
+# telemetry twin, which carries a comment explaining exactly that and was
+# repaired on its own. On a database built from this repository 20261006 has
+# already dropped it, so this is a no-op here and the fix on production.
+echo "▶ Applying 20261025000000_the_other_policy_public_could_reach.sql"
+psql_run "-f $PGROOT/20261025000000_the_other_policy_public_could_reach.sql" >/dev/null
+psql_run "-f $PGROOT/20261025000000_the_other_policy_public_could_reach.sql" >/dev/null
+
+# AND THE BRANCH THAT MATTERS, WHICH THE REPLAY DOES NOT REACH.
+#
+# On a database built from this repository the policy is already gone (20261006
+# dropped it, and 20260725 is staging-only), so the run above only proves the
+# no-op. The branch that does the work on PRODUCTION — policy exists, recorded
+# TO PUBLIC, repair it — would otherwise ship untested. So plant production's
+# shape and watch the migration close it.
+echo "▶ Asserting the repair branch closes a TO-PUBLIC policy it finds"
+cat > "$PGROOT/zz_plant_public_policy.sql" <<'PLANT'
+-- Exactly what 20260725000000_v6_geo_lga_scoping_staging.sql used to create:
+-- no TO clause, which PostgreSQL records as TO PUBLIC.
+CREATE POLICY "alerts_select_geo_lga_scoped"
+  ON public.alerts FOR SELECT
+  USING (
+    auth.role() = 'authenticated'
+    AND EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.role IN ('FIELD_OFFICER', 'WARD_OFFICER', 'LGA_OFFICER')
+        AND p.geo_lga IS NOT NULL
+        AND TRIM(p.geo_lga) <> ''
+        AND public.normalise_lga(p.geo_lga) = public.normalise_lga(alerts.geo_lga)
+    )
+  );
+SELECT 'planted=' || roles::text FROM pg_policies
+ WHERE schemaname='public' AND policyname='alerts_select_geo_lga_scoped';
+PLANT
+chown postgres:postgres "$PGROOT/zz_plant_public_policy.sql"
+PLANT_OUT=$(psql_run "-t -A -f $PGROOT/zz_plant_public_policy.sql" 2>&1)
+printf '%s\n' "$PLANT_OUT" | grep -qx "planted={public}" || {
+  printf '%s\n' "$PLANT_OUT" | sed 's/^/    /'
+  echo "✗ the planted policy was not recorded as {public} — this step proves nothing"
+  exit 1; }
+echo "  PASS  planted alerts_select_geo_lga_scoped and PostgreSQL recorded it TO {public}"
+
+# The expression BEFORE, so the claim that the migration leaves it alone is
+# asserted rather than described. The policy on production was applied by hand;
+# a repair that rewrites its body from this repository's text would silently
+# change which officer may read which incident, and `pg_policies.qual` is the
+# only place that difference would show.
+QUAL_BEFORE=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
+  \"select qual from pg_policies where schemaname='public' \
+    and policyname='alerts_select_geo_lga_scoped';\"")
+psql_run "-f $PGROOT/20261025000000_the_other_policy_public_could_reach.sql" >/dev/null
+REPAIRED=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
+  \"select roles::text from pg_policies where schemaname='public' \
+    and policyname='alerts_select_geo_lga_scoped';\"")
+QUAL_AFTER=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
+  \"select qual from pg_policies where schemaname='public' \
+    and policyname='alerts_select_geo_lga_scoped';\"")
+if [ "$REPAIRED" != "{authenticated}" ]; then
+  echo "    roles after the migration: $REPAIRED"
+  echo "✗ the repair branch did not scope the policy TO authenticated"
+  exit 1
+fi
+echo "  PASS  and the migration scoped it TO {authenticated}"
+if [ -z "$QUAL_BEFORE" ] || [ "$QUAL_BEFORE" != "$QUAL_AFTER" ]; then
+  echo "    before: $QUAL_BEFORE"
+  echo "    after:  $QUAL_AFTER"
+  echo "✗ the policy's USING expression changed. ALTER POLICY … TO must change"
+  echo "  the roles and nothing else: production's copy of this policy was"
+  echo "  applied by hand, and rewriting its body decides who reads what."
+  exit 1
+fi
+echo "  PASS  and its USING expression is byte-identical, so no read path moved"
+
+# Left in place it would be an extra policy on alerts that no migration creates,
+# which the convergence assertions would rightly call drift.
+psql_run "-c 'DROP POLICY \"alerts_select_geo_lga_scoped\" ON public.alerts;'" >/dev/null
+echo "  PASS  and the planted policy is removed, so the end state is the repo's own"
+
+echo "▶ Asserting no policy in schema public reaches anon or public, by name"
+PR_OUT=$(psql_run "-f $PGROOT/policy_roles_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?
+echo "$PR_OUT" | grep -E "PASS|FAIL|ERROR" || true
+if [ "$PR_RC" -ne 0 ] || echo "$PR_OUT" | grep -q "ERROR"; then
+  echo "$PR_OUT"; echo "✗ policy-role assertions failed"; exit 1
 fi
 
 echo "▶ Asserting a complaint about an officer does not reach that officer"

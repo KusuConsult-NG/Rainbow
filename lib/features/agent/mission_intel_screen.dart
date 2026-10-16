@@ -11,11 +11,11 @@ import 'package:latlong2/latlong.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/services/alert_media.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/shared/widgets/voice_note_player.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class MissionIntelScreen extends ConsumerStatefulWidget {
   const MissionIntelScreen({required this.alertData, super.key});
@@ -169,6 +169,10 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
     final lng = (alertData['longitude'] as num?)?.toDouble();
     final alertId = alertData['id'] as String?;
     final mediaUrls = (alertData['media_urls'] as List<dynamic>?)?.cast<String>() ?? [];
+    // The reporter's own voice, which is not evidence and not one of the
+    // attachments: it is the report, from somebody who could not type.
+    final voiceNoteUrl = (alertData['voice_note_url'] as String?)?.trim();
+    final voiceNoteSeconds = alertData['voice_note_seconds'] as int?;
     final authState = ref.watch(authProvider);
     final isAgent = authState.role == UserRole.responder;
 
@@ -190,6 +194,20 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
             ],
             Text(desc, style: GoogleFonts.inter(fontSize: 14, color: AppColors.onBackground)),
             const SizedBox(height: 24),
+            // ABOVE the evidence, because for a report filed by voice this is
+            // the report and the photographs are the attachments. It used to be
+            // one of the thumbnails in the strip below, drawn as a microphone with
+            // TAP TO PLAY under it, which called `launchUrl()` and left the
+            // app — on a handset whose re-entry lock can then ask for a code
+            // before the responder gets back to the incident.
+            if (voiceNoteUrl != null && voiceNoteUrl.isNotEmpty) ...[
+              VoiceNotePlayer(
+                url: voiceNoteUrl,
+                seconds: voiceNoteSeconds,
+                label: 'VOICE NOTE FROM THE REPORTER',
+              ),
+              const SizedBox(height: 24),
+            ],
             if (mediaUrls.isNotEmpty) ...[
               Text('EVIDENCE ACQUIRED', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textDim)),
               const SizedBox(height: 8),
@@ -208,7 +226,21 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
                     return GestureDetector(
                       onTap: () {
                         if (isAudio) {
-                          unawaited(launchUrl(Uri.parse(url)));
+                          // Plays in a sheet rather than in whatever app the
+                          // phone hands an .m4a url to. A Cloudinary `/raw/`
+                          // link is often DOWNLOADED rather than played, so
+                          // TAP TO PLAY could leave the app and then not play.
+                          unawaited(showModalBottomSheet<void>(
+                            context: context,
+                            backgroundColor: AppColors.background,
+                            builder: (context) => Padding(
+                              padding: const EdgeInsets.all(20),
+                              child: VoiceNotePlayer(
+                                url: url,
+                                label: 'RECORDING ATTACHED TO THIS INCIDENT',
+                              ),
+                            ),
+                          ),);
                         } else {
                           unawaited(showDialog<void>(
                             context: context,

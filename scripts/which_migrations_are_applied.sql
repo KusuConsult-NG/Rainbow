@@ -12,6 +12,16 @@
 -- never applied; `N of N` was. Anything in between is a migration that failed
 -- partway, which is the worst case and the one worth looking at first.
 --
+-- "Partly present" has TWO readings and the summary line no longer picks one.
+-- A migration that failed halfway is the alarming case. But a CONVERGENCE
+-- migration — `20261023000000_one_table_one_shape`, which exists because two
+-- databases had the same table with different columns — adds columns with
+-- `ADD COLUMN IF NOT EXISTS`, and on a database that already had some of them
+-- it reads `5 of 8` while never having been applied at all. That is the file
+-- written to handle exactly this, reported as the worst case. The `missing`
+-- rows tell them apart: a partial failure leaves an arbitrary subset, while a
+-- convergence migration leaves the objects that database never had.
+--
 -- Most migrations CREATE, and read `N of N present`. One REMOVES, and reads
 -- `N of N removed` — for those the assertion is that the object is gone, so
 -- `0 of 7 removed` means that migration has not been applied yet, not that
@@ -135,6 +145,21 @@ WITH expected(migration, kind, obj, want) AS (VALUES
   ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief', true),
   ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief_by', true),
   ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief_at', true),
+  ('20261020000000_a_handset_that_leaves_mid_emergency', 'column', 'alerts.device_signed_out_at', true),
+  ('20261021000000_an_lga_can_hand_an_incident_to_a_ward', 'function', 'alert_delegated_to_my_ward', true),
+  ('20261022000000_a_new_emergency_tells_the_unit', 'function', 'queue_new_incident_notice', true),
+  ('20261023000000_one_table_one_shape', 'column', 'agency_notifications.detail', true),
+  ('20261023000000_one_table_one_shape', 'column', 'agency_notifications.sent_by', true),
+  ('20261023000000_one_table_one_shape', 'column', 'agency_notifications.target_lga', true),
+  ('20261023000000_one_table_one_shape', 'column', 'agency_notifications.acknowledged_at', true),
+  ('20261023000000_one_table_one_shape', 'column', 'agency_notifications.created_at', true),
+  ('20261023000000_one_table_one_shape', 'column', 'agency_action_reports.created_at', true),
+  ('20261023000000_one_table_one_shape', 'column', 'agency_deployments.resolved_at', true),
+  ('20261023000000_one_table_one_shape', 'column', 'agency_deployments.created_at', true),
+  ('20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency', 'function', 'is_non_emergency', true),
+  ('20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency', 'function', 'route_non_emergency_to_lga', true),
+  ('20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency', 'column', 'alerts.voice_note_url', true),
+  ('20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency', 'column', 'alerts.voice_note_seconds', true),
   ('phase1_foundation', 'table', 'safe_zones', true),
   ('phase1_foundation', 'table', 'uninstall_requests', true),
   ('phase1_foundation', 'table', 'app_config', true),
@@ -188,7 +213,7 @@ SELECT 1 AS ord, 'summary' AS section, migration AS name,
               CASE
                 WHEN migration IN ('20260721000000_v2_agency_tables', '20260722000000_v3_telemetry_geofence', '20260723000000_v4_mesh_broadcast', '20260724000000_v5_rls_security') THEN ' — by hand in production, absence is not a fault'
                 WHEN count(*) FILTER (WHERE present = want) = 0 THEN ' — NEVER APPLIED'
-                WHEN count(*) FILTER (WHERE present = want) < count(*) THEN ' — APPLIED PARTWAY, look here first'
+                WHEN count(*) FILTER (WHERE present = want) < count(*) THEN ' — PARTLY PRESENT: either applied partway, or a convergence migration whose objects already existed here. Read its `missing` rows below'
                 ELSE ''
               END) AS detail
   FROM resolved
@@ -211,7 +236,9 @@ SELECT 3, 'not detectable', name, detail
          ('20260903000003_alert_escalation_columns', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
          ('20260927000000_signup_cannot_choose_role', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
          ('20261016000000_telemetry_policy_is_not_public', 'it only creates policies, which object existence cannot see — use scripts/rls_inventory.sql'),
-         ('20261017000000_the_hand_applied_era_is_in_the_history', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them')
+         ('20261017000000_the_hand_applied_era_is_in_the_history', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
+         ('20261019000000_the_audit_trail_names_who_acted', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
+         ('20261025000000_the_other_policy_public_could_reach', 'it declares no table, column or function')
        ) AS u(name, detail)
 UNION ALL
 SELECT 4, 'as expected', 'every object in every migration is as it should be',

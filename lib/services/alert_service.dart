@@ -8,6 +8,7 @@ import 'package:rainbow_app/core/offline/offline_ref.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/services/background_tracking_service.dart';
+import 'package:rainbow_app/services/voice_note_service.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/services/mesh_service.dart';
@@ -39,6 +40,14 @@ class AlertService {
     bool isCritical = false,
     AlertPriority priority = AlertPriority.medium,
     List<String>? attachments,
+    /// The reporter's own voice, when they could not or did not type.
+    ///
+    /// Separate from `attachments` on purpose: that list is evidence and this
+    /// is the report. It lands in `alerts.voice_note_url`, so a responder's
+    /// card can say "the reporter left a voice note" instead of counting it
+    /// among the photographs — which is what happened while the recording was
+    /// uploaded as one more attachment.
+    VoiceNote? voiceNote,
     String? geoLga,
     String? geoWard,
     String? geoSiecWard,
@@ -226,6 +235,38 @@ class AlertService {
         }
       }
 
+      // THE VOICE NOTE IS UPLOADED LAST AND ON ITS OWN.
+      //
+      // Through the same two-step path as the evidence (Cloudinary, then
+      // Supabase storage) because the fallback is the reason either one
+      // arrives. A failure here must not take the report with it: somebody who
+      // could not type has also said something in the description or the
+      // transcript, and an incident filed without its audio beats no incident.
+      String? voiceNoteUrl;
+      if (voiceNote != null) {
+        try {
+          final file = File(voiceNote.path);
+          if (file.existsSync()) {
+            voiceNoteUrl = await CloudinaryService.instance.uploadMedia(file);
+            if (voiceNoteUrl == null) {
+              final bytes = await file.readAsBytes();
+              final storagePath =
+                  'incident_media/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+              await SupabaseConfig.client.storage
+                  .from('incident-media')
+                  .uploadBinary(storagePath, bytes);
+              voiceNoteUrl = SupabaseConfig.client.storage
+                  .from('incident-media')
+                  .getPublicUrl(storagePath);
+            }
+          } else if (voiceNote.path.startsWith('http')) {
+            voiceNoteUrl = voiceNote.path;
+          }
+        } catch (e) {
+          debugPrint('[ALERT_SERVICE] the voice note did not upload: $e');
+        }
+      }
+
       final alertPayload = <String, dynamic>{
         'local_id': localId,
         'type': type,
@@ -253,6 +294,11 @@ class AlertService {
         'geo_siec_ward': geoSiecWard,
         'geo_pu': finalPu,
         'media_urls': mediaUrls,
+        // Only when there is one: writing nulls would overwrite nothing here
+        // (this is an insert) but it keeps the payload honest about what the
+        // report actually carries.
+        if (voiceNoteUrl != null) 'voice_note_url': voiceNoteUrl,
+        if (voiceNoteUrl != null) 'voice_note_seconds': voiceNote!.seconds,
       };
 
       try {

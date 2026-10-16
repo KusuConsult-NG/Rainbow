@@ -210,7 +210,26 @@ describe('the actions offered on a marker', () => {
 
   it('always offers the full dossier', () => {
     const html = incidentPopupHtml(alert(), { reporter: resolveReporterDetails(alert(), {}), now: NOW });
-    expect(html).toContain('window._hqDossier');
+    expect(html).toContain('data-hq-action="dossier"');
+  });
+
+  it('carries no inline event handler, which the CSP refuses to run', () => {
+    // This test asserted `window._hqDossier` — the presence of an
+    // `onclick="…"` attribute. The console's CSP is `script-src 'self'
+    // 'nonce-…' 'strict-dynamic'` with no `'unsafe-inline'`, and a nonce
+    // cannot apply to an event handler ATTRIBUTE, so the browser refused
+    // every one of them: DOSSIER, DISPATCH and RESOLVE were dead in every map
+    // popup on the console's landing screen. The suite was defending the
+    // defect.
+    const html = incidentPopupHtml(
+      alert({ status: 'PENDING' }),
+      { reporter: resolveReporterDetails(alert(), { 'user-1': CITIZEN }), now: NOW },
+    );
+
+    expect(html).not.toMatch(/\son[a-z]+\s*=/);
+    expect(html).toContain('data-hq-action="dossier"');
+    expect(html).toContain('data-hq-action="dispatch"');
+    expect(html).toContain('data-hq-id=');
   });
 });
 

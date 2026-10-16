@@ -1,7 +1,67 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { Settings, Save } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Settings, Save, AlertTriangle, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+
+/**
+ * The statewide escalation policy: how long an incident waits at each tier
+ * before it climbs. The SQL escalation watchdog reads these three rows.
+ *
+ * ## The defect this closes
+ *
+ * The load was:
+ *
+ *     supabase.from('app_config').select('key, value').in('key', KEYS)
+ *       .then(({ data }) => { if (data && data.length > 0) { ... } });
+ *
+ * `error` is destructured away. A refused or failed read left the component's
+ * own seeded placeholders — 2 / 5 / 10 — on screen with nothing saying the read
+ * had not happened. The component had an `error` state; only the SAVE path ever
+ * set it.
+ *
+ * That is this repository's own rule, from the badge two hundred lines into the
+ * dashboard: "A failed count must not read as zero: a badge that says nothing
+ * when it could not ask is the same lie as an empty board." Here it is worse
+ * than a badge, because Save **upserts all three keys**. An operator who saw
+ * 2 / 5 / 10, changed one field and pressed Save replaced the live statewide
+ * policy with placeholders — and the migration seeds exactly 2 / 5 / 10, so the
+ * screen looked right until somebody had changed them, which is the only point
+ * at which it mattered.
+ *
+ * Three smaller faults in the same ten lines:
+ *
+ *   * a key with no row merged over the placeholder, so a value that had never
+ *     been configured read as though it had;
+ *   * `Number(row.value)` is unchecked and the column is TEXT, so a non-numeric
+ *     value became `NaN`, rendered as an empty number input, and `String(NaN)`
+ *     — the literal "NaN" — is what Save would have written back;
+ *   * the labels were not associated with their inputs, so a screen reader had
+ *     three unlabelled number boxes on the page that sets the escalation
+ *     policy.
+ *
+ * ## And a value the watchdog will not honour
+ *
+ * `tier_timeout_minutes()` in `20260928000000_command_chain_escalation.sql`
+ * reads these rows, and it rejects what it cannot use:
+ *
+ *     parsed := raw::INTEGER;        -- '2.5' raises, and is caught
+ *     IF parsed IS NULL OR parsed <= 0 THEN  -- falls back to the seeded value
+ *
+ * with the reason given: "A missing or malformed setting must not silently mean
+ * 'escalate immediately' (a timeout of 0) or 'never escalate' (NULL treated as
+ * infinite). Both are dangerous defaults for an emergency queue."
+ *
+ * The form accepted anything its number input would produce. So an operator
+ * could set the ward timeout to `0`, or `2.5`, and it was stored, and read
+ * back, and displayed as the policy — while the watchdog discarded it and used
+ * the seeded value. The screen and the job disagreed about what the row means,
+ * which is T-28's and T-29's signature: two sides of one name.
+ *
+ * ## The rule
+ *
+ * Do not offer to save what you could not read, and do not accept a value the
+ * thing that reads it will throw away.
+ */
 
 interface Config {
   POLLING_UNIT: number;
@@ -9,41 +69,119 @@ interface Config {
   LGA: number;
 }
 
+/**
+ * The smallest timeout `tier_timeout_minutes()` will honour.
+ *
+ * It rejects `<= 0` and anything that will not cast to INTEGER, falling back to
+ * the seeded value. A form that accepts what the job discards is a form that
+ * lies about the policy, so this is enforced here too.
+ *
+ * `scripts/check_escalation_defaults_agree.py` asserts this and the seeded
+ * values below against the migration.
+ */
+const MIN_MINUTES = 1;
+
+/** Field, its `app_config` key, its label, and what the migration seeds. */
+const FIELDS = [
+  { field: 'POLLING_UNIT', key: 'escalation_timeout_pu', label: 'Polling Unit Timeout (Minutes)', seeded: 2 },
+  { field: 'WARD', key: 'escalation_timeout_ward', label: 'Ward Timeout (Minutes)', seeded: 5 },
+  { field: 'LGA', key: 'escalation_timeout_lga', label: 'LGA Timeout (Minutes)', seeded: 10 },
+] as const satisfies readonly { field: keyof Config; key: string; label: string; seeded: number }[];
+
+type Load =
+  | { status: 'loading' }
+  /** The policy could not be read. Nothing is shown and nothing may be saved. */
+  | { status: 'failed'; reason: string }
+  /** `missing` names the keys that have no row — never configured here. */
+  | { status: 'ready'; missing: readonly string[] };
+
 export default function SystemConfig() {
+  const [load, setLoad] = useState<Load>({ status: 'loading' });
   const [thresholds, setThresholds] = useState<Config>({ POLLING_UNIT: 2, WARD: 5, LGA: 10 });
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    // Load existing config from DB on mount
-    supabase
-      .from('app_config')
-      .select('key, value')
-      .in('key', ['escalation_timeout_pu', 'escalation_timeout_ward', 'escalation_timeout_lga'])
-      .then(({ data }) => {
-        if (data && data.length > 0) {
-          const cfg: Partial<Config> = {};
-          data.forEach((row: { key: string; value: string }) => {
-            if (row.key === 'escalation_timeout_pu') cfg.POLLING_UNIT = Number(row.value);
-            if (row.key === 'escalation_timeout_ward') cfg.WARD = Number(row.value);
-            if (row.key === 'escalation_timeout_lga') cfg.LGA = Number(row.value);
-          });
-          setThresholds((prev) => ({ ...prev, ...cfg }));
+    let cancelled = false;
+    void (async () => {
+      const { data, error: readErr } = await supabase
+        .from('app_config')
+        .select('key, value')
+        .in('key', FIELDS.map(f => f.key));
+      if (cancelled) return;
+
+      if (readErr) {
+        setLoad({
+          status: 'failed',
+          reason: readErr.message || 'Could not read the escalation configuration',
+        });
+        return;
+      }
+
+      const stored = new Map(
+        ((data ?? []) as { key: string; value: string }[]).map(r => [r.key, r.value]),
+      );
+      const values = {} as Config;
+      const missing: string[] = [];
+      const notNumeric: string[] = [];
+
+      for (const { field, key, seeded } of FIELDS) {
+        const raw = stored.get(key);
+        if (raw === undefined || raw === null || String(raw).trim() === '') {
+          // Never configured. The seeded value is shown so the field has
+          // something to edit, and `missing` is what says it is not live.
+          missing.push(key);
+          values[field] = seeded;
+          continue;
         }
-      });
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed)) {
+          notNumeric.push(`${key} = "${raw}"`);
+          continue;
+        }
+        values[field] = parsed;
+      }
+
+      if (notNumeric.length > 0) {
+        // Not editable: saving would write "NaN" over it, and whatever put a
+        // word in a minutes column needs a person to look at it.
+        setLoad({
+          status: 'failed',
+          reason:
+            'app_config holds a value that is not a number, so this screen '
+            + `cannot show the live policy: ${notNumeric.join('; ')}`,
+        });
+        return;
+      }
+
+      setThresholds(values);
+      setLoad({ status: 'ready', missing });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
+  /** Values the watchdog would throw away, named so the operator can fix them. */
+  const unusable = FIELDS.filter(({ field }) => {
+    const v = thresholds[field];
+    return !Number.isInteger(v) || v < MIN_MINUTES;
+  });
+
   const saveConfig = async () => {
+    // Guarded here as well as by the disabled button: this is the write that
+    // replaces the statewide policy.
+    if (load.status !== 'ready' || unusable.length > 0) return;
     setSaving(true);
     setMsg('');
     setError('');
     try {
-      const rows = [
-        { key: 'escalation_timeout_pu', value: String(thresholds.POLLING_UNIT), description: 'Polling Unit escalation timeout in minutes' },
-        { key: 'escalation_timeout_ward', value: String(thresholds.WARD), description: 'Ward escalation timeout in minutes' },
-        { key: 'escalation_timeout_lga', value: String(thresholds.LGA), description: 'LGA escalation timeout in minutes' },
-      ];
+      const rows = FIELDS.map(({ field, key }) => ({
+        key,
+        value: String(thresholds[field]),
+        description: `${field === 'POLLING_UNIT' ? 'Polling Unit' : field} escalation timeout in minutes`,
+      }));
 
       const { error: dbErr } = await supabase
         .from('app_config')
@@ -51,12 +189,32 @@ export default function SystemConfig() {
 
       if (dbErr) throw dbErr;
       setMsg('Statewide tactical escalation configuration saved successfully.');
+      setLoad({ status: 'ready', missing: [] });
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to save configuration';
-      setError(msg);
+      const message = e instanceof Error ? e.message : 'Failed to save configuration';
+      setError(message);
     } finally {
       setSaving(false);
     }
+  };
+
+  const banner = (
+    tone: 'ok' | 'bad' | 'warn',
+    body: React.ReactNode,
+  ) => {
+    const colours = {
+      ok: { bg: 'var(--success-dim)', line: 'var(--success)', text: 'var(--success)' },
+      bad: { bg: 'rgba(239,68,68,0.1)', line: '#E31E24', text: '#E31E24' },
+      warn: { bg: 'rgba(245,158,11,0.12)', line: '#F59E0B', text: '#F59E0B' },
+    }[tone];
+    return (
+      <div style={{
+        padding: 12, background: colours.bg, border: `1px solid ${colours.line}`,
+        borderRadius: 10, color: colours.text, marginBottom: 16, fontSize: 13,
+      }}>
+        {body}
+      </div>
+    );
   };
 
   return (
@@ -66,68 +224,98 @@ export default function SystemConfig() {
         Jurisdictional Escalation Config
       </h2>
 
-      {msg && (
-        <div style={{ padding: 12, background: 'var(--success-dim)', border: '1px solid var(--success)', borderRadius: 10, color: 'var(--success)', marginBottom: 16, fontSize: 13 }}>
-          ✓ {msg}
+      {msg && banner('ok', <>✓ {msg}</>)}
+      {error && banner('bad', <>✗ {error}</>)}
+
+      {load.status === 'failed' && banner('bad', (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>
+              The live escalation policy could not be read
+            </div>
+            <div style={{ fontSize: 12 }}>{load.reason}</div>
+            <div style={{ fontSize: 12, marginTop: 6 }}>
+              Saving is disabled, because this form writes all three timeouts
+              and would replace a policy it has not seen.
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {unusable.length > 0 && load.status === 'ready' && banner('bad', (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>
+              The escalation job would discard this
+            </div>
+            <div style={{ fontSize: 12 }}>
+              {unusable.map(f => f.label.replace(' (Minutes)', '')).join(', ')} —
+              a timeout must be a whole number of minutes, at least
+              {' '}{MIN_MINUTES}. <code>tier_timeout_minutes()</code> rejects
+              anything else and falls back to its seeded value, so saving this
+              would show you a policy the job is not using.
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {load.status === 'ready' && load.missing.length > 0 && banner('warn', (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>
+              Not configured in this database
+            </div>
+            <div style={{ fontSize: 12 }}>
+              {load.missing.join(', ')} — no row in <code>app_config</code>.
+              The value shown is what <code>tier_timeout_minutes()</code> falls
+              back to, so it IS the effective timeout; it is simply not recorded
+              anywhere. Save to write it down.
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {load.status === 'loading' ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)', fontSize: 13, padding: '24px 0' }}>
+          <Loader2 size={16} className="spin" /> Reading the live escalation policy...
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {load.status === 'ready' && FIELDS.map(({ field, key, label }) => (
+            <div key={key}>
+              <label
+                htmlFor={`cfg-${key}`}
+                style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}
+              >
+                {label}
+              </label>
+              <input
+                id={`cfg-${key}`}
+                type="number"
+                min={MIN_MINUTES}
+                step={1}
+                className="input-tactical"
+                style={{ width: '100%' }}
+                value={thresholds[field]}
+                onChange={(e) => setThresholds({ ...thresholds, [field]: Number(e.target.value) })}
+              />
+            </div>
+          ))}
+
+          <button
+            onClick={saveConfig}
+            disabled={saving || load.status !== 'ready' || unusable.length > 0}
+            className="btn-tactical btn-primary"
+            style={{ padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: saving || load.status !== 'ready' || unusable.length > 0 ? 0.7 : 1 }}
+          >
+            <Save size={16} />
+            {saving ? 'Saving...' : 'Save Configuration'}
+          </button>
         </div>
       )}
-
-      {error && (
-        <div style={{ padding: 12, background: 'rgba(239,68,68,0.1)', border: '1px solid #E31E24', borderRadius: 10, color: '#E31E24', marginBottom: 16, fontSize: 13 }}>
-          ✗ {error}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div>
-          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-            Polling Unit Timeout (Minutes)
-          </label>
-          <input
-            type="number"
-            className="input-tactical"
-            style={{ width: '100%' }}
-            value={thresholds.POLLING_UNIT}
-            onChange={(e) => setThresholds({ ...thresholds, POLLING_UNIT: Number(e.target.value) })}
-          />
-        </div>
-
-        <div>
-          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-            Ward Timeout (Minutes)
-          </label>
-          <input
-            type="number"
-            className="input-tactical"
-            style={{ width: '100%' }}
-            value={thresholds.WARD}
-            onChange={(e) => setThresholds({ ...thresholds, WARD: Number(e.target.value) })}
-          />
-        </div>
-
-        <div>
-          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-            LGA Timeout (Minutes)
-          </label>
-          <input
-            type="number"
-            className="input-tactical"
-            style={{ width: '100%' }}
-            value={thresholds.LGA}
-            onChange={(e) => setThresholds({ ...thresholds, LGA: Number(e.target.value) })}
-          />
-        </div>
-
-        <button
-          onClick={saveConfig}
-          disabled={saving}
-          className="btn-tactical btn-primary"
-          style={{ padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: saving ? 0.7 : 1 }}
-        >
-          <Save size={16} />
-          {saving ? 'Saving...' : 'Save Configuration'}
-        </button>
-      </div>
     </div>
   );
 }

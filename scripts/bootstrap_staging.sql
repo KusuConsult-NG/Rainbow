@@ -1658,13 +1658,21 @@ DO $b$ BEGIN RAISE NOTICE 'applying 20260903000003_alert_escalation_columns.sql'
 --
 -- A NOTE ON WHAT GOES IN escalated_to_agency
 --
--- The two writers disagree. The console writes an agency ('POLICE', 'ARMY'),
--- which is what AgencyPortal filters on. The mobile agent dashboard writes a
--- TIER ('HQ', 'LGA') — its own comment says "tier label for filtering". A
--- mobile escalation is therefore invisible to every agency portal, though it
--- still shows as ESCALATED on the HQ board. That is a semantic collision in one
--- column, not a schema fault, and it is left alone here: narrowing it belongs
--- with whoever owns the escalation model. Recorded in E2E_AUDIT_REPORT.md.
+-- The two writers disagree. The mobile agent dashboard wrote a TIER ('HQ',
+-- 'LGA') here — its own comment said "tier label for filtering" — so a mobile
+-- escalation was invisible to every agency portal while still showing as
+-- ESCALATED on the HQ board. That has since been given its own column,
+-- `assigned_tier`, and the mobile side writes it there.
+--
+-- CORRECTION, 2026-10-07. This comment used to say the console writes an agency
+-- code, 'POLICE' or 'ARMY', "which is what AgencyPortal filters on". It did not.
+-- The console's escalation menu was built from the list that badges Operation
+-- Rainbow's own staff, so it wrote 'NPF', 'MILITARY', 'RAINBOW' or 'VGN' —
+-- codes no liaison role, portal or contact variable knows. An incident handed
+-- to the Police was stored as 'NPF' and the Police portal, which asks for
+-- 'POLICE', never showed it. Fixed on the console side; the column stays free
+-- text because production holds rows written before any of this was settled.
+-- Recorded in E2E_AUDIT_REPORT.md.
 --
 -- Idempotent: safe to re-run.
 -- ============================================================================
@@ -2909,9 +2917,11 @@ DO $b$ BEGIN RAISE NOTICE 'applying 20261003000000_liaisons_are_not_staff.sql'; 
 -- THE HOLE
 --
 -- Six agencies send liaison officers to this console: the Police, the Army,
--- the DSS, the NSCDC, the FRSC and Operation Safe Haven. They are officers of
--- OTHER organisations, given an account so that an incident handed to their
--- agency reaches them.
+-- the DSS, the NSCDC, the FRSC and Operation Enduring Peace. They are officers
+-- of OTHER organisations, given an account so that an incident handed to their
+-- agency reaches them. (Operation Enduring Peace was called Operation Safe
+-- Haven when this was written; the code stays OPSH, which is what the role
+-- name and `escalated_to_agency` store.)
 --
 -- `is_staff()` is:
 --
@@ -6178,6 +6188,974 @@ END $$;
 --    WHERE pol.qual ILIKE '%' || p.proname || '%'
 --       OR pol.with_check ILIKE '%' || p.proname || '%';
 
+-- ----------------------------------------------------------------------------
+-- 20261019000000_the_audit_trail_names_who_acted.sql  (outstanding)
+-- ----------------------------------------------------------------------------
+DO $b$ BEGIN RAISE NOTICE 'applying 20261019000000_the_audit_trail_names_who_acted.sql'; END $b$;
+
+-- ============================================================================
+-- OPERATION RAINBOW — THE AUDIT TRAIL NAMES WHO ACTED
+--
+-- `audit_trail()` reads the actor out of each escalation_log entry as
+--
+--     coalesce(nullif(e.entry ->> 'by', ''), 'SYSTEM')
+--
+-- and NOTHING A PERSON DOES WRITES 'by'.
+--
+--   writer                                        key          actor shown
+--   ------------------------------------------    ----------   -----------
+--   escalate_overdue_alerts()  (the timeout job)  'by'         SYSTEM      ✓
+--   the notification outbox trigger               'by'         SYSTEM      ✓
+--   confirm_ussd_report() / mark_false_report()   'by'         the uuid    ✓
+--   alert-actions.ts escalateAlert  (HQ console)  'by_email'   SYSTEM      ✗
+--   agent_dashboard_screen.dart     (a handset)   'by_email'   SYSTEM      ✗
+--
+-- So the audit trail inverted responsibility. Every escalation an officer
+-- performed — from the HQ console or from their own handset — was attributed to
+-- the system, and the only accurate attributions in the list were the machine's
+-- own. On a screen whose entire purpose is to say who did what, that is worse
+-- than showing nothing: a reader cannot tell an automatic timeout from a
+-- commander's decision, and the commander's decision is the one somebody will
+-- later be asked to account for.
+--
+-- The column comment on `alerts.escalation_log`, written in 20260722000000, has
+-- said `by_email` since the beginning:
+--
+--     'Append-only structured log: [{from_tier, to_tier, to_officer_id,
+--      to_officer_name, reason, notes, by_email, at}]'
+--
+-- so the reader is what disagreed with the documented shape, not the writers.
+--
+-- WHY THIS IS NOT FIXED BY CHANGING THE WRITERS
+--
+-- Production holds entries of both shapes, written over this schema's whole
+-- life, and the log is append-only: a chain of custody that is rewritten is not
+-- one. Both keys therefore have to be readable, forever. `by` is tried first so
+-- the SQL writers' explicit value keeps precedence.
+--
+-- WHY THE BEHAVIOUR TEST DID NOT CATCH IT
+--
+-- `scripts/oversight_behaviour_test.sql` plants its fixture entry as
+-- `{"from_tier":"UNIT","to_tier":"WARD","reason":"TIMEOUT","by":"SYSTEM",…}` —
+-- the machine's shape, the one key that worked. It asserted the action and the
+-- tiers and never the actor. Both shapes are now planted and the actor is
+-- asserted for each.
+--
+-- Idempotent: CREATE OR REPLACE, no data is touched.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.audit_trail(p_limit INTEGER DEFAULT 100)
+RETURNS TABLE (
+  alert_id   UUID,
+  reference  TEXT,
+  incident   TEXT,
+  at         TIMESTAMPTZ,
+  action     TEXT,
+  actor      TEXT,
+  detail     TEXT
+)
+LANGUAGE sql
+SECURITY INVOKER
+STABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT a.id,
+         coalesce(a.public_reference, left(a.id::text, 8)),
+         a.type,
+         -- Entries have been written with two different key names over this
+         -- schema's life ('at' as a formatted string, and an ISO timestamp), and
+         -- a row whose timestamp cannot be parsed must still appear — an audit
+         -- entry dropped for a formatting reason is the worst possible thing for
+         -- this list to do quietly. Falls back to the incident's own time.
+         coalesce(
+           nullif(e.entry ->> 'at', '')::timestamptz,
+           a.updated_at,
+           a.created_at
+         ),
+         upper(coalesce(
+           nullif(e.entry ->> 'action', ''),
+           -- A tier move has no 'action' key; it is identified by carrying a
+           -- from_tier. Without this, every automatic escalation in the system
+           -- would read as 'UNKNOWN'.
+           CASE WHEN e.entry ? 'from_tier' THEN 'ESCALATED' END,
+           'UPDATED'
+         )),
+         -- WHO. `by` is what the SQL writers set, explicitly, to 'SYSTEM' or to
+         -- auth.uid(); `by_email` is what both apps set, and is the key the
+         -- column's own comment has always documented. Reading only the first
+         -- attributed every human action to the system — see the header.
+         coalesce(
+           nullif(e.entry ->> 'by', ''),
+           nullif(e.entry ->> 'by_email', ''),
+           'SYSTEM'
+         ),
+         -- For a tier move, BOTH the tiers and the reason. The first version
+         -- coalesced the reason first, so an automatic escalation read simply
+         -- "TIMEOUT" — the word without the movement, which is the half that
+         -- tells a reader nothing. Where an incident WENT is the point of the
+         -- entry; why is the qualifier.
+         CASE
+           WHEN e.entry ? 'from_tier' THEN
+             (e.entry ->> 'from_tier') || ' → ' || (e.entry ->> 'to_tier')
+             || coalesce(' (' || nullif(e.entry ->> 'reason', '') || ')', '')
+           ELSE coalesce(nullif(e.entry ->> 'reason', ''), '')
+         END
+    FROM public.alerts a
+    CROSS JOIN LATERAL jsonb_array_elements(
+           CASE WHEN jsonb_typeof(a.escalation_log) = 'array'
+                THEN a.escalation_log ELSE '[]'::jsonb END
+         ) AS e(entry)
+   ORDER BY 4 DESC
+   LIMIT greatest(1, least(coalesce(p_limit, 100), 500));
+$$;
+
+COMMENT ON FUNCTION public.audit_trail(INTEGER) IS
+  'What was actually DONE to incidents, flattened out of alerts.escalation_log. '
+  'The console previously showed chat_messages under this heading, which '
+  'contained no action anybody had taken. SECURITY INVOKER so alert_is_ours() '
+  'scopes it — including keeping oversight matters out of it. The actor is read '
+  'from `by` then `by_email`: the SQL writers set the first, both apps set the '
+  'second, and reading only `by` attributed every human action to SYSTEM.';
+
+-- ----------------------------------------------------------------------------
+-- 20261020000000_a_handset_that_leaves_mid_emergency.sql  (outstanding)
+-- ----------------------------------------------------------------------------
+DO $b$ BEGIN RAISE NOTICE 'applying 20261020000000_a_handset_that_leaves_mid_emergency.sql'; END $b$;
+
+-- ============================================================================
+-- A HANDSET THAT SIGNS OUT WHILE ITS EMERGENCY IS STILL OPEN
+-- ============================================================================
+--
+-- `AuthService.signOut()` stopped location tracking first, deliberately, and
+-- said why:
+--
+--     Signing out is the clearest statement a person can make that they are
+--     done being observed, and it was the one action that did not stop it.
+--
+-- That is right about a person signing out of their own phone. It is wrong
+-- about the one case the duress design exists for. A duress PIN tells the
+-- person their alarm is cancelled and KEEPS TRACKING RUNNING, because they may
+-- still be in danger — and the lock screen offers a sign-out that needs no code
+-- at all. So whoever is holding the phone could end the tracking of a live
+-- duress alert without knowing any PIN, and HQ saw silence indistinguishable
+-- from a flat battery.
+--
+-- Two rules collided and nothing recorded which won. Now: signing out ends the
+-- session and retires the SMS key as before, a RESPONDER's patrol track still
+-- stops (they are off duty), and an SOS track keeps running until the incident
+-- closes or the twelve-hour ceiling in `sosTrackingMaxAge` expires.
+--
+-- This column is the other half: the loss of the app has to be visible as a
+-- FACT rather than inferred from a gap. An operator watching a track go quiet
+-- cannot tell a captor from a dead phone; one that says "this handset signed
+-- out at 19:42, tracking continues" can.
+--
+-- Written by the handset itself, in the window before the session is cleared,
+-- so `alerts_update_own_or_ours` covers it: `reported_by = auth.uid()`.
+-- Best-effort by design — a phone being switched off must not have the sign-out
+-- blocked on a network write.
+-- ============================================================================
+
+ALTER TABLE public.alerts
+  ADD COLUMN IF NOT EXISTS device_signed_out_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN public.alerts.device_signed_out_at IS
+  'When the reporting handset signed out while this incident was still open. '
+  'Tracking continues regardless; this says the app is gone, so an operator can '
+  'tell that from a dead battery. Written by the handset before its session '
+  'ends, best-effort.';
+
+-- The console reads it on one incident at a time, from the dossier, so no index
+-- is warranted. Said out loud because the next column added here will be
+-- tempted to copy an index it does not need either.
+
+-- ----------------------------------------------------------------------------
+-- 20261021000000_an_lga_can_hand_an_incident_to_a_ward.sql  (outstanding)
+-- ----------------------------------------------------------------------------
+DO $b$ BEGIN RAISE NOTICE 'applying 20261021000000_an_lga_can_hand_an_incident_to_a_ward.sql'; END $b$;
+
+-- ============================================================================
+-- AN LGA COMMANDER CAN HAND AN INCIDENT TO A WARD
+-- ============================================================================
+--
+-- The chain only ever climbed. `next_tier()` is UNIT -> WARD -> LGA -> HQ and
+-- `escalationTargetFor()` offers no choice of target, so an LGA commander's
+-- single escalation was upward to HQ. The one sideways move that existed was
+-- HQ handing an incident DOWN to an LGA by name, which `to_lga` in the last
+-- escalation entry records and `alert_delegated_to_my_lga()` grants.
+--
+-- There was no `to_ward` anywhere in the codebase. So an LGA commander who
+-- judged that a neighbouring ward should take an incident — because the
+-- roadblock is on their side of the boundary, or because the ward it sits in
+-- has nobody free — had no way to say so. They could assign individual
+-- responders across the LGA, but the other ward's COMMANDER never owned it.
+--
+-- This is the LGA hand-down, one rung lower, and deliberately the same shape:
+-- the target named in the last escalation entry, a function that grants it, and
+-- `alert_is_ours()` consulting that function. Nothing new to learn.
+--
+-- WHY BOTH THE WARD AND THE LGA ARE COMPARED
+--
+-- `alert_delegated_to_my_lga()` compares one name, because an LGA name is
+-- unique in Plateau. Ward names are not: a ward called the same thing can exist
+-- in two LGAs, and granting on the ward name alone would hand the incident to a
+-- commander in a different LGA who happens to share it. So the LGA must agree
+-- too, unless the entry did not record one.
+--
+-- WHY AN EXACT COMPARISON IS ENOUGH
+--
+-- The Dart side compares places through `geoKey`, which collapses whitespace,
+-- because the app writes a ward resolved from the GPS centroid asset
+-- ('GINDIRI  I') while an officer is posted from the tactical map
+-- ('GINDIRI  1'). That mismatch cannot arise here: the ward written into
+-- `to_ward` is chosen from the tactical map, and the commander's `geo_ward` is
+-- posted from the same tactical map. Both sides come from one source.
+-- ============================================================================
+
+-- ── Was it handed to my ward ────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.alert_delegated_to_my_ward(p_alert public.alerts)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = public, pg_temp
+AS $$
+  WITH me AS (
+    SELECT nullif(upper(trim(coalesce(geo_lga,  ''))), '') AS lga,
+           nullif(upper(trim(coalesce(geo_ward, ''))), '') AS ward
+      FROM public.profiles
+     WHERE id = auth.uid()
+  ),
+  handed AS (
+    SELECT nullif(upper(trim(coalesce(
+             (p_alert.escalation_log
+                -> jsonb_array_length(p_alert.escalation_log) - 1)
+               ->> 'to_ward', ''))), '') AS ward,
+           nullif(upper(trim(coalesce(
+             (p_alert.escalation_log
+                -> jsonb_array_length(p_alert.escalation_log) - 1)
+               ->> 'to_lga', ''))), '') AS lga
+  )
+  SELECT COALESCE(
+    (SELECT ward FROM handed) IS NOT NULL
+    AND (SELECT ward FROM handed) = (SELECT ward FROM me)
+    -- An entry that named no LGA is trusted on the ward alone; one that named
+    -- an LGA must agree with the caller's.
+    AND ((SELECT lga FROM handed) IS NULL
+         OR (SELECT lga FROM handed) = (SELECT lga FROM me)),
+    false
+  );
+$$;
+
+COMMENT ON FUNCTION public.alert_delegated_to_my_ward(public.alerts) IS
+  'Whether the last escalation entry handed this incident to the calling '
+  'account''s ward. The LAST entry only: the log is append-only, so an earlier '
+  'handover has been superseded. The LGA must agree too, because ward names '
+  'are not unique across LGAs.';
+
+REVOKE ALL ON FUNCTION public.alert_delegated_to_my_ward(public.alerts) FROM anon;
+
+-- ── And the one question the policies ask ───────────────────────────────────
+--
+-- RESTATED FROM 20261015000000, NOT FROM 20261006000000.
+--
+-- `alert_is_ours()` has been replaced twice. 20261006000000 restates it as a
+-- flat OR and says why — "so a replica built from these files in order gets the
+-- same result whichever migration ran last" — and 20261015000000 then WRAPPED
+-- it in a CASE whose first branch is exclusive:
+--
+--     WHEN public.is_oversight_matter(p_alert.type) THEN
+--       public.commands_whole_state() OR p_alert.reported_by = auth.uid()
+--
+-- A complaint about security personnel goes to HQ and the complainant, and to
+-- nobody else, because the ordinary clauses would hand it to the accused's own
+-- command.
+--
+-- The first version of THIS migration copied the restatement idiom from
+-- 20261006000000 — the older generation — and so dropped that CASE. Every
+-- client test passed. `scripts/oversight_behaviour_test.sql` caught it on a
+-- real PostgreSQL: "FAIL: the WARD COMMAND of the ward it was filed in can read
+-- a complaint about security personnel". Restating a function is only safe
+-- against its CURRENT definition, and the only way to know which that is, is to
+-- replay the history.
+--
+-- The one change below is the ward clause in the ELSE branch.
+
+CREATE OR REPLACE FUNCTION public.alert_is_ours(p_alert public.alerts)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT CASE
+    -- A complaint about security personnel goes to HQ and the person who made
+    -- it. Checked FIRST and exclusively: the clauses below would otherwise hand
+    -- it to the accused's own command, which is the defect. A hand-down must
+    -- not become a way around it either, which is why this stays first.
+    WHEN public.is_oversight_matter(p_alert.type) THEN
+      public.commands_whole_state()
+      OR p_alert.reported_by = auth.uid()
+
+    ELSE
+      -- HQ and administrators: the state.
+      public.commands_whole_state()
+      -- The reporter, the lead, and every officer on the dispatched team.
+      OR p_alert.reported_by = auth.uid()
+      OR p_alert.assigned_to = auth.uid()
+      OR auth.uid()::text = ANY (COALESCE(p_alert.assigned_responders, '{}'::text[]))
+      -- Operation Rainbow staff, within their command, plus anything handed to
+      -- their LGA or to their WARD by name.
+      OR (public.is_staff() AND NOT public.is_liaison()
+          AND (public.alert_in_my_area(p_alert)
+               OR public.alert_delegated_to_my_lga(p_alert)
+               OR public.alert_delegated_to_my_ward(p_alert)))
+      -- An outside agency: only what was handed to them.
+      OR (public.is_liaison()
+          AND upper(COALESCE(p_alert.escalated_to_agency, '')) = public.liaison_agency())
+  END;
+$$;
+
+COMMENT ON FUNCTION public.alert_is_ours(public.alerts) IS
+  'Whether the calling account has a part in this incident: HQ sees the state, '
+  'everyone else sees their command, anything handed to them by name, and '
+  'their own work — EXCEPT a complaint against security personnel, which only '
+  'HQ and the complainant may see.';
+
+-- ----------------------------------------------------------------------------
+-- 20261022000000_a_new_emergency_tells_the_unit.sql  (outstanding)
+-- ----------------------------------------------------------------------------
+DO $b$ BEGIN RAISE NOTICE 'applying 20261022000000_a_new_emergency_tells_the_unit.sql'; END $b$;
+
+-- ============================================================================
+-- A NEW EMERGENCY TELLS THE UNIT IT LANDED IN
+-- ============================================================================
+--
+-- `notification_outbox` was built for the TIMEOUT escalation, and its own
+-- header says why that mattered:
+--
+--     an incident that climbed to the LGA at 02:00 because nobody at the ward
+--     answered was moved into another tier's queue in complete silence, and
+--     was only seen if somebody happened to have the console open. The whole
+--     point of the timeout is the case where nobody is watching.
+--
+-- Every word of that applies more strongly to the FIRST report. Nothing queued
+-- a notice when an alert was INSERTED. The only paths that reached a phone
+-- were a human pressing DISPATCH or ESCALATE on the console, and the timeout
+-- job two minutes later. So a citizen's SOS reached a responder only if that
+-- responder happened to have the app open and in the foreground; a phone in a
+-- pocket learned nothing until a dispatcher acted or the unit's window expired.
+--
+-- The irony is the shape of the gap: the system notified you when it gave up
+-- waiting for you, and not when the emergency arrived.
+--
+-- WHO IS TOLD
+--
+-- The tier the row lands at, which is `NEW.assigned_tier` — not a hardcoded
+-- 'UNIT'. That matters for one case and it is the important one: the BEFORE
+-- INSERT trigger `route_oversight_to_hq_trg` sets `assigned_tier := 'HQ'` for a
+-- complaint against security personnel, so reading the column means a complaint
+-- is never announced to the local command it is about. Hardcoding the unit
+-- would have been a way around the oversight rule, through a door nobody was
+-- watching.
+--
+-- The console's drain then widens the UNIT audience for this kind to the field
+-- responders as well as the unit's desk, because the responders are who go. An
+-- officer who would be refused the row by RLS is never sent a push about it:
+-- `alert_in_my_area()` gives a field responder their whole LGA, so their own
+-- polling unit is well inside it.
+--
+-- WHY FILING THE EMERGENCY WINS
+--
+-- This is the hot path of the one thing the system exists to do. The trigger
+-- therefore catches its own failure: if the notice cannot be queued, the SOS is
+-- still filed and a WARNING goes to the PostgreSQL log. An emergency that
+-- reaches the database silently beats one refused because a notice could not be
+-- written. SECURITY DEFINER for the same reason — the outbox is not readable or
+-- writable by a citizen, and the insert must not depend on that changing.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.queue_new_incident_notice()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  BEGIN
+    INSERT INTO public.notification_outbox (alert_id, kind, payload)
+    VALUES (
+      NEW.id,
+      'NEW_INCIDENT',
+      jsonb_build_object(
+        'alert_id',  NEW.id,
+        -- No `from_tier`: nothing moved. A new incident is not an escalation,
+        -- and the notice must not read like one.
+        'to_tier',   coalesce(NEW.assigned_tier, 'UNIT'),
+        'geo_lga',   NEW.geo_lga,
+        'geo_ward',  NEW.geo_ward,
+        'geo_pu',    NEW.geo_pu,
+        'severity',  NEW.severity,
+        'type',      NEW.type,
+        'reason',    'REPORTED'
+      )
+    );
+  EXCEPTION WHEN OTHERS THEN
+    -- The SOS is already written; this is the notice about it. Losing the
+    -- notice is bad and losing the report is worse.
+    RAISE WARNING '[NEW_INCIDENT_NOTICE] could not queue a notice for %: %',
+      NEW.id, SQLERRM;
+  END;
+  RETURN NULL;  -- AFTER trigger: the return value is discarded.
+END $$;
+
+COMMENT ON FUNCTION public.queue_new_incident_notice() IS
+  'AFTER INSERT on alerts: queues a NEW_INCIDENT notice for the tier the row '
+  'landed at, so the first report is announced and not only the timeout that '
+  'follows it. Swallows its own failure: the emergency is filed either way.';
+
+DROP TRIGGER IF EXISTS queue_new_incident_notice_trg ON public.alerts;
+CREATE TRIGGER queue_new_incident_notice_trg
+  AFTER INSERT ON public.alerts
+  FOR EACH ROW EXECUTE FUNCTION public.queue_new_incident_notice();
+
+-- ----------------------------------------------------------------------------
+-- 20261023000000_one_table_one_shape.sql  (outstanding)
+-- ----------------------------------------------------------------------------
+DO $b$ BEGIN RAISE NOTICE 'applying 20261023000000_one_table_one_shape.sql'; END $b$;
+
+-- ============================================================================
+-- OPERATION RAINBOW — ONE TABLE, ONE SHAPE
+--
+-- Three of the four agency tables are created TWICE in this history, by two
+-- files with different column lists and `CREATE TABLE IF NOT EXISTS` on both.
+-- So the second one is a no-op, and WHICH COLUMNS A DATABASE HAS DEPENDS ON
+-- WHICH FILE RAN FIRST:
+--
+--   agency_notifications   20260722000000_v3_telemetry_geofence   10 columns
+--                          20260812000000_agency_tables            7 columns
+--   agency_action_reports  20260723000000_v4_mesh_broadcast       14 columns
+--                          20260812000000_agency_tables           15 columns
+--   agency_deployments     20260723000000_v4_mesh_broadcast       10 columns
+--                          20260812000000_agency_tables           10 columns
+--
+-- The v2–v6 era was applied to PRODUCTION by hand and written down afterwards,
+-- and `verify_rls_migration.sh`, `bootstrap_staging.sql` and
+-- `apply_all_migrations.sql` all exclude it — it cannot be replayed (v2 calls
+-- auth.jwt() before the shim defines it). So the split is exact and permanent:
+--
+--   * on PRODUCTION the v3/v4 definitions ran first, and the tables carry
+--     `detail`, `sent_by`, `target_lga`, `acknowledged_at` and `resolved_at`
+--     but NOT `created_at`;
+--   * on every database this repository can build, only 20260812 runs, and the
+--     tables carry `created_at` but NONE of those five.
+--
+-- Two shapes, differing in both directions, with nothing saying so. The local
+-- Supabase stand-in builds its column set by UNIONING every definition it
+-- finds, which is right for a fake that must not refuse a column production
+-- has — and it means the harness accepts a column that exists on neither
+-- database, so nothing in the run could report this.
+--
+-- ## What it cost
+--
+-- `/api/notify-agency` is the handover: HQ escalates an incident to the Police,
+-- the Army or the DSS, and the route sends an SMS and/or posts a webhook, then
+-- records one row per leg. Its own comment:
+--
+--     Every leg, including the skipped ones: this table is the only durable
+--     record of whether an agency was told, and a row set that omits the
+--     channels nobody used cannot answer that question later.
+--
+-- It writes `method` and `status` — and drops `result.detail`, which is the
+-- only thing that says WHY: `HTTP 502`, a timeout's message, "no contact
+-- configured". The table has that column on production and not on staging, so
+-- writing it would have worked in production and failed everywhere else, and
+-- the route's error path is a `console.error` in a server log nobody reads.
+-- "The Army was not told, and here is what the gateway said" is the whole
+-- content of this table, and it was the part being thrown away.
+--
+-- ## What this migration does
+--
+-- Adds every column one definition has and the other lacks, so both shapes
+-- converge on the union. `ADD COLUMN IF NOT EXISTS` throughout: on production
+-- this adds `created_at` to three tables and nothing else; on a repo-built
+-- database it adds the other five.
+--
+-- `created_at` is BACKFILLED from the column that records the real time —
+-- `sent_at`, `submitted_at`, `deployed_at` — rather than stamped with this
+-- migration's clock. A delivery log whose timestamps all read "the day we
+-- fixed the schema" is worse than one with a null: the null is honest.
+-- ============================================================================
+
+-- ── agency_notifications: the delivery log of a handover ────────────────────
+ALTER TABLE public.agency_notifications
+  ADD COLUMN IF NOT EXISTS detail          TEXT,
+  ADD COLUMN IF NOT EXISTS sent_by         TEXT,
+  ADD COLUMN IF NOT EXISTS target_lga      TEXT,
+  ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS created_at      TIMESTAMPTZ;
+
+UPDATE public.agency_notifications
+   SET created_at = sent_at
+ WHERE created_at IS NULL;
+
+ALTER TABLE public.agency_notifications
+  ALTER COLUMN created_at SET DEFAULT NOW();
+
+COMMENT ON COLUMN public.agency_notifications.detail IS
+  'Why this leg ended as it did: the gateway''s response, an exception message, '
+  'or the reason a channel was skipped. The route recorded method and status '
+  'and dropped this, because the column existed only on production.';
+
+-- ── agency_action_reports: what the agency sent back ───────────────────────
+ALTER TABLE public.agency_action_reports
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+
+UPDATE public.agency_action_reports
+   SET created_at = submitted_at
+ WHERE created_at IS NULL;
+
+ALTER TABLE public.agency_action_reports
+  ALTER COLUMN created_at SET DEFAULT NOW();
+
+-- ── agency_deployments: who the agency sent ────────────────────────────────
+ALTER TABLE public.agency_deployments
+  ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS created_at  TIMESTAMPTZ;
+
+UPDATE public.agency_deployments
+   SET created_at = deployed_at
+ WHERE created_at IS NULL;
+
+ALTER TABLE public.agency_deployments
+  ALTER COLUMN created_at SET DEFAULT NOW();
+
+COMMENT ON COLUMN public.agency_deployments.resolved_at IS
+  'When the agency stood its personnel down. Present on production from '
+  '20260723000000_v4_mesh_broadcast and absent from the 20260812000000 '
+  'definition that any other database applies; nothing reads it yet.';
+
+-- ----------------------------------------------------------------------------
+-- 20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency.sql  (outstanding)
+-- ----------------------------------------------------------------------------
+DO $b$ BEGIN RAISE NOTICE 'applying 20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency.sql'; END $b$;
+
+-- ============================================================================
+-- OPERATION RAINBOW — A VOICE NOTE, AND A REPORT THAT IS NOT AN EMERGENCY
+--
+-- Two things an operator asked for, and they meet in the same place: a report
+-- from somebody who cannot type, about something that is not an emergency.
+--
+-- ## 1. THE REPORTER'S OWN VOICE
+--
+-- The app can already record. `report_details_screen.dart` holds an
+-- `AudioRecorder`, writes an `.m4a` to the temporary directory, and uploads it
+-- with the photographs — so the audio reaches Cloudinary and lands in
+-- `media_urls` beside them.
+--
+-- Which is the problem. `media_urls` is EVIDENCE: the photograph of the
+-- vehicle, the video of the roadblock. The reporter's own voice, left because
+-- they could not type, is not one of several attachments — it is the report.
+-- Nothing downstream could tell the difference:
+--
+--   * a responder's incident card said "3 attachments" and an operator had to
+--     open each to find out that one of them was somebody speaking;
+--   * the console's dossier rendered it as a 72px thumbnail with a musical
+--     note on it, among the photographs;
+--   * and the one path built for a person who cannot type — the AI voice
+--     dialog — runs speech-to-text and files the TRANSCRIPT. The audio is
+--     discarded. So if the recogniser mangles Hausa, or there is no network to
+--     reach it, what the person actually said is gone. For a report that
+--     exists BECAUSE they could not type, that is the whole content.
+--
+-- `voice_note_url` is therefore its own column: one per report, the reporter
+-- speaking. `voice_note_seconds` is beside it because a responder on a metered
+-- or weak connection needs to know whether they are about to pull eight
+-- seconds or two minutes before they press play.
+--
+-- ## 2. A REPORT THAT MUST NOT WAKE ANYBODY
+--
+-- The second ask is a general report: government property mismanaged,
+-- vandalised, abandoned, unsafe, in need of repair. A street light is not a
+-- kidnapping, and this system is built to treat everything as a kidnapping:
+--
+--   * `queue_new_incident_notice()` (20261022000000) announces every INSERT to
+--     the tier it landed at, and the drain widens a UNIT notice to the field
+--     responders — the people who physically go. A broken culvert filed at
+--     02:00 would push to their handsets.
+--   * `escalate_overdue_alerts()` climbs anything unacknowledged one rung per
+--     timeout. Nobody acknowledges a street light at 02:00, so by morning it
+--     would be an HQ-tier incident with three escalations against it, sitting
+--     among the night's actual emergencies.
+--
+-- Both are right for an emergency and wrong for this. The mechanism for
+-- "handle this differently" already exists twice — `is_oversight_matter()`
+-- routes a complaint about an officer to HQ, and `awaiting_human_confirmation()`
+-- holds an unconfirmed keypad report out of the ladder — and this is the same
+-- shape, so it is built the same way rather than a third way:
+--
+--   * `is_non_emergency(type)` matches on the CATEGORY, the part of `type`
+--     before ' - ', so every subtype is covered and a new one added to the app
+--     needs no migration;
+--   * a BEFORE INSERT trigger lands it at the LGA — the local authority whose
+--     property it is — and not at the polling unit, so the notice goes to a
+--     desk rather than to a patrol's pocket;
+--   * `escalate_overdue_alerts()` leaves it alone. It waits for somebody to
+--     look at it, which is what it is for.
+--
+-- WHAT THIS DELIBERATELY DOES NOT DO: hide it. The report is a normal row on
+-- the board, in the feed, on the map, with its own category — an operator can
+-- see it, filter to it and act on it. "Not an emergency" means not paged and
+-- not climbed; it does not mean not seen. Something nobody is shown is
+-- something nobody fixes, which is how a thing ends up abandoned.
+-- ============================================================================
+
+-- ── 1. the reporter's voice ────────────────────────────────────────────────
+ALTER TABLE public.alerts
+  ADD COLUMN IF NOT EXISTS voice_note_url     TEXT,
+  ADD COLUMN IF NOT EXISTS voice_note_seconds INTEGER;
+
+COMMENT ON COLUMN public.alerts.voice_note_url IS
+  'The reporter speaking, when they could not or did not type. Its own column '
+  'and not one of media_urls: that list is evidence — photographs, video — and '
+  'a voice note is the report itself. One per report; a second recording '
+  'replaces it.';
+
+COMMENT ON COLUMN public.alerts.voice_note_seconds IS
+  'How long the voice note runs. A responder on a metered or weak connection '
+  'is told what they are about to pull before they press play.';
+
+-- A negative or absurd duration is a bug in whatever wrote it, and a column
+-- that accepts one makes the screen that renders it lie.
+ALTER TABLE public.alerts
+  DROP CONSTRAINT IF EXISTS alerts_voice_note_seconds_sane;
+ALTER TABLE public.alerts
+  ADD CONSTRAINT alerts_voice_note_seconds_sane
+  CHECK (voice_note_seconds IS NULL
+         OR (voice_note_seconds > 0 AND voice_note_seconds <= 600));
+
+-- ── 2. which categories are not emergencies ───────────────────────────────
+--
+-- One name, matched on the category exactly as `is_oversight_matter()` does.
+-- The labels are the app's, from lib/core/constants/alert_categories.dart;
+-- `scripts/check_non_emergency_categories_agree.py` fails if the two lists
+-- drift, because a category the app can file and the database does not know
+-- about would be paged out to responders at 02:00.
+CREATE OR REPLACE FUNCTION public.is_non_emergency(p_type TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT upper(trim(split_part(coalesce(p_type, ''), ' - ', 1)))
+         IN ('PUBLIC PROPERTY', 'PUBLIC SERVICE');
+$$;
+
+COMMENT ON FUNCTION public.is_non_emergency(TEXT) IS
+  'A report about government property or a public service: mismanaged, '
+  'vandalised, abandoned, unsafe, needing repair. Matched on the category — '
+  'the part of type before " - " — so every subtype is covered. These are '
+  'filed at the LGA and never climb the escalation ladder: a street light does '
+  'not page a patrol at 02:00 and must not be an HQ-tier incident by morning. '
+  'They are still on the board, in the feed and on the map.';
+
+-- ── 3. land it at the local authority, not in a patrol's pocket ───────────
+CREATE OR REPLACE FUNCTION public.route_non_emergency_to_lga()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  -- An oversight matter has already been sent to HQ by its own trigger, and
+  -- that decision wins: a complaint about an officer is not a street light,
+  -- whatever else it is. Checked rather than assumed, because trigger order is
+  -- alphabetical by name and that is a thin thread to hang a routing rule on.
+  IF public.is_non_emergency(NEW.type)
+     AND NOT public.is_oversight_matter(NEW.type) THEN
+    NEW.assigned_tier    := 'LGA';
+    NEW.tier_assigned_at := NOW();
+    -- Not pre-assigned to a responder. The app's own default would hand it to
+    -- whoever is posted where it was filed, which for a culvert means an
+    -- officer gets a dispatch for something no officer can fix.
+    NEW.assigned_to         := NULL;
+    NEW.assigned_responders := NULL;
+    NEW.escalation_log := coalesce(NEW.escalation_log, '[]'::jsonb) || jsonb_build_object(
+      'at',     to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+      'by',     'SYSTEM',
+      'action', 'NON_EMERGENCY_ROUTED',
+      'reason', 'a report about public property is filed at the LGA and does not climb'
+    );
+  END IF;
+  RETURN NEW;
+END $$;
+
+COMMENT ON FUNCTION public.route_non_emergency_to_lga() IS
+  'BEFORE INSERT: files a report about government property at the LGA, clears '
+  'any responder assignment, and records why. Defers to the oversight router: '
+  'a complaint against security personnel goes to HQ even if it also mentions '
+  'property.';
+
+-- `z_` so it sorts AFTER route_oversight_to_hq_trg: PostgreSQL fires BEFORE
+-- triggers in alphabetical order by name, and this one must see whatever the
+-- oversight router decided rather than race it. The guard above makes the
+-- order not matter; the name makes it not matter twice.
+DROP TRIGGER IF EXISTS z_route_non_emergency_to_lga_trg ON public.alerts;
+CREATE TRIGGER z_route_non_emergency_to_lga_trg
+  BEFORE INSERT ON public.alerts
+  FOR EACH ROW EXECUTE FUNCTION public.route_non_emergency_to_lga();
+
+-- ── 4. the ladder leaves it alone ─────────────────────────────────────────
+--
+-- RESTATED IN FULL from 20261011000000_ussd_reports_are_unconfirmed.sql, which
+-- is the latest generation, with ONE line added. Restating a function from the
+-- wrong generation is how `alert_is_ours()` lost its oversight branch in this
+-- repository — every Dart and console test still passed and only a SQL
+-- behaviour test on a real PostgreSQL caught it. Everything below except the
+-- marked line is that file's text.
+CREATE OR REPLACE FUNCTION public.escalate_overdue_alerts()
+RETURNS TABLE (alert_id UUID, from_tier TEXT, to_tier TEXT)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  RETURN QUERY
+  WITH overdue AS (
+    SELECT a.id,
+           upper(a.assigned_tier)            AS current_tier,
+           public.next_tier(a.assigned_tier) AS target_tier
+      FROM public.alerts a
+     WHERE a.status NOT IN ('RESOLVED', 'CANCELLED')
+       -- Acknowledged means somebody at this tier has it. Climbing past a
+       -- responder who is already on it is how you get two units dispatched
+       -- to the same incident and none to the next one.
+       AND a.acknowledged_at IS NULL
+       -- A report filed over USSD that no officer has stood behind. The timers
+       -- must not turn a stranger's keypresses into a deployment; see
+       -- awaiting_human_confirmation() above.
+       AND NOT public.awaiting_human_confirmation(a)
+       -- THE ONE NEW LINE. A street light does not become an HQ-tier incident
+       -- because nobody looked at it overnight.
+       AND NOT public.is_non_emergency(a.type)
+       AND public.next_tier(a.assigned_tier) IS NOT NULL
+       AND a.tier_assigned_at IS NOT NULL
+       AND a.tier_assigned_at <
+             NOW() - make_interval(
+               mins => public.tier_timeout_minutes(a.assigned_tier)
+             )
+     FOR UPDATE OF a SKIP LOCKED
+  ),
+  moved AS (
+    UPDATE public.alerts a
+       SET assigned_tier    = o.target_tier,
+           tier_assigned_at = NOW(),
+           status           = 'ESCALATED',
+           updated_at       = NOW(),
+           escalation_log = COALESCE(a.escalation_log, '[]'::jsonb) || jsonb_build_object(
+             'from_tier',  o.current_tier,
+             'to_tier',    o.target_tier,
+             'reason',     'TIMEOUT',
+             'by',         'SYSTEM',
+             'at',         to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+           )
+      FROM overdue o
+     WHERE a.id = o.id
+    RETURNING a.id, o.current_tier, o.target_tier, a.geo_lga, a.geo_ward, a.geo_pu, a.severity
+  ),
+  queued AS (
+    INSERT INTO public.notification_outbox (alert_id, kind, payload)
+    SELECT m.id,
+           'TIER_ESCALATION',
+           jsonb_build_object(
+             'alert_id',  m.id,
+             'from_tier', m.current_tier,
+             'to_tier',   m.target_tier,
+             'geo_lga',   m.geo_lga,
+             'geo_ward',  m.geo_ward,
+             'geo_pu',    m.geo_pu,
+             'severity',  m.severity,
+             'reason',    'TIMEOUT'
+           )
+      FROM moved m
+    -- `RETURNING alert_id` collides with this function's own OUT parameter of
+    -- that name and is rejected as ambiguous. Nothing reads this CTE's output;
+    -- it exists so the INSERT runs inside the same statement as the UPDATE.
+    RETURNING id
+  )
+  SELECT m.id, m.current_tier, m.target_tier FROM moved m;
+END;
+$$;
+
+COMMENT ON FUNCTION public.escalate_overdue_alerts() IS
+  'The timeout sweep. Climbs an unacknowledged incident one rung when its tier '
+  'has held it too long, and queues a TIER_ESCALATION notice. Skips an '
+  'unconfirmed keypad report (awaiting_human_confirmation) and a report about '
+  'public property (is_non_emergency), neither of which should be moved by a '
+  'clock.';
+
+-- ----------------------------------------------------------------------------
+-- 20261025000000_the_other_policy_public_could_reach.sql  (outstanding)
+-- ----------------------------------------------------------------------------
+DO $b$ BEGIN RAISE NOTICE 'applying 20261025000000_the_other_policy_public_could_reach.sql'; END $b$;
+
+-- ============================================================================
+-- The OTHER policy PUBLIC could reach
+--
+-- A production policy query came back with two rows:
+--
+--   alerts_select_geo_lga_scoped    | alerts    | SELECT
+--   telemetry_select_geo_lga_scoped | telemetry | SELECT
+--
+-- The second is known. 20261016000000_telemetry_policy_is_not_public.sql exists
+-- because a production paste reported it as the one policy reaching PUBLIC, and
+-- that migration drops and recreates it TO authenticated.
+--
+-- The first is its TWIN, and nothing had looked at it.
+--
+-- Both are created by 20260725000000_v6_geo_lga_scoping_staging.sql, twelve
+-- lines apart. The telemetry one is written `TO authenticated`. The alerts one
+-- is written:
+--
+--     CREATE POLICY "alerts_select_geo_lga_scoped"
+--       ON public.alerts
+--       FOR SELECT
+--       USING ( … )          -- no TO clause
+--
+-- and PostgreSQL records a policy with no TO clause as **TO PUBLIC**, which
+-- includes `anon`. So the lesson had already been learned, written down, and
+-- committed as a comment IN THAT FILE, directly below a policy carrying the
+-- same defect — and the sibling was never fixed.
+--
+-- ## What it exposes
+--
+-- `alerts` is the incident table: the reporter's name and phone number, what
+-- they said, where they are. `telemetry` is position history. Neither should be
+-- reachable by the anonymous key under any circumstances.
+--
+-- What stops this being an open database today is only that
+-- 20260813000000_rls_least_privilege.sql REVOKEs the table privileges from
+-- `anon`, so the policy has nothing to permit. That is one layer. A single
+-- GRANT, or one click in the dashboard's table editor, and the policy is the
+-- only thing standing between the anonymous key and every incident on the
+-- board — and it says yes.
+--
+-- ## Why neither the migration nor the tests caught it
+--
+-- Three reasons, and they are the same three that hid the telemetry twin:
+--
+--   * 20260813 drops prior policies BY EXACT NAME, 98 of them, and neither v6
+--     policy is in the list — it cannot be, because 20260725 is a file that
+--     migration had no reason to know about. Checked: 0 occurrences of
+--     `geo_lga_scoped` in it.
+--   * `20260725…_staging.sql` is STAGING_ONLY, so it is not in the production
+--     paste at all. Production has these two policies because the v6 era was
+--     applied BY HAND. A file excluded from the paste still shaped the database
+--     the paste runs against.
+--   * verify_rls_migration.sh asserts no policy reaches anon or public at the
+--     END of the full replay, and passes — because 20261006000000 drops
+--     `alerts_select_geo_lga_scoped` on its way to the posting-scoped policy.
+--     The end state is clean. Production is sitting in the MIDDLE, where the
+--     policy exists and the drop has not been applied, and no assertion in this
+--     repository describes the middle.
+--
+-- ## What this does
+--
+-- `ALTER POLICY … TO authenticated`, which changes the policy's ROLES and
+-- nothing else. No officer loses a row they could read before; `anon` and
+-- PUBLIC lose a policy that should never have named them.
+--
+-- Deliberately NOT a drop-and-recreate, which is what the first draft of this
+-- file did and what 20261016 does for the twin. Production's copy of this
+-- policy was applied BY HAND. Recreating it from the expression in this
+-- repository would impose this repository's text on a database whose version
+-- may differ — and that expression decides which officer may read which
+-- incident. ALTER POLICY leaves the body exactly as it is, and leaves no
+-- window in which the table carries no policy at all.
+--
+-- Idempotent, and a no-op in two different ways on purpose:
+--
+--   * on a database built from this repository the policy is already gone,
+--     dropped by 20261006000000 eleven files earlier, and this says so;
+--   * on a database where it is already TO authenticated, nothing changes.
+--
+-- 20261006000000 still drops it later in the paste, in favour of
+-- `alerts_select_own_or_ours`. This exists so that a production database is
+-- safe the moment it is pasted, on its own, before the other thirty-six.
+-- ============================================================================
+
+DO $$
+DECLARE
+  current_roles NAME[];
+  reaches_public INTEGER;
+BEGIN
+  SELECT roles INTO current_roles
+    FROM pg_policies
+   WHERE schemaname = 'public'
+     AND tablename  = 'alerts'
+     AND policyname = 'alerts_select_geo_lga_scoped';
+
+  IF current_roles IS NULL THEN
+    RAISE NOTICE
+      'alerts_select_geo_lga_scoped is not on this database — either '
+      '20260725 (staging-only) never ran here, or 20261006 has already '
+      'replaced it with alerts_select_own_or_ours. Nothing to repair.';
+
+  ELSIF NOT ('public' = ANY(current_roles) OR 'anon' = ANY(current_roles)) THEN
+    RAISE NOTICE
+      'alerts_select_geo_lga_scoped is already scoped to % — left alone',
+      current_roles;
+
+  ELSE
+    -- ALTER POLICY, NOT DROP AND RECREATE.
+    --
+    -- The first version of this migration dropped the policy and recreated it
+    -- from the expression in 20260725000000_v6_geo_lga_scoping_staging.sql.
+    -- That is wrong here, and quietly so: production's copy of this policy was
+    -- applied BY HAND, so the only thing known about its body is that it was
+    -- once pasted from that file. Recreating it imposes THIS repository's text
+    -- on a database whose version may differ by a character — and the thing
+    -- being rewritten decides which officer may read which incident.
+    --
+    -- `ALTER POLICY … TO authenticated` changes only the roles. The USING
+    -- expression on that database is left exactly as it is, whatever it is.
+    -- There is also no window in which the table has no policy, which a drop
+    -- followed by a failing recreate would leave behind.
+    RAISE NOTICE
+      'alerts_select_geo_lga_scoped is TO % — scoping it TO authenticated, '
+      'leaving its USING expression untouched', current_roles;
+
+    ALTER POLICY "alerts_select_geo_lga_scoped" ON public.alerts TO authenticated;
+
+    COMMENT ON POLICY "alerts_select_geo_lga_scoped" ON public.alerts IS
+      'An officer may read incidents in their own LGA. Scoped TO authenticated '
+      'by 20261025000000: created by 20260725 with no TO clause, which '
+      'PostgreSQL records as TO PUBLIC — and PUBLIC includes anon. 20260813 '
+      'could not drop it by name because that migration predates the file. Its '
+      'telemetry twin had the same defect and was repaired by 20261016000000; '
+      'this is the one beside it that was missed. Only the roles were changed: '
+      'the expression is whatever this database already had.';
+
+    RAISE NOTICE 'alerts_select_geo_lga_scoped is now scoped TO authenticated';
+  END IF;
+
+  -- Both known offenders are now closed. Anything else reaching PUBLIC is new
+  -- information and is named, loudly, rather than left for the next person to
+  -- find on a live database.
+  SELECT count(*) INTO reaches_public
+    FROM pg_policies
+   WHERE schemaname = 'public'
+     AND ('anon' = ANY(roles) OR 'public' = ANY(roles));
+
+  IF reaches_public = 0 THEN
+    RAISE NOTICE 'No policy in schema public reaches anon or public.';
+  ELSE
+    RAISE WARNING
+      '% policy/policies in schema public still reach anon or public. Run '
+      'scripts/rls_inventory.sql and read the roles column — a policy with no '
+      'TO clause is recorded as TO PUBLIC.', reaches_public;
+  END IF;
+END $$;
+
 
 COMMIT;
 
@@ -6194,8 +7172,8 @@ WITH checks(ord, name, ok) AS (
     -- the output below. A pasted result used to carry nothing identifying its
     -- version, so a run from a stale working copy read exactly like a current
     -- one. Compare with: python3 scripts/migration_sets.py --fingerprint
-    (0, 'script version: 35 migrations, '
-        'fingerprint 357dfe26db00', true),
+    (0, 'script version: 42 migrations, '
+        'fingerprint 198474e0909a', true),
     (1, 'core tables exist (9)',
         (SELECT count(*) = 9 FROM information_schema.tables
           WHERE table_schema = 'public'

@@ -29,6 +29,19 @@ const path = require('path');
 const { launch, tileToLatLon } = require('./browser');
 const { DOMAIN, PASSWORD } = require('./fixtures');
 
+// Read out of the console's own source rather than written here: a harness with
+// its own copy of this list is how the escalation menu drifted in the first
+// place. src/lib/agencies.ts owns it.
+const AGENCY_CODES = (() => {
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'hq-dashboard-next', 'src', 'lib', 'agencies.ts'),
+    'utf8',
+  );
+  const block = /export const AGENCY_CODES = \[([^\]]*)\] as const;/.exec(src);
+  if (!block) throw new Error('agencies.ts: AGENCY_CODES not found');
+  return [...block[1].matchAll(/'([A-Z]+)'/g)].map((m) => m[1]);
+})();
+
 const BASE = process.env.CONSOLE_URL || 'http://127.0.0.1:3000';
 const CONTROL = 'http://127.0.0.1:54322/';
 const OUT = process.env.E2E_OUT || path.join(__dirname, '..', '..', 'local_e2e_screenshots');
@@ -151,7 +164,7 @@ async function writeMark() {
 // ===========================================================================
 
 (async () => {
-  const { browser, newPage, tiles, problems, state } = await launch({ viewport: VIEWPORT });
+  const { browser, newPage, tiles, problems, state, dialogs } = await launch({ viewport: VIEWPORT });
   const page = await newPage();
 
   await resetAll();
@@ -269,12 +282,30 @@ async function writeMark() {
     // until somebody is selected — dispatching to nobody is refused, which is
     // right, and is why a naive click-and-assert reported this as broken.
     if (label === 'DISPATCH') {
-      await page.evaluate(() => {
-        const rows = [...document.querySelectorAll('div')].filter(
-          (d) => /LIVE GPS|READY/.test(d.textContent) && d.children.length < 6,
+      // TICK THE CHECKBOX, which is what a dispatcher does.
+      //
+      // This used to look for a `div` containing "LIVE GPS|READY", because the
+      // row WAS a clickable div with a dead checkbox inside it (its onChange
+      // was `() => {}`). The row is now a <label> around the real checkbox —
+      // the fix for a control a keyboard could focus and not operate — so a
+      // div query finds nothing, the picker stays empty, and DISPATCH is
+      // correctly refused. Selecting the control itself does not care what its
+      // container is next time.
+      const picked = await page.evaluate(() => {
+        const boxes = [...document.querySelectorAll('input[type="checkbox"]')].filter(
+          (b) => b.offsetParent !== null
+            && /LIVE GPS|READY/.test(b.closest('label')?.textContent || ''),
         );
-        (rows[rows.length - 1] || rows[0])?.click();
+        const box = boxes[boxes.length - 1] || boxes[0];
+        if (!box) return 0;
+        box.click();
+        return boxes.length;
       });
+      check(
+        'the dispatch picker offers a responder to select',
+        picked > 0,
+        picked ? `${picked} responder(s) on the picker` : 'no selectable responder row',
+      );
       await sleep(800);
       await shot(page, '52a-dispatch-responder-picker');
     }
@@ -324,6 +355,41 @@ async function writeMark() {
       'ESCALATE writes an escalation to alerts',
       !!got && (got.rows[0]?.escalated_to_agency || got.rows[0]?.assigned_tier || got.rows[0]?.status),
       got ? JSON.stringify(got.rows[0]).slice(0, 200) : 'no PATCH reached the database',
+    );
+
+    // AND THAT IT WROTE A CODE AN AGENCY ANSWERS TO.
+    //
+    // The check above passed for a year on `escalated_to_agency: 'NPF'`, because
+    // it only asked whether SOMETHING was written. 'NPF' is not a code anything
+    // in this system knows: the Police liaison's portal loads its whole desk
+    // with `.eq('escalated_to_agency', 'POLICE')`, so the incident never
+    // appeared on it, and /api/notify-agency answered 400 Unknown agency, so no
+    // SMS and no webhook were sent. The console said "Escalation Sent".
+    const stored = got?.rows[0]?.escalated_to_agency;
+    check(
+      'the escalation names an agency the portal and the notifier both know',
+      AGENCY_CODES.includes(stored),
+      stored
+        ? `escalated_to_agency = ${JSON.stringify(stored)}`
+          + (AGENCY_CODES.includes(stored)
+            ? ''
+            : ` — not one of ${AGENCY_CODES.join(', ')}, so no liaison portal`
+              + ' can find it and /api/notify-agency refuses it')
+        : 'nothing was written to escalated_to_agency',
+    );
+
+    // AND THAT THE OPERATOR IS TOLD WHEN THE AGENCY WAS NOT REACHED.
+    //
+    // This run configures no liaison phone and no webhook URL — which is also
+    // true of the deployment — so the honest answer is that the agency was not
+    // notified. The toast used to read "Escalation Sent" either way.
+    const toast = await text(page);
+    check(
+      'the console says the agency was NOT notified, rather than claiming it was',
+      /NOT NOTIFIED/i.test(toast) && !/Escalation Sent/i.test(toast),
+      /NOT NOTIFIED/i.test(toast)
+        ? 'the handover is recorded and the operator is told nobody was reached'
+        : `no "not notified" warning on screen: ${toast.replace(/\s+/g, ' ').slice(0, 200)}`,
     );
     await shot(page, '55-action-escalate-after');
   } else {
@@ -667,6 +733,225 @@ async function writeMark() {
   await shot(page, '69-hq-dossier-reply-sent');
 
   // -----------------------------------------------------------------------
+  // THE DOSSIER WITHOUT A MOUSE.
+  //
+  // This console had no keydown handler anywhere, and the dossier is a fixed
+  // overlay over the feed and the map. An operator who opened it on the wrong
+  // report — which is the common case, since the cards are a dense list during
+  // an incident — had to find its close button with a pointer to see the board
+  // again. Ten of its controls were also clickable `<div>`s, so a keyboard
+  // could not reach them at all; `check_console_controls.py` gates that
+  // statically, and this is the half a static check cannot make: that the key
+  // actually closes the thing in a browser.
+  // DID THE CONSOLE EVEN LOAD?
+  //
+  // Asserted here rather than assumed, because a run against a half-served
+  // build produced EIGHT findings about controls instead of one about the
+  // build: three map buttons "did nothing", five nav entries were "not
+  // found", and the real cause was a `next start` still holding :3000 while
+  // the build underneath it had been replaced — every chunk request answering
+  // 500, the app's JavaScript never running, and the error boundary showing
+  // CONSOLE FAILED. The port check said 200 and the sweep carried on.
+  //
+  // Two hours went into chasing control-level explanations for an environment
+  // fault. A harness that cannot load the app must say THAT.
+  const booted = await page.evaluate(() => ({
+    failed: /CONSOLE FAILED/i.test(document.body.innerText || ''),
+    controls: [...document.querySelectorAll('button, a[href], [role="button"]')]
+      .filter((b) => !b.disabled && b.offsetParent !== null).length,
+  }));
+  check(
+    'the console loaded its own JavaScript',
+    !booted.failed && booted.controls > 5,
+    booted.failed
+      ? 'the page shows CONSOLE FAILED — the app\'s JS did not run. Usually a '
+        + 'stale server: a `next start` holding the port while .next was '
+        + 'rebuilt under it. Stop it first (pkill -f next-server), then build, '
+        + 'then start. Every finding below this line is suspect.'
+      : `${booted.controls} operable controls on the dashboard`,
+  );
+
+  state.screen = 'hq:dossier-keyboard';
+  const stillOpen = () => page.evaluate(
+    () => !!document.querySelector('[role="dialog"][aria-modal="true"]'),
+  );
+
+  const dialogPresent = await stillOpen();
+  check(
+    'the dossier is a dialog, and says so',
+    dialogPresent,
+    dialogPresent ? '' : 'no [role=dialog][aria-modal] on screen while the dossier is open',
+  );
+
+  const dossierName = await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"][aria-modal="true"]');
+    return d ? d.getAttribute('aria-label') : null;
+  });
+  check(
+    'the dialog is named for the incident it is showing',
+    !!dossierName && /dossier/i.test(dossierName),
+    dossierName || '(no aria-label)',
+  );
+
+  // The close button has to be findable by its NAME, not by its glyph: it was
+  // an unlabelled circle holding an X, which reads as "button" and nothing
+  // else. Four more like it were found by the gate, all of them dismiss
+  // controls, all hidden from the first version of the rule by a regex that
+  // stopped at the `>` inside `() => {}`.
+  const closeNamed = await page.evaluate(() => {
+    const el = document.querySelector('[aria-label="Close the incident dossier"]');
+    return !!el && el.tagName === 'BUTTON';
+  });
+  check(
+    'the dossier close control is a named button',
+    closeNamed,
+    closeNamed ? '' : 'nothing on screen is a <button> named "Close the incident dossier"',
+  );
+
+  await page.keyboard.press('Escape');
+  await sleep(1200);
+  // `dialogPresent &&`: without it this check passes on a console that has no
+  // dialog markup at all — `stillOpen()` is false before the keystroke, so
+  // "it is closed afterwards" is true for the wrong reason. Found by running
+  // this file against the commit before the fix, where it passed.
+  const closedByEscape = dialogPresent && !(await stillOpen());
+  check(
+    'Escape closes the dossier',
+    closedByEscape,
+    closedByEscape
+      ? ''
+      : (dialogPresent
+        ? 'the dossier is still on screen after Escape'
+        : 'there was no dialog open, so this proves nothing'),
+  );
+  await shot(page, '69b-hq-dossier-closed-by-escape');
+
+  // -----------------------------------------------------------------------
+  // THE MAP POPUP'S OWN BUTTONS.
+  //
+  // The Intelligence Map is the screen this console opens on, and a marker's
+  // popup is how a dispatcher acts on a pin. Those buttons carried
+  // `onclick="window._hqDossier('…')"`, and this console's CSP is
+  // `script-src 'self' 'nonce-…' 'strict-dynamic'` with no `'unsafe-inline'`:
+  // a nonce cannot authorise an event handler ATTRIBUTE, so the browser
+  // refused every one of them. DOSSIER, DISPATCH and RESOLVE were dead from
+  // the day that policy shipped.
+  //
+  // Nothing caught it. The sweep pressed them and logged "nothing", which is
+  // not a failing check; `csp.test.ts` asserts the header, not what the header
+  // does to the page; and the component tests asserted the `onclick`
+  // attribute and the global SEPARATELY, because jsdom cannot evaluate an
+  // inline handler — so the join was never tested anywhere, and it never
+  // worked. This is the join, in a browser, with the real policy applied.
+  state.screen = 'hq:map-popup';
+  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle2' });
+  await sleep(4000);
+
+  // Opening one takes some finding, and the first two versions of this did not
+  // do it.
+  //
+  // The markers are CLUSTERED, and a cluster icon carries the same
+  // `.leaflet-marker-icon` class as a single incident — pressing one ZOOMS the
+  // map and opens nothing. Pressing the first icon and reporting `true`
+  // therefore asserted that A MARKER EXISTED, which is not the same claim as a
+  // popup being open: the two checks after it ran against no popup at all and
+  // failed with "no DOSSIER control in the popup", which reads exactly like
+  // the defect this block exists to catch and is not it.
+  //
+  // Stopping at the first popup was still wrong. The RESPONDERS are markers
+  // too, and theirs is a status card with no actions on it — so the run
+  // reported "actions: none" having opened Sgt. Danjuma Yusuf.
+  //
+  // So: press markers until an INCIDENT popup is open, which is the one that
+  // offers actions, and keep every popup seen on the way — because a handler
+  // attribute on a responder's card is refused by the same policy and belongs
+  // in the same failure.
+  const popup = await (async () => {
+    const seen = [];
+    let markers = 0;
+    for (let pass = 0; pass < 12; pass++) {
+      markers = await page.evaluate((i) => {
+        document.querySelector('.leaflet-popup-close-button')?.click();
+        const icons = [...document.querySelectorAll('.leaflet-marker-icon')];
+        if (!icons.length) return 0;
+        icons[i % icons.length].dispatchEvent(
+          new MouseEvent('click', { bubbles: true, cancelable: true, view: window }),
+        );
+        return icons.length;
+      }, pass);
+      if (!markers) break;
+      await sleep(1100);
+      const open = await page.evaluate(() => {
+        const content = document.querySelector('.leaflet-popup .leaflet-popup-content');
+        if (!content) return null;
+        return {
+          actions: [...content.querySelectorAll('[data-hq-action]')]
+            .map((b) => b.getAttribute('data-hq-action')),
+          // Every HTML event handler attribute starts with `on`, and this
+          // console's CSP refuses all of them.
+          inline: [...content.querySelectorAll('*')]
+            .filter((e) => [...e.attributes].some((a) => /^on[a-z]+$/i.test(a.name)))
+            .map((e) => e.tagName.toLowerCase()),
+          text: (content.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60),
+        };
+      });
+      if (!open) continue;        // a cluster: it zoomed, and spread the pins
+      seen.push(open);
+      if (open.actions.length) return { found: open, seen, markers, pass: pass + 1 };
+    }
+    return { found: null, seen, markers };
+  })();
+
+  const inlineAnywhere = popup.seen.flatMap((p) => p.inline);
+  check(
+    'a map marker opens an incident popup, with its actions on it',
+    !!popup.found,
+    popup.found
+      ? `opened on press ${popup.pass} of 12; ${popup.markers} marker icon(s); `
+        + `${popup.seen.length} popup(s) seen`
+      : (popup.markers
+        ? `pressed every one of ${popup.markers} marker icon(s) over 12 passes `
+          + `and got ${popup.seen.length} popup(s), none with an action on it`
+          + (popup.seen.length ? `: ${popup.seen.map((p) => p.text).join(' | ')}` : '')
+        : 'no marker icons on the map at all'),
+  );
+  check(
+    'the popup carries its actions as data, not as inline handlers',
+    !!popup.found
+      && popup.found.actions.includes('dossier')
+      && inlineAnywhere.length === 0,
+    popup.found
+      ? `actions: ${popup.found.actions.join(', ') || 'none'}`
+        + (inlineAnywhere.length
+          ? `; ${inlineAnywhere.length} inline handler(s) on <`
+            + `${[...new Set(inlineAnywhere)].join('>, <')}> — each one the CSP refuses`
+          : '; no handler attributes in any popup')
+      : 'no popup with actions to look at',
+  );
+
+  const dossierFromMap = await page.evaluate(() => {
+    const b = document.querySelector('.leaflet-popup [data-hq-action="dossier"]');
+    if (!b) return false;
+    b.click();
+    return true;
+  });
+  await sleep(2000);
+  const dossierOpenedFromMap = await page.evaluate(
+    () => !!document.querySelector('[role="dialog"][aria-modal="true"]'),
+  );
+  check(
+    'DOSSIER on a map popup opens the incident',
+    dossierFromMap && dossierOpenedFromMap,
+    dossierFromMap
+      ? (dossierOpenedFromMap ? '' : 'pressed, and no dossier opened — the '
+        + 'handler never ran (an inline handler the CSP refuses, or no listener)')
+      : 'no DOSSIER control in the popup',
+  );
+  await shot(page, '69c-hq-dossier-from-the-map');
+  await page.keyboard.press('Escape');
+  await sleep(800);
+
+  // -----------------------------------------------------------------------
   // Mass broadcast.
   //
   // Every broadcast HQ ever sent failed: the screen wrote six columns no
@@ -750,21 +1035,47 @@ async function writeMark() {
       }
       await sleep(1200);
 
-      const count = await page.evaluate(() => {
-        window.__sweep = [...document.querySelectorAll('button, a[href], [role="button"]')].filter(
-          (b) => !b.disabled && b.offsetParent !== null,
-        );
-        return window.__sweep.length;
+      // WORK THROUGH THE SCREEN BY IDENTITY, AND RE-READ IT AFTER EVERY PRESS.
+      //
+      // This captured `window.__sweep` once per tab and then indexed into it
+      // for the rest of the tab. React re-renders on any state change, so the
+      // FIRST control that changed anything detached every node after it:
+      // `isConnected` went false, the click was skipped, and the rest of that
+      // screen was never pressed — in silence, because a skipped control is
+      // not a failed one.
+      //
+      // It surfaced when three stat tiles in the sidebar became real buttons:
+      // they switch tab, they come early in the DOM, and the sweep's reach
+      // dropped from 145 controls to 88 with every check still passing. The
+      // mobile sweep had already paid for this exact fault and fixed it the
+      // same way (see the note in mobile_interact.js). Re-listing costs a
+      // navigation per effective press and reaches the whole screen.
+      const listControls = () => page.evaluate(() => {
+        window.__sweep = [...document.querySelectorAll('button, a[href], [role="button"]')]
+          .filter((b) => !b.disabled && b.offsetParent !== null);
+        return window.__sweep.map((b) => (b.textContent.replace(/\s+/g, ' ').trim()
+          || b.getAttribute('aria-label') || b.title || '(icon)').slice(0, 48));
       });
+      // Two controls can carry the same label — "VIEW" on every card — so the
+      // key is the label plus how many of that label came before it.
+      const keysFor = (labels) => {
+        const seen = new Map();
+        return labels.map((l) => {
+          const n = (seen.get(l) ?? 0) + 1;
+          seen.set(l, n);
+          return `${l}#${n}`;
+        });
+      };
 
-      for (let i = 0; i < count; i++) {
-        const label = await page.evaluate((idx) => {
-          const b = window.__sweep?.[idx];
-          if (!b || !b.isConnected || b.disabled || b.offsetParent === null) return null;
-          return (b.textContent.replace(/\s+/g, ' ').trim()
-            || b.getAttribute('aria-label') || b.title || '(icon)').slice(0, 48);
-        }, i);
-        if (!label) continue;
+      let labels = await listControls();
+      const pressed = new Set();
+
+      for (let guard = 0; guard < 120; guard += 1) {
+        const keys = keysFor(labels);
+        const i = keys.findIndex((k) => !pressed.has(k));
+        if (i === -1) break;
+        const label = labels[i];
+        pressed.add(keys[i]);
         // Leaving the screen mid-sweep would attribute the next tab's controls
         // to this one, and signing out would end the sweep entirely.
         if (/terminate uplink|sign out|log ?out/i.test(label)) continue;
@@ -778,6 +1089,11 @@ async function writeMark() {
         const external = await page.evaluate((idx) => {
           const b = window.__sweep?.[idx];
           const href = b?.getAttribute?.('href') || '';
+          // `tel:` and `mailto:` hand off to the operating system, so in a
+          // browser they change nothing — which the sweep reported as a dead
+          // control. The CALL button on a map popup is a `tel:` link, and it
+          // is the app working: there is a number, and pressing it dials.
+          if (/^(tel|mailto|sms):/i.test(href)) return true;
           return /^https?:/i.test(href) && !href.includes('127.0.0.1');
         }, i);
         if (external) {
@@ -798,6 +1114,7 @@ async function writeMark() {
           return { html: eval(`(${fn})`)(), url: location.href };
         }, digest.toString());
         const reqBefore = (await control()).log.length;
+        const dialogsBefore = dialogs.length;
 
         const clicked = await page.evaluate((idx) => {
           const b = window.__sweep?.[idx];
@@ -830,13 +1147,27 @@ async function writeMark() {
         // apart from a button wired to nothing — which is the distinction that
         // matters, and why the fix went into the component rather than into a
         // suppression list here.
-        const alreadySelected = await page.evaluate((idx) => {
+        // `aria-selected` for a tab, `aria-pressed` for a filter that is
+        // already the applied one. Both are the app SAYING what state it is
+        // in, which is the only way a sweep can tell a control that correctly
+        // does nothing from one wired to nothing — and is why the fix for the
+        // stat tiles went into the component (they now carry `aria-pressed`)
+        // rather than into a suppression list here.
+        const alreadyOn = await page.evaluate((idx) => {
           const b = window.__sweep?.[idx];
-          return b?.getAttribute?.('aria-selected') === 'true';
+          return b?.getAttribute?.('aria-selected') === 'true'
+            || b?.getAttribute?.('aria-pressed') === 'true';
         }, i);
 
         const effect = [];
-        if (alreadySelected) effect.push('already the selected tab');
+        // A control guarded by `confirm()` has acted: it asked. The dialog is
+        // dismissed by the shared browser helper — a harness must not take a
+        // destructive action nobody asked it to take — so the DOM afterwards
+        // looks untouched, which is the right outcome and not a dead control.
+        if (dialogs.length > dialogsBefore) {
+          effect.push(`asked for confirmation: "${dialogs[dialogs.length - 1].message.slice(0, 60)}"`);
+        }
+        if (alreadyOn) effect.push('already the selected state');
         if (blockedByValidation) effect.push('refused by field validation');
         if (after.url !== before.url) effect.push('navigated');
         if (after.html !== before.html) effect.push('changed the page');
@@ -848,6 +1179,15 @@ async function writeMark() {
         // Close anything that opened, so the next click starts from the screen.
         await page.keyboard.press('Escape').catch(() => {});
         await sleep(200);
+
+        // BACK TO THE SCREEN, AND RE-READ IT. A press that changed anything
+        // re-rendered the tree, so every node captured before it is stale;
+        // without this the sweep stopped at the first effective control.
+        if (effect.length) {
+          await openTab(page, tab);
+          await sleep(900);
+        }
+        labels = await listControls();
       }
       await shot(page, `70-sweep-${role}-${tab.toLowerCase().replace(/[^a-z]+/g, '-')}`);
     }
@@ -897,6 +1237,24 @@ async function writeMark() {
     ctl.unknownColumns.join('; ') || 'none',
   );
 
+  // AND NOTHING ANY CONTROL DID WAS REFUSED FOR WANT OF A FUNCTION.
+  //
+  // The sibling claim, missing for the same reason. This pass presses the
+  // dossier's controls, two of which are `confirm_ussd_report()` and
+  // `mark_false_report()`, and the stand-in had no RPC router at all — so both
+  // came back 400 while the sweep recorded the button as having done something
+  // (it issued a request) and moved on.
+  const rpcRefused = [...new Set(ctl.rpcMisses || [])];
+  check(
+    'every database function a control called was answered, not refused',
+    rpcRefused.length === 0,
+    rpcRefused.length
+      ? `refused: ${rpcRefused.join(', ')}`
+        + ' — implement it in RPCS in scripts/local_e2e/fake_supabase.js'
+      : `none refused; ${new Set((ctl.rpcCalls || []).map((c) => c.fn)).size}`
+        + ' function(s) answered',
+  );
+
   fs.writeFileSync(
     path.join(OUT, 'interactions.json'),
     JSON.stringify(
@@ -909,7 +1267,13 @@ async function writeMark() {
         controlsExercised: sweepLog.length,
         deadControls,
         sweep: sweepLog,
+        rpcMisses: rpcRefused,
+        rpcCalls: ctl.rpcCalls || [],
         browserProblems: problems,
+        // Every native dialog the run met, and which screen it came from. A
+        // blocking confirm() is what ended a run forty checks in with nothing
+        // in the log to say a dialog had ever been on screen.
+        nativeDialogs: dialogs,
       },
       null,
       2,

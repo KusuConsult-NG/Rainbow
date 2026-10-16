@@ -46,7 +46,7 @@ OUT = ROOT / "scripts/apply_all_migrations.sql"
 # before that function exists and fails outright. See migration_sets.py.
 import migration_sets  # noqa: E402  (sibling module; scripts/ is sys.path[0])
 
-MIGRATIONS = migration_sets.outstanding()
+MIGRATIONS = migration_sets.in_the_paste()
 
 HEADER = f"""-- ============================================================================
 -- APPLY ALL OUTSTANDING MIGRATIONS — generated file, do not edit by hand.

@@ -14,6 +14,7 @@ import 'package:rainbow_app/services/push_notification_service.dart';
 import 'package:rainbow_app/services/sync_service.dart';
 import 'package:rainbow_app/services/user_service.dart';
 import 'package:rainbow_app/shared/widgets/system_alert_listener.dart';
+import 'package:rainbow_app/services/voice_note_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
 // ─── Fake Implementations ──────────────────────────────────────────────────
@@ -51,6 +52,7 @@ class FakeAlertService implements AlertService {
     bool isCritical = false,
     AlertPriority priority = AlertPriority.medium,
     List<String>? attachments,
+    VoiceNote? voiceNote,
     String? geoLga,
     String? geoWard,
     String? geoSiecWard,

@@ -128,7 +128,10 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
       </div>
       {toast.type !== 'loading' && (
         <button
+          type="button"
           onClick={handleDismiss}
+          aria-label="Dismiss this message"
+          title="Dismiss"
           style={{
             background: 'none',
             border: 'none',

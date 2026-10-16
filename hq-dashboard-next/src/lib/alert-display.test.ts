@@ -175,6 +175,31 @@ describe('filterAlerts', () => {
 
   const ids = (out: Alert[]) => out.map(x => x.id).sort();
 
+  // THE FILTER THAT COULD NEVER MATCH ANYTHING.
+  //
+  // The status dropdown offers "ACTIVE INCIDENTS" and the UNIT STATUS panel has
+  // an ACTIVE tile; both set `filterStatus = 'ACTIVE'`, and 'ACTIVE' is not one
+  // of the ten statuses an alert can carry. `a.status === 'ACTIVE'` was
+  // therefore never true, so the one control that says "show me what is
+  // happening now" emptied the board — which on this console reads as ALL
+  // CLEAR. These two fail against that version.
+  it('treats ACTIVE as a state, not a status nothing carries', () => {
+    const out = filterAlerts(rows, { ...NO_FILTERS, status: 'ACTIVE' });
+
+    expect(out.length).toBeGreaterThan(0);
+    expect(ids(out)).not.toContain('resolved');
+    // Everything that has not been closed out, whatever rung it is on.
+    expect(ids(out)).toEqual(['critical', 'duress', 'pending', 'sms', 'south']);
+  });
+
+  it('counts a cancelled incident as closed, like a resolved one', () => {
+    const out = filterAlerts(
+      [...rows, a({ id: 'cancelled', status: 'CANCELLED' })],
+      { ...NO_FILTERS, status: 'ACTIVE' },
+    );
+    expect(ids(out)).not.toContain('cancelled');
+  });
+
   it('returns everything with no filters applied', () => {
     expect(filterAlerts(rows, NO_FILTERS)).toHaveLength(rows.length);
   });

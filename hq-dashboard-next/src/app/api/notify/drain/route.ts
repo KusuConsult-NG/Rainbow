@@ -5,7 +5,7 @@ import { postNotification } from '@/lib/onesignal-auth';
 import {
   escalationMessage,
   recipientsFor,
-  rolesForTier,
+  rolesToNotify,
   type OfficerRow,
   type OutboxRow,
 } from '@/lib/notification-recipients';
@@ -95,7 +95,7 @@ export async function POST(request: Request) {
 
   for (const row of rows) {
     try {
-      const roles = rolesForTier(row.payload?.to_tier);
+      const roles = rolesToNotify(row);
       if (roles.length === 0) {
         // A notice nobody can be addressed from is not a delivery failure to
         // retry for ever. Record it and stop.
@@ -153,7 +153,9 @@ export async function POST(request: Request) {
           contents: { en: body },
           data: {
             alertId: row.payload?.alert_id ?? row.alert_id,
-            type: 'TIER_ESCALATION',
+            // The kind as queued, not a constant: a new incident and a
+            // timeout escalation open to different things on the handset.
+            type: row.kind,
             toTier: row.payload?.to_tier,
           },
         },

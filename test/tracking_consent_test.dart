@@ -17,6 +17,15 @@
 // The last one is the plainest: signing out is the clearest statement a person
 // can make that they are done being observed, and it was the one action that
 // did not stop it.
+//
+// AND IT HAS ONE EXCEPTION, which is the first bullet above arriving from the
+// other side. A duress PIN keeps tracking running because the person may still
+// be in danger, and the lock screen's sign-out needs no code — so a sign-out
+// could end a live duress trail with no PIN at all. Sign-out now stops a
+// RESPONDER's patrol track, as asserted below, and leaves an SOS track running
+// until the incident closes or the twelve-hour ceiling expires. That half is in
+// test/signout_during_emergency_test.dart; the tests here are the no-emergency
+// case, which is still the common one and still works this way.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rainbow_app/services/auth_service.dart';
 import 'package:rainbow_app/services/secure_storage_service.dart';

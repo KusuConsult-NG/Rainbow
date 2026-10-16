@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import AdminDirectory from '@/components/AdminDirectory';
+import VoiceNote from '@/components/VoiceNote';
 import SystemConfig from '@/components/SystemConfig';
 import AuditLogs from '@/components/AuditLogs';
 import MassBroadcast from '@/components/MassBroadcast';
@@ -17,10 +18,13 @@ import IncidentReplayPanel from '@/components/IncidentReplayPanel';
 import LiveFeedViewer from '@/components/LiveFeedViewer';
 import TacticalSelect, { SelectOption } from '@/components/TacticalSelect';
 import { usePersistedTheme } from '@/hooks/usePersistedTheme';
+import { useEscapeKey } from '@/hooks/useEscapeKey';
 
 
 import { useToast } from '@/components/ToastProvider';
 import { plateauTacticalMap, TacticalJurisdiction, TacticalWard, STATE_SECURITY_AGENCIES } from '@/lib/tactical_mapping';
+import { AGENCY_LIST, AGENCY_TARGET_ALL } from '@/lib/agencies';
+import { placeField } from '@/lib/place-label';
 import {
   ShieldAlert, Shield, Map as MapIcon, Users, Radio, Settings,
   LogOut, AlertTriangle, CheckCircle, ChevronUp, Phone,
@@ -28,7 +32,7 @@ import {
   Sun, Moon, X, Sparkles, MapPin, Menu, SignalZero,
 } from 'lucide-react';
 import type { Alert } from './types';
-import { clusterAlerts, filterAlerts } from '@/lib/alert-display';
+import { clusterAlerts, filterAlerts, isLiveIncident } from '@/lib/alert-display';
 import { emptyBoardMeaning, emptyBoardWording } from '@/lib/empty-board';
 import { geoKey, geoMatchesKeyed } from '@/lib/geo-key';
 import UssdProvenancePanel from '@/components/UssdProvenancePanel';
@@ -328,7 +332,42 @@ export default function DashboardPage() {
   const [navOpen, setNavOpen] = useState(false);
 
   const [user, setUser] = useState<any>(null);
-  const [userRole, setUserRole] = useState('HQ_OFFICER');
+  /**
+   * This account's role, or NULL until the `profiles` read says what it is.
+   *
+   * It used to be `useState('HQ_OFFICER')` — a COMMAND role — so `consoleAccess`
+   * was never handed an unknown role. That function was written to prevent
+   * exactly that, and says so:
+   *
+   *     An unknown role gets the smallest possible console rather than the
+   *     largest: while the profile is still loading, `userRole` is '', and a
+   *     default of "show everything" would flash the whole command console at
+   *     an agency liaison on every page load before settling.
+   *
+   * `userRole` was never ''. The "Unknown, or still loading" branch was
+   * unreachable, and its RESOLVING ACCESS subtitle had never once been rendered
+   * despite being under test.
+   *
+   * And the window was not merely "until the read returns". This body is gated
+   * on `authLoading`, cleared by the auth effect below — which set the role
+   * from `user_metadata` BEFORE its own `profiles` read and before clearing the
+   * gate. Two concurrent reads of the same row race; when the auth effect won,
+   * the first visible render was command by an active claim.
+   *
+   * What the flash cost, beyond chrome: the advisory banner reads command as
+   * "sees everything, because they sent it", so a liaison was shown advisories
+   * addressed to other agencies and to citizens (T-34); and an agency tab
+   * clicked in that window mounted `AgencyPortal` with `isHq` true and no
+   * agency, which froze that liaison on the Police desk for the life of the
+   * mount (T-35).
+   *
+   * The app learned this rule once already, in the responder tier filter:
+   * "you cannot be assigned something when we do not know who you are". Same
+   * principle. Unknown PLACE still fails open — withholding a warning from
+   * somebody inside the affected area costs more than showing it to somebody
+   * outside — but unknown IDENTITY fails closed.
+   */
+  const [userRole, setUserRole] = useState<string | null>(null);
 
   // Load real user role from Supabase session
   useEffect(() => {
@@ -342,15 +381,22 @@ export default function DashboardPage() {
             .eq('id', user.id)
             .single();
           if (profile?.role) {
+            // THE ONLY WRITER. `profiles.role` is the authoritative source —
+            // it is what `requireRole` reads with admin privileges and what the
+            // RLS policies key on. A second path used to set `userRole` from
+            // `user_metadata.role`, which in Supabase is USER-WRITABLE: that is
+            // H-7, "role source user-writable", and a value a user can set must
+            // not be what decides they are command. It is gone; an account with
+            // no role in `profiles` keeps the smallest console, which is the
+            // truth about it.
             setUserRole(profile.role as string);
-              // Land where this role belongs. It used to send liaisons to
-              // the agency tab but leave every other tab reachable, so the
-              // statewide map was one click away for an officer of another
-              // organisation.
-              const resolved = consoleAccess(profile.role as string);
-              setActiveTab((current) =>
-                resolved.tabs.includes(current) ? current : resolved.landing,
-              );
+            // Land where this role belongs. It used to send liaisons to the
+            // agency tab but leave every other tab reachable, so the statewide
+            // map was one click away for an officer of another organisation.
+            const resolved = consoleAccess(profile.role as string);
+            setActiveTab((current) =>
+              resolved.tabs.includes(current) ? current : resolved.landing,
+            );
           }
         }
       } catch (e) {
@@ -376,7 +422,9 @@ export default function DashboardPage() {
   // polling-unit officer simply gets nothing here rather than an error.
   useEffect(() => {
     const commandRoles = ['HQ_OFFICER', 'HQ_COMMAND', 'ADMIN', 'LGA_COMMAND'];
-    if (!commandRoles.includes(userRole)) return;
+    // `null` until the profile read lands, and not a member of any list: no
+    // privileged read is issued on the strength of a role we do not have yet.
+    if (!userRole || !commandRoles.includes(userRole)) return;
     const loadOpen = async () => {
       const { count, error } = await supabase
         .from('sim_channel_events')
@@ -399,7 +447,7 @@ export default function DashboardPage() {
   // Note: uses userRole directly since isHqUser is declared later in the component
   useEffect(() => {
     const hqRoles = ['HQ_OFFICER', 'HQ_COMMAND', 'ADMIN'];
-    if (!hqRoles.includes(userRole)) return;
+    if (!userRole || !hqRoles.includes(userRole)) return;
     const loadUnread = async () => {
       const { count } = await supabase
         .from('agency_action_reports')
@@ -431,6 +479,21 @@ export default function DashboardPage() {
   const [theme, setTheme] = usePersistedTheme();
   const [timeString, setTimeString] = useState('');
   const [selectedReport, setSelectedReport] = useState<Alert | null>(null);
+
+  // ESCAPE CLOSES WHAT IS ON TOP.
+  //
+  // The console had no keydown handler anywhere, so the dossier — a fixed
+  // overlay over the feed and the map — and the narrow-screen drawer could
+  // only be dismissed with a pointer. The dossier is the surface an operator
+  // works an emergency from, and the one they open by accident most.
+  //
+  // The dossier sits above the drawer, so the drawer only listens while the
+  // dossier is closed: two window listeners fire in registration order, not in
+  // z-order, so precedence has to be said here rather than inside the hook.
+  const closeDossier = useCallback(() => setSelectedReport(null), []);
+  const closeNav = useCallback(() => setNavOpen(false), []);
+  useEscapeKey(selectedReport !== null, closeDossier);
+  useEscapeKey(navOpen && selectedReport === null, closeNav);
   /**
    * The route taken during the incident currently open in the dossier.
    *
@@ -610,7 +673,11 @@ export default function DashboardPage() {
       }
 
       setUser(u);
-      setUserRole(u.user_metadata?.role || 'HQ_COMMAND');
+      // This used to read `setUserRole(u.user_metadata?.role || 'HQ_COMMAND')`.
+      // `user_metadata` is writable by the user it belongs to (H-7), and the
+      // fallback claimed the top of the command chain for an account with no
+      // role in its metadata at all. The role comes from `profiles` and only
+      // from there; see `userRole`.
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -967,7 +1034,21 @@ export default function DashboardPage() {
       { id: user?.id, email: user?.email },
     );
     if (res.ok) {
-      toast.update(toastId, 'success', 'Escalation Sent', `Handed off to ${res.value.commanderName} (${res.value.agency})`);
+      // "RECORDED", not "SENT".
+      //
+      // This said `Escalation Sent`, and the only thing it knew about was the
+      // write to `alerts`. Whether the agency was reached was decided by a POST
+      // whose answer nobody read — and for four of the six destinations the
+      // menu used to offer, that POST was refused outright. The handover is now
+      // two statements because it is two facts: the incident has changed hands
+      // in the record, and the agency has (or has not) been told.
+      toast.update(toastId, 'success', 'Escalation Recorded', `Handed off to ${res.value.commanderName} (${res.value.agency})`);
+      const notified = res.value.notified;
+      if (notified && !notified.delivered) {
+        // A warning, not an error: the escalation itself stands. What this
+        // needs from the operator is a phone call, not a second escalation.
+        toast.warning(`${res.value.agency} NOT NOTIFIED`, notified.detail);
+      }
     } else {
       toast.update(toastId, 'error', 'Escalation Failed', res.error);
     }
@@ -1108,6 +1189,15 @@ export default function DashboardPage() {
   });
 
   const duressCount = sectorAlerts.filter(a => a.status === 'DURESS').length;
+  // THE TILE HAS TO COUNT WHAT ITS FILTER WILL SHOW.
+  //
+  // This read `value={alerts.length}` — every incident in the loaded window,
+  // resolved ones included — under the word ACTIVE, and pressing it set
+  // `filterStatus = 'ACTIVE'`, which is NOT one of the ten statuses an alert
+  // can carry, so it matched nothing and emptied the board. One predicate now
+  // answers both, over the same sector-scoped set the DURESS tile beside it
+  // uses: see `isLiveIncident` in lib/alert-display.ts.
+  const activeCount = sectorAlerts.filter(isLiveIncident).length;
   const smsFallbackCount = sectorAlerts.filter(a => 
     (a.description || '').includes('[OFFLINE_SMS]') || 
     (a.description || '').includes('[SMS]') ||
@@ -1237,6 +1327,13 @@ export default function DashboardPage() {
       {isNarrow && navOpen && (
         <div
           onClick={() => setNavOpen(false)}
+          // A scrim, not a control: everything it does, Escape and the nav
+          // items do. Hidden from the accessibility tree so it is not offered
+          // as something to operate, and declared pointer-only so
+          // `check_console_controls.py` can tell it from the eight clickable
+          // divs on this screen that WERE controls nobody could reach.
+          aria-hidden="true"
+          data-pointer-only="backdrop; Escape closes the drawer"
           style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.6)', zIndex: 4000 }}
         />
       )}
@@ -1244,6 +1341,11 @@ export default function DashboardPage() {
       <aside
         className="tactical-panel glass"
         onClick={() => { if (isNarrow) setNavOpen(false); }}
+        // The container, not a control. Tapping a nav item inside it closes
+        // the drawer on a narrow screen; the items are the controls and carry
+        // their own keyboard behaviour.
+        data-pointer-only="closes the drawer after a nav item is chosen"
+
         style={{
           width: 280,
           display: 'flex',
@@ -1343,9 +1445,26 @@ export default function DashboardPage() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '16px', background: 'var(--input-bg)', borderRadius: 16, border: '1px solid var(--border)' }}>
             <p style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1.5, marginBottom: 4 }}>UNIT STATUS</p>
-            <StatBar label="DURESS" value={duressCount} color="var(--duress)" onClick={() => { setActiveTab('alerts'); setFilterStatus('DURESS'); }} />
-            <StatBar label="ACTIVE" value={alerts.length} color="var(--warning)" onClick={() => { setActiveTab('alerts'); setFilterStatus('ACTIVE'); }} />
-            <StatBar label="ONLINE" value={agentLocations.length} color="var(--success)" onClick={() => setActiveTab('map')} />
+            {/* `pressed` is the filter state, which these tiles set and said
+                nowhere: a screen reader could not tell which of them was
+                currently applied, and neither could anything else — a filter
+                control that looks identical whether it is on or off is the
+                same defect as the tab that did not say it was selected. */}
+            <StatBar
+              label="DURESS" value={duressCount} color="var(--duress)"
+              pressed={activeTab === 'alerts' && filterStatus === 'DURESS'}
+              onClick={() => { setActiveTab('alerts'); setFilterStatus('DURESS'); }}
+            />
+            <StatBar
+              label="ACTIVE" value={activeCount} color="var(--warning)"
+              pressed={activeTab === 'alerts' && filterStatus === 'ACTIVE'}
+              onClick={() => { setActiveTab('alerts'); setFilterStatus('ACTIVE'); }}
+            />
+            <StatBar
+              label="ONLINE" value={agentLocations.length} color="var(--success)"
+              pressed={activeTab === 'map'}
+              onClick={() => setActiveTab('map')}
+            />
           </div>
         </div>
 
@@ -1431,7 +1550,8 @@ export default function DashboardPage() {
             )}
 
             {smsFallbackCount > 0 && (
-              <div
+              <button
+                type="button"
                 onClick={() => {
                   setActiveTab('alerts');
                   setFilterStatus('SMS_FALLBACK');
@@ -1451,7 +1571,7 @@ export default function DashboardPage() {
               >
                 <Radio size={13} color="#FF9800" className="spin-slow" />
                 <span style={{ fontSize: 10, fontWeight: 900, color: '#FF9800' }}>{smsFallbackCount} SMS</span>
-              </div>
+              </button>
             )}
 
             <button
@@ -1496,12 +1616,34 @@ export default function DashboardPage() {
 
             <div style={{ textAlign: 'right', paddingLeft: 4 }}>
               <p style={{ fontSize: 10, fontWeight: 900, color: 'var(--text-primary)' }}>{(user?.email || 'HQ').split('@')[0].toUpperCase()}</p>
-              <p style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)' }}>{userRole.replace('_', ' ')}</p>
+              <p style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)' }}>{(userRole ?? access.subtitle).replace('_', ' ')}</p>
             </div>
           </div>
         </header>
 
-        <SystemAlertListener />
+        {/* The advisory banner is scoped to this operator now: it applied no
+            targeting at all, so an advisory addressed to citizens of one ward
+            docked here and one addressed to another agency docked on that
+            liaison's screen. `access.agency` rather than `userProfile.agency`,
+            because the former is derived from the ROLE and the latter is a
+            decorative badge (T-28). */}
+        <SystemAlertListener
+          viewer={{
+            // Both come from the role, and the role is `null` until the
+            // `profiles` read lands — so until then `access.agency` is null and
+            // `isHqUser` is false, which is the most restricted viewer this
+            // filter has. There was a `roleResolved ? ... : null` guard here
+            // for one commit; it was a patch over the privileged default, and
+            // once the default was gone it was dead logic reading as the thing
+            // that protected you. The default is what protects you, and it
+            // protects every other consumer of the role at the same time.
+            agency: access.agency,
+            isCommand: isHqUser,
+            geoLga: userProfile?.geo_lga ?? null,
+            geoWard: userProfile?.geo_ward ?? null,
+            geoPu: userProfile?.geo_pu ?? null,
+          }}
+        />
 
         {/* Filters sit IN THE FLOW, not floating over the map.
             They were `position: absolute; top: 86` with only a left edge, so
@@ -1917,7 +2059,7 @@ export default function DashboardPage() {
           {activeTab === 'sim' && <SimChannelEvents />}
           {activeTab === 'agency' && (
             <AgencyPortal
-              userRole={userRole}
+              userRole={userRole ?? ''}
               userAgency={userAgencyCode}
               isHq={isHqUser}
               userEmail={user?.email || ''}
@@ -1982,8 +2124,29 @@ export default function DashboardPage() {
             justifyContent: 'center',
             zIndex: 9999,
             padding: '24px'
-          }} onClick={() => setSelectedReport(null)}>
-            <div className="tactical-panel glass fade-in" style={{
+          }}
+          onClick={() => setSelectedReport(null)}
+          // The scrim. Escape closes this now (see `useEscapeKey` where
+          // `selectedReport` is declared) and the dossier has its own close
+          // button, so the backdrop is a convenience rather than the only way
+          // out — which is what it was for anybody without a mouse.
+          aria-hidden="true"
+          data-pointer-only="backdrop; Escape and the close button both do this"
+          >
+            <div
+              className="tactical-panel glass fade-in"
+              // It IS a modal dialog: it covers the board, it owns the screen
+              // until it is dismissed, and it is what an operator reads while
+              // deciding. Saying so gives a screen reader the name of the
+              // thing that just took over. Focus is NOT trapped here — that
+              // needs this 500-line inline block to become a component, and
+              // it is recorded in E2E_AUDIT_REPORT.md rather than half-done.
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Incident dossier: ${selectedReport.type || 'emergency'}`}
+              onClick={(e) => e.stopPropagation()}
+              data-pointer-only="keeps a click inside the dialog off the backdrop"
+              style={{
               width: '100%',
               maxWidth: '800px',
               maxHeight: '90vh',
@@ -1995,8 +2158,8 @@ export default function DashboardPage() {
               display: 'flex',
               flexDirection: 'column',
               padding: 0
-            }} onClick={(e) => e.stopPropagation()}>
-              
+            }}>
+
               {/* Header HUD */}
               <div style={{
                 display: 'flex',
@@ -2015,8 +2178,11 @@ export default function DashboardPage() {
                     {isDuress ? 'DURESS CRISIS LOG' : selectedReport.type}
                   </h3>
                 </div>
-                <button 
+                <button
+                  type="button"
                   onClick={() => setSelectedReport(null)}
+                  aria-label="Close the incident dossier"
+                  title="Close (Esc)"
                   style={{
                     background: 'var(--input-bg)',
                     border: '1px solid var(--border)',
@@ -2106,8 +2272,30 @@ export default function DashboardPage() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>LGA / Sector:</span>
-                        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', textTransform: 'uppercase' }}>{selectedReport.geo_lga || 'STATE HQ'}</span>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', textTransform: 'uppercase' }}>{placeField(selectedReport.geo_lga, 'lga')}</span>
                       </div>
+                      {/* THE HANDSET LEFT, AND THE TRACK DID NOT.
+                          A track going quiet reads as a flat battery. This says
+                          the app was signed out — which on the lock screen needs
+                          no code, so it is the one path somebody other than the
+                          reporter can reach. Tracking continues either way; see
+                          20261020000000. */}
+                      {selectedReport.device_signed_out_at && (
+                        <div style={{
+                          display: 'flex', gap: 8, alignItems: 'flex-start',
+                          padding: 10, borderRadius: 8,
+                          background: 'rgba(245,158,11,0.12)',
+                          border: '1px solid #F59E0B', color: '#F59E0B',
+                        }}>
+                          <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                          <div style={{ fontSize: 11 }}>
+                            <strong>Handset signed out</strong> at{' '}
+                            {new Date(selectedReport.device_signed_out_at as string).toLocaleString()}.
+                            Location tracking is still running — the app is gone,
+                            the trail is not.
+                          </div>
+                        </div>
+                      )}
                       {selectedReport.geo_ward && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Ward:</span>
@@ -2465,12 +2653,33 @@ function NavItem({ icon, label, active, onClick, badge }: { icon: React.ReactNod
   );
 }
 
-function StatBar({ label, value, color, onClick }: { label: string; value: number; color: string; onClick?: () => void }) {
+/**
+ * A labelled count, which sometimes filters the board when pressed.
+ *
+ * Two elements rather than one: with an `onClick` this is a control and must
+ * be a `<button>` — it was a clickable `<div>`, so the counts that filter the
+ * feed could be read and not operated without a mouse — and with no `onClick`
+ * it is a row of text, which must NOT be focusable. A div that is always a
+ * button lies to a keyboard user in the other direction.
+ */
+function StatBar({ label, value, color, onClick, pressed }: { label: string; value: number; color: string; onClick?: () => void; pressed?: boolean }) {
+  const row = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 12px', borderRadius: '8px', transition: 'background 0.2s' } as const;
+  const labelEl = <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1.5, fontFamily: "var(--font-outfit), sans-serif" }}>{label}</span>;
+  const valueEl = <span style={{ fontSize: 14, fontWeight: 900, color, textShadow: `0 0 10px ${color}44`, fontFamily: "var(--font-outfit), sans-serif" }}>{value}</span>;
+
+  if (!onClick) {
+    return <div style={{ ...row, cursor: 'default' }} className="card-hover">{labelEl}{valueEl}</div>;
+  }
   return (
-    <div onClick={onClick} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: onClick ? 'pointer' : 'default', padding: '6px 12px', borderRadius: '8px', transition: 'background 0.2s' }} className="card-hover">
-      <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1.5, fontFamily: "var(--font-outfit), sans-serif" }}>{label}</span>
-      <span style={{ fontSize: 14, fontWeight: 900, color, textShadow: `0 0 10px ${color}44`, fontFamily: "var(--font-outfit), sans-serif" }}>{value}</span>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={pressed}
+      style={{ ...row, cursor: 'pointer', width: '100%', background: 'none', border: 'none', textAlign: 'left', font: 'inherit' }}
+      className="card-hover"
+    >
+      {labelEl}{valueEl}
+    </button>
   );
 }
 
@@ -2818,6 +3027,12 @@ Respond ONLY with a JSON object with this exact shape:
 
       <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: alert.media_urls && alert.media_urls.length > 0 ? 12 : 20 }}>{alert.description}</p>
 
+      {/* ABOVE the evidence: for a report filed by voice this IS the report,
+          and the photographs are the attachments. */}
+      {alert.voice_note_url && (
+        <VoiceNote url={alert.voice_note_url} seconds={alert.voice_note_seconds} />
+      )}
+
       {/* Evidence Media Thumbnails — Phase 7 */}
       {alert.media_urls && alert.media_urls.length > 0 && (
         <div style={{ marginBottom: 20 }}>
@@ -2830,9 +3045,22 @@ Respond ONLY with a JSON object with this exact shape:
               const isVideo = u.includes('/video/') || u.endsWith('.mp4') || u.endsWith('.mov') || u.endsWith('.webm');
               const isAudio = u.includes('/raw/') || u.endsWith('.m4a') || u.endsWith('.mp3') || u.endsWith('.wav');
               return (
-                <div
+                /* A LINK, not a button: it opens evidence in a new tab, so a
+                   link is what it is — and it then costs nothing to reach by
+                   keyboard, to open with the middle mouse button, or to copy
+                   the address of. As a clickable div it had none of that, and
+                   `window.open` from a div is also the one shape a popup
+                   blocker treats as suspicious. `rel="noreferrer"` because
+                   this is a Cloudinary URL for an incident and the referrer
+                   would carry the console's own address. */
+                <a
                   key={idx}
-                  onClick={() => window.open(url, '_blank')}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={isVideo ? `Open video evidence ${idx + 1} in a new tab`
+                    : isAudio ? `Play audio evidence ${idx + 1} in a new tab`
+                    : `View image evidence ${idx + 1} in a new tab`}
                   title={isVideo ? 'Click to open video' : isAudio ? 'Click to play audio' : 'Click to view image'}
                   style={{
                     width: 72, height: 72, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', flexShrink: 0,
@@ -2870,7 +3098,7 @@ Respond ONLY with a JSON object with this exact shape:
                       +{alert.media_urls!.length - 6}
                     </div>
                   )}
-                </div>
+                </a>
               );
             })}
           </div>
@@ -3064,7 +3292,7 @@ Respond ONLY with a JSON object with this exact shape:
             borderRadius: 6,
             display: 'inline-block'
           }}>
-            PU: {a.geo_pu || 'SECTOR HQ'}
+            PU: {placeField(a.geo_pu, 'pu')}
           </div>
           {a.lat && a.lng && (
             <div style={{ fontSize: 8, color: 'var(--text-dim)', marginTop: 6, letterSpacing: 0.5, fontFamily: 'monospace' }}>
@@ -3207,15 +3435,24 @@ Respond ONLY with a JSON object with this exact shape:
               return responderList.map((r: any) => {
                 const isSelected = selectedResponders.includes(r.userId);
                 return (
-                  <div
+                  /* A LABEL around the real checkbox, which now does the
+                     toggling itself.
+                     
+                     This row was a clickable div with a checkbox inside it
+                     whose `onChange` was `() => {}` and a comment saying
+                     "Handled by div onClick". So the checkbox was focusable,
+                     looked operable, and did nothing: a dispatcher working by
+                     keyboard could tab onto it, press Space, see no change,
+                     and conclude the roster was broken — WORSE than a plain
+                     div, which at least does not offer itself.
+                     
+                     As a label, clicking anywhere on the row still toggles
+                     (that is what a label does), Space works because the
+                     control is a real checkbox, and a screen reader announces
+                     the officer's name with its checked state instead of
+                     reading an unlabelled checkbox and then some text. */
+                  <label
                     key={r.userId}
-                    onClick={() => {
-                      setSelectedResponders(prev => 
-                        prev.includes(r.userId)
-                          ? prev.filter(id => id !== r.userId)
-                          : [...prev, r.userId]
-                      );
-                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -3234,7 +3471,13 @@ Respond ONLY with a JSON object with this exact shape:
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => {}} // Handled by div onClick
+                        onChange={() => {
+                          setSelectedResponders(prev =>
+                            prev.includes(r.userId)
+                              ? prev.filter(id => id !== r.userId)
+                              : [...prev, r.userId]
+                          );
+                        }}
                         style={{ cursor: 'pointer' }}
                       />
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -3250,7 +3493,7 @@ Respond ONLY with a JSON object with this exact shape:
                     <span style={{ fontSize: 9, fontWeight: 800, color: r.isLive ? 'var(--success)' : 'var(--warning)' }}>
                       {r.isLive ? '● LIVE GPS' : 'READY'}
                     </span>
-                  </div>
+                  </label>
                 );
               });
             })()}
@@ -3301,13 +3544,26 @@ Respond ONLY with a JSON object with this exact shape:
                   fontFamily: 'inherit'
                 }}
               >
-                <option value="ALL">🌐 ALL JOINT COMMANDS (Broad Inter-Agency Escalation)</option>
-                <option value="MILITARY">🎖️ OPERATION ENDURING PEACE / MILITARY STF</option>
-                <option value="NPF">👮‍♂️ NIGERIA POLICE FORCE (NPF TACTICAL CELL)</option>
-                <option value="NSCDC">🛡️ CIVIL DEFENCE CORPS (NSCDC RAPID UNIT)</option>
-                <option value="DSS">🕶️ DEPT OF STATE SERVICES (DSS HIGH-THREAT)</option>
-                <option value="RAINBOW">🌈 OPERATION RAINBOW TACTICAL HQ</option>
-                <option value="VGN">🛡️ VIGILANTE GROUP (VGN COMMUNITY DEFENSE)</option>
+                {/*
+                  BUILT FROM THE SHARED LIST, NOT WRITTEN OUT HERE.
+
+                  These were seven hand-written options taken from
+                  `STATE_SECURITY_AGENCIES`, which badges Operation Rainbow's
+                  own staff. Four of them — NPF, MILITARY, RAINBOW, VGN — are
+                  not agency codes: the value chosen here is written to
+                  `alerts.escalated_to_agency`, and the liaison's portal, the
+                  liaison's role and the liaison's phone number are all keyed
+                  on POLICE / ARMY / DSS / NSCDC / FRSC / OPSH. So escalating
+                  to the Police stored 'NPF', the Police portal asked for
+                  'POLICE' and never showed it, /api/notify-agency answered
+                  400 Unknown agency, and the operator was told it was sent.
+                  FRSC and OPSH, the two this deployment has contacts for,
+                  were not on the menu at all.
+                */}
+                <option value={AGENCY_TARGET_ALL}>🌐 ALL JOINT COMMANDS (Broad Inter-Agency Escalation)</option>
+                {AGENCY_LIST.map(a => (
+                  <option key={a.code} value={a.code}>{a.icon} {a.label.toUpperCase()}</option>
+                ))}
               </select>
             </div>
 

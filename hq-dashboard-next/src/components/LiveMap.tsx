@@ -895,52 +895,96 @@ function drawApproximateArea(
     });
   }, [agents]);
 
-  // The popup is an HTML string, so its buttons can only reach code through
-  // globals. One effect installs all four and removes all four: the previous
-  // arrangement had two effects fighting over two of these names, and the
-  // cleanup belonged to the one that lost.
+  // ONE REAL LISTENER, AND NO GLOBALS.
+  //
+  // The popup is an HTML string, so its buttons used to reach code through
+  // `onclick="window._hqDossier('…')"` and four `window._hq*` functions
+  // installed by this effect. Every one of those clicks was REFUSED by the
+  // console's own Content Security Policy:
+  //
+  //   Refused to execute inline event handler because it violates the
+  //   following Content Security Policy directive: "script-src …"
+  //
+  // `lib/csp.ts` sets `script-src 'self' 'nonce-…' 'strict-dynamic'` with no
+  // `'unsafe-inline'`, deliberately and for good reasons it writes out at
+  // length — and a nonce cannot apply to an inline event handler attribute.
+  // So DOSSIER, DISPATCH and RESOLVE were dead in every map popup, on the
+  // console's landing screen, from the day that policy shipped. Nothing
+  // noticed: the browser sweep pressed them and recorded "nothing", which is
+  // not a failing check, and the CSP's own test asserts the header rather than
+  // what the header does to the page.
+  //
+  // Delegation fixes it without `'unsafe-inline'`: the buttons carry
+  // `data-hq-action` and `data-hq-id` (see `incidentPopupHtml`), and this
+  // listener reads them. It also disposes of the globals, which this comment
+  // used to apologise for.
   useEffect(() => {
-    (window as any)._hqResolve = async (id: string) => {
-      try {
-        await onResolve(clusterOf(id));
-      } catch (e: any) {
-        window.alert('Resolution failed: ' + e.message);
-      }
-    };
-    (window as any)._hqEscalate = async (id: string, currentTier: string) => {
-      try {
-        await onEscalate(clusterOf(id), currentTier);
-      } catch (e: any) {
-        window.alert('Escalation failed: ' + e.message);
-      }
-    };
-    (window as any)._hqShowDispatch = (id: string) => {
-      const event = new CustomEvent('hq-show-dispatch', { detail: { alertId: id } });
-      window.dispatchEvent(event);
-    };
-    // The popup holds the fields a dispatcher acts on; the dossier holds the
-    // rest — the escalation log, the media, the chat, the feedback. The button
-    // exists so nobody has to leave the map, find the same incident in the list
-    // and open it there, which is what the map's thin popup used to force.
-    //
-    // NOT expanded to the cluster: a dossier is about one report, and the
-    // popup's own id is the cluster master. The write paths expand; reading
-    // does not.
-    (window as any)._hqDossier = (id: string) => {
-      if (typeof onOpenDossier === 'function') {
-        onOpenDossier(id);
-        return;
-      }
-      window.dispatchEvent(new CustomEvent('hq-open-dossier', { detail: { alertId: id } }));
+    const map = mapRef.current;
+    if (!map) return;
+
+    const onPopupClick = (event: Event) => {
+      const target = event.target as HTMLElement | null;
+      const button = target?.closest?.('[data-hq-action]') as HTMLElement | null;
+      if (!button) return;
+      const action = button.getAttribute('data-hq-action');
+      const id = button.getAttribute('data-hq-id');
+      if (!action || !id) return;
+      // The popup sits over the map; a click that has been handled must not
+      // also pan it.
+      event.preventDefault();
+      event.stopPropagation();
+
+      void (async () => {
+        try {
+          switch (action) {
+            case 'resolve':
+              await onResolve(clusterOf(id));
+              break;
+            case 'escalate':
+              // The tier comes from the incident, not from the markup. The
+              // global this replaces took it as a second argument and NOTHING
+              // ever called it — so the only caller this branch has ever had
+              // would have been handing it a string invented at the call site.
+              await onEscalate(
+                clusterOf(id),
+                alerts.find((a) => a.id === id)?.assigned_tier ?? 'UNIT',
+              );
+              break;
+            case 'dispatch':
+              window.dispatchEvent(
+                new CustomEvent('hq-show-dispatch', { detail: { alertId: id } }),
+              );
+              break;
+            case 'dossier':
+              // NOT expanded to the cluster: a dossier is about one report,
+              // and the popup's own id is the cluster master. The write paths
+              // expand; reading does not.
+              if (typeof onOpenDossier === 'function') {
+                onOpenDossier(id);
+              } else {
+                window.dispatchEvent(
+                  new CustomEvent('hq-open-dossier', { detail: { alertId: id } }),
+                );
+              }
+              break;
+            default:
+              // An action this build does not know about. Said, rather than
+              // ignored: a popup button that silently does nothing is the
+              // defect this whole change exists to fix.
+              console.error('[LIVE_MAP] unknown popup action:', action);
+          }
+        } catch (e: any) {
+          window.alert(`${action} failed: ${e?.message ?? e}`);
+        }
+      })();
     };
 
-    return () => {
-      delete (window as any)._hqResolve;
-      delete (window as any)._hqEscalate;
-      delete (window as any)._hqShowDispatch;
-      delete (window as any)._hqDossier;
-    };
-  }, [onResolve, onEscalate, onOpenDossier, clusterOf]);
+    // On the container, not on each popup: Leaflet creates and destroys popup
+    // DOM as markers open and close, so a listener attached to a popup dies
+    // with it — which is how this would quietly stop working again.
+    map.addEventListener('click', onPopupClick);
+    return () => map.removeEventListener('click', onPopupClick);
+  }, [alerts, onResolve, onEscalate, onOpenDossier, clusterOf]);
 
   return (
     <div style={{ position: 'relative', height: '100%', width: '100%' }}>

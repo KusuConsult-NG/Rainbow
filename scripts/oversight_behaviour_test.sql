@@ -219,16 +219,43 @@ BEGIN
   RAISE NOTICE 'PASS: a complaint does not climb the ladder towards the accused';
 END $$;
 
+-- NARROWED, DELIBERATELY, AND THIS IS WHY.
+--
+-- This asserted that NO row at all was queued for a complaint, "they would page
+-- the accused's own commander". When it was written the outbox had one kind —
+-- TIER_ESCALATION — and zero rows was a consequence of
+-- `awaiting_human_confirmation()` holding a complaint out of the ladder, not an
+-- independent rule that a complaint must never be announced.
+--
+-- 20261022000000 queues a NEW_INCIDENT notice on INSERT, addressed to
+-- `NEW.assigned_tier` — which the oversight trigger has already set to 'HQ'.
+-- HQ is who the complaint is routed TO, and telling them is the point: a
+-- complaint nobody is told about sits in a queue until somebody looks, which is
+-- the silence the outbox exists to end.
+--
+-- So the assertion now says what it always meant, and says it more strictly: no
+-- escalation notice, and nothing addressed anywhere but HQ.
 DO $$
-DECLARE n INTEGER;
+DECLARE
+  n   INTEGER;
+  bad INTEGER;
 BEGIN
   SELECT count(*) INTO n FROM public.notification_outbox
-   WHERE alert_id = '0eea0000-0000-4000-8000-00000000a002';
+   WHERE alert_id = '0eea0000-0000-4000-8000-00000000a002'
+     AND kind = 'TIER_ESCALATION';
   IF n <> 0 THEN
     RAISE EXCEPTION 'FAIL: % escalation notice(s) were queued for a complaint — '
                     'they would page the accused''s own commander', n;
   END IF;
-  RAISE NOTICE 'PASS: no escalation notice is queued for a complaint';
+
+  SELECT count(*) INTO bad FROM public.notification_outbox
+   WHERE alert_id = '0eea0000-0000-4000-8000-00000000a002'
+     AND coalesce(payload ->> 'to_tier', '') <> 'HQ';
+  IF bad <> 0 THEN
+    RAISE EXCEPTION 'FAIL: % notice(s) for a complaint are addressed below HQ, '
+                    'which is the command the complaint is about', bad;
+  END IF;
+  RAISE NOTICE 'PASS: nothing about a complaint is addressed below HQ';
 END $$;
 
 -- ── The debrief column ────────────────────────────────────────────────────
@@ -334,6 +361,66 @@ BEGIN
     RAISE EXCEPTION 'FAIL: the tier move does not say where it went: "%"', r.detail;
   END IF;
   RAISE NOTICE 'PASS: an automatic escalation reads as ESCALATED, naming both tiers';
+
+  -- WHO DID IT — FOR BOTH SHAPES OF ENTRY.
+  --
+  -- The entry planted above carries `"by":"SYSTEM"`, which is what the SQL
+  -- writers set. Both APPS write `by_email` instead, and `audit_trail()` read
+  -- only `by` — so every escalation an officer performed, from the console or
+  -- from a handset, was attributed to the system, and the test never noticed
+  -- because its own fixture used the machine's key. Asserted both ways now.
+  IF r.actor <> 'SYSTEM' THEN
+    RAISE EXCEPTION 'FAIL: an automatic escalation is attributed to "%" rather '
+                    'than SYSTEM', r.actor;
+  END IF;
+
+  UPDATE public.alerts
+     SET escalation_log = '[{"from_tier":"WARD","to_tier":"LGA",'
+                          '"reason":"Beyond local capacity",'
+                          '"by_email":"acp.musa@operationrainbow.plateau.gov.ng",'
+                          '"at":"2026-09-29T11:00:00Z"}]'::jsonb
+   WHERE id = '0eea0000-0000-4000-8000-00000000a001';
+
+  PERFORM pg_temp.as_user('0ee50000-0000-4000-8000-00000000c005');
+  SET LOCAL ROLE authenticated;
+  SELECT * INTO r FROM public.audit_trail(100)
+   WHERE alert_id = '0eea0000-0000-4000-8000-00000000a001' LIMIT 1;
+  RESET ROLE;
+
+  IF r.actor = 'SYSTEM' THEN
+    RAISE EXCEPTION 'FAIL: an escalation a PERSON performed is attributed to '
+                    'SYSTEM. The console and the app both write `by_email`; '
+                    'only the SQL writers set `by`.';
+  END IF;
+  IF r.actor NOT LIKE '%acp.musa%' THEN
+    RAISE EXCEPTION 'FAIL: the audit trail names "%" as the actor, not the '
+                    'officer who escalated it', r.actor;
+  END IF;
+  RAISE NOTICE 'PASS: an escalation performed by a person names that person';
+
+  -- And an entry with no actor at all still appears, as SYSTEM, rather than
+  -- being dropped: an audit entry withheld for a missing field is the worst
+  -- thing this list can do quietly.
+  UPDATE public.alerts
+     SET escalation_log = '[{"from_tier":"LGA","to_tier":"HQ",'
+                          '"reason":"No acknowledgement",'
+                          '"at":"2026-09-29T12:00:00Z"}]'::jsonb
+   WHERE id = '0eea0000-0000-4000-8000-00000000a001';
+
+  PERFORM pg_temp.as_user('0ee50000-0000-4000-8000-00000000c005');
+  SET LOCAL ROLE authenticated;
+  SELECT * INTO r FROM public.audit_trail(100)
+   WHERE alert_id = '0eea0000-0000-4000-8000-00000000a001' LIMIT 1;
+  RESET ROLE;
+
+  IF r.action IS NULL THEN
+    RAISE EXCEPTION 'FAIL: an entry naming no actor was dropped from the trail';
+  END IF;
+  IF r.actor <> 'SYSTEM' THEN
+    RAISE EXCEPTION 'FAIL: an entry naming no actor reads as "%" rather than '
+                    'SYSTEM', r.actor;
+  END IF;
+  RAISE NOTICE 'PASS: an entry naming no actor still appears, as SYSTEM';
 END $$;
 
 ROLLBACK;

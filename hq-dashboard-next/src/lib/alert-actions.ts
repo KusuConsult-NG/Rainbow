@@ -50,6 +50,26 @@ export interface EscalateOptions {
 }
 
 /**
+ * Whether the outside agency was actually told, and what to say if it was not.
+ *
+ * Separate from the escalation's own result on purpose. The escalation is
+ * committed to `alerts` before the notification is attempted, so a notification
+ * failure must not report the escalation as failed — an operator who is told
+ * "Escalation Failed" escalates again, and the incident collects duplicate
+ * handovers in its chain of custody.
+ *
+ * But it must not be swallowed either, and it was: the POST was fired and
+ * discarded with a `.catch(console.warn)`, so when it answered
+ * `400 Unknown agency 'NPF'` — which it did for four of the six destinations
+ * the menu offered — nothing on screen or in the record said the agency had
+ * not been reached. Two facts, reported separately.
+ */
+export interface AgencyDelivery {
+  delivered: boolean;
+  detail: string;
+}
+
+/**
  * Hands an incident to an LGA command and optionally an outside agency.
  *
  * Two invariants here were previously fixed bugs, both marked in the original
@@ -64,11 +84,72 @@ export interface EscalateOptions {
  * The escalation log and the notes are APPENDED to, never replaced — this is
  * the chain of custody for an incident.
  */
+/**
+ * Asks the server to reach an agency, and reports whether it did.
+ *
+ * A network failure here is "we do not know whether they were told", which is
+ * operationally the same as "they were not" — so it reads as undelivered rather
+ * than throwing into the escalation's own error path.
+ */
+async function notifyAgency(payload: {
+  alertIds: string[];
+  agency: string;
+  targetLga: string;
+  reason: string;
+  sentBy: string;
+}): Promise<AgencyDelivery> {
+  try {
+    const res = await fetch('/api/notify-agency', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // BOUNDED, because this is now awaited before the operator is told
+      // anything. The notification reaches Termii and an agency's own webhook
+      // endpoint, neither of which this console controls, and a dispatcher
+      // watching a spinner during an escalation is its own kind of failure.
+      // On a timeout the catch below reports "could not tell", which is the
+      // honest answer and the one that gets them to pick up the phone.
+      signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify({
+        alertId: payload.alertIds[0],
+        alertIds: payload.alertIds,
+        agency: payload.agency,
+        targetLga: payload.targetLga,
+        reason: payload.reason,
+        sentBy: payload.sentBy,
+      }),
+    });
+    // The body is the point. `res.ok` alone cannot tell a delivery from a
+    // skipped channel, and reading the status code instead of the verdict is
+    // how this went unnoticed for fifty merges.
+    const body = await res.json().catch(() => null) as
+      { delivered?: boolean; detail?: string; error?: string } | null;
+    if (body && typeof body.delivered === 'boolean') {
+      return {
+        delivered: body.delivered,
+        detail: body.detail || (body.delivered ? 'Agency notified.' : 'Agency was not notified.'),
+      };
+    }
+    return {
+      delivered: false,
+      detail: body?.error
+        ? `${payload.agency} was NOT notified: ${body.error}`
+        : `${payload.agency} was NOT notified: the notification endpoint answered ${res.status}.`,
+    };
+  } catch (e) {
+    console.warn('[HQ_AGENCY_NOTIFY_WARN]', e);
+    const message = (e as { message?: string } | null)?.message || 'the request did not complete';
+    return {
+      delivered: false,
+      detail: `Could not tell whether ${payload.agency} was notified: ${message}.`,
+    };
+  }
+}
+
 export async function escalateAlert(
   alertIds: AlertIds,
   options: EscalateOptions,
   actor: Actor,
-): Promise<ActionResult<{ commanderName: string; agency: string }>> {
+): Promise<ActionResult<{ commanderName: string; agency: string; notified: AgencyDelivery | null }>> {
   const ids = idsOf(alertIds);
   const lgaTarget = options.targetLga || 'ALL';
   const agencyTarget = options.targetAgency || 'ALL';
@@ -175,25 +256,28 @@ export async function escalateAlert(
       if (error) throw error;
     }
 
-    // Fire agency notification if a specific external agency was selected.
-    // Deliberately not awaited and never fatal: the escalation is already
-    // committed, and a failed notification must not report it as failed.
+    // Notify the outside agency if a specific one was selected.
+    //
+    // AWAITED, AND THE ANSWER IS READ. Still never fatal to the escalation —
+    // see `AgencyDelivery` — but the outcome travels back to the caller so the
+    // operator can be told that the Police were not reached, which is a
+    // different thing from the escalation failing and needs a different action
+    // from them: pick up the phone.
+    let notified: AgencyDelivery | null = null;
     if (agencyTarget !== 'ALL' && agencyTarget !== 'HQ') {
-      fetch('/api/notify-agency', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          alertId: ids[0],
-          alertIds: ids,
-          agency: agencyTarget,
-          targetLga: lgaTarget,
-          reason,
-          sentBy: byEmail,
-        }),
-      }).catch(err => console.warn('[HQ_AGENCY_NOTIFY_WARN]', err));
+      notified = await notifyAgency({
+        alertIds: ids,
+        agency: agencyTarget,
+        targetLga: lgaTarget,
+        reason,
+        sentBy: byEmail,
+      });
     }
 
-    return { ok: true, value: { commanderName: targetCommanderName, agency: agencyTarget } };
+    return {
+      ok: true,
+      value: { commanderName: targetCommanderName, agency: agencyTarget, notified },
+    };
   } catch (e) {
     console.error('[HQ_ESCALATE_ERR]', e);
     return failed(e, 'Unknown error');
@@ -482,8 +566,17 @@ export async function sendChatMessage(
     const { error } = await supabase.from('chat_messages').insert({
       alert_id: alertId,
       sender_id: actor.id,
-      sender_name: actor.name || actor.email || 'HQ DISPATCH',
-      sender_role: actor.role || 'HQ_COMMAND',
+      // Neither of these may invent an author. This used to store
+      // 'HQ DISPATCH' and 'HQ_COMMAND' for an actor the console could not name
+      // — a claim about who said something, written into the operational
+      // record of an incident, and the T-32 fault with the attribution running
+      // the other way: there the audit trail called every human SYSTEM, here
+      // the chat called an unknown author Command. The app side already
+      // learned this (see secure_chat_screen.dart: "the thread carried
+      // HQ_COMMAND from one writer and RESPONDER from another for the same
+      // person"); the console side had not.
+      sender_name: actor.name || actor.email || 'UNKNOWN',
+      sender_role: actor.role || 'UNKNOWN',
       message: text,
     });
     if (error) throw error;

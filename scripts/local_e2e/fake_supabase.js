@@ -25,7 +25,52 @@ const http = require('http');
 const crypto = require('crypto');
 const path = require('path');
 const { tables, PEOPLE, PASSWORD, DOMAIN } = require('./fixtures');
-const { columns: schema, relationships, defaults: columnDefaults } = require('./schema').build();
+const buildSchema = require('./schema');
+
+// The schema is held in containers that are REFILLED rather than replaced, so
+// every reference below keeps working when the migrations change under a
+// stand-in that is already running. See `refreshSchema`.
+const schema = {};
+const relationships = {};
+const columnDefaults = {};
+let loadedGeneration = '';
+
+function refreshSchema(reason) {
+  const built = buildSchema.build();
+  for (const target of [schema, relationships, columnDefaults]) {
+    for (const key of Object.keys(target)) delete target[key];
+  }
+  Object.assign(schema, built.columns);
+  Object.assign(relationships, built.relationships);
+  Object.assign(columnDefaults, built.defaults);
+  loadedGeneration = buildSchema.generation();
+  if (reason) {
+    console.log(
+      `[fake] ${reason}: schema REBUILT — ${Object.keys(schema).length} tables, `
+      + `alerts has ${(schema.alerts || []).length} columns`,
+    );
+  }
+}
+refreshSchema();
+
+/**
+ * Re-read the migrations when they have changed on disk.
+ *
+ * A stand-in left running across a migration otherwise rejects the column that
+ * migration adds, exactly as it rejects one that does not exist — and the
+ * screen built on it comes back empty while the harness names the screen. One
+ * `stat` per file, at most once a second, and nothing is read unless the
+ * fingerprint has moved.
+ */
+let lastChecked = 0;
+function refreshSchemaIfStale() {
+  const now = Date.now();
+  if (now - lastChecked < 1000) return;
+  lastChecked = now;
+  if (buildSchema.generation() !== loadedGeneration) {
+    refreshSchema('supabase/migrations/ changed while this stand-in was running');
+  }
+}
 
 const PORT = Number(process.env.FAKE_SUPABASE_PORT || 54321);
 
@@ -43,6 +88,15 @@ const log = [];
 const unknownColumns = [];
 /** Writes the app performed, so a "did the broadcast actually send?" claim has evidence. */
 const writes = [];
+/** Every rpc the app called and this stand-in answered. */
+const rpcCalls = [];
+/**
+ * Every rpc the app called that this stand-in does NOT implement. Any entry is a
+ * screen or a flow running against a 501, and a harness that does not look at
+ * this cannot tell that apart from a screen that works — which is exactly how
+ * the Audit Logs screen was photographed empty and reported as rendering.
+ */
+const rpcMisses = [];
 
 // ---------------------------------------------------------------------------
 // Fixture self-check: a fixture column the schema does not define is a bug in
@@ -358,6 +412,11 @@ const server = http.createServer(async (req, res) => {
 
   log.push({ method: req.method, path: url.pathname, search: url.search });
 
+  // Before anything is answered from the schema, make sure the schema is the
+  // one on disk. A migration applied while this process was up must not read
+  // back as a column that does not exist.
+  refreshSchemaIfStale();
+
   if (req.method === 'OPTIONS') return send(204, null);
 
   // ---- Auth -------------------------------------------------------------
@@ -498,6 +557,204 @@ const server = http.createServer(async (req, res) => {
     const h = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     sessions.delete(h);
     return send(204, null);
+  }
+
+  // ---- RPC ---------------------------------------------------------------
+  //
+  // THIS STAND-IN HAD NO RPC AT ALL, AND NOTHING NOTICED.
+  //
+  // `/rest/v1/rpc/audit_trail` fell through to the table router below, which
+  // took the whole path segment as a relation name and answered
+  //
+  //     400 {"code":"42P01","message":"relation \"public.rpc/audit_trail\" does not exist"}
+  //
+  // So every RPC either app makes — fifteen functions, including the one the
+  // Audit Logs screen is built on and the one that issues a handset's SMS
+  // fallback key on every sign-in — was refused, in a run that reported
+  // 46/46 and 15/15. The console's own report file holds the proof:
+  //
+  //     ('hq:audit', 'Failed to load resource: ... 400 (Bad Request)')
+  //     ('hq:audit', '[AUDIT_TRAIL_ERR] [object Object]')
+  //
+  // recorded in `browserProblems`, which nothing asserts on. An empty audit
+  // screen was photographed as evidence that the audit screen renders.
+  //
+  // Two changes. The functions the browser flows actually reach are
+  // implemented over the same in-memory tables as everything else; and anything
+  // NOT implemented answers 501 with its own name, so the next one to be added
+  // in the apps shows up as "the stand-in does not implement X" instead of as a
+  // lie about a missing relation.
+  const RPCS = {
+    /**
+     * Flattens `alerts.escalation_log` the way the SQL does: one row per entry,
+     * newest first. Deliberately mirrors the column ORDER and the coalesce
+     * chain of public.audit_trail(), because the console reads these by name
+     * and renders `from_tier → to_tier` out of `detail`.
+     */
+    audit_trail(body) {
+      const limit = Math.max(1, Math.min(Number(body?.p_limit) || 100, 500));
+      const out = [];
+      for (const a of tables.alerts || []) {
+        const log = Array.isArray(a.escalation_log) ? a.escalation_log : [];
+        for (const e of log) {
+          out.push({
+            alert_id: a.id,
+            reference: a.public_reference || String(a.id).slice(0, 8),
+            incident: a.type,
+            at: e.at || a.updated_at || a.created_at,
+            action: String(
+              e.action || (e.from_tier ? 'ESCALATED' : 'UPDATED'),
+            ).toUpperCase(),
+            actor: e.by || e.by_email || 'SYSTEM',
+            detail: e.from_tier
+              ? `${e.from_tier} → ${e.to_tier}`
+                + (e.reason ? ` (${e.reason})` : '')
+              : (e.reason || ''),
+          });
+        }
+      }
+      out.sort((x, y) => String(y.at).localeCompare(String(x.at)));
+      return out.slice(0, limit);
+    },
+
+    /**
+     * Issues a device key, as `RETURNS TABLE (device_ref BYTEA, secret BYTEA)`.
+     * PostgREST renders BYTEA as a `\x…` hex string and the app decodes exactly
+     * that, so the shape matters as much as the values: returning base64 here
+     * would be read as hex and produce a key the ingest route cannot match.
+     */
+    register_sms_device(body, user) {
+      if (!user) {
+        return { error: { code: 'P0001', message: 'not signed in' } };
+      }
+      const ref = crypto.randomBytes(4);
+      const secret = crypto.randomBytes(32);
+      tables.sms_device_keys = tables.sms_device_keys || [];
+      for (const row of tables.sms_device_keys) {
+        if (row.user_id === user.id && !row.revoked_at) {
+          row.revoked_at = new Date().toISOString();
+        }
+      }
+      tables.sms_device_keys.push({
+        device_ref: `\\x${ref.toString('hex')}`,
+        user_id: user.id,
+        secret: `\\x${secret.toString('hex')}`,
+        created_at: new Date().toISOString(),
+        last_used_at: null,
+        revoked_at: null,
+      });
+      return [{
+        device_ref: `\\x${ref.toString('hex')}`,
+        secret: `\\x${secret.toString('hex')}`,
+      }];
+    },
+
+    /**
+     * The persisted AI debrief for one incident, newest first.
+     *
+     * `RETURNS TABLE (body, model, requested_by, created_at)`, so a list even
+     * though the dossier reads one. The console was reading this through a 400
+     * and showing "no AI summary" for every incident, which is also what a
+     * genuinely ungenerated report looks like (T-7 is the same confusion, one
+     * layer up).
+     */
+    latest_ai_report(args) {
+      const id = args?.p_alert_id;
+      // p_kind IS PART OF THE CONTRACT, not an optional filter. 'summary' is the
+      // forensic debrief and 'triage' is a classification recommendation; the
+      // migration keeps them apart because, in its own words, "a triage
+      // recommendation is not a report". Ignoring it here would have handed the
+      // dossier a triage row and rendered it as the debrief.
+      const kind = args?.p_kind;
+      const rows = (tables.incident_ai_reports || [])
+        .filter((r) => r.alert_id === id && (!kind || r.kind === kind))
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      return rows.slice(0, 1).map((r) => ({
+        body: r.body, model: r.model,
+        requested_by: r.requested_by, created_at: r.created_at,
+      }));
+    },
+
+    /**
+     * How much to believe a USSD report, from the caller's history and from
+     * independent reports near the same place.
+     *
+     * Counted off the same in-memory alerts, with `geo_key` folding applied the
+     * crude way (upper-case, collapse runs of whitespace) — enough for the panel
+     * to render a verdict, and NOT a reimplementation of public.geo_key(), which
+     * the SQL behaviour harness covers against real PostgreSQL.
+     */
+    ussd_report_credibility(args) {
+      const key = (v) => String(v || '').toUpperCase().replace(/\s+/g, ' ').trim();
+      const all = tables.alerts || [];
+      const it = all.find((a) => a.id === args?.p_alert_id);
+      if (!it) return [];
+      const byCaller = all.filter(
+        (a) => a.reporter_msisdn && a.reporter_msisdn === it.reporter_msisdn);
+      const near = all.filter(
+        (a) => a.id !== it.id
+          && key(a.geo_lga) === key(it.geo_lga)
+          && key(a.geo_ward) === key(it.geo_ward));
+      return [{
+        first_time_caller: byCaller.length <= 1,
+        caller_report_count: byCaller.length,
+        caller_false_reports: byCaller.filter((a) => a.false_report_at).length,
+        caller_known_days: 0,
+        callback_offered: !!it.caller_may_be_called,
+        corroborating_reports: near.length,
+        corroborating_numbers: new Set(
+          near.map((a) => a.reporter_msisdn).filter(Boolean)).size,
+      }];
+    },
+
+    /** Marks a USSD report confirmed. `RETURNS TABLE (confirmed, tier)`. */
+    confirm_ussd_report(args) {
+      const row = (tables.alerts || []).find((a) => a.id === args?.p_alert_id);
+      if (!row || !row.assigned_tier) return [];
+      row.ussd_confirmed_at = new Date().toISOString();
+      return [{ confirmed: true, tier: row.assigned_tier }];
+    },
+
+    /** Marks a report false. `RETURNS BOOLEAN`, so a bare value, not a row. */
+    mark_false_report(args) {
+      const row = (tables.alerts || []).find((a) => a.id === args?.p_alert_id);
+      if (!row) return false;
+      row.false_report_at = new Date().toISOString();
+      return true;
+    },
+
+    /** Retires this user's keys on sign-out. Returns the count, as the SQL does. */
+    revoke_sms_device_keys(body, user) {
+      if (!user) return 0;
+      let n = 0;
+      for (const row of tables.sms_device_keys || []) {
+        if (row.user_id === user.id && !row.revoked_at) {
+          row.revoked_at = new Date().toISOString();
+          n += 1;
+        }
+      }
+      return n;
+    },
+  };
+
+  if (url.pathname.startsWith('/rest/v1/rpc/')) {
+    const fn = url.pathname.slice('/rest/v1/rpc/'.length);
+    const impl = RPCS[fn];
+    if (!impl) {
+      rpcMisses.push(fn);
+      return send(501, {
+        code: 'FAKE_NO_RPC',
+        message: `the local stand-in does not implement rpc ${fn}(). `
+          + `It is defined in supabase/migrations/ and real PostgREST would run `
+          + `it; add it to RPCS in scripts/local_e2e/fake_supabase.js, or assert `
+          + `on this refusal instead of letting the screen render empty.`,
+      });
+    }
+    const args = req.method === 'POST' ? await body(req) : null;
+    const result = impl(args, bearer(req));
+    if (result && result.error) return send(400, result.error);
+    rpcCalls.push({ fn, args });
+    return send(200, result);
   }
 
   // ---- PostgREST --------------------------------------------------------
@@ -835,17 +1092,35 @@ const control = http.createServer((req, res) => {
     unknownColumns.length = 0;
     writes.length = 0;
     broadcasts.length = 0;
+    rpcCalls.length = 0;
+    rpcMisses.length = 0;
     if (req.url === '/reset-data') {
       const fresh = JSON.parse(JSON.stringify(PRISTINE));
       for (const name of Object.keys(tables)) {
         tables[name].length = 0;
-        tables[name].push(...fresh[name]);
+        // `?? []` BECAUSE A TABLE CAN APPEAR AFTER PRISTINE WAS TAKEN.
+        //
+        // PRISTINE is snapshotted at startup. `register_sms_device()` wrote to a
+        // table the fixtures had not declared, so the key existed in `tables`
+        // and not in the snapshot — and `push(...undefined)` threw INSIDE this
+        // request handler, which is an uncaught exception in an http server, so
+        // the whole stand-in died. The harness that was mid-run got
+        // `UND_ERR_SOCKET: other side closed` from the control plane and the
+        // suite aborted after its fifth pass, forty-five minutes in, pointing
+        // at a fetch in user_features.js that had nothing to do with it.
+        //
+        // The fixtures declare that table now, which is the real fix. This is
+        // the second one: resetting an unknown table empties it instead of
+        // killing the process, because the cost of being wrong here is every
+        // result after the mistake.
+        tables[name].push(...(fresh[name] ?? []));
       }
     }
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end('{"reset":true}');
   }
   res.writeHead(200, { 'content-type': 'application/json' });
-  res.end(JSON.stringify({ log, unknownColumns, writes, broadcasts }, null, 1));
+  res.end(JSON.stringify(
+    { log, unknownColumns, writes, broadcasts, rpcCalls, rpcMisses }, null, 1));
 });
 control.listen(PORT + 1, '127.0.0.1');

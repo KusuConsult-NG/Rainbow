@@ -26,11 +26,89 @@ OUT="${E2E_OUT:-$ROOT/local_e2e_screenshots}"
 export NO_PROXY="127.0.0.1,localhost"
 export no_proxy="127.0.0.1,localhost"
 
+# WHERE THE BROWSER IS.
+#
+# In CI `npm ci` downloads puppeteer's own Chrome and it resolves itself. A
+# sandbox that sets PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 has a Chromium already
+# and no puppeteer download, so every pass died at launch with "Could not find
+# Chrome" — after the build, after the server was up, forty seconds in. The
+# browser was on disk the whole time and the run needed one environment
+# variable that nothing recorded.
+#
+# Resolved here, once, rather than left to whoever remembers to export it:
+# an explicit PUPPETEER_EXECUTABLE_PATH wins, then puppeteer's own cache
+# (CI), then a sandbox Chromium. Unset if none is found, so puppeteer reports
+# its own error rather than this script inventing a worse one.
+if [[ -z "${PUPPETEER_EXECUTABLE_PATH:-}" ]]; then
+  # Puppeteer's own download, which is what CI has. Left to resolve itself:
+  # it knows which build its version wants and this script must not guess.
+  shopt -s nullglob
+  puppeteer_own=("${PUPPETEER_CACHE_DIR:-$HOME/.cache/puppeteer}"/chrome*/*/chrome \
+                 "${PUPPETEER_CACHE_DIR:-$HOME/.cache/puppeteer}"/chrome*/*/chrome-*/chrome)
+  shopt -u nullglob
+  if (( ${#puppeteer_own[@]} == 0 )); then
+    for candidate in \
+      /opt/pw-browsers/chromium \
+      /usr/bin/chromium \
+      /usr/bin/chromium-browser \
+      /usr/bin/google-chrome
+    do
+      # -f as well as -x: a DIRECTORY is executable, and passing one to
+      # puppeteer fails with a confusing ENOENT rather than "not a browser".
+      if [[ -f "$candidate" && -x "$candidate" ]]; then
+        export PUPPETEER_EXECUTABLE_PATH="$candidate"
+        echo "==> browser: $candidate (puppeteer has no download of its own)"
+        break
+      fi
+    done
+    if [[ -z "${PUPPETEER_EXECUTABLE_PATH:-}" ]]; then
+      echo "==> no browser anywhere; the browser passes will fail at launch and say so" >&2
+    fi
+  fi
+fi
+
+# Is anything listening? No curl, no lsof: a bare TCP connect, which cannot be
+# fooled by a server that answers 404.
+port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && exec 3<&- || return 1; }
+
+# A SECOND RUN USED TO TEST THE FIRST RUN'S BUILD.
+#
+# `npm start` forks `sh -c next start`, so $NEXT_PID below was the WRAPPER and
+# killing it left `next-server` holding :3000. On the next run `npm start` could
+# not bind, exited, and the health check two lines down was satisfied by the
+# server still running from last time — while `npm run build` had meanwhile
+# replaced the `.next` directory underneath it. Every screen then rendered blank
+# and 30 of 46 checks failed, against code that was fine. Diagnosing that cost
+# more than the run.
+#
+# Two changes. Next is started DIRECTLY so the PID is the server's own, and this
+# script refuses to start at all if either port is taken, because a run that
+# silently exercises the wrong build is worse than no run.
 cleanup() {
   [[ -n "${FAKE_PID:-}" ]] && kill "$FAKE_PID" 2>/dev/null || true
   [[ -n "${NEXT_PID:-}" ]] && kill "$NEXT_PID" 2>/dev/null || true
+  # Next spawns workers; give the group a moment, then say so rather than
+  # leaving the next run to discover it.
+  for _ in $(seq 1 20); do
+    port_busy "$PORT" || port_busy "$FAKE_PORT" || return 0
+    sleep 0.5
+  done
+  port_busy "$PORT" && echo "WARNING: something is still listening on :$PORT — kill it before the next run" >&2
+  port_busy "$FAKE_PORT" && echo "WARNING: something is still listening on :$FAKE_PORT" >&2
+  return 0
 }
 trap cleanup EXIT
+
+for occupied in "$PORT" "$FAKE_PORT"; do
+  if port_busy "$occupied"; then
+    echo "127.0.0.1:$occupied is already in use." >&2
+    echo "This run would not be able to bind it, and the health checks below" >&2
+    echo "would be answered by whatever is there — most likely a server left" >&2
+    echo "over from an earlier run, serving a build this one has replaced." >&2
+    echo "Stop it first:  pkill -f next-server ; pkill -f fake_supabase.js" >&2
+    exit 1
+  fi
+done
 
 echo "==> Supabase stand-in on :$FAKE_PORT"
 node "$ROOT/scripts/local_e2e/fake_supabase.js" &
@@ -59,7 +137,10 @@ npm run build
 echo "==> serving it on :$PORT"
 # A production build, not `next dev`. The guard is Next's proxy, and the thing
 # being tested is what a deployed server does.
-PORT="$PORT" npm start &
+#
+# `next` directly rather than `npm start`: npm forks a shell, and killing the
+# shell leaves the server running on the port — see cleanup() above.
+./node_modules/.bin/next start -p "$PORT" &
 NEXT_PID=$!
 
 for _ in $(seq 1 60); do

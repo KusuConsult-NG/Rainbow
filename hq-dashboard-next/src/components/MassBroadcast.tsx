@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AGENCY_LIST, AGENCY_TARGET_ALL } from '@/lib/agencies';
 import { supabase } from '@/lib/supabase';
 import { Radio, Send, ShieldAlert, Loader2, MapPin, Users, MessageSquare } from 'lucide-react';
 import { plateauTacticalMap } from '@/lib/tactical_mapping';
@@ -172,13 +173,29 @@ export default function MassBroadcast() {
               value={targetAgency}
               onChange={(e) => setTargetAgency(e.target.value)}
             >
-              <option value="ALL">🌐 ALL JOINT AGENCIES</option>
-              <option value="RAINBOW">🌈 OPERATION RAINBOW TASKFORCE</option>
-              <option value="NPF">👮‍♂️ NIGERIA POLICE FORCE (NPF)</option>
-              <option value="NSCDC">🛡️ CIVIL DEFENCE CORPS (NSCDC)</option>
-              <option value="MILITARY">🎖️ MILITARY STF (ENDURING PEACE)</option>
-              <option value="DSS">🕶️ DEPT OF STATE SERVICES (DSS)</option>
-              <option value="VGN">🛡️ VIGILANTE GROUP (VGN)</option>
+              {/*
+                BUILT FROM THE SHARED LIST — the same correction as T-28, and
+                it became urgent the moment this control acquired a reader.
+
+                These were six hand-written options from the staff-badge list:
+                NPF, MILITARY, RAINBOW, VGN and two that happened to overlap.
+                While `target_agency` was read by nothing that was merely
+                untidy. Now `advisoryReaches` compares it against the viewer's
+                agency — POLICE / ARMY / DSS / NSCDC / FRSC / OPSH, derived from
+                their liaison role — so an advisory addressed to "NIGERIA POLICE
+                FORCE (NPF)" would have matched no liaison at all and reached
+                nobody but command, which is exactly what the escalation menu
+                did to incidents.
+
+                RAINBOW and VGN are gone for the same reason they are not
+                escalation destinations: Operation Rainbow's own staff are
+                reached by `target_audience: AGENTS`, and no vigilante outfit
+                has a console account to read an advisory with.
+              */}
+              <option value={AGENCY_TARGET_ALL}>🌐 ALL JOINT AGENCIES</option>
+              {AGENCY_LIST.map(a => (
+                <option key={a.code} value={a.code}>{a.icon} {a.label.toUpperCase()}</option>
+              ))}
             </select>
           </div>
         </div>

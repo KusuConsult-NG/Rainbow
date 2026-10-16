@@ -17,6 +17,8 @@ import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/alerts_feed.dart';
 import 'package:rainbow_app/features/agent/alert_row.dart';
 import 'package:rainbow_app/features/agent/assignable_responders.dart';
+import 'package:rainbow_app/services/alert_audience.dart';
+import 'package:rainbow_app/services/place_label.dart';
 import 'package:rainbow_app/features/agent/responder_tier.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/auth_service.dart';
@@ -31,63 +33,18 @@ import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
 /// safety problem rather than a cosmetic one.
 final alertsStreamProvider = StreamProvider<AlertsFeed>((ref) {
   final auth = ref.watch(authProvider);
-  final profile = auth.profile ?? {};
-  final role = (profile['role'] as String? ?? '').toUpperCase();
-  final geoLga = profile['geo_lga'] as String?;
-  final geoWard = profile['geo_ward'] as String?;
-  final geoPu = profile['geo_pu'] as String?;
-  final userId = auth.user?.id;
+  // The rule itself is in lib/services/alert_audience.dart, with its own tests.
+  // It was a `.where()` in this closure, and every test that touches the feed
+  // overrides this provider — so the rule deciding which emergencies reach a
+  // responder had no test, and had no branch for an agency liaison at all while
+  // RLS was handing them exactly their agency's incidents.
+  final officer = AlertAudience.fromProfile(auth.profile, userId: auth.user?.id);
 
-  return supabaseAlertsFeed(SupabaseConfig.client).map((feed) {
-    return feed.copyWith(rows: feed.rows.where((alert) {
-      final aGeoLga = alert['geo_lga'] as String?;
-      final aGeoWard = alert['geo_ward'] as String?;
-      final aGeoPu = alert['geo_pu'] as String?;
-      final aAssignedTo = alert['assigned_to'] as String?;
-      final aAssignedResponders = (alert['assigned_responders'] as List<dynamic>?)?.cast<String>() ?? [];
-
-      // 1. Directly assigned to officer or multi-unit squad -> ALWAYS SHOW
-      if (userId != null && (aAssignedTo == userId || aAssignedResponders.contains(userId))) return true;
-      if (aAssignedTo == 'HQ' || aAssignedTo == 'LGA' || aAssignedTo == 'WARD') {
-        if (role.contains(aAssignedTo!) || role.contains('HQ') || role == 'ADMIN') return true;
-      }
-
-      // 2. State HQ Commanders -> ALWAYS SHOW ALL
-      if (role.contains('STATE') || role.contains('HQ') || role == 'ADMIN') return true;
-
-      // Place names are compared on geoKey, not on toUpperCase(). This app
-      // writes a ward resolved from the GPS centroid asset ('GINDIRI  I') while
-      // an officer is posted from the tactical map ('GINDIRI  1'), so the raw
-      // comparison failed for four Mangu wards. Here it was masked by the LGA
-      // fallback below the ward test — the commander saw the incident for the
-      // wrong reason — and for a polling-unit responder it was not masked at
-      // all. See lib/core/geo/geo_key.dart.
-
-      // 3. LGA Commanders -> Show alerts matching LGA, unassigned, or escalated to LGA
-      if (role.contains('LGA')) {
-        if (geoLga == null || geoLga == 'ALL') return true;
-        return aGeoLga == null || sameGeo(aGeoLga, geoLga);
-      }
-
-      // 4. Ward Commanders -> Show alerts matching Ward/LGA
-      if (role.contains('WARD')) {
-        if (geoWard == null || geoWard == 'ALL') return true;
-        return aGeoWard == null || sameGeo(aGeoWard, geoWard) ||
-               sameGeo(aGeoLga, geoLga);
-      }
-
-      // 5. PU / Beat Responders -> Show alerts in their PU, Ward, LGA, or unassigned general alerts
-      if (sameGeo(aGeoPu, geoPu)) return true;
-      if (sameGeo(aGeoWard, geoWard)) return true;
-      if (sameGeo(aGeoLga, geoLga)) return true;
-      if (aGeoPu == null && aGeoWard == null && aGeoLga == null) return true;
-
-      // No matching rule — don't show this alert to avoid delivering all
-      // statewide data to every field device. The build-level filteredAlerts
-      // handles any edge cases for assigned-to-me alerts.
-      return false;
-    }).toList(),);
-  });
+  return supabaseAlertsFeed(SupabaseConfig.client).map(
+    (feed) => feed.copyWith(
+      rows: feed.rows.where((alert) => alertReaches(alert, officer)).toList(),
+    ),
+  );
 });
 
 /// Documentation for this public member.
@@ -511,6 +468,23 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
 
 
       final auth = ref.watch(authProvider);
+
+      // AN OUTSIDE AGENCY IS NOT ON THE COMMAND CHAIN.
+      //
+      // Answered here as well as in `alertsStreamProvider`, because this is a
+      // SECOND filter and it was the one that actually hid the incident. The
+      // stream filter delivered the row; `tierCanSee` below then dropped it,
+      // because the tier ladder is Operation Rainbow's own hierarchy and a
+      // liaison has no rung on it. `ResponderTier.unknown` ranks below
+      // everything, and an incident handed to an agency always has a Rainbow
+      // tier owning it — so the rule meant "a liaison sees nothing that was
+      // ever assigned to anybody", which is every incident they are sent.
+      //
+      // Found by the browser harness after the first fix: both liaisons' feeds
+      // came back completely empty, which is the only reason this second filter
+      // was looked at. One rule, in one place, answers them.
+      final officer = AlertAudience.fromProfile(auth.profile, userId: uid);
+      if (officer.isLiaison) return alertReaches(alert, officer);
 
       // OWNER TIER AND EVERYONE ABOVE.
       //
@@ -1042,8 +1016,11 @@ class _MissionCard extends ConsumerWidget {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          '${alert['geo_lga'] ?? 'PLATEAU'} · ${alert['geo_ward'] ?? 'HQ'} · ${alert['geo_pu'] ?? 'UNIT'}'
-                              .toUpperCase(),
+                          // `PLATEAU · HQ · UNIT` used to appear here when the
+                          // jurisdiction had not resolved, and `· UNIT` on
+                          // almost every card, since there is no polling unit
+                          // from coordinates. See place_label.dart.
+                          incidentPlace(alert).toUpperCase(),
                           style: GoogleFonts.outfit(
                             color: AppColors.textDim,
                             fontSize: 10,
@@ -1476,6 +1453,24 @@ class _EscalationDialogState extends State<_EscalationDialog> {
   List<Map<String, dynamic>> _availableCommanders = [];
   bool _loadingCommanders = true;
 
+  /// HAND ACROSS TO A WARD INSTEAD OF UP TO HQ.
+  ///
+  /// Offered only to an LGA commander, because the wards are theirs to direct.
+  /// The chain only ever climbed — `escalationTargetFor` gives LGA exactly one
+  /// target, HQ — so a commander who judged that a neighbouring ward should
+  /// take an incident could assign individual responders but could not give
+  /// that ward's COMMANDER the incident. See
+  /// `20261021000000_an_lga_can_hand_an_incident_to_a_ward.sql`.
+  bool _handToWard = false;
+
+  /// Whether this escalation may be handed sideways at all.
+  bool get _canHandToWard => widget.assignedTier.toUpperCase() == 'LGA';
+
+  /// The tier taking it. One place, asked by the loader, the body and the write.
+  String get _targetTier => _handToWard
+      ? 'WARD'
+      : (escalationTargetFor(widget.assignedTier) ?? 'HQ');
+
   final List<String> _presets = [
     'Tactical Resource Exhaustion',
     'Overwhelming Threat Level',
@@ -1491,23 +1486,41 @@ class _EscalationDialogState extends State<_EscalationDialog> {
   }
 
   Future<void> _loadTargetCommanders() async {
-    final targetTier = escalationTargetFor(widget.assignedTier) ?? 'HQ';
+    final targetTier = _targetTier;
 
     // Map tier to role string
     final roleMap = {'WARD': 'WARD_COMMAND', 'LGA': 'LGA_COMMAND', 'HQ': 'HQ_COMMAND'};
     final targetRole = roleMap[targetTier] ?? 'HQ_COMMAND';
 
+    if (mounted) {
+      setState(() {
+        _loadingCommanders = true;
+        _availableCommanders = [];
+        _targetCommander = null;
+      });
+    }
+
     try {
-      // Get the alert's geo_lga to find commanders in the right area
+      // Get the alert's geo_lga to find commanders in the right area.
+      //
+      // Handing SIDEWAYS is scoped to the escalating officer's own LGA, not the
+      // incident's: the point is that an LGA commander directs the wards they
+      // command, and the incident may sit in a ward of another LGA — which is
+      // often why it is being handed over at all.
       final alertLga = widget.alertDoc['geo_lga'] as String?;
+      final myLga = _handToWard
+          ? (SupabaseConfig.client.auth.currentUser == null
+              ? alertLga
+              : await _myLga() ?? alertLga)
+          : alertLga;
       var query = SupabaseConfig.client
           .from('profiles')
           .select('id, full_name, role, geo_lga, geo_ward')
           .eq('role', targetRole);
 
       // For ward/LGA tier, narrow to same LGA
-      if (alertLga != null && targetTier != 'HQ') {
-        query = query.eq('geo_lga', alertLga);
+      if (myLga != null && targetTier != 'HQ') {
+        query = query.eq('geo_lga', myLga);
       }
 
       final res = await query.limit(20);
@@ -1525,6 +1538,23 @@ class _EscalationDialogState extends State<_EscalationDialog> {
     }
   }
 
+  /// The escalating officer's own LGA, for scoping a sideways hand-down.
+  Future<String?> _myLga() async {
+    try {
+      final me = SupabaseConfig.client.auth.currentUser;
+      if (me == null) return null;
+      final row = await SupabaseConfig.client
+          .from('profiles')
+          .select('geo_lga')
+          .eq('id', me.id)
+          .maybeSingle();
+      return row?['geo_lga'] as String?;
+    } catch (e) {
+      debugPrint('[ESCALATION_MY_LGA_ERR] $e');
+      return null;
+    }
+  }
+
   @override
   void dispose() {
     _notesController.dispose();
@@ -1533,7 +1563,7 @@ class _EscalationDialogState extends State<_EscalationDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final targetTier = escalationTargetFor(widget.assignedTier) ?? 'HQ';
+    final targetTier = _targetTier;
 
     return AlertDialog(
       backgroundColor: AppColors.surfaceContainer,
@@ -1562,13 +1592,76 @@ class _EscalationDialogState extends State<_EscalationDialog> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Transferring command to $targetTier tier',
+            _handToWard
+                ? 'Handing command to a ward in your LGA'
+                : 'Transferring command to $targetTier tier',
             style: GoogleFonts.outfit(
               color: AppColors.textDim,
               fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
           ),
+          // UP, OR ACROSS. Only an LGA commander is offered the choice: the
+          // wards are theirs to direct, and the chain above them has one rung.
+          if (_canHandToWard) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                for (final toWard in [false, true]) ...[
+                  Expanded(
+                    child: Semantics(
+                      button: true,
+                      selected: _handToWard == toWard,
+                      label: toWard
+                          ? 'Hand to a ward'
+                          : 'Escalate to ${escalationTargetFor(widget.assignedTier) ?? 'HQ'}',
+                      excludeSemantics: true,
+                      child: InkWell(
+                        onTap: _isSubmitting || _handToWard == toWard
+                            ? null
+                            : () {
+                                setState(() => _handToWard = toWard);
+                                unawaited(_loadTargetCommanders());
+                              },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _handToWard == toWard
+                                ? AppColors.primary.withValues(alpha: 0.18)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: _handToWard == toWard
+                                  ? AppColors.primary
+                                  : AppColors.outline,
+                            ),
+                          ),
+                          child: Center(
+                            child: Text(
+                              toWard
+                                  ? 'HAND TO A WARD'
+                                  : 'ESCALATE TO ${escalationTargetFor(widget.assignedTier) ?? 'HQ'}',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.outfit(
+                                color: _handToWard == toWard
+                                    ? AppColors.primary
+                                    : AppColors.textSecondary,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 10,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (!toWard) const SizedBox(width: 8),
+                ],
+              ],
+            ),
+          ],
         ],
       ),
       content: Form(
@@ -1749,7 +1842,7 @@ class _EscalationDialogState extends State<_EscalationDialog> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSubmitting = true);
 
-    final targetTier = escalationTargetFor(widget.assignedTier) ?? 'HQ';
+    final targetTier = _targetTier;
 
     try {
       final alertId = widget.alertDoc['id'] as String?;
@@ -1764,6 +1857,14 @@ class _EscalationDialogState extends State<_EscalationDialog> {
       final escalationEntry = {
         'from_tier': widget.assignedTier,
         'to_tier': targetTier,
+        // NAMED, when it is handed across rather than up. `to_ward` is what
+        // `alert_delegated_to_my_ward()` reads, and the LGA goes with it
+        // because ward names are not unique across Plateau's seventeen LGAs.
+        // Written from the TARGET COMMANDER's own posting, so the name comes
+        // from the same tactical map their profile was posted from and an exact
+        // comparison is enough.
+        if (_handToWard) 'to_ward': _targetCommander?['geo_ward'],
+        if (_handToWard) 'to_lga': _targetCommander?['geo_lga'],
         'to_officer_id': targetCommanderId,
         'to_officer_name': targetCommanderName,
         'reason': _selectedReason,
@@ -2229,7 +2330,9 @@ class _DispatchDialogState extends State<_DispatchDialog> {
                                 ),
                               ),
                               subtitle: Text(
-                                'Role: ${r['role'] ?? 'RESPONDER'} · ${r['geo_lga'] ?? 'JOS'}',
+                                // `JOS` is not one of Plateau's seventeen
+                                // LGAs. See place_label.dart.
+                                responderPosting(r),
                                 style: GoogleFonts.inter(fontSize: 10, color: const Color(0xFF94A3B8)),
                               ),
                               onChanged: (val) {

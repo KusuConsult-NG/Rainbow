@@ -204,6 +204,8 @@ export default function TacticalSelect({
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
+                  aria-label="Clear the search"
+                  title="Clear the search"
                   style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2 }}
                 >
                   <X size={12} />

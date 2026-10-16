@@ -5,6 +5,7 @@ import {
   officerShouldHear,
   recipientsFor,
   rolesForTier,
+  rolesToNotify,
   type OfficerRow,
   type OutboxRow,
 } from './notification-recipients';
@@ -138,5 +139,114 @@ describe('what the notification says', () => {
 
   it('carries a reference short enough to read on a lock screen', () => {
     expect(escalationMessage(notice()).body).toContain('#aaaaaaaa');
+  });
+});
+
+describe('a new incident, not an escalation', () => {
+  // Nothing queued a notice when an alert was INSERTED. The only paths to a
+  // phone were a human pressing DISPATCH and the timeout two minutes later, so
+  // a citizen's SOS reached a responder only if that responder had the app open
+  // and in the foreground. The system announced that it had given up waiting
+  // for you, and not that the emergency had arrived.
+  const reported = (over: Partial<OutboxRow['payload']> = {}): OutboxRow => ({
+    id: 1,
+    alert_id: 'aaaaaaaa-1111-4111-8111-111111111111',
+    kind: 'NEW_INCIDENT',
+    payload: {
+      alert_id: 'aaaaaaaa-1111-4111-8111-111111111111',
+      to_tier: 'UNIT',
+      geo_lga: 'JOS NORTH',
+      geo_ward: 'NARAGUTA',
+      geo_pu: 'PU-01',
+      severity: 'CRITICAL',
+      type: 'SOS',
+      reason: 'REPORTED',
+      ...over,
+    },
+  });
+
+  const inPu = (role: string, over: Partial<OfficerRow> = {}): OfficerRow => ({
+    id: `o-${role}`,
+    role,
+    geo_lga: 'JOS NORTH',
+    geo_ward: 'NARAGUTA',
+    geo_pu: 'PU-01',
+    onesignal_player_id: 'player-123456',
+    ...over,
+  });
+
+  it('reaches the field responders, who are the ones who go', () => {
+    // They hold no tier, so `rolesForTier` does not name them, and a new
+    // emergency that only reaches the unit commander is waiting on one person
+    // to be awake.
+    const roles = rolesToNotify(reported());
+    expect(roles).toContain('RESPONDER');
+    expect(roles).toContain('AGENT');
+    expect(officerShouldHear(inPu('RESPONDER'), reported())).toBe(true);
+  });
+
+  it('and the unit desk as well', () => {
+    expect(officerShouldHear(inPu('UNIT_COMMAND'), reported())).toBe(true);
+    expect(officerShouldHear(inPu('POLLING_UNIT_OFFICER'), reported())).toBe(true);
+  });
+
+  it('not a responder in another polling unit', () => {
+    expect(officerShouldHear(inPu('RESPONDER', { geo_pu: 'PU-09' }), reported()))
+      .toBe(false);
+  });
+
+  it('nor one in another LGA', () => {
+    expect(
+      officerShouldHear(
+        inPu('RESPONDER', { geo_lga: 'MANGU', geo_ward: 'PANYAM', geo_pu: 'PU-11' }),
+        reported(),
+      ),
+    ).toBe(false);
+  });
+
+  it('an unlocated report reaches the whole tier rather than nobody', () => {
+    // Those are the SOS reports that arrived without a GPS fix, and they are
+    // exactly the ones that must not fall silently between desks.
+    const nowhere = reported({ geo_lga: null, geo_ward: null, geo_pu: null });
+    expect(officerShouldHear(inPu('RESPONDER', { geo_pu: 'PU-99' }), nowhere)).toBe(true);
+  });
+
+  it('does NOT widen a timeout escalation to every responder', () => {
+    // An escalation is a message to a desk. Copying every responder in the LGA
+    // on it is how people turn off the notifications they do need.
+    const escalated: OutboxRow = {
+      ...reported(),
+      kind: 'TIER_ESCALATION',
+      payload: { ...reported().payload, from_tier: 'UNIT', to_tier: 'WARD' },
+    };
+    expect(rolesToNotify(escalated)).not.toContain('RESPONDER');
+  });
+
+  it('does not widen a new incident that landed above the unit', () => {
+    // A complaint against security personnel is routed to HQ by the database
+    // before this notice is queued. It must not be copied to field responders.
+    const atHq = reported({ to_tier: 'HQ' });
+    expect(rolesToNotify(atHq)).not.toContain('RESPONDER');
+    expect(officerShouldHear(inPu('RESPONDER'), atHq)).toBe(false);
+  });
+
+  it('says it was reported, not that somebody sat on it', () => {
+    // "was not acknowledged in time and has come up to" is true of a timeout
+    // and false of an emergency just filed — it tells an officer that somebody
+    // already had it and did nothing, which nobody did.
+    const { heading, body } = escalationMessage(reported());
+    expect(body).toMatch(/just been reported/i);
+    expect(body).not.toMatch(/not acknowledged/i);
+    expect(heading).toMatch(/SOS REPORTED/);
+    expect(heading).toMatch(/CRITICAL/);
+  });
+
+  it('still says "came up to" for an actual escalation', () => {
+    const escalated: OutboxRow = {
+      ...reported(),
+      kind: 'TIER_ESCALATION',
+      payload: { ...reported().payload, from_tier: 'UNIT', to_tier: 'WARD' },
+    };
+    expect(escalationMessage(escalated).body).toMatch(/not acknowledged in time/i);
   });
 });

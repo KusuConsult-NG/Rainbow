@@ -49,8 +49,19 @@ E2E = REPO / 'scripts' / 'local_e2e'
 OWNER = 'mobile_login.js'
 
 # Typing the staff badge, in any of the shapes the harnesses use.
-STAFF_BADGE = re.compile(r"""(?:typeInto|type)\s*\(\s*`\$\{[A-Za-z_]\w*\}@\$\{DOMAIN\}`""")
-STAFF_BADGE_LITERAL = re.compile(r"""(?:typeInto|type)\s*\(\s*`[a-z_]+@\$\{DOMAIN\}`""")
+#
+# `typeText` and the optional leading `page,` are here because the typing
+# MECHANISM changed and this signature was written around the call: the flow moved
+# from `page.keyboard.type(...)` to a helper that sends Input.insertText, because
+# puppeteer synthesises `-` as a keyup with location 1 and Flutter's web keyboard
+# engine null-asserts on it. The claim this check makes is "the sign-in flow lives
+# in one file", so it has to recognise the flow however the text gets typed —
+# otherwise a legitimate change to the mechanism reads as the flow having been
+# deleted, which is what happened.
+STAFF_BADGE = re.compile(
+    r"""(?:typeInto|typeText|type)\s*\(\s*(?:page\s*,\s*)?`\$\{[A-Za-z_]\w*\}@\$\{DOMAIN\}`""")
+STAFF_BADGE_LITERAL = re.compile(
+    r"""(?:typeInto|typeText|type)\s*\(\s*(?:page\s*,\s*)?`[a-z_]+@\$\{DOMAIN\}`""")
 # The citizen path: the fixture phone, stripped of its country code.
 CITIZEN_PHONE = re.compile(r"""byKey\(\s*['"]citizen['"]\s*\)\.phone\.replace""")
 

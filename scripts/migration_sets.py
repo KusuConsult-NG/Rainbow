@@ -78,7 +78,7 @@ STAGING_ONLY = [
     '20260725000000_v6_geo_lga_scoping_staging.sql',
 ]
 
-NOT_OUTSTANDING = set(ORIGINAL_SCHEMA) | set(HAND_APPLIED_ERA) | set(STAGING_ONLY)
+NOT_IN_THE_PASTE = set(ORIGINAL_SCHEMA) | set(HAND_APPLIED_ERA) | set(STAGING_ONLY)
 
 
 def all_files() -> list[str]:
@@ -88,11 +88,35 @@ def all_files() -> list[str]:
     return names
 
 
-def outstanding() -> list[str]:
-    """What a production database still needs, in filename (timestamp) order."""
-    names = [n for n in all_files() if n not in NOT_OUTSTANDING]
+def in_the_paste() -> list[str]:
+    """Every migration the production paste carries, in apply order.
+
+    THIS IS NOT A LIST OF WHAT A DATABASE STILL NEEDS, and it used to say it
+    was: the docstring read "what a production database still needs". It is
+    computed from filenames minus an exclusion set, and nothing updates it when
+    a migration is applied somewhere — so it answered a question about a
+    DATABASE with a fact about this DIRECTORY.
+
+    That wrong answer travelled. Both runbooks opened with "N migrations are
+    proven in CI and not yet applied to the production Supabase project", a
+    gate enforced that wording, and the number was repeated to the operator as
+    the top blocker for the whole deployment. Then
+    `scripts/which_migrations_are_applied.sql` was run against the database and
+    reported 32 of those 38 already present, including every one up to
+    20261015. Six were genuinely missing.
+
+    No file in this repository can know what a database has. The paste is
+    idempotent precisely so that it does not need to: every statement is
+    `IF NOT EXISTS`/`OR REPLACE`, the verifiers apply the whole bundle twice to
+    prove it, and pasting a migration a database already has is a no-op.
+
+    So this names the paste, which is a fact about the repository and is
+    checkable here. What a given database still needs is answered by querying
+    that database, and `which_migrations_are_applied.sql` is the query.
+    """
+    names = [n for n in all_files() if n not in NOT_IN_THE_PASTE]
     if not names:
-        raise SystemExit('no outstanding migrations — the exclusion set is wrong')
+        raise SystemExit('the paste is empty — the exclusion set is wrong')
     return names
 
 
@@ -147,7 +171,7 @@ def assert_no_bundle_reopens_the_database() -> list[str]:
 
 
 def assert_coverage() -> int:
-    """Every outstanding migration reaches both paste scripts; no excluded one does.
+    """Every migration in the paste reaches both paste scripts; no excluded one does.
 
     Both halves matter and they fail differently. A missing migration means an
     operator pastes a script that silently lacks it — and the "regenerate and
@@ -164,7 +188,7 @@ def assert_coverage() -> int:
     parts = sorted(p.name for p in parts_dir.glob('*.sql')) if parts_dir.is_dir() else []
 
     problems: list[str] = []
-    for name in outstanding():
+    for name in in_the_paste():
         if name not in apply_all:
             problems.append(f'{name} is missing from scripts/apply_all_migrations.sql')
         if not any(name in p for p in parts):
@@ -192,7 +216,7 @@ def assert_coverage() -> int:
     if problems:
         print(f'\n{len(problems)} problem(s) in the generated apply scripts.')
         return 1
-    print(f'✓ {len(outstanding())} outstanding migrations reach both paste scripts; '
+    print(f'✓ {len(in_the_paste())} migrations reach both paste scripts; '
           f'the {len(HAND_APPLIED_ERA) + len(STAGING_ONLY)} already-applied ones '
           f'reach neither; {len(from_zero())} build a project from zero')
     return 0
@@ -201,7 +225,7 @@ def assert_coverage() -> int:
 def from_zero() -> list[str]:
     """Every file a fresh staging database needs, in the order it needs them.
 
-    The original schema first, in its own order, then the outstanding migrations
+    The original schema first, in its own order, then the paste's migrations
     by timestamp — which is the set the bootstrap has always built, and the same
     schema verify_rls_migration.sh replays and asserts against.
 
@@ -226,7 +250,7 @@ def from_zero() -> list[str]:
     reporting it missing. Closing it properly means a NEW forward migration that
     adds those columns idempotently — not a re-run of five files from July.
     """
-    return ORIGINAL_SCHEMA + outstanding()
+    return ORIGINAL_SCHEMA + in_the_paste()
 
 
 def fingerprint(files: list[str]) -> str:
@@ -270,13 +294,13 @@ if __name__ == '__main__':
         # — and Python's default response to a closed pipe is a traceback on
         # stderr after the line they asked for.
         try:
-            print(f'outstanding ({len(outstanding())} migrations): '
-                  f'{fingerprint(outstanding())}')
+            print(f'the paste ({len(in_the_paste())} migrations): '
+                  f'{fingerprint(in_the_paste())}')
             print(f'from zero   ({len(from_zero())} migrations): '
                   f'{fingerprint(from_zero())}')
             sys.stdout.flush()
         except BrokenPipeError:
             os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         sys.exit(0)
-    print(f'{len(all_files())} migration files; {len(outstanding())} outstanding; '
+    print(f'{len(all_files())} migration files; {len(in_the_paste())} in the paste; '
           f'{len(from_zero())} from zero')

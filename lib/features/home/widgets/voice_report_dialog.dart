@@ -10,6 +10,7 @@ import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/alert_service.dart';
 import 'package:rainbow_app/services/speech_service.dart';
+import 'package:rainbow_app/services/voice_note_service.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
 
 class VoiceReportDialog extends ConsumerStatefulWidget {
@@ -51,6 +52,25 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
   bool _isTriaging = false;
   String? _errorMessage;
 
+  /// THE AUDIO IS KEPT, AND THE TRANSCRIPT IS A BONUS.
+  ///
+  /// This screen is the one path built for somebody who cannot type, and it
+  /// filed the TRANSCRIPT and discarded the recording. Two consequences, both
+  /// of them worst for the person it exists for:
+  ///
+  ///   * `_submitReport` refused to file at all when the transcript was empty
+  ///     ("no voice input"). A recogniser that is offline, or has never heard
+  ///     Hausa or Pidgin, produces an empty transcript from somebody speaking
+  ///     perfectly clearly — and they were told they had said nothing.
+  ///   * even when it worked, what the person actually said was gone. Nobody
+  ///     could listen and judge for themselves.
+  ///
+  /// So the microphone is recorded to a file at the same time, that file is
+  /// the report, and the transcript rides along when there is one.
+  final VoiceNoteService _voice = VoiceNoteService();
+  VoiceNote? _captured;
+  bool _micRefused = false;
+
   @override
   void initState() {
     super.initState();
@@ -71,6 +91,9 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
     _waveformController.dispose();
     _pulseController.dispose();
     unawaited(SpeechService.instance.stopListening());
+    // Abandoned, not kept: a dialog dismissed without pressing submit has not
+    // filed anything, and leaving the recorder running holds the microphone.
+    unawaited(_voice.cancel().then((_) => _voice.dispose()));
     super.dispose();
   }
 
@@ -95,6 +118,17 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
 
     _waveformController.repeat(reverse: true);
     _pulseController.repeat(reverse: true);
+
+    // Recording starts BEFORE transcription and does not depend on it. If the
+    // microphone is refused, say so once and let the speech recogniser try
+    // anyway — it may be using a different permission on this handset, and a
+    // transcript is better than nothing even when the audio is unavailable.
+    _micRefused = !await _voice.start();
+    if (_micRefused && mounted) {
+      setState(() {
+        _errorMessage = Translations.get('voice_note_unavailable', lang);
+      });
+    }
 
     try {
       await SpeechService.instance.startListening(
@@ -146,6 +180,8 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
 
   Future<void> _stopListeningFlow() async {
     await SpeechService.instance.stopListening();
+    // Kept even if the transcript is empty: that is the whole point.
+    _captured = await _voice.stop() ?? _captured;
     _waveformController.stop();
     _pulseController.stop();
     if (mounted) {
@@ -157,14 +193,22 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
 
   Future<void> _submitReport() async {
     final lang = ref.read(languageProvider);
-    if (_transcription.trim().isEmpty) {
+    // Stop FIRST, so there is a recording to weigh. This used to refuse on an
+    // empty transcript before stopping, which meant the audio was never even
+    // collected — the one person this screen is for was told they had said
+    // nothing, while a perfectly good recording was running.
+    await _stopListeningFlow();
+
+    final spoke = _transcription.trim();
+    if (spoke.isEmpty && _captured == null) {
       setState(() {
-        _errorMessage = Translations.get('no_voice_input', lang);
+        _errorMessage = Translations.get(
+          _micRefused ? 'voice_note_unavailable' : 'no_voice_input',
+          lang,
+        );
       });
       return;
     }
-
-    await _stopListeningFlow();
 
     setState(() {
       _isTriaging = true;
@@ -177,8 +221,15 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
       final auth = ref.read(authProvider);
       final userId = auth.user?.id ?? 'anonymous';
 
-      // Perform AI Triage Classification on recognized voice transcript
-      final lowerText = _transcription.toLowerCase();
+      // Keyword triage, on the transcript when there is one.
+      //
+      // The vocabulary below is ENGLISH. A report spoken in Hausa or Pidgin
+      // matches none of it and files at MEDIUM, which is the existing
+      // behaviour and is not made worse here — but it is why the recording
+      // matters: an operator can listen and grade it themselves, which no
+      // keyword list can do. Translating this vocabulary is recorded as open
+      // work rather than guessed at.
+      final lowerText = spoke.toLowerCase();
       var inferredType = 'INCIDENT - AI Voice Report';
       var inferredPriority = AlertPriority.medium;
 
@@ -196,11 +247,21 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
         inferredPriority = AlertPriority.high;
       }
 
+      // What the description SAYS depends on what actually exists, because an
+      // operator reading `Recognized Speech: ""` cannot tell a silent reporter
+      // from a recogniser that produced nothing.
+      final description = spoke.isNotEmpty
+          ? '[AI VOICE TRIAGE] Recognized Speech: "$spoke"'
+          : '[VOICE NOTE] The reporter left a '
+              '${_captured!.label} voice note and no text. '
+              'Nothing was transcribed — play the recording.';
+
       final alertId = await ref.read(alertServiceProvider).submitAlert(
             type: inferredType,
-            description: '[AI VOICE TRIAGE] Recognized Speech: "$_transcription"',
+            description: description,
             reportedBy: userId,
             priority: inferredPriority,
+            voiceNote: _captured,
           );
 
       if (!mounted) return;

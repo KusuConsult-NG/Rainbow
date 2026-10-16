@@ -141,24 +141,132 @@ const alerts = [
     reported_by: byKey('citizen').id,
     assigned_tier: 'LGA',
     escalated_to_agency: 'ARMY',
+    // A HISTORY, BECAUSE AN ESCALATED INCIDENT HAS ONE.
+    //
+    // Every fixture alert carried an empty escalation_log, so `audit_trail()` —
+    // which exists to flatten exactly this — had nothing to return and the Audit
+    // Logs screen was photographed empty in every run. It was ALSO being refused
+    // with a 400 by a stand-in that implemented no RPC at all, and an empty
+    // screen looks the same either way; that is what let the refusal sit there.
+    // This row is now coherent with its own status, and the screen has rows to
+    // render, so the two states are distinguishable.
+    //
+    // Shaped exactly as alert-actions.ts escalateAlert writes an entry: the
+    // tier move in `from_tier`/`to_tier`, the place in its own key, and `at` as
+    // an ISO timestamp.
+    escalation_log: [
+      {
+        from_tier: 'UNIT', to_tier: 'WARD',
+        reason: 'No acknowledgement within the unit window',
+        by_email: 'SYSTEM', at: '2026-09-26T17:22:00.000Z',
+      },
+      {
+        from_tier: 'WARD', to_tier: 'LGA',
+        reason: 'Roadblock spans two wards',
+        by_email: 'ward@staging.operationrainbow.test',
+        at: '2026-09-26T17:41:00.000Z',
+      },
+      {
+        from_tier: 'HQ', to_tier: 'LGA', to_lga: 'MANGU', to_agency: 'ARMY',
+        reason: 'Armed and beyond local capacity',
+        by_email: 'hq@staging.operationrainbow.test',
+        at: '2026-09-26T18:05:00.000Z',
+      },
+    ],
     created_at: '2026-09-26T17:14:00.000Z',
+  },
+  {
+    // HANDED TO AN AGENCY, OUTSIDE THAT LIAISON'S OWN POSTING.
+    //
+    // a005 above is escalated to the ARMY and happens to sit in MANGU/PANYAM/
+    // PU-11, which is exactly where the Army liaison is posted — so the
+    // handset's old place-based filter admitted it by coincidence and the
+    // missing liaison rule was invisible. This one is handed to the POLICE and
+    // is in BOKKOS, while the Police liaison is posted to JOS NORTH, so only a
+    // filter that reads `escalated_to_agency` can deliver it.
+    //
+    // It is the normal case, not a corner: a liaison is based somewhere
+    // specific and incidents happen across the state.
+    ...ALERT_DEFAULTS,
+    id: 'aaaa1111-0000-4000-8000-00000000a006',
+    type: 'INCIDENT', status: 'ESCALATED', severity: 'HIGH',
+    description: 'Convoy stopped at Mushere.',
+    latitude: 9.3012, longitude: 9.2411,
+    geo_lga: 'BOKKOS', geo_ward: 'MUSHERE', geo_pu: 'PU-03',
+    reported_by: byKey('citizen').id,
+    assigned_tier: 'LGA',
+    escalated_to_agency: 'POLICE',
+    escalation_log: [
+      {
+        from_tier: 'LGA', to_tier: 'LGA', to_lga: 'BOKKOS', to_agency: 'POLICE',
+        reason: 'Handed to the Police for traffic control',
+        by_email: 'hq@staging.operationrainbow.test',
+        at: '2026-09-26T16:50:00.000Z',
+      },
+    ],
+    created_at: '2026-09-26T16:44:00.000Z',
   },
 ];
 
+// TWO ADVISORIES, AND BOTH ARE SHAPES THE SYSTEM CAN ACTUALLY PRODUCE.
+//
+// There was one, and it was fiction: `target_type: 'LGA'` with
+// `target_value: 'JOS NORTH'`. That encoding — the place in the legacy pair —
+// has NEVER been written by anything. The only two appearances of
+// `target_value` in this repository's whole history are a READER (in
+// system_alert_listener.dart, removed with T-29) and a column inventory in
+// MassBroadcast.test.tsx. The old mobile broadcast screen wrote an AUDIENCE
+// into `target_type`; nothing has ever put a place there.
+//
+// So the fixture described a row no writer could create, which is worse than no
+// fixture: it sent me looking for geography that had been silently dropped, when
+// in fact none was ever stored. The two rows below are the two shapes that do
+// exist, and each is asserted in the browser run.
 const system_alerts = [
   {
+    // SHAPE ONE: canonically scoped, as both composers write today. Scoped to a
+    // WARD, which is the assertion T-29 needed and never had outside the widget
+    // tests: every fixture person is in NARAGUTA except the ARMY liaison, who is
+    // in PANYAM, so this advisory must reach seven roles and not the eighth.
     id: 'cccc3333-0000-4000-8000-00000000c001',
-    title: 'CRITICAL ADVISORY — JOS NORTH LGA',
+    title: 'CRITICAL ADVISORY — NARAGUTA WARD',
     message: 'Avoid the Naraguta junction until further notice.',
     severity: 'CRITICAL',
     target_audience: 'ALL',
-    target_type: 'LGA',
-    target_value: 'JOS NORTH',
+    target_lga: 'JOS NORTH',
+    target_ward: 'NARAGUTA',
     is_active: true,
     created_by: byKey('hq').id,
+    // NEWEST, deliberately. The console's banner orders by `created_at` and
+    // docks ONE advisory — the newest the viewer is addressed by — so whichever
+    // row is newer is the one an assertion about that surface can see. With the
+    // legacy row newer, every console role was shown IT and the ward row was
+    // invisible to the test, which made "the Army was not shown the ward
+    // advisory" pass for the wrong reason: absence was indistinguishable from a
+    // banner that renders nothing at all.
+    created_at: '2026-09-26T21:55:00.000Z',
+  },
+  {
+    // SHAPE TWO: a genuine legacy row, exactly as the old mobile broadcast
+    // screen wrote one — the audience in `target_type`, no canonical column at
+    // all, no place. `broadcastAudience()` falls back to it, which is the one
+    // legacy path that is real, and it had no end-to-end coverage either.
+    // Addressed to responders, so a citizen must NOT see it.
+    id: 'cccc3333-0000-4000-8000-00000000c002',
+    title: 'HIGH ADVISORY — ALL CALL SIGNS',
+    message: 'Radio discipline on the command net until the sweep ends.',
+    severity: 'HIGH',
+    target_type: 'AGENTS',
+    is_active: true,
+    created_by: byKey('hq').id,
+    // Older than the ward row above, so it is what the Army liaison falls
+    // through to — which is what proves their banner is alive and the ward
+    // advisory's absence is a scoping decision rather than a broken surface.
     created_at: '2026-09-26T21:50:00.000Z',
   },
 ];
+
+const sms_device_keys = [];
 
 const chat_messages = [
   {
@@ -279,6 +387,14 @@ module.exports = {
     profiles,
     alerts,
     system_alerts,
+    // Empty on purpose, and DECLARED on purpose. `register_sms_device()` writes
+    // here on every sign-in, and a table the fake creates at runtime has no
+    // entry in PRISTINE — so the next /reset-data pushed `fresh[name]` for a
+    // name that snapshot has never heard of, threw inside the control server's
+    // request handler, and killed the stand-in mid-run. Forty-five minutes of
+    // run, lost after the fifth harness. The reset loop is hardened too; this
+    // is the half that makes the table real.
+    sms_device_keys,
     chat_messages,
     telemetry,
     app_config,

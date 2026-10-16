@@ -23,6 +23,7 @@ import 'package:rainbow_app/services/speech_service.dart';
 import 'package:rainbow_app/services/sync_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 import 'package:record/record.dart';
+import 'package:rainbow_app/services/voice_note_service.dart';
 
 /// Documentation for this public member.
 
@@ -88,6 +89,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   final _audioRecorder = AudioRecorder();
   bool _isRecording = false;
   String? _recordedAudioPath;
+  DateTime? _recordingStartedAt;
+  VoiceNote? _voiceNote;
 
   /// Tells the person something went wrong, rather than the console.
   ///
@@ -166,6 +169,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         setState(() {
           _isRecording = true;
           _recordedAudioPath = null;
+          _voiceNote = null;
+          _recordingStartedAt = DateTime.now();
         });
       } else {
         // hasPermission() returning false skipped the whole body and said
@@ -204,14 +209,25 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       final path = await _audioRecorder.stop();
       await SpeechService.instance.stopListening();
       if (path != null) {
-        final file = File(path);
+        final seconds = _recordingStartedAt == null
+            ? 1
+            : DateTime.now().difference(_recordingStartedAt!).inSeconds.clamp(
+                1, VoiceNoteService.maxDuration.inSeconds);
         setState(() {
           _isRecording = false;
           _recordedAudioPath = path;
-          _attachedFiles.add(file);
-          if (_narrativeCtrl.text.isEmpty || _narrativeCtrl.text == '[AUDIO_REPORT] voice message recorded') {
-            _narrativeCtrl.text = '[AUDIO_REPORT] voice message recorded';
-          }
+          // NOT added to `_attachedFiles` any more. That list is evidence —
+          // the photograph of the vehicle, the video of the roadblock — and
+          // uploading the reporter's own voice into it is why a responder's
+          // card said "3 attachments" with no way to tell that one of them was
+          // somebody speaking. It travels as the voice note instead.
+          _voiceNote = VoiceNote(path: path, seconds: seconds);
+          // The narrative is no longer stuffed with a placeholder. `[AUDIO_REPORT]
+          // voice message recorded` was written into the field the reporter
+          // was meant to type in, so it reached the console as the description
+          // of the incident — an operator read a marker instead of a report.
+          // An empty narrative is allowed now, because a voice note is a
+          // report; see `_canSubmit`.
         });
       }
     } catch (e) {
@@ -228,7 +244,10 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       setState(() {
         _attachedFiles.removeWhere((f) => f.path == _recordedAudioPath);
         _recordedAudioPath = null;
-        _narrativeCtrl.clear();
+        _voiceNote = null;
+        // The narrative is the reporter's, not ours: it used to be CLEARED
+        // when the recording was deleted, so typing a report and then
+        // discarding a recording threw the typing away too.
       });
     }
   }
@@ -245,9 +264,16 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
     try {
       final userId = ref.read(authServiceProvider).currentUserId ?? 'anonymous';
-      final desc = _narrativeCtrl.text.isEmpty
-          ? 'No narrative provided'
-          : _narrativeCtrl.text;
+      // "No narrative provided" is the right wording for a report with
+      // nothing in it and the wrong one for a report whose content is a
+      // recording: an operator reading it on the board would pass over an
+      // incident that has somebody's voice attached.
+      final desc = _narrativeCtrl.text.isNotEmpty
+          ? _narrativeCtrl.text
+          : _voiceNote != null
+              ? '[VOICE NOTE] The reporter left a ${_voiceNote!.label} voice '
+                  'note and no text. Play the recording.'
+              : 'No narrative provided';
 
       final connectivityResult = await Connectivity().checkConnectivity();
       final isOffline = connectivityResult.contains(ConnectivityResult.none);
@@ -264,10 +290,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       };
 
       // Build the combined list of all media: attached files + optional audio
-      final allMediaFiles = [
-        ..._attachedFiles,
-        if (_recordedAudioPath != null) File(_recordedAudioPath!),
-      ];
+      // The voice note is NOT in here. It goes as `voiceNote:` below, into its
+      // own column, so the screens that read it can say whose voice it is.
+      final allMediaFiles = [..._attachedFiles];
 
       // submitAlert handles its own Cloudinary upload for instant-submit path
       final attachmentPaths = allMediaFiles.map((f) => f.path).toList();
@@ -280,6 +305,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             latitude: _shareLocation ? lat : null,
             longitude: _shareLocation ? lng : null,
             attachments: attachmentPaths,
+            voiceNote: _voiceNote,
             geoLga: _manualOverride ? _selectedLga?.name : null,
             geoWard: _manualOverride ? _selectedWard?.name : null,
             geoSiecWard: _manualOverride ? _selectedSiecWard?.name : null,

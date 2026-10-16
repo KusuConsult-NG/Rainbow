@@ -60,6 +60,29 @@ bool _placeMatches(String scope, String? recipientValue) {
 /// `target_audience` is what the console writes and what the model has always
 /// declared. `target_type` is the original schema's name and is still present on
 /// rows written before the reconciliation, so it is read as a fallback.
+///
+/// ## There is no fallback for `target_value`, and that is deliberate
+///
+/// The initial schema paired `target_type` with `target_value`, and the old
+/// `SystemAlertListener` read the pair as a PLACE: `target_type == 'LGA'` then
+/// `target_value` as the LGA's name. So a reader existed for that encoding, and
+/// the obvious conclusion is that `20260903000002` — which carried
+/// `target_type` into `target_audience` and said it was doing so "rather than
+/// leaving them to the reader's fallback forever" — left the place behind,
+/// and that legacy rows are therefore delivered statewide.
+///
+/// They are not, because **nothing has ever written `target_value`**. Across
+/// this repository's entire history the column appears exactly twice outside
+/// the SQL: in that reader, and in a column inventory in
+/// `MassBroadcast.test.tsx`. The old mobile broadcast screen wrote an AUDIENCE
+/// into `target_type` (`'CITIZENS'`, `'AGENTS'`, `'ALL'`), never a place; the
+/// console has always written the canonical columns. The place half of the pair
+/// was read for a scheme no writer implemented.
+///
+/// So there is no geography to recover, and adding a fallback here would be
+/// scoping live advisories by a column that is empty on every row that exists.
+/// Checked rather than assumed, because the harness fixture used to describe
+/// exactly that impossible row and it is a convincing thing to find.
 String broadcastAudience(Map<String, dynamic> row) {
   final canonical = (row['target_audience'] as String?)?.trim();
   if (canonical != null && canonical.isNotEmpty) return canonical.toUpperCase();

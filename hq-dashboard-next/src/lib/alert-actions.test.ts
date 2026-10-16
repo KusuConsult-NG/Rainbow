@@ -240,6 +240,71 @@ describe('escalateAlert', () => {
     expect(res.ok).toBe(true);
   });
 
+  // ── Whether the agency was actually told ────────────────────────────────
+  //
+  // The escalation and the notification are two facts, and only one of them
+  // used to reach the operator. The POST was fired and discarded, so a route
+  // answering `400 Unknown agency 'NPF'` — which is what the console's own
+  // escalation menu produced for the Police — looked exactly like a delivered
+  // handover.
+  it('reports that the agency was reached when the endpoint says it was', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ delivered: true, detail: 'Nigeria Police Force notified by SMS.' }),
+      { status: 200 },
+    ));
+    const { escalateAlert } = await actions();
+
+    const res = await escalateAlert('alert-1', { targetAgency: 'POLICE' }, HQ);
+    expect(res.ok && res.value.notified).toEqual({
+      delivered: true,
+      detail: 'Nigeria Police Force notified by SMS.',
+    });
+  });
+
+  it('reports that it was NOT reached when the endpoint says nothing was sent', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ delivered: false, detail: 'Nigeria Police Force was NOT notified: no contact configured.' }),
+      { status: 503 },
+    ));
+    const { escalateAlert } = await actions();
+
+    const res = await escalateAlert('alert-1', { targetAgency: 'POLICE' }, HQ);
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.value.notified?.delivered).toBe(false);
+    expect(res.ok && res.value.notified?.detail).toContain('NOT notified');
+  });
+
+  // The exact shape of the original defect: the endpoint refused the code the
+  // menu submitted, and the escalation still read as a completed handover.
+  it('reports NOT reached when the endpoint refuses the agency code', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ error: "Unknown agency 'NPF'. Expected one of: POLICE, ARMY, DSS, NSCDC, FRSC, OPSH" }),
+      { status: 400 },
+    ));
+    const { escalateAlert } = await actions();
+
+    const res = await escalateAlert('alert-1', { targetAgency: 'NPF' }, HQ);
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.value.notified?.delivered).toBe(false);
+    expect(res.ok && res.value.notified?.detail).toContain("Unknown agency 'NPF'");
+  });
+
+  it('reports NOT reached — not a thrown escalation — when the request dies', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'));
+    const { escalateAlert } = await actions();
+
+    const res = await escalateAlert('alert-1', { targetAgency: 'ARMY' }, HQ);
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.value.notified?.delivered).toBe(false);
+    expect(res.ok && res.value.notified?.detail).toContain('network down');
+  });
+
+  it.each(['ALL', 'HQ'])('has nothing to report about delivery for %s', async (agency) => {
+    const { escalateAlert } = await actions();
+    const res = await escalateAlert('alert-1', { targetAgency: agency }, HQ);
+    expect(res.ok && res.value.notified).toBeNull();
+  });
+
   it('reports failure when the update is rejected', async () => {
     db.setUpdateError('alerts', { message: 'permission denied for table alerts' });
     const { escalateAlert } = await actions();
@@ -520,6 +585,22 @@ describe('sendChatMessage', () => {
       sender_name: 'ACP Musa Ibrahim',
       sender_role: 'HQ_COMMAND',
       message: 'Units are ten minutes out.',
+    });
+  });
+
+  it('does not sign an unnamed operator as HQ Command', async () => {
+    // The console passes `role: userRole`, which is null until the `profiles`
+    // read lands (T-35). This used to store sender_role 'HQ_COMMAND' and
+    // sender_name 'HQ DISPATCH' — a claim about who spoke, written into the
+    // incident's own record.
+    const { sendChatMessage } = await actions();
+    await sendChatMessage('alert-1', 'hold position', {
+      ...HQ, name: undefined, email: undefined, role: undefined,
+    } as Parameters<typeof sendChatMessage>[2]);
+
+    expect(inserted()).toMatchObject({
+      sender_name: 'UNKNOWN',
+      sender_role: 'UNKNOWN',
     });
   });
 

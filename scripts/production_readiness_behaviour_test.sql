@@ -197,6 +197,31 @@ BEGIN
   END IF;
   RAISE NOTICE 'PASS: a liaison cannot act on another agency''s incident';
 
+  -- ── A HANDSET THAT SIGNS OUT MID-EMERGENCY ────────────────────────────────
+  --
+  -- `signOut()` stamps `device_signed_out_at` on its own open incident, in the
+  -- window before the session is cleared, so that a track going quiet can be
+  -- told from an app that left. It must be able to; and a liaison of an agency
+  -- the incident was never handed to must not, or a handset could stamp
+  -- somebody else's emergency.
+  PERFORM pg_temp.become(cit, 'authenticated');
+  UPDATE public.alerts SET device_signed_out_at = NOW()
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca03';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'FAIL: the reporter cannot record that their own handset '
+                    'signed out, so HQ can never tell that from a dead battery';
+  END IF;
+  RAISE NOTICE 'PASS: a reporter can record that their own handset signed out';
+
+  PERFORM pg_temp.become(police, 'authenticated');
+  UPDATE public.alerts SET device_signed_out_at = NOW()
+   WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca02';
+  IF FOUND THEN
+    RAISE EXCEPTION 'FAIL: a liaison stamped an incident handed to another '
+                    'agency';
+  END IF;
+  RAISE NOTICE 'PASS: nobody can stamp an incident that is not theirs';
+
   -- But CAN act on their own, or the handover is ceremonial.
   UPDATE public.alerts SET status = 'DISPATCHED'
    WHERE id = 'cccccccc-cccc-4ccc-8ccc-ccccccccca01';

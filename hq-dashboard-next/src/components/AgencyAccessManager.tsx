@@ -1,16 +1,14 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { AGENCY_LIST } from '@/lib/agencies';
 import { Shield, Plus, Trash2, RefreshCw, Loader2, Eye, EyeOff } from 'lucide-react';
 
-const AGENCIES = [
-  { code: 'POLICE', label: 'Nigeria Police Force', icon: '🚔' },
-  { code: 'ARMY', label: 'Nigerian Army', icon: '🪖' },
-  { code: 'DSS', label: 'Dept. of State Services', icon: '🕵️' },
-  { code: 'NSCDC', label: 'NSCDC', icon: '🛡️' },
-  { code: 'FRSC', label: 'Federal Road Safety Corps', icon: '🚨' },
-  { code: 'OPSH', label: 'Operation Safe Haven', icon: '🛰️' },
-];
+// Shared with the escalation menu, the portal and the contact lookup. The
+// role this form writes is `<code>_LIAISON`, and that code is what the portal
+// filters the liaison's whole desk by — so a list of its own here is a list of
+// agencies that may not exist anywhere else.
+const AGENCIES = AGENCY_LIST;
 
 interface LiaisonUser {
   id: string;
@@ -156,7 +154,15 @@ export default function AgencyAccessManager() {
           Agency Liaison Access Control
         </h3>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={fetchLiaisons} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', color: 'var(--text-muted)' }}>
+          {/* An icon is not a name: this read as "button" and nothing else to
+              a screen reader, and `check_console_controls.py` now fails on it. */}
+          <button
+            type="button"
+            onClick={fetchLiaisons}
+            aria-label="Reload the liaison list"
+            title="Reload the liaison list"
+            style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', color: 'var(--text-muted)' }}
+          >
             <RefreshCw size={14} />
           </button>
           <button

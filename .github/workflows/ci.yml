@@ -738,6 +738,199 @@ jobs:
       - name: Assert the mobile sign-in flow exists in one place
         run: python3 scripts/check_one_mobile_login.py
 
+      # Five files declared the list of outside agencies and four of them
+      # agreed. The fifth was the HQ escalation menu — the only one an operator
+      # touches — and it offered NPF, MILITARY, RAINBOW and VGN, taken from the
+      # list that badges Operation Rainbow's own staff. So handing an incident
+      # to the Police stored 'NPF'; the Police liaison's portal asks for
+      # 'POLICE' and never showed it, /api/notify-agency answered 400 Unknown
+      # agency, and the operator was told "Escalation Sent". FRSC and OPSH, the
+      # only two codes this deployment has contact variables for, were not on
+      # the menu. 679 unit tests and 79 browser assertions passed over it,
+      # because every one of them was written in the vocabulary of the four
+      # sides that agreed.
+      - name: Assert one agency vocabulary, built from one list
+        run: python3 scripts/check_one_agency_vocabulary.py
+
+      # `console-access.ts` exists so that an unknown role gets the SMALLEST
+      # console, and its doc comment says why: "a default of 'show everything'
+      # would flash the whole command console at an agency liaison on every page
+      # load". It also says `userRole` is '' while the profile loads. It was
+      # `useState('HQ_OFFICER')` — a COMMAND role — so that function was never
+      # handed an unknown role and its unknown branch was unreachable. Worse: the
+      # console body is gated on `authLoading`, and the effect that clears it is
+      # the same one that set the role from `user_metadata.role || 'HQ_COMMAND'`
+      # before its own profiles read — the effect that opened the door claimed
+      # command walking through it. The advisory banner read command as "sees
+      # everything" and showed a liaison other agencies' advisories (T-34); an
+      # agency tab clicked in that window froze them on the Police desk for the
+      # life of the mount, reported as empty (T-35). A second path set the role
+      # from `user_metadata.role`, which the user can write (H-7).
+      - name: Assert identity is resolved before anything is acted on
+        run: python3 scripts/check_identity_resolved_before_scoping.py
+
+      # AlertService refuses to guess where an incident happened — "submitting
+      # without jurisdiction rather than guessing one" — and writes NULL, and
+      # the responder feed filter treats a null LGA as reaching everybody. Five
+      # screens then named a place anyway: PLATEAU · HQ · UNIT on a responder's
+      # card, JOS on the dispatch roster (not one of Plateau's seventeen LGAs),
+      # STATE HQ in the console dossier three lines above a guard that drops an
+      # absent ward, SECTOR HQ on nearly every map card since there is no
+      # polling unit from coordinates, and STATE HQ in the AI triage prompt
+      # where every line around it says N/A. Only the display guessed, which is
+      # why nothing downstream of the writer or the filter caught it.
+      - name: Assert no screen names a place that was never recorded
+        run: python3 scripts/check_no_invented_places.py
+
+      # `tier_timeout_minutes()` is the only reader of the three escalation
+      # timeouts and it refuses what it cannot use — `raw::INTEGER`, then
+      # `parsed <= 0` — because, in the migration's own words, a timeout of 0
+      # means "escalate immediately" and a NULL means "never escalate", and
+      # both are dangerous defaults for an emergency queue. SystemConfig is the
+      # only writer and accepted anything its number input produced, so an
+      # operator could store 0 or 2.5, read it back, and see it displayed as the
+      # live policy while the job discarded it and used the seeded value.
+      - name: Assert the job and the screen mean one escalation policy
+        run: python3 scripts/check_escalation_defaults_agree.py
+
+      # The word "liaison" appeared nowhere in lib/. `alert_is_ours()` hands an
+      # agency liaison exactly `escalated_to_agency = liaison_agency()` and
+      # nothing else; the handset's feed filter had no branch for one, so it
+      # fell through to the place rules and answered them from their own
+      # POSTING. The Army liaison is posted to MANGU and the incident handed to
+      # the Army can be anywhere in the state. HQ's console shows the handover
+      # as done and /api/notify-agency reports it sent, while the device the
+      # officer carries shows nothing. The same filter was stricter than RLS in
+      # two more places: an incident with no LGA (unlocated, which RLS grants to
+      # all staff) and one HQ delegated to an LGA by name — which the old
+      # filter's own comment claimed, over code that read only geo_lga.
+      - name: Assert an outside agency sees what was handed to them
+        run: python3 scripts/check_alert_audience_agrees.py
+
+      # `Translations.get()` returned the KEY on a miss, and two keys were asked
+      # for and never defined — both on the citizen's DISPATCHER CHAT screen, so
+      # its header read `live_dispatch_channel` and `alert_ref #a1b2c3d4` in
+      # every language, English included. Separately there were two providers
+      # called `languageProvider`, each with a `LanguageNotifier`: the Settings
+      # picker wrote `app_language` = 'HA' while every translated string watches
+      # `app_lang` = 'ha', so choosing Hausa in Settings changed nothing, and it
+      # offered two of the three languages the app has.
+      - name: Assert every string the app asks for exists in every language
+        run: python3 scripts/check_translation_keys.py
+
+      # `IncidentReplayPanel` — the forensic replay of one incident — built its
+      # escalation events by string-matching `ai_summary`. Every automatic
+      # escalation was therefore missing from it: `escalate_overdue_alerts()`
+      # appends to `escalation_log` and writes no prose, so an incident that
+      # climbed at 02:00 because nobody answered showed on the Audit History
+      # screen and nowhere on the replay of the incident it happened to. Every
+      # escalation also carried `updated_at`, so three tier moves shared one
+      # time and could not be ordered, and the actor was the literal 'Tactical
+      # Command' while the log records who did it — T-32's fault, one screen
+      # later.
+      - name: Assert an incident's history is read from the record
+        run: python3 scripts/check_history_reads_the_record.py
+
+      # Three of the four agency tables are created TWICE, by two files with
+      # different column lists and IF NOT EXISTS on both — so the second is a
+      # no-op and the winner is whichever ran first. The v3/v4 era was applied
+      # to production by hand and is excluded from every replay, so production
+      # has `detail`, `sent_by`, `target_lga`, `acknowledged_at` and
+      # `resolved_at` and no `created_at`, while every database this repository
+      # can build has the opposite. `/api/notify-agency` wrote the intersection
+      # and dropped `result.detail` — the only field that says WHY a handover
+      # to the Police or the Army failed. Nothing could have caught it: the
+      # convergence gate compares objects, not columns, and the local stand-in
+      # unions every definition it finds.
+      - name: Assert every table has one shape on both databases
+        run: python3 scripts/check_one_table_one_shape.py
+
+      # `check_control_labels.py` has covered the Flutter app since controls
+      # there were found with empty accessible names. The console had no
+      # equivalent, and ten of its controls were clickable `<div>`s — no role,
+      # no tabIndex, no key handler: usable with a pointer and with nothing
+      # else. Among them the agency desk's incident card, which is the only way
+      # to the escalation log, the evidence, the live feed and both action
+      # buttons on the one surface an outside agency ever sees; and the
+      # responder picker, which had a real checkbox inside whose `onChange` was
+      # `() => {}` — focusable, apparently operable, inert. The console also had
+      # no keydown handler anywhere, so the incident dossier could only be
+      # dismissed with a mouse.
+      - name: Assert every console control is operable and named
+        run: python3 scripts/check_console_controls.py
+
+      # Every scripted button in every map popup was dead from the day the CSP
+      # shipped. The popups are built as HTML strings, so their buttons carried
+      # `onclick="window._hqDossier('<id>')"` — and `script-src 'self'
+      # 'nonce-…' 'strict-dynamic'` has no `'unsafe-inline'`: a nonce can
+      # authorise a `<script>` element and CANNOT authorise an event handler
+      # ATTRIBUTE, so Chrome refused all of them. DOSSIER, DISPATCH and RESOLVE
+      # did nothing on the screen the console opens on. `csp.test.ts` asserts
+      # the header, not what the header does to the page, and the component
+      # tests asserted the `onclick` attribute and the global separately —
+      # defending the halves of a join that never worked.
+      # The two non-emergency categories live in the app's Dart and the
+      # routing lives in SQL, matched on the category before " - ". A category
+      # renamed on one side and not the other means a report of a destroyed
+      # culvert is filed as an emergency: pushed to the field responders at
+      # 02:00 and escalated to HQ by morning. This gate was written with T-47
+      # and was wired into nothing — found by checking that every
+      # `scripts/check_*.py` is actually run by this file.
+      - name: Assert the non-emergency categories agree with the SQL
+        run: python3 scripts/check_non_emergency_categories_agree.py
+
+      - name: Assert no inline event handler the CSP will refuse
+        run: python3 scripts/check_no_inline_handlers.py
+
+      # The local Supabase stand-in rejects a column no migration defines, in
+      # full, the way PostgREST does. It read that column list once, at require
+      # time — so a stand-in left running across a migration rejected the
+      # column that migration had just added, the whole query failed, and the
+      # screen built on it came back empty while the run reported the SCREEN
+      # broken. Three checks failed naming the agency liaison desk on code that
+      # was fine. Same trap as a stale `next-server` holding :3000 while
+      # `.next` is rebuilt underneath it, which has invalidated two runs.
+      - name: Assert the stand-in answers from the migrations as they are now
+        run: python3 scripts/check_standin_reads_live_schema.py
+
+      # `check_non_emergency_categories_agree.py` was written with T-47,
+      # mutation-tested six ways, and wired into nothing — so a category
+      # renamed on one side only would have sailed through, and a destroyed
+      # culvert would have been filed as an emergency. A gate nothing runs does
+      # not fail; it reports nothing, forever, and reads as coverage. This asks
+      # the question that found it.
+      - name: Assert every gate in scripts/ is actually run
+        run: python3 scripts/check_every_gate_runs.py
+
+      # A production policy query returned two rows, and the second was known:
+      # `telemetry_select_geo_lga_scoped` sat on a live database as the one
+      # policy reaching PUBLIC and was repaired on its own. Its twin,
+      # `alerts_select_geo_lga_scoped`, is created twelve lines above it in the
+      # same file with no TO clause — and PostgreSQL records that as TO PUBLIC,
+      # which includes anon. The incident table: reporter names, phone numbers,
+      # locations. The fix for the twin had put a comment in that very file
+      # saying TO authenticated is not decoration, and the sibling kept the
+      # defect. 20260813 cannot drop either by name (both postdate it), the
+      # file is staging-only yet production has the policies because that era
+      # was applied by hand, and the end-of-replay sweep passes because a later
+      # migration drops this one — production sits in the middle, which nothing
+      # described.
+      - name: Assert every policy says which roles it is for
+        run: python3 scripts/check_every_policy_names_its_roles.py
+
+      # The language picker worked, persisted, was reachable from two places,
+      # and `check_translation_keys.py` confirmed every key asked for was
+      # defined in all three languages — and a citizen who chose HAUSA got a
+      # Hausa home screen and an English emergency. Five files in the app asked
+      # the table for anything; the situation chooser, the live SOS screen, the
+      # confirmation, the safe-zone map and the lock screen were written with
+      # the English string in the widget. A screen that requests NO keys passes
+      # a key-integrity check perfectly. This asks the other question: does the
+      # screen hardcode the words on it? Converted screens must stay at zero,
+      # and the four still to do are capped at their current counts.
+      - name: Assert the citizen path reads the language they chose
+        run: python3 scripts/check_citizen_screens_speak_the_language.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04
@@ -1125,6 +1318,36 @@ jobs:
       # refuses looks identical to one that succeeded. Only watching the
       # database can tell them apart — which is how `alerts.reportedBy`, a
       # column that does not exist, was found sitting in every SOS payload.
+      # THE FILE THAT SHIPS, NOT THE TEMPLATE IT CAME FROM.
+      #
+      # The `mobile` job scans `.env.example` for credential-shaped names and
+      # finds none. But `.env` is the Flutter ASSET — it is bundled verbatim and
+      # extracts with `unzip` — and this job WRITES it before building. A real
+      # release build made here carried `AGENT_DEFAULT_PASS=staging-only-password`
+      # in `build/web/assets/.env`: the one name T-20 removed, that two other
+      # gates exist to keep out, put back by the harness's own provisioning
+      # script. Read out of the artefact, not inferred. The template was clean
+      # the whole time, which is exactly why nothing caught it.
+      #
+      # So this scans what was actually bundled, and allows one name: the seeded
+      # demo citizen password, which the app reads to offer the demo login and
+      # which exists only in a throwaway project.
+      - name: Assert the bundled .env carries nothing but the accounted-for demo login
+        run: |
+          set -uo pipefail
+          BUNDLED=build/web/assets/.env
+          test -f "$BUNDLED" || {
+            echo "::error::no $BUNDLED — this job builds WITH the asset on purpose, so its absence means the build changed and this gate is now blind"
+            exit 1; }
+          UNEXPECTED=$(grep -oE '^[A-Z0-9_]*(PASS|PASSWORD|PIN|SECRET|TOKEN)[A-Z0-9_]*=' "$BUNDLED" \
+            | sed 's/=$//' | grep -vxE 'DEMO_CITIZEN_PASS' || true)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "::error::the bundled .env carries credential-shaped keys nobody has accounted for: $(echo $UNEXPECTED | tr '\n' ' ')"
+            echo "::error::that file ships inside the APK. Either the app does not need it, or it does not belong in an asset."
+            exit 1
+          fi
+          echo "OK: the only credential in the bundled asset is the seeded demo citizen password."
+
       - name: Render every screen, then use the app
         run: |
           # Each step gets a FRESH stand-in, and stops it on the way out.

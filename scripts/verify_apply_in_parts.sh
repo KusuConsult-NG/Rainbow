@@ -141,9 +141,26 @@ fi
 # nothing. normalise_lga is planted too: 20261016 refuses to drop a policy it
 # cannot recreate, and on production that function is present from the same era
 # the policy came from.
-HOLD_BACK=3
+# HOW MANY TO HOLD BACK — DERIVED, NOT COUNTED.
+#
+# This was `HOLD_BACK=3`, which was right when there were 31 migrations: the
+# held-back set then began at 20261016, the migration that FIXES the planted
+# symptom. Adding a 32nd migration pushed 20261016 one place earlier, into the
+# "already applied" group, so the symptom was repaired while the fixture was
+# being built and the assertion below failed looking for a notice that had
+# already been raised — a scenario that silently stopped testing what it says
+# it tests, reported as a broken verifier.
+#
+# So the boundary is derived from the part that matters: hold back everything
+# from 20261016 onwards. Adding a migration now extends the held-back set
+# instead of shifting it.
 RESUME_DB=resumelike
-FIRST_RUN=$((COUNT - HOLD_BACK - 1))   # all parts except the held-back ones + VERIFY
+SYMPTOM_PART=$(ls "$PGROOT/parts" | grep -n '20261016000000' | cut -d: -f1)
+[ -n "$SYMPTOM_PART" ] || {
+  echo "::error::no part applies 20261016000000 — this scenario plants the symptom that migration repairs, so it cannot mean anything without it" >&2
+  exit 2; }
+FIRST_RUN=$((SYMPTOM_PART - 1))        # every part BEFORE the one that repairs it
+HOLD_BACK=$((COUNT - FIRST_RUN - 1))   # the rest, excluding VERIFY
 VERIFY_PART=$(ls "$PGROOT/parts" | tail -1)
 
 psql_db() { su postgres -s /bin/bash -c \

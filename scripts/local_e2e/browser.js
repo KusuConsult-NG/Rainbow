@@ -99,7 +99,7 @@ const DARK_TILE = tilePng(true);
 
 /**
  * Launch a browser whose pages serve map tiles locally and record every tile
- * asked for. Returns { browser, newPage, tiles, problems, state }.
+ * asked for. Returns { browser, newPage, tiles, problems, dialogs, state }.
  *
  * The three collectors can be passed IN, which is what lets a long run replace
  * its browser part-way through without losing what it has recorded. A Flutter
@@ -131,6 +131,8 @@ async function launch({
   tiles = [],
   /** Anything the browser complained about, tagged with the screen. */
   problems = [],
+  /** Native confirm/alert/prompt dialogs, which block the page until answered. */
+  dialogs = [],
   state = { screen: 'startup' },
 } = {}) {
   const browser = await puppeteer.launch({
@@ -207,10 +209,40 @@ async function launch({
       });
     });
 
+    // A NATIVE DIALOG BLOCKS THE PAGE, AND EVERYTHING AFTER IT.
+    //
+    // `AgencyAccessManager` asks `confirm('Revoke portal access for …?')`
+    // before deactivating a liaison. A `confirm()` stops the page's main
+    // thread until something answers it, so every `page.evaluate` that follows
+    // times out — the run dies on
+    // `ProtocolError: Runtime.callFunctionOn timed out`, forty checks in, with
+    // nothing in the log to say a dialog was ever on screen. It took a console
+    // sweep that reached the whole screen to find this: the previous sweep
+    // stopped at the first control that changed anything and never got to the
+    // revoke button.
+    //
+    // DISMISSED, not accepted. Accepting it would revoke a liaison's access
+    // mid-run and change the data the checks after it read — a harness must
+    // not take a destructive action it was not asked to take. Recorded so a
+    // control that opens a dialog counts as having DONE something rather than
+    // being reported dead.
+    page.on('dialog', async (d) => {
+      dialogs.push({
+        screen: state.screen,
+        type: d.type(),
+        message: d.message().slice(0, 200),
+      });
+      try {
+        await d.dismiss();
+      } catch {
+        /* already gone: the page navigated out from under it */
+      }
+    });
+
     return page;
   }
 
-  return { browser, newPage, tiles, problems, state };
+  return { browser, newPage, tiles, problems, state, dialogs };
 }
 
 /**

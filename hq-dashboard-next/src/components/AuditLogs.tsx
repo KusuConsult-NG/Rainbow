@@ -30,6 +30,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { stampLabel } from '@/lib/incident-timeline';
 import { AlertTriangle, ShieldAlert, Clock } from 'lucide-react';
 
 interface AuditEntry {
@@ -107,7 +108,12 @@ export default function AuditLogs() {
                   {log.action} · {log.actor}
                 </span>
                 <span style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                  <Clock size={12} /> {new Date(log.at).toLocaleString()}
+                  {/* `audit_trail()` coalesces an entry's time down to the
+                      incident's own, so this is normally set — but the wording
+                      for a time nobody recorded belongs in one place, and a
+                      screen that prints "Invalid Date" reads as a broken
+                      console rather than as a gap in the record. */}
+                  <Clock size={12} /> {stampLabel(log.at, 'full')}
                 </span>
               </div>
               <p style={{ fontSize: 12.5, color: 'var(--text-primary)', margin: 0 }}>

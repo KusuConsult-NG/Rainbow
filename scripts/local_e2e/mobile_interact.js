@@ -176,6 +176,40 @@ async function logMark() {
   }
 
   /**
+   * Scroll until a control is in the page, then report whether it is.
+   *
+   * Flutter builds semantics for the slivers it has RENDERED — the viewport
+   * plus a cache extent of a couple of hundred pixels. A control further down
+   * a long list is not a hidden element this harness could reveal with a CSS
+   * query: it is not in the DOM at all. So `tap` cannot see it, returns false,
+   * and the check above it reads as "the app does not offer this".
+   *
+   * That is not hypothetical. Adding the language picker to Settings — four
+   * screens' worth of a list, one new card of about 150px — pushed "Lock This
+   * Phone" past the cache extent, and two assertions about the deliberate
+   * phone-lock path began failing although nothing about the lock had changed.
+   * A harness that can only press what starts above the fold silently stops
+   * covering a screen the moment anything is added to the top of it.
+   *
+   * Three copies of this loop were already inline in this file, none of which
+   * moved the pointer first. A wheel event goes to whatever is under the
+   * pointer and the pointer starts at (0, 0) — the app bar, which does not
+   * scroll (`chain_lifecycle.js` has the same note, and paid for it). Those
+   * copies worked only because something earlier in the run happened to leave
+   * the mouse over the body. One definition, pointer parked over the list.
+   */
+  async function bringIntoView(pattern, opts = {}) {
+    const { role = null, steps = 16, deltaY = 300 } = opts;
+    for (let attempt = 0; attempt < steps; attempt += 1) {
+      if (await findNode(pattern, { role })) return true;
+      await page.mouse.move(PHONE.width / 2, PHONE.height * 0.6);
+      await page.mouse.wheel({ deltaY });
+      await sleep(500);
+    }
+    return !!(await findNode(pattern, { role }));
+  }
+
+  /**
    * A long press has no semantics equivalent — the element exposes a tap and
    * nothing else — so this one has to be pointer events on the element, held.
    */
@@ -313,11 +347,28 @@ async function logMark() {
   await sleep(800);
 
   // ---- every reporting category --------------------------------------------
-  const CATEGORIES = [
-    'Kidnap', 'Fire', 'Drug abuse', 'Police brutality', 'Flood',
-    'Cyber crime', 'Child abuse', 'Domestic violence', 'Cattle rustling',
-    'Community attack',
-  ];
+  //
+  // READ FROM THE APP'S OWN CATALOGUE, not written out here. This was a list of
+  // ten labels, and two non-emergency categories — Public property and Public
+  // service, for government property mismanaged, vandalised, abandoned or
+  // needing repair — would have been swept by nothing: the check that says
+  // "every reporting category can be selected" would have gone on passing
+  // while two of them were never pressed.
+  const CATEGORIES = (() => {
+    const dart = fs.readFileSync(
+      path.join(ROOT, 'lib', 'core', 'constants', 'alert_categories.dart'),
+      'utf8',
+    );
+    const labels = [...dart.matchAll(/label:\s*'([^']+)'/g)].map((m) => m[1]);
+    if (labels.length < 10) {
+      throw new Error(
+        `only ${labels.length} categories parsed out of alert_categories.dart — `
+        + 'the shape of that file changed and this sweep is about to pass by '
+        + 'testing almost nothing',
+      );
+    }
+    return labels;
+  })();
 
   const categoryResults = [];
   for (const [i, cat] of CATEGORIES.entries()) {
@@ -334,11 +385,7 @@ async function logMark() {
     await go('/report-category', 2800);
 
     // The list scrolls; bring the category into view before tapping it.
-    for (let attempt = 0; attempt < 16; attempt++) {
-      if (await findNode(cat, { role: 'button' })) break;
-      await page.mouse.wheel({ deltaY: 300 });
-      await sleep(500);
-    }
+    await bringIntoView(cat, { role: 'button' });
     const pickedCat = await tap(cat, { role: 'button', settle: 2400 });
     if (!pickedCat) {
       categoryResults.push({ cat, reached: false, inserted: false, why: 'category not found' });
@@ -380,11 +427,7 @@ async function logMark() {
     await sleep(500);
 
     // INITIATE TRANSMISSION sits below the fold on this screen.
-    for (let sc = 0; sc < 8; sc++) {
-      if (await findNode('initiate transmission', { role: 'button' })) break;
-      await page.mouse.wheel({ deltaY: 320 });
-      await sleep(400);
-    }
+    await bringIntoView('initiate transmission', { role: 'button', steps: 8, deltaY: 320 });
     if (i === 0) await shot('92-mobile-report-03b-details-filled');
 
     const mk = await writeMark();
@@ -415,6 +458,25 @@ async function logMark() {
     submitted.length === CATEGORIES.length,
     `${submitted.length}/${CATEGORIES.length} inserted` +
       (submitted.length ? `; e.g. ${submitted[0].type} / ${submitted[0].severity}` : ''),
+  );
+
+  // A REPORT THAT IS NOT AN EMERGENCY IS FILED AS ONE.
+  //
+  // `Public property` and `Public service` exist so somebody can report
+  // government property mismanaged, vandalised, abandoned or needing repair.
+  // The danger is that this system treats everything as a kidnapping: at UNIT
+  // tier the drain widens a new-incident notice to the field responders'
+  // handsets, and the timeout sweep climbs anything unacknowledged. The
+  // database holds them back (`is_non_emergency`), and this is the proof that
+  // the app files them in a shape the database recognises — the label travels
+  // as `type` = '<label> - <subtype>', so a rename on either side breaks it.
+  const nonEmergency = submitted.filter((r) => /^Public (property|service) - /.test(r.type));
+  check(
+    'a public-property report is filed at a priority that is not an emergency',
+    nonEmergency.length === 2 && nonEmergency.every((r) => r.severity === 'LOW'),
+    nonEmergency.length
+      ? nonEmergency.map((r) => `${r.type} / ${r.severity}`).join('; ')
+      : 'neither non-emergency category reached the database',
   );
 
   // ---- the rest of the features --------------------------------------------
@@ -490,8 +552,18 @@ async function logMark() {
   // liability, and the whole design of this feature is the list of things it
   // must not do.
   state.screen = 'mobile:lock';
-  const lockOpened = await tap('lock this phone', { role: 'button', settle: 3000 });
-  check('Settings offers a way to lock the phone deliberately', lockOpened);
+  // Settings is a long list and the lock is near the bottom of it, so the
+  // control has to be scrolled to before it exists in the semantics tree at
+  // all. See `bringIntoView`: without this, adding anything above it on this
+  // screen turns two assertions about the lock into failures.
+  const lockReached = await bringIntoView('lock this phone', { role: 'button' });
+  const lockOpened = lockReached
+    && await tap('lock this phone', { role: 'button', settle: 3000 });
+  check(
+    'Settings offers a way to lock the phone deliberately',
+    lockOpened,
+    lockReached ? '' : 'not on the Settings screen, scrolled to the end of it',
+  );
   if (lockOpened) {
     await shot('93b-mobile-lock-screen');
     const lockText = await screenText();
@@ -601,11 +673,7 @@ async function logMark() {
   state.screen = 'mobile:attachment';
   await go('/report-category', 2800);
 
-  for (let attempt = 0; attempt < 16; attempt++) {
-    if (await findNode('Fire', { role: 'button' })) break;
-    await page.mouse.wheel({ deltaY: 300 });
-    await sleep(500);
-  }
+  await bringIntoView('Fire', { role: 'button' });
   const attachCat = await tap('Fire', { role: 'button', settle: 2400 });
 
   // Subtype: the same selector the category loop uses, because the rows carry
@@ -676,11 +744,7 @@ async function logMark() {
   // see but the database never receives is the worst of both.
   await tap('enter mission details|mission narrative', { settle: 900 });
   await typeInto('Local end-to-end attachment report.');
-  for (let sc = 0; sc < 8; sc++) {
-    if (await findNode('initiate transmission', { role: 'button' })) break;
-    await page.mouse.wheel({ deltaY: 320 });
-    await sleep(400);
-  }
+  await bringIntoView('initiate transmission', { role: 'button', steps: 8, deltaY: 320 });
   const attachMark = await writeMark();
   await tap('initiate transmission', { role: 'button', settle: 4000 });
   const attachWrites = (await writesSince(attachMark, 'alerts')).filter((x) => x.method === 'POST');
@@ -889,13 +953,33 @@ async function logMark() {
       const before = await snapshot();
       const reqBefore = await logMark();
 
-      const wasDisabled = await page.evaluate((k) => {
+      // DISABLED, or ALREADY CHOSEN. Both are correctly inert, and both are
+      // read BEFORE the press, from the same node the press will land on.
+      //
+      // The already-chosen case arrived with the language picker: pressing
+      // "English" while the app is in English calls `setLanguage(english)`,
+      // the provider's state does not change, nothing rebuilds, and the sweep
+      // reported the one control on that card that was behaving as a selected
+      // option. `Hausa` and `Pidgin` on the same card both changed the screen.
+      // It is the same exemption as ACTIVE_NAV above, taken from the node's
+      // own selection state rather than from a list of words — and the engine
+      // writes that state to aria-selected or to aria-current depending on the
+      // role, which is why both are read.
+      const stateBefore = await page.evaluate((k) => {
         for (const n of document.querySelectorAll('flt-semantics')) {
           const l = (n.textContent || n.getAttribute('aria-label') || '(icon)').trim().slice(0, 40);
-          if (k.startsWith(l)) return n.getAttribute('aria-disabled') === 'true';
+          if (k.startsWith(l)) {
+            return {
+              disabled: n.getAttribute('aria-disabled') === 'true',
+              selected: n.getAttribute('aria-selected') === 'true'
+                || n.getAttribute('aria-current') === 'true',
+            };
+          }
         }
-        return false;
+        return { disabled: false, selected: false };
       }, key);
+      const wasDisabled = stateBefore.disabled;
+      const wasSelected = stateBefore.selected;
 
       const clicked = await clickControl(key);
       if (!clicked) {
@@ -919,6 +1003,7 @@ async function logMark() {
       // guarded twice against a double submit. A disabled control that did
       // something would be the defect.
       if (!effect.length && wasDisabled) effect.push('is disabled, correctly');
+      if (!effect.length && wasSelected) effect.push('was already the chosen option');
 
       sweepLog.push({ route, label, effect: effect.join(', ') || 'nothing' });
       if (!effect.length && !isActiveNavItem(route, label)) {

@@ -224,6 +224,8 @@ async function chooseTactical(page, triggerText, optionText) {
   ];
 
   const roleReport = {};
+  /** role -> whether the ward-scoped advisory docked for them. */
+  const advisoryReport = {};
 
   for (const role of ['hq', 'lga', 'police', 'army', 'responder', 'citizen']) {
     currentScreen = `${role}:login`;
@@ -244,6 +246,22 @@ async function chooseTactical(page, triggerText, optionText) {
       !/__next_error__/.test(await page.content()) && body.length > 200,
       `${body.length} chars of text`,
     );
+
+    // WHICH ADVISORY DOCKED UNDER THIS OPERATOR'S HEADER.
+    //
+    // `SystemAlertListener` took no viewer and applied no targeting: it docked
+    // the newest live row, so an advisory addressed to CITIZENS of one ward sat
+    // under the HQ header and one addressed to another agency sat on that
+    // liaison's screen. The seeded ward advisory names NARAGUTA, where the
+    // police liaison works; the army liaison is in PANYAM. Asserted below.
+    advisoryReport[role] = {
+      ward: /naraguta junction/i.test(body),
+      // What the Army liaison falls through to. Recorded so their NOT seeing
+      // the ward advisory can be told apart from their banner being dead —
+      // which is how the first version of this check passed for the wrong
+      // reason.
+      legacyAgents: /radio discipline/i.test(body),
+    };
     await shot(page, `20-${role}-01-map`);
 
     const seen = [];
@@ -255,6 +273,35 @@ async function chooseTactical(page, triggerText, optionText) {
       n += 1;
       seen.push(slug);
       await shot(page, `20-${role}-${String(n).padStart(2, '0')}-${slug}`);
+
+      // THE AUDIT SCREEN HAS TO SAY WHO DID IT.
+      //
+      // Photographing this screen was all that was ever asked of it, and the
+      // photograph was of an empty panel: the stand-in answered
+      // `audit_trail()` with a 400 (it implemented no RPC at all), and no
+      // fixture incident carried an escalation_log for it to flatten even if
+      // it had. Both are fixed, so the screen now has rows — and the rows are
+      // worth asserting on, because `audit_trail()` read the actor from `by`
+      // while BOTH apps write `by_email`, so every escalation a person
+      // performed was attributed to SYSTEM. An audit trail that cannot name
+      // the officer who escalated an incident is the one thing this screen
+      // must not be.
+      if (slug === 'audit' && role === 'hq') {
+        const audit = await textOf(page);
+        check(
+          'the audit screen lists the actions taken on an incident',
+          /ESCALATED/.test(audit) && /UNIT|WARD|LGA/.test(audit),
+          audit.replace(/\s+/g, ' ').slice(0, 140),
+        );
+        check(
+          'the audit screen names the officer who escalated it, not SYSTEM',
+          /hq@staging\.operationrainbow\.test/.test(audit),
+          /hq@staging\.operationrainbow\.test/.test(audit)
+            ? 'the HQ operator is named on their own escalation'
+            : 'the escalation performed by the HQ operator is attributed to '
+              + `${/SYSTEM/.test(audit) ? 'SYSTEM' : 'nobody'}`,
+        );
+      }
     }
     // The agency portal's nav label is built from the liaison's own agency.
     currentScreen = `${role}:agency`;
@@ -636,6 +683,59 @@ async function chooseTactical(page, triggerText, optionText) {
     ctl.unknownColumns.join('; ') || 'none',
   );
 
+  // AN ADVISORY DOCKS FOR THE PEOPLE IT NAMES, AND NOT THE OTHERS.
+  //
+  // The console's advisory banner honoured none of the composer's five
+  // targeting controls. The seeded advisory is scoped to NARAGUTA ward: the
+  // police liaison and the LGA command are posted there, the army liaison is in
+  // PANYAM. Command sees every advisory by design — they compose and withdraw
+  // them — so HQ is expected to see it too.
+  check(
+    'the ward-scoped advisory docks for the operators posted to that ward',
+    ['hq', 'lga', 'police'].every((r) => advisoryReport[r]?.ward),
+    ['hq', 'lga', 'police'].map((r) => `${r}:${advisoryReport[r]?.ward ? 'shown' : 'absent'}`).join(' '),
+  );
+  check(
+    'and does not dock for the liaison posted to another ward',
+    advisoryReport.army ? advisoryReport.army.ward === false : false,
+    advisoryReport.army
+      ? (advisoryReport.army.ward
+          ? 'the ARMY liaison in PANYAM was shown a NARAGUTA advisory'
+          : 'the ARMY liaison in PANYAM was not shown it')
+      : 'the ARMY liaison never signed in, so this proves nothing',
+  );
+  // AND THEIR BANNER IS ALIVE, so the line above means scoping and not silence.
+  check(
+    "the other-ward liaison's banner still docks an advisory addressed to them",
+    advisoryReport.army ? advisoryReport.army.legacyAgents === true : false,
+    advisoryReport.army?.legacyAgents
+      ? 'the ARMY liaison was shown the AGENTS advisory instead'
+      : 'the ARMY liaison was shown nothing at all, so the check above proves nothing',
+  );
+
+  // AND NO FUNCTION THE STAND-IN COULD NOT ANSWER.
+  //
+  // The sibling of the check above, and it was missing for the same reason that
+  // one exists. The stand-in had no RPC router at all, so every `.rpc()` fell
+  // through to the table router and came back
+  // `400 relation "public.rpc/<fn>" does not exist`. The Audit Logs screen is
+  // built on `audit_trail()`: it rendered empty, logged `[AUDIT_TRAIL_ERR]` into
+  // `browserProblems`, and this run reported 46/46 and photographed the empty
+  // screen as evidence that it works.
+  //
+  // `rpcMisses` is now the record of "the app asked for a function the stand-in
+  // does not implement", and any entry fails the run — because an unimplemented
+  // function and a working screen look identical in a screenshot.
+  check(
+    'every database function the app called was answered, not refused',
+    (ctl.rpcMisses || []).length === 0,
+    (ctl.rpcMisses || []).length
+      ? `refused: ${[...new Set(ctl.rpcMisses)].join(', ')}`
+        + ' — implement it in RPCS in scripts/local_e2e/fake_supabase.js'
+      : `none refused; ${new Set((ctl.rpcCalls || []).map((c) => c.fn)).size}`
+        + ' function(s) answered',
+  );
+
   // A basemap refused by our OWN policy is invisible from the map code and
   // from the header: the map simply renders grey with the markers floating on
   // it, and the only evidence is a console message nobody reads during an
@@ -686,6 +786,9 @@ async function chooseTactical(page, triggerText, optionText) {
     roles: roleReport,
     checks,
     unknownColumns: ctl.unknownColumns,
+    advisories: advisoryReport,
+    rpcMisses: ctl.rpcMisses || [],
+    rpcCalls: ctl.rpcCalls || [],
     writesObserved: ctl.writes.map((w) => ({ table: w.table, method: w.method })),
     browserProblems,
     requestCount: ctl.log.length,

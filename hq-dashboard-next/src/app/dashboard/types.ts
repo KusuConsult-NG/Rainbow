@@ -55,6 +55,19 @@ export interface Alert {
     | 'RESOLVED'
     | 'DURESS'
     | 'CANCELLED';
+  /**
+   * When the reporting handset signed out while this incident was still open.
+   *
+   * Tracking continues regardless — a duress PIN deliberately leaves it
+   * running, and the lock screen's sign-out needs no code, so this is the one
+   * path somebody other than the reporter can reach. The column exists so an
+   * operator can tell "the app is gone" from "the battery died", which a gap in
+   * the track cannot. See `20261020000000`.
+   *
+   * Optional, because a console can be running against a database the
+   * migration has not reached yet.
+   */
+  device_signed_out_at?: string | null;
   severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   priority?: string;
   assigned_to?: string;
@@ -93,6 +106,18 @@ export interface Alert {
   feedback_at?: string;
   post_sos_status?: string;
   media_urls?: string[];
+  /**
+   * The reporter's own voice, when they could not or did not type.
+   *
+   * Its own column and not one of `media_urls`: that list is evidence —
+   * photographs, video — and a voice note is the report. While the app
+   * uploaded it as one more attachment, this dossier drew it as a 72px
+   * thumbnail with a musical note on it, among the photographs, and an
+   * operator had to open each one to find out which was somebody speaking.
+   */
+  voice_note_url?: string | null;
+  /** Its length, so the player can say so before anything is fetched. */
+  voice_note_seconds?: number | null;
   attachments?: string[];
   created_at?: string;
   updated_at?: string;

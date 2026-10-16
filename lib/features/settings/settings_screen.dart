@@ -6,11 +6,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/shared/widgets/language_picker.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/reentry_lock_provider.dart';
 import 'package:rainbow_app/services/mesh_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -20,8 +20,6 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  String _language = 'EN';
-
   /// Whether this phone relays others' sealed alerts over Bluetooth. Null until
   /// read, so the switch never flashes the wrong position.
   bool? _meshRelay;
@@ -29,7 +27,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    unawaited(_loadLanguage());
     unawaited(_loadMeshRelay());
   }
 
@@ -59,20 +56,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  Future<void> _loadLanguage() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _language = prefs.getString('app_language') ?? 'EN';
-    });
-  }
-
-  Future<void> _setLanguage(String lang) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('app_language', lang);
-    setState(() {
-      _language = lang;
-    });
-  }
 
   Future<void> _updateFullName(String newName) async {
     final user = SupabaseConfig.client.auth.currentUser;
@@ -302,24 +285,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 16),
 
           // 4. Language
-          ListTile(
-            tileColor: AppColors.surfaceContainer,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            leading: const Icon(Icons.language, color: AppColors.primary),
-            title: Text('App Language', style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold)),
-            trailing: DropdownButton<String>(
-              value: _language,
-              dropdownColor: AppColors.surfaceContainer,
-              style: GoogleFonts.inter(color: AppColors.onBackground),
-              items: const [
-                DropdownMenuItem(value: 'EN', child: Text('English')),
-                DropdownMenuItem(value: 'HA', child: Text('Hausa')),
-              ],
-              onChanged: (val) {
-                if (val != null) unawaited(_setLanguage(val));
-              },
-            ),
-          ),
+          //
+          // This was a DropdownButton bound to a private `_language` string and
+          // written to SharedPreferences as `app_language` = 'HA'. Nothing
+          // reads that key: every translated string watches `languageProvider`
+          // from shared/localization/translations.dart, which stores `app_lang`
+          // = 'ha'. So this control changed nothing, and it offered two of the
+          // three languages the app actually has. One widget, one provider.
+          const LanguagePicker(),
           const SizedBox(height: 16),
 
           // Emergency PINs — per-user, verified on the server.

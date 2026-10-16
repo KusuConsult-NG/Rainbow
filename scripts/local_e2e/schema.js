@@ -179,7 +179,35 @@ function build() {
   return { columns, relationships, defaults: Object.fromEntries(defaults) };
 }
 
-module.exports = { build };
+/**
+ * A fingerprint of `supabase/migrations/` as it is on disk right now.
+ *
+ * The stand-in reads the schema ONCE, at boot, and then answers every request
+ * from it. A stand-in left running across a migration therefore rejects the
+ * column that migration adds — in full, taking the whole query with it, which
+ * is what it is built to do for a column that really does not exist. The app
+ * then renders an empty screen and the harness reports the feature broken.
+ *
+ * That happened: a stand-in started at 13:06 was still answering at 14:28,
+ * after a migration had added `alerts.voice_note_url`. The agency liaison desk
+ * came back with nothing, and three checks failed naming the portal — on code
+ * that was fine. It is the same trap as a stale `next-server` holding :3000,
+ * and the harness has been caught by it twice now.
+ *
+ * So the stand-in compares this between requests and rebuilds when it moves.
+ * Names, sizes and mtimes: enough to see an edit, an addition or a removal,
+ * and no file reads.
+ */
+function generation() {
+  let out = '';
+  for (const f of fs.readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).sort()) {
+    const st = fs.statSync(path.join(MIGRATIONS, f));
+    out += `${f}:${st.size}:${st.mtimeMs}\n`;
+  }
+  return out;
+}
+
+module.exports = { build, generation };
 
 if (require.main === module) {
   const { columns, relationships } = build();

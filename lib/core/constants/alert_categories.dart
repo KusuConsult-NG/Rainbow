@@ -165,6 +165,55 @@ const List<AlertCategoryInfo> alertCategories = [
     icon: Icons.warning_rounded,
     subTypes: ['Armed Invasion', 'Riot', 'Vandalism'],
   ),
+  // ── The two that are not emergencies ──────────────────────────────────────
+  //
+  // Everything above is somebody in danger now. These are not, and the
+  // difference is enforced in the database rather than left to the label:
+  // `is_non_emergency()` matches on the CATEGORY — the part of `type` before
+  // ' - ' — so `PUBLIC PROPERTY` and `PUBLIC SERVICE` are filed at the LGA,
+  // never pre-assigned to a responder, and never climbed by the timeout sweep.
+  // A broken culvert reported at 02:00 would otherwise page the patrol that
+  // cannot fix it and be an HQ-tier incident by morning.
+  //
+  // THE LABELS ARE LOAD-BEARING. They are what the database matches, through
+  // `type` = '<label> - <subtype>'. `scripts/check_non_emergency_categories_agree.py`
+  // fails if these two and the SQL function disagree, because a category the
+  // app can file and the database does not recognise is paged out like an
+  // emergency — silently, and at night.
+  AlertCategoryInfo(
+    category: AlertCategory.general,
+    label: 'Public property',
+    emoji: '🏛️',
+    priority: 'LOW',
+    color: Color(0xFF00695C),
+    bg: Color(0xFFE0F2F1),
+    icon: Icons.account_balance_rounded,
+    subTypes: [
+      'Abandoned or derelict',
+      'Vandalised or destroyed',
+      'Needs repair',
+      'Mismanaged or misused',
+      'Unsafe to the public',
+      'Illegally occupied',
+    ],
+  ),
+  AlertCategoryInfo(
+    category: AlertCategory.general,
+    label: 'Public service',
+    emoji: '🛠️',
+    priority: 'LOW',
+    color: Color(0xFF4E342E),
+    bg: Color(0xFFEFEBE9),
+    icon: Icons.handyman_rounded,
+    subTypes: [
+      'No water supply',
+      'No power supply',
+      'Blocked drain or refuse',
+      'Road or bridge damaged',
+      'Street light out',
+      'Clinic or school neglected',
+    ],
+  ),
 ];
 
 /// Documentation for this public member.

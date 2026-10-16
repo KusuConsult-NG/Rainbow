@@ -194,8 +194,24 @@ BEGIN
     failures := failures + 1;
   END IF;
 
-  UPDATE public.app_config SET value = '2'
-   WHERE key = 'escalation_timeout_pu';
+  -- No row at all, which is not the same as a bad one: `SELECT ... INTO raw`
+  -- leaves `raw` NULL, `NULL::INTEGER` is NULL, and the fallback applies. The
+  -- console's SystemConfig screen now tells an operator that an unconfigured
+  -- timeout is still the effective one BECAUSE of this branch, so the claim
+  -- needs an assertion behind it.
+  DELETE FROM public.app_config WHERE key = 'escalation_timeout_pu';
+  IF public.tier_timeout_minutes('UNIT') = 2 THEN
+    RAISE NOTICE 'PASS  an unconfigured timeout falls back to the seeded value';
+  ELSE
+    RAISE WARNING 'FAIL  a missing timeout row produced %',
+      coalesce(public.tier_timeout_minutes('UNIT')::text, 'NULL');
+    failures := failures + 1;
+  END IF;
+
+  INSERT INTO public.app_config (key, value, description)
+  VALUES ('escalation_timeout_pu', '2',
+          'Polling Unit escalation timeout in minutes')
+  ON CONFLICT (key) DO UPDATE SET value = '2';
 
   -- ── 9. The job is not reachable from a phone ─────────────────────────────
   IF has_function_privilege('anon', 'public.escalate_overdue_alerts()', 'EXECUTE')

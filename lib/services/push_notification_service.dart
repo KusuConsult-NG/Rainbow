@@ -38,15 +38,32 @@ class NotificationTarget {
 /// Decides whether a notification payload is a deep link this app handles.
 ///
 /// Pure: no I/O and no navigation, so the rule can be tested without a device.
-/// Only DISPATCH and ALERT carry an incident to open; anything else — a
-/// broadcast, a malformed payload, a future notification type — must be ignored
-/// rather than navigating somewhere arbitrary.
+/// Anything not named here — a broadcast, a malformed payload, a future
+/// notification type — must be ignored rather than navigating somewhere
+/// arbitrary. A responder taken to the wrong incident is worse than one taken
+/// nowhere.
+///
+/// The two queued kinds were added after the fact and are worth naming:
+///
+///   * `NEW_INCIDENT` — a report has just been filed in this officer's polling
+///     unit (`20261022000000`). It is the most urgent notification the system
+///     sends, and until it was listed here tapping it opened the app and
+///     stopped, because an unlisted type is ignored by the rule above.
+///   * `TIER_ESCALATION` — the timeout moved an incident up to this desk. It
+///     has been queued since `20261007000000` and could never deep-link
+///     either; found while adding the one above.
+///
+/// Both name a specific incident the recipient is entitled to open — the
+/// console's drain only sends them to officers RLS would grant the row to — so
+/// both navigate.
+const _deepLinkTypes = {'DISPATCH', 'ALERT', 'NEW_INCIDENT', 'TIER_ESCALATION'};
+
 NotificationTarget? notificationTarget(Map<String, dynamic>? data) {
   if (data == null) return null;
   final alertId = data['alertId'];
   final type = data['type'];
   if (alertId is! String || alertId.isEmpty) return null;
-  if (type != 'DISPATCH' && type != 'ALERT') return null;
+  if (type is! String || !_deepLinkTypes.contains(type)) return null;
   return NotificationTarget(alertId: alertId);
 }
 

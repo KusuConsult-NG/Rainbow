@@ -2,7 +2,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
 import { supabase } from '@/lib/supabase';
+import { AGENCY_LIST } from '@/lib/agencies';
+import { entryActor, entryNotes, stampLabel } from '@/lib/incident-timeline';
 import LiveFeedViewer from '@/components/LiveFeedViewer';
+import VoiceNote from '@/components/VoiceNote';
 
 import {
   Shield, Users, FileText, AlertTriangle, CheckCircle,
@@ -24,6 +27,9 @@ interface AgencyAlert {
   latitude?: number;
   longitude?: number;
   media_urls?: string[];
+  /** The reporter's own voice. See the note in dashboard/types.ts. */
+  voice_note_url?: string | null;
+  voice_note_seconds?: number | null;
   escalated_to_agency: string;
   escalation_log?: any[];
   created_at: string;
@@ -66,18 +72,11 @@ interface AgencyActionReport {
   hq_acknowledged_at?: string;
 }
 
-const AGENCIES = [
-  { code: 'POLICE',   label: 'Nigeria Police Force',        color: '#3b82f6', icon: '🚔' },
-  { code: 'ARMY',     label: 'Nigerian Army',               color: '#22c55e', icon: '🪖' },
-  { code: 'DSS',      label: 'Dept. of State Services',     color: '#8b5cf6', icon: '🕵️' },
-  { code: 'NSCDC',    label: 'NSCDC',                       color: '#f59e0b', icon: '🛡️' },
-  { code: 'FRSC',     label: 'Federal Road Safety Corps',   color: '#ef4444', icon: '🚨' },
-  // Operation Safe Haven, not Amotekun. Amotekun is a SOUTH-WEST outfit —
-  // Ondo, Ekiti, Oyo, Ogun, Osun — with no presence in Plateau. OPSH is the
-  // military joint task force that actually covers Plateau, Bauchi and
-  // Kaduna, and is who an incident here would be handed to.
-  { code: 'OPSH',     label: 'Operation Safe Haven',        color: '#14b8a6', icon: '🛰️' },
-];
+// One list, shared with the escalation menu and the contact lookup. It used
+// to be declared here, and the escalation menu was built from a different one:
+// an incident handed to the "NIGERIA POLICE FORCE (NPF)" was stored as 'NPF'
+// and this feed asks for 'POLICE', so it never arrived on the liaison's desk.
+const AGENCIES = AGENCY_LIST;
 
 const STATUS_COLORS: Record<string, string> = {
   AVAILABLE:   '#1B5E20',
@@ -143,7 +142,7 @@ async function loadAgencyData(agency: string): Promise<AgencyData> {
   try {
     const { data: incidentData } = await supabase
       .from('alerts')
-      .select('id, type, description, status, severity, geo_lga, geo_ward, geo_pu, latitude, longitude, media_urls, escalated_to_agency, escalation_log, created_at, updated_at')
+      .select('id, type, description, status, severity, geo_lga, geo_ward, geo_pu, latitude, longitude, media_urls, voice_note_url, voice_note_seconds, escalated_to_agency, escalation_log, created_at, updated_at')
       .eq('escalated_to_agency', agency)
       .neq('status', 'RESOLVED')
       .order('created_at', { ascending: false })
@@ -191,10 +190,30 @@ async function loadAgencyData(agency: string): Promise<AgencyData> {
 // ─── Main Component ──────────────────────────────────────────────────────
 
 export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, userId }: AgencyPortalProps) {
-  // If HQ, they can select which agency to view. Liaisons are locked to their agency.
-  const [selectedAgency, setSelectedAgency] = useState<string>(
-    isHq ? (AGENCIES[0].code) : (userAgency || 'POLICE')
-  );
+  /**
+   * Which desk is on screen.
+   *
+   * HQ chooses; a liaison does not, because it is their own. That used to be
+   * one piece of state seeded from the props:
+   *
+   *     useState(isHq ? AGENCIES[0].code : (userAgency || 'POLICE'))
+   *
+   * and a `useState` initialiser runs ONCE. The dashboard renders this before
+   * it knows whose console it is — `userRole` defaults to a command role, so
+   * `isHq` arrives true with no agency — and an Army liaison who reached this
+   * tab in that window was frozen on `AGENCIES[0]`, the Police desk, for the
+   * life of the mount. The switcher below is HQ-only, so when their real role
+   * landed it took the one control that could have moved them. RLS then
+   * correctly returned nothing for POLICE, and the portal reported the Police
+   * as having no incidents, no personnel and no deployments — on the only
+   * screen that role has.
+   *
+   * Derived, it follows the props whenever they settle. And a non-HQ account
+   * with no agency gets NULL rather than `'POLICE'`: it is not the Police, and
+   * naming a real agency is worse than saying we do not know yet.
+   */
+  const [hqSelection, setHqSelection] = useState<string>(AGENCIES[0].code);
+  const selectedAgency: string | null = isHq ? hqSelection : (userAgency || null);
   const [activeSection, setActiveSection] = useState<'incidents' | 'personnel' | 'reports' | 'add_personnel'>('incidents');
 
   // Data — ONE piece of state, tagged with the agency it belongs to.
@@ -222,7 +241,9 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
 
-  const agencyInfo = AGENCIES.find(a => a.code === selectedAgency) || AGENCIES[0];
+  // No `|| AGENCIES[0]` fallback: that is how an unresolved desk came to be
+  // labelled with a real agency's name and colours.
+  const agencyInfo = AGENCIES.find(a => a.code === selectedAgency) ?? null;
 
   // ── Data fetching ─────────────────────────────────────────────────────
   //
@@ -233,10 +254,12 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
   // a rule that gets disabled. Inlining the load in the effect is also plainly
   // better — it can cancel.
   const fetchAll = useCallback(async () => {
+    if (!selectedAgency) return;
     setData(await loadAgencyData(selectedAgency));
   }, [selectedAgency]);
 
   useEffect(() => {
+    if (!selectedAgency) return;
     let cancelled = false;
     void (async () => {
       const snapshot = await loadAgencyData(selectedAgency);
@@ -251,6 +274,7 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
 
   // Realtime subscription for incidents assigned to this agency
   useEffect(() => {
+    if (!selectedAgency) return;
     const channel = supabase
       .channel(`agency-portal-${selectedAgency}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => fetchAll())
@@ -270,6 +294,35 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
   };
 
   // ── Render ────────────────────────────────────────────────────────────
+
+  // Not HQ, and no agency on the account yet. Every hook above has already
+  // run, and each one holds off rather than reading somebody else's desk.
+  //
+  // This is a real state, not a transient: a sector-command or responder
+  // account that opens this tab has no agency and never will, and it used to
+  // be shown the Police desk, empty. "We do not know whose this is" is the
+  // honest version, and it is the same rule as the incident feed's — an empty
+  // board that could not ask is the same lie as an empty board.
+  if (!agencyInfo || !selectedAgency) {
+    return (
+      <div style={{
+        height: '100%', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', gap: 10,
+        color: 'var(--text-muted)', padding: 24, textAlign: 'center',
+      }}>
+        <Shield size={28} />
+        <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: 1 }}>
+          RESOLVING YOUR DESK
+        </div>
+        <div style={{ fontSize: 11, maxWidth: 420 }}>
+          This console has not been told which agency this account belongs to.
+          If it does not resolve, the account has no liaison desk — ask HQ to
+          grant agency access.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 0 }}>
 
@@ -324,7 +377,7 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
                 key={a.code}
                 role="tab"
                 aria-selected={selectedAgency === a.code}
-                onClick={() => setSelectedAgency(a.code)}
+                onClick={() => setHqSelection(a.code)}
                 style={{
                   padding: '5px 12px',
                   borderRadius: 20,
@@ -522,8 +575,20 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
       borderRadius: 12,
       overflow: 'hidden',
     }}>
-      <div
-        style={{ padding: '14px 16px', cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: 12 }}
+      {/* THE CARD HEADER IS THE ONLY WAY INTO THE DETAIL, so it has to be a
+          button. This was a clickable div: the escalation log, the evidence,
+          the live feed and both action buttons sit behind it, on the one
+          surface an outside agency ever sees, and none of it could be reached
+          without a pointer. `aria-expanded` says which state it is in, which
+          the chevron says visually and said nowhere else. */}
+      <button
+        type="button"
+        aria-expanded={expanded}
+        style={{
+          padding: '14px 16px', cursor: 'pointer', display: 'flex',
+          alignItems: 'flex-start', gap: 12, width: '100%', textAlign: 'left',
+          background: 'none', border: 'none', color: 'inherit', font: 'inherit',
+        }}
         onClick={() => setExpanded(!expanded)}
       >
         {/* Severity dot */}
@@ -555,7 +620,7 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
           </div>
         </div>
         {expanded ? <ChevronDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} /> : <ChevronRight size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />}
-      </div>
+      </button>
 
       {expanded && (
         <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--border)' }}>
@@ -566,19 +631,36 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
           {/* WebRTC Live Stream Receiver */}
           <LiveFeedViewer alertId={incident.id} />
 
+          {/* The reporter's voice, above the evidence: an agency liaison has
+              this desk and nothing else, so a report filed by somebody who
+              could not type has to be audible here. */}
+          {incident.voice_note_url && (
+            <div style={{ marginTop: 12 }}>
+              <VoiceNote
+                url={incident.voice_note_url}
+                seconds={incident.voice_note_seconds}
+              />
+            </div>
+          )}
+
           {/* Media */}
           {incident.media_urls && incident.media_urls.length > 0 && (
             <div style={{ marginTop: 12 }}>
               <div style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1, marginBottom: 6 }}>EVIDENCE ({incident.media_urls.length})</div>
               <div style={{ display: 'flex', gap: 6 }}>
                 {incident.media_urls.slice(0, 4).map((url, i) => (
-                  <div
+                  /* A link, because it opens evidence in a new tab. See the
+                     same change in dashboard/page.tsx. */
+                  <a
                     key={i}
-                    onClick={() => window.open(url, '_blank')}
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`Open evidence ${i + 1} for this incident in a new tab`}
                     style={{
                       width: 64, height: 64, borderRadius: 8, overflow: 'hidden',
                       background: 'var(--input-bg)', border: '1px solid var(--border)',
-                      cursor: 'pointer', flexShrink: 0,
+                      cursor: 'pointer', flexShrink: 0, display: 'block',
                     }}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element -- images.unoptimized is set, so next/image serves this unchanged; see the note in dashboard/page.tsx. */}
@@ -586,7 +668,7 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                     />
-                  </div>
+                  </a>
                 ))}
               </div>
             </div>
@@ -598,12 +680,16 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
               <div style={{ fontSize: 9, fontWeight: 900, color: 'var(--text-muted)', letterSpacing: 1, marginBottom: 6 }}>ESCALATION LOG</div>
               {incident.escalation_log.map((entry: any, i: number) => (
                 <div key={i} style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                  <span style={{ color: agencyColor, fontWeight: 700 }}>{entry.from_tier} → {entry.to_tier}</span>
-                  {/* The LGA an HQ handover was aimed at. It used to be written
-                      into `to_tier` itself, which put a place where every other
-                      writer puts a rung; naming it separately keeps both. */}
-                  {entry.to_lga && entry.to_lga !== 'ALL' ? ` (${entry.to_lga})` : ''}
-                  {' '}{entry.reason} · {entry.by_email ?? entry.by ?? 'SYSTEM'} · {new Date(entry.at).toLocaleString()}
+                  {/* One reading of an entry, shared with the replay panel.
+                      `entryNotes` names the tiers AND where a hand-down went
+                      (the LGA an HQ handover was aimed at used to be written
+                      into `to_tier` itself, which put a place where every
+                      other writer puts a rung). `entryActor` is the T-32 order
+                      — `by`, then `by_email`, then SYSTEM — and `stampLabel`
+                      is why an entry with no `at` no longer reads
+                      "Invalid Date" on this desk. */}
+                  <span style={{ color: agencyColor, fontWeight: 700 }}>{entryNotes(entry)}</span>
+                  {' '}· {entryActor(entry)} · {stampLabel(entry.at, 'full')}
                 </div>
               ))}
             </div>
