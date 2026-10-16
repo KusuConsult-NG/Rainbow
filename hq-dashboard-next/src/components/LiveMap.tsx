@@ -287,12 +287,18 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
       .then(data => {
         if (!alive) return;
         Leaflet.geoJSON(data, {
+          // Navy, not `--duress`. The seventeen LGA boundaries were drawn
+          // with the DURESS token: the state's own internal borders were
+          // painted in the one colour that means a person is in danger, so
+          // a map with nothing happening on it still read as alarming, and
+          // a real critical marker had to compete with every border on
+          // screen. Boundaries are structure; red is an incident.
           style: {
-            color: 'var(--duress)',
+            color: 'var(--primary)',
             weight: 1.5,
-            opacity: 0.8,
-            fillColor: 'var(--duress)',
-            fillOpacity: 0.05,
+            opacity: 0.55,
+            fillColor: 'var(--primary)',
+            fillOpacity: 0.04,
             dashArray: '3, 3'
           },
           onEachFeature: (feature: any, layer: any) => {
@@ -623,7 +629,7 @@ function drawApproximateArea(
             iconCreateFunction: (cluster: any) => {
               const count = cluster.getChildCount();
               return L.divIcon({
-                html: `<div style="background:var(--duress);color:white;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;border:3px solid white;box-shadow:0 0 15px var(--duress)">${count}</div>`,
+                html: `<div style="background:var(--primary);color:white;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;border:3px solid white;box-shadow:0 0 15px var(--primary)">${count}</div>`,
                 className: '',
                 iconSize: [30, 30]
               });

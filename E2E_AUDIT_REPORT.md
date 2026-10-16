@@ -7490,3 +7490,24 @@ A colour sweep that cannot tell code from prose rewrote one of these very
 explanations into nonsense mid-task — *"`AppColors.danger` was `#B3261E` and is
 now `#B3261E`; it was never `#B3261E`"* — which is why the check blanks
 comments before reading, and why `brand.ts` spells the old red with dashes.
+
+### A postscript: the borders of Plateau State were drawn in the duress colour
+
+Found by looking at the recoloured console, not by reading it. The seventeen
+LGA boundaries on the HQ map were styled with `var(--duress)`:
+
+```ts
+style: { color: 'var(--duress)', fillColor: 'var(--duress)', … }
+```
+
+The state's own internal borders were painted in the one colour that means a
+person is in danger. While every colour was a different arbitrary hue this was
+invisible; the moment red became *the* emergency red, a map with nothing
+happening on it read as alarming, and three real critical markers had to
+compete with seventeen red borders for attention. The cluster bubble — which
+counts incidents, it does not grade them — was the same red.
+
+Both are navy now. Boundaries are structure; red is an incident. This is the
+second defect in this pass that no amount of reading the source would find,
+because nothing in the source was wrong by its own lights: a token was simply
+being used for something it does not mean.
