@@ -95,6 +95,77 @@ def trimmed(master: Image.Image) -> Image.Image:
     return square
 
 
+def emblem(master: Image.Image) -> Image.Image:
+    """The ring and the map, without the wordmark above or the line below.
+
+    THE LAUNCHER ICON IS NOT THE LOCKUP. Android masks an adaptive icon to a
+    circle or a squircle and then the launcher scales it to ~40px: the whole
+    lockup put through that gives a clipped "PLATEAU EY" across the top and a
+    grey smear underneath where "COMMUNITY REPORTING & VIGILANCE" used to be.
+    On the handset it read as a broken image, which is what it was.
+
+    So the launcher, the adaptive foreground and the iOS icons take the
+    emblem; everything a person reads at a readable size — the splash, the
+    in-app mark, the console — keeps the whole lockup.
+
+    The crop is MEASURED, not typed. The gold inner ring is the only gold in
+    the artwork, so its bounding box finds the emblem's centre; the outer navy
+    stroke is then walked out along the middle row, and the square is padded
+    by a little so the mask does not shave it.
+    """
+    rgb = master.convert('RGB')
+    px = rgb.load()
+    w, h = rgb.size
+
+    def near(c, t, tol=40):
+        return all(abs(a - b) <= tol for a, b in zip(c, t))
+
+    x0, y0, x1, y1 = w, h, -1, -1
+    for y in range(h):
+        for x in range(w):
+            if near(px[x, y], GOLD):
+                x0, y0 = min(x0, x), min(y0, y)
+                x1, y1 = max(x1, x), max(y1, y)
+    if x1 < 0:
+        raise SystemExit('no gold ring found in the master — the artwork '
+                         'changed and the emblem can no longer be located.')
+    cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+
+    radius = (x1 - x0) // 2
+    for x in range(cx, w):
+        if near(px[x, cy], NAVY, 60):
+            radius = x - cx
+    radius += 14
+
+    box = (cx - radius, cy - radius, cx + radius, cy + radius)
+    return trimmed_box(master, box)
+
+
+def trimmed_box(master: Image.Image, box: tuple[int, int, int, int]):
+    """`trimmed`, but on a crop: the page cleared from the border inward."""
+    cropped = master.convert('RGBA').crop(box)
+    arr = np.array(cropped)
+    lum = arr[:, :, :3].min(axis=2)
+    page = lum > 230
+    reach = np.zeros_like(page)
+    reach[0, :] = page[0, :]
+    reach[-1, :] = page[-1, :]
+    reach[:, 0] = page[:, 0]
+    reach[:, -1] = page[:, -1]
+    for _ in range(max(cropped.size)):
+        grown = reach.copy()
+        grown[1:, :] |= reach[:-1, :]
+        grown[:-1, :] |= reach[1:, :]
+        grown[:, 1:] |= reach[:, :-1]
+        grown[:, :-1] |= reach[:, 1:]
+        grown &= page
+        if (grown == reach).all():
+            break
+        reach = grown
+    arr[:, :, 3] = np.where(reach, 0, arr[:, :, 3])
+    return Image.fromarray(arr)
+
+
 def on(colour, mark: Image.Image, size: int, scale: float = 1.0,
        alpha: bool = True) -> Image.Image:
     """`mark` centred on `colour` (or transparency) at `size`."""
@@ -186,21 +257,22 @@ if not MASTER.is_file():
                      'here is built from.')
 
 master = Image.open(MASTER)
-mark = trimmed(master)
+mark = trimmed(master)          # the whole lockup, for anything read at size
+badge = emblem(master)          # ring and map only, for the launcher tile
 made = 0
 
 # ── Android: adaptive foreground, transparent ───────────────────────────────
 RES = REPO / 'android' / 'app' / 'src' / 'main' / 'res'
 for folder, px in [('mdpi', 108), ('hdpi', 162), ('xhdpi', 216),
                    ('xxhdpi', 324), ('xxxhdpi', 432)]:
-    write(on(None, mark, px, 1.0),
+    write(on(None, badge, px, 1.0),
           RES / f'drawable-{folder}' / 'ic_launcher_foreground.png')
     made += 1
 
 # ── Android: legacy launcher icon, emblem on navy ──────────────────────────
 for folder, px in [('mdpi', 48), ('hdpi', 72), ('xhdpi', 96),
                    ('xxhdpi', 144), ('xxxhdpi', 192)]:
-    write(on((255, 255, 255), mark, px, 0.94),
+    write(on((255, 255, 255), badge, px, 0.94),
           RES / f'mipmap-{folder}' / 'ic_launcher.png')
     made += 1
 
@@ -209,7 +281,7 @@ IOS = REPO / 'ios' / 'Runner' / 'Assets.xcassets' / 'AppIcon.appiconset'
 if IOS.is_dir():
     for icon in sorted(IOS.glob('*.png')):
         px = Image.open(icon).size[0]
-        write(on((255, 255, 255), mark, px, 0.94, alpha=False), icon)
+        write(on((255, 255, 255), badge, px, 0.94, alpha=False), icon)
         made += 1
 
 # ── Flutter assets: the mark on transparency, the lockup whole ─────────────
@@ -236,6 +308,8 @@ print(f'  * {manifest.relative_to(REPO)} records each one\'s hash, and the '
       'Pillow')
 print(f'  * lockup trimmed to {mark.size[0]}x{mark.size[1]}, page removed by '
       'flood fill from the border')
-print('  * the whole lockup every time: transparent for the app screens, on '
-      'white for the launcher tiles')
+print(f'  * emblem cropped to {badge.size[0]}x{badge.size[1]} for the launcher '
+      'and the iOS icons — the lockup clipped to "PLATEAU EY" under the '
+      'adaptive mask')
+print('  * the whole lockup for the splash, the in-app mark and the console')
 print('  * iOS icons carry no alpha channel')

@@ -18,7 +18,9 @@ final broadcastProvider = StreamProvider<List<BroadcastAlert>>((ref) {
   // The recipient's own geography comes from their profile. It is watched, not
   // read once: a responder reassigned to another LGA mid-shift starts receiving
   // that LGA's advisories without restarting the app.
-  final profile = ref.watch(userProfileProvider).value;
+  // `.valueOrNull`: `AsyncError.value` rethrows. See the note in
+  // `shared/widgets/system_alert_listener.dart`.
+  final profile = ref.watch(userProfileProvider).valueOrNull;
   final to = BroadcastRecipient(
     isResponder: auth.role == UserRole.responder,
     geoLga: profile?['geo_lga'] as String?,

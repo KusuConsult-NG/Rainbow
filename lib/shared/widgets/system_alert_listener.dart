@@ -33,7 +33,22 @@ class _SystemAlertListenerState extends ConsumerState<SystemAlertListener> {
 
   @override
   Widget build(BuildContext context) {
-    final userProfile = ref.watch(userProfileProvider).value;
+    // `.valueOrNull`, NEVER `.value`.
+    //
+    // `AsyncError.value` RETHROWS the underlying error
+    // (riverpod/lib/src/common.dart:493) — it is not a null-returning getter,
+    // whatever its name suggests. This widget wraps EVERY screen through
+    // `MaterialApp.builder`, and `userProfileProvider` is a realtime stream on
+    // `profiles`. So a signed-in handset that cannot reach the backend — no
+    // DNS, no data, a dropped socket — rethrew `RealtimeSubscribeException`
+    // out of the build of the widget wrapping the whole app, and the app died
+    // at launch. A citizen saw that as a blank pale page, which is what a
+    // release build paints for a build-time throw.
+    //
+    // This app keeps an offline queue, an SMS fallback and a Bluetooth mesh
+    // precisely so losing the network is survivable. Losing it must not be
+    // what kills the UI.
+    final userProfile = ref.watch(userProfileProvider).valueOrNull;
     final systemAlertsAsync = ref.watch(systemAlertsStreamProvider);
 
     return Stack(

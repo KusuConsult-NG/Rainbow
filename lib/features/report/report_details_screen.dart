@@ -278,7 +278,20 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
       final connectivityResult = await Connectivity().checkConnectivity();
       final isOffline = connectivityResult.contains(ConnectivityResult.none);
-      final userLoc = ref.read(userLocationStreamProvider).value;
+      // `.valueOrNull`, NEVER `.value`: `AsyncValue.value` RETHROWS on an
+      // error state (riverpod/lib/src/common.dart:493).
+      //
+      // This is the submit handler. `userLocationStreamProvider` is the GPS
+      // stream, and it errors for the ordinary reasons — permission refused,
+      // location services switched off, a plugin fault. With `.value` the
+      // THROW happened here, so filing the report failed outright.
+      //
+      // The system is built to take a report with no coordinates:
+      // `AlertService` leaves them NULL rather than guessing, logs it, and HQ
+      // surfaces the incident in its unlocated-alerts panel with the
+      // jurisdiction still attached. A citizen whose GPS is off must still be
+      // able to report. This line was what stopped them.
+      final userLoc = ref.read(userLocationStreamProvider).valueOrNull;
       final lat = userLoc?.latitude;
       final lng = userLoc?.longitude;
 

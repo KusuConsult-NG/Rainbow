@@ -985,6 +985,19 @@ jobs:
       - name: Assert every colour traces back to the logo
         run: python3 scripts/check_brand_colours.py
 
+      # Reported from a real handset once the blank page became legible:
+      # "Failed while drawing the screen. RealtimeSubscribeException(... Failed
+      # host lookup ... errno = 7)". `AsyncValue.value` RETHROWS on an error
+      # state (riverpod/lib/src/common.dart:493) — `valueOrNull` is the safe
+      # read. SystemAlertListener, which wraps EVERY screen, called `.value` on
+      # a realtime stream that only subscribes once somebody is SIGNED IN, so a
+      # signed-in handset with no DNS died at launch and every automated pass,
+      # all of which boot signed out, saw nothing. The report submit path had
+      # the same read on the GPS stream, so a citizen with location off could
+      # not file at all.
+      - name: Assert no async read can rethrow into a build
+        run: python3 scripts/check_async_reads_cannot_rethrow.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

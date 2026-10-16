@@ -7511,3 +7511,101 @@ Both are navy now. Boundaries are structure; red is an incident. This is the
 second defect in this pass that no amount of reading the source would find,
 because nothing in the source was wrong by its own lights: a token was simply
 being used for something it does not mean.
+
+## The blank page's real cause, found because the blank page stopped being blank
+
+A handset, running the build with the readable failure screen:
+
+```
+Plateau Eye could not start
+Failed while drawing the screen.
+RealtimeSubscribeException(status: channelError, details:
+WebSocketChannelException: SocketException: Failed host lookup:
+'<project>.supabase.co' (OS Error: No address associated with hostname,
+errno = 7))
+```
+
+That is the fix reporting the defect it was built to make visible. The cause
+is one getter, and its name is the trap:
+
+```dart
+T? get value {
+  if (!hasValue) {
+    throwErrorWithCombinedStackTrace(error, stackTrace);
+  }
+  return _value;
+}
+```
+`riverpod-2.6.1/lib/src/common.dart:493-498`
+
+`AsyncValue.value` is nullable and reads like a safe access. On an `AsyncError`
+it **rethrows the error it is holding**. `valueOrNull` is the one that returns
+null.
+
+`SystemAlertListener.build` did `ref.watch(userProfileProvider).value`, and
+that widget wraps **every screen** through `MaterialApp.builder`.
+`userProfileProvider` is a realtime stream on `profiles` — and it only
+subscribes once somebody is **signed in**; signed out it returns
+`Stream.value(null)` and can never error.
+
+So: a signed-in handset that could not reach the backend rethrew out of the
+build of the widget wrapping the whole app. Before the readable error screen
+that was a featureless pale rectangle. **It is the blank page.**
+
+### Why nothing caught it
+
+Every automated pass boots the app **signed out**. 744 Flutter tests, the
+browser sweeps across eight account types, the console harness — all of them
+reach the login screen first, and on that screen `userProfileProvider` returns
+a stream that cannot fail. The one state where the defect exists is the one
+state no test started from. Confirmed by building the web app against an
+unresolvable host: it survives and reaches the login screen, exactly as the
+handset did not.
+
+### Two more sites, one of them worse
+
+A gate written for this found a third read the first grep missed, because the
+`ref.read(...)` spanned lines:
+
+```dart
+final userLoc = ref.read(userLocationStreamProvider).value;
+```
+`lib/features/report/report_details_screen.dart`
+
+That is the **submit handler** for a citizen's report, on the GPS stream, which
+errors for the ordinary reasons — permission refused, location services off, a
+plugin fault. With `.value` the throw happened there, so **filing the report
+failed outright**. The system is built to accept a report with no coordinates:
+`AlertService` leaves them NULL rather than guessing, logs it, and HQ surfaces
+the incident in its unlocated-alerts panel with the jurisdiction still
+attached. A citizen whose GPS is off must still be able to report. This line
+was what stopped them, and it is very likely what "the location coordinates is
+not working" was.
+
+The two `.value!` reads in `live_tracking_screen.dart` are sound — both sit
+under `if (…hasValue)` — and were left alone.
+
+### Coverage
+
+`test/realtime_failure_test.dart`: boots the real app shell **signed in** with
+the profile stream in an error state. Against the shipped code both tests fail
+with the handset's own exception; with the fix the app stands and renders a
+screen.
+
+`scripts/check_async_reads_cannot_rethrow.py`, 3 mutations, all caught. No
+`ref.watch(...).value` or `ref.read(...).value` anywhere in `lib/`, and a
+`.value!` only under a `hasValue` guard visible within six lines — because
+`AsyncValue.value` throws before the `!` is ever reached, so the guard is the
+whole safety and it has to be beside it.
+
+### And the launcher icon
+
+Reported alongside: the app icon showed a clipped **"PLATEAU EY"** across the
+top. Android masks an adaptive icon to a circle and scales it to about 40px;
+the whole lockup through that gives clipped type and a grey smear where
+"COMMUNITY REPORTING & VIGILANCE" was. The launcher, the adaptive foreground
+and the iOS icons now take the **emblem** — the ring and the Plateau
+silhouette, no wordmark — while the splash, the in-app mark and the console
+keep the whole lockup. The crop is measured, not typed: the gold inner ring is
+the only gold in the artwork, so its bounding box locates the emblem, and the
+outer navy stroke is walked out along the centre row.
