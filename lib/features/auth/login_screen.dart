@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/auth/phone_number.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/services/auth_service.dart';
+import 'package:rainbow_app/shared/widgets/build_stamp.dart';
 
 /// Documentation for this public member.
 
@@ -264,7 +265,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   ),
                 ],
 
-                const SizedBox(height: 48),
+                const SizedBox(height: 32),
+                const BuildStamp(),
+                const SizedBox(height: 24),
               ],
             ),
           ),

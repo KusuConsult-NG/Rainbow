@@ -7713,3 +7713,99 @@ this container** — DNS is disabled here, and the proxy returns `000` for
 `supabase.com` itself, so there is nothing to report either way rather than a
 negative result. That one is the operator's to check: whether the Supabase
 project is live, unpaused, and reachable from the network that phone is on.
+
+### T-54. The launcher icon drew a circle inside the launcher's own circle
+
+Reported from the handset, with a photograph: *"the app icon on my phone
+looks very ugly with the black circle. for just app icon you can remove the
+circle."*
+
+The black circle is the emblem's outer navy stroke. T-53's predecessor had
+already cut the wordmark out of the launcher icon, because the full lockup
+through Android's adaptive mask gave a clipped **"PLATEAU EY"**. What was left
+was the emblem — navy ring, gold ring, green state — and at 40px behind a mask
+that is itself a circle, a ring a few pixels inside that mask does not read as
+a ring. It reads as a dark edge, with the mask's edge and the artwork's edge
+competing a few pixels apart.
+
+The launcher already draws the tile. The icon does not need to draw one too.
+
+#### What was done
+
+A third crop, `silhouette()`: the state on its own, no ring, no disc, no
+wordmark. The Android mipmaps, the adaptive foreground and the 21 iOS icons
+take it; the splash, the in-app mark and the console keep the whole lockup,
+where a ring is legible and belongs.
+
+Two things in it were measured rather than chosen, and both were wrong first:
+
+**The green tolerance.** At 60 the bounding box came out **581x826** and had
+swallowed the wordmark — an anti-aliased navy edge against white passes
+through colours like `(33, 54, 91)`, which is within 60 of the emerald on
+every channel. The box is stable at **340x376** from tolerance 24 through 36,
+so 36 sits in the middle of that plateau rather than at its edge. A guard now
+fails the build if the silhouette ever comes out larger than the emblem, since
+the map is inside the ring and its crop cannot be the bigger one.
+
+**The alpha.** The first version cropped to the green box and cleared white
+from the border inward, as the emblem crop does. The ring curves into the
+corners of a square drawn round the map, so **two gold wedges sat in the
+bottom corners of every launcher tile** — not white, so the flood fill left
+them, in an icon whose entire purpose was to have no ring in it. Caught by
+rendering the tile and looking at it. The alpha is now built from the green
+mask itself, grown two pixels to carry the anti-aliased rim.
+
+**And the scale.** 0.76, which is the largest scale that puts no ink at all
+outside the 66dp guaranteed-visible circle once the adaptive XML's 16% inset
+is applied. 0.80 leaves 44 pixels outside it; 0.92 — where this started —
+leaves 1152, which is the map's top-left shoulder cut off by the launcher's
+own mask. Every mask shape contains that circle, so the icon is uncropped on
+a circle, a squircle and a rounded square alike.
+
+### T-55. Neither end could tell which build was on the phone
+
+Reported in the same message as T-54: the **"NO CONNECTION"** message, on a
+new APK, after T-53 had already replaced it.
+
+That message cannot be produced by the fixed code unless the handset reports
+itself offline — the branch is guarded on it, and the gate added with T-53
+fails the build if it ever is not. So either the handset said it was offline,
+or the APK predates the fix. The screenshot's clock reads **17:27**; the fix
+was pushed at **16:44 UTC** and CI went green at **17:39 UTC**. On West
+Africa Time that photograph was taken seventeen minutes before the fix
+existed.
+
+This is the third time in one week:
+
+| reported | what it turned out to be |
+| --- | --- |
+| "the same old app was compiled why?" | the build predated the change |
+| "the app logo is showing the old logo" | the build predated the change |
+| "NO CONNECTION" on a new APK | almost certainly the same |
+
+Each one cost a round of diagnosis aimed at code that was already correct, and
+none of them had to: neither end could name the build on the phone.
+
+#### What was done
+
+`BuildStamp` — the version and build number, small and muted, at the foot of
+the sign-in screen. That screen is the one everybody reaches, including
+somebody who cannot get past it, so it is the one place a stamp is always
+readable. The version is bumped to **1.0.8+29** with this change, so the test
+is now a single glance: if the sign-in screen does not read `v1.0.8 (29)`,
+the APK is not this build and nothing else about it is worth diagnosing.
+
+It never guesses. `PackageInfo.fromPlatform()` needs a registered plugin and
+throws without one, which is every widget test in this repository; the stamp
+renders nothing at all rather than a placeholder, and nothing before the
+answer arrives — a stamp that flashes a wrong value and corrects itself is
+worse than no stamp, because somebody reads it out in the half-second it is
+wrong. Four tests in `test/build_stamp_test.dart` hold those four cases.
+
+#### What this still does not fix
+
+If the stamp reads `v1.0.8 (29)` and the screen still says **NO CONNECTION**,
+then the handset is reporting itself offline and that is a new finding, not
+this one. And the underlying `Failed host lookup` from T-53 is unchanged
+either way: whether `<project>.supabase.co` resolves is not knowable from this
+container and remains the operator's to check.

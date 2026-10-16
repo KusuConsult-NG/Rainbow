@@ -54,6 +54,7 @@ MASTER = REPO / 'Plateau_Eye_Logo.png'
 
 NAVY = (0x0B, 0x23, 0x4B)       # Oxford Navy, the icon background
 GOLD = (0xB9, 0x91, 0x23)       # Warm Gold, the inner ring — and the locator
+EMERALD = (0x0F, 0x6C, 0x32)    # the state silhouette — the launcher locator
 
 
 def trimmed(master: Image.Image) -> Image.Image:
@@ -166,6 +167,63 @@ def trimmed_box(master: Image.Image, box: tuple[int, int, int, int]):
     return Image.fromarray(arr)
 
 
+def silhouette(master: Image.Image) -> Image.Image:
+    """The state on its own — no ring, no disc, no wordmark.
+
+    Reported from a handset: "the app icon on my phone looks very ugly with
+    the black circle." The circle is the emblem's outer navy stroke. At 40px
+    behind the launcher's own circular mask it stops reading as a ring around
+    a map and reads as a dark blob, and the mask's edge and the ring's edge
+    fight each other — two concentric circles a few pixels apart.
+
+    The launcher already draws a tile. It does not need the logo to draw one
+    as well, so the icon takes the state alone and lets the mask be the shape.
+    Everything read at a size where a ring is legible — the splash, the in-app
+    mark, the console — keeps the whole lockup, ring and all.
+
+    MEASURED, not typed, for the same reason the emblem crop is: the green of
+    the state is the only green in the artwork, so the green itself is the
+    shape. The alpha channel is that mask, grown two pixels to carry the
+    anti-aliased rim with it; everything else in the artwork goes.
+
+    The alpha is built from the GREEN rather than by clearing white from the
+    crop's border, which is what the first attempt did. The ring curves into
+    the corners of a square drawn round the map, so two gold wedges sat in the
+    bottom corners of every launcher tile: not white, so the flood fill left
+    them, and the whole point of the crop was to have no ring in it.
+
+    The tolerance is TIGHT on purpose. At 60 the box grew to 581x826 and took
+    in the wordmark, because an anti-aliased navy edge against white passes
+    through colours like (33, 54, 91) that are within 60 of the emerald on
+    every channel. The box is stable at 340x376 from tolerance 24 through 36,
+    so 36 sits in the middle of that plateau rather than at the edge of it.
+    """
+    arr = np.asarray(master.convert('RGB')).astype(int)
+    mask = np.abs(arr - np.array(EMERALD)).max(axis=2) <= 36
+    if not mask.any():
+        raise SystemExit('no green state found in the master — the artwork '
+                         'changed and the silhouette can no longer be found.')
+
+    for _ in range(2):
+        grown = mask.copy()
+        grown[1:, :] |= mask[:-1, :]
+        grown[:-1, :] |= mask[1:, :]
+        grown[:, 1:] |= mask[:, :-1]
+        grown[:, :-1] |= mask[:, 1:]
+        mask = grown
+
+    rgba = np.asarray(master.convert('RGBA')).copy()
+    rgba[:, :, 3] = np.where(mask, 255, 0)
+    cut = Image.fromarray(rgba, 'RGBA')
+    cut = cut.crop(cut.getbbox())
+
+    side = max(cut.size)
+    square = Image.new('RGBA', (side, side), (0, 0, 0, 0))
+    square.paste(cut, ((side - cut.size[0]) // 2,
+                       (side - cut.size[1]) // 2), cut)
+    return square
+
+
 def on(colour, mark: Image.Image, size: int, scale: float = 1.0,
        alpha: bool = True) -> Image.Image:
     """`mark` centred on `colour` (or transparency) at `size`."""
@@ -258,21 +316,39 @@ if not MASTER.is_file():
 
 master = Image.open(MASTER)
 mark = trimmed(master)          # the whole lockup, for anything read at size
-badge = emblem(master)          # ring and map only, for the launcher tile
+badge = emblem(master)          # ring and map, for anywhere a ring still reads
+state = silhouette(master)      # the map alone, for the launcher tile
+
+# The map sits inside the ring, so its crop must be the smaller of the two.
+# If a tolerance ever widens enough to swallow the wordmark again, this is
+# what says so — the icons would otherwise just quietly go wrong.
+if state.size[0] >= badge.size[0]:
+    raise SystemExit(
+        f'the state silhouette came out {state.size[0]}px against an emblem '
+        f'of {badge.size[0]}px. The map is inside the ring, so its crop '
+        'cannot be the larger one — the green locator has taken in '
+        'something that is not the state.')
+
 made = 0
 
 # ── Android: adaptive foreground, transparent ───────────────────────────────
 RES = REPO / 'android' / 'app' / 'src' / 'main' / 'res'
 for folder, px in [('mdpi', 108), ('hdpi', 162), ('xhdpi', 216),
                    ('xxhdpi', 324), ('xxxhdpi', 432)]:
-    write(on(None, badge, px, 1.0),
+    # 0.76 is measured, not chosen: with the 16% inset the adaptive XML
+    # applies, it is the LARGEST scale that puts no ink at all outside the
+    # 66dp guaranteed-visible circle. 0.80 leaves 44 pixels outside it and
+    # 0.92 leaves 1152 — which is the map's top-left shoulder clipped off by
+    # the launcher's own mask. Every mask shape contains that circle, so
+    # nothing here is cropped on any launcher.
+    write(on(None, state, px, 0.76),
           RES / f'drawable-{folder}' / 'ic_launcher_foreground.png')
     made += 1
 
-# ── Android: legacy launcher icon, emblem on navy ──────────────────────────
+# ── Android: legacy launcher icon, the state on white ──────────────────────
 for folder, px in [('mdpi', 48), ('hdpi', 72), ('xhdpi', 96),
                    ('xxhdpi', 144), ('xxxhdpi', 192)]:
-    write(on((255, 255, 255), badge, px, 0.94),
+    write(on((255, 255, 255), state, px, 0.78),
           RES / f'mipmap-{folder}' / 'ic_launcher.png')
     made += 1
 
@@ -281,7 +357,7 @@ IOS = REPO / 'ios' / 'Runner' / 'Assets.xcassets' / 'AppIcon.appiconset'
 if IOS.is_dir():
     for icon in sorted(IOS.glob('*.png')):
         px = Image.open(icon).size[0]
-        write(on((255, 255, 255), badge, px, 0.94, alpha=False), icon)
+        write(on((255, 255, 255), state, px, 0.78, alpha=False), icon)
         made += 1
 
 # ── Flutter assets: the mark on transparency, the lockup whole ─────────────
@@ -308,8 +384,10 @@ print(f'  * {manifest.relative_to(REPO)} records each one\'s hash, and the '
       'Pillow')
 print(f'  * lockup trimmed to {mark.size[0]}x{mark.size[1]}, page removed by '
       'flood fill from the border')
-print(f'  * emblem cropped to {badge.size[0]}x{badge.size[1]} for the launcher '
-      'and the iOS icons — the lockup clipped to "PLATEAU EY" under the '
-      'adaptive mask')
+print(f'  * state silhouette cropped to {state.size[0]}x{state.size[1]} for '
+      'the launcher and the iOS icons — no ring, because the launcher mask '
+      'already draws one and two circles a few pixels apart read as a blob')
+print(f'  * emblem available at {badge.size[0]}x{badge.size[1]} for anywhere '
+      'a ring is still legible')
 print('  * the whole lockup for the splash, the in-app mark and the console')
 print('  * iOS icons carry no alpha channel')
