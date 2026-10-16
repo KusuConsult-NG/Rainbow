@@ -52,6 +52,7 @@ emulator. This encodes the RULES those steps would have enforced.
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -174,6 +175,7 @@ for values in sorted(RES.glob('values*')):
 
 # ── 4. No iOS icon carries an alpha channel ─────────────────────────────────
 alpha: list[str] = []
+alpha_checked = False
 if IOS_ICONS.is_dir():
     try:
         from PIL import Image
@@ -181,6 +183,7 @@ if IOS_ICONS.is_dir():
             with Image.open(icon) as im:
                 if im.mode in ('RGBA', 'LA', 'P') or 'transparency' in im.info:
                     alpha.append(f'{icon.name} ({im.mode})')
+        alpha_checked = True
     except ImportError:
         alpha = []
         print('note: Pillow is not installed, so the iOS alpha check was '
@@ -207,44 +210,101 @@ print(f'  * {bitmaps} <bitmap> src(s) name a raster with no anydpi XML '
       'shadowing them')
 print(f'  * every @drawable/@mipmap/@color reference in res/ resolves, '
       f'LaunchTheme included')
-print(f'  * {icons} iOS app icons, none carrying an alpha channel')
+# Said what it did, not what it would have done. The previous version
+# printed "none carrying an alpha channel" after printing that the check had
+# been SKIPPED for want of Pillow — a claim about something it had not looked
+# at, in the same output as the admission that it had not looked.
+if alpha_checked:
+    print(f'  * {icons} iOS app icons, none carrying an alpha channel')
+else:
+    print(f'  * {icons} iOS app icons NOT checked for alpha: Pillow is not '
+          'installed here (`pip install pillow`)')
 
 # ── 5. Every generated asset still matches the master logo ──────────────────
 #
 # The rebrand's icons were a redraw, not the logo: the state silhouette became
 # a lumpy polygon and the ring lost its navy. `scripts/build_brand_assets.py`
-# makes all 37 from `Plateau_Eye_Logo.png`, so regenerating must be a no-op.
-# If it is not, someone edited an export by hand and the logo is drifting
-# again.
+# makes all 37 from `Plateau_Eye_Logo.png`, and records each one's hash — plus
+# its own and the master's — in `assets/brand_manifest.json`.
+#
+# This used to RE-RUN the builder and diff the bytes. That needs Pillow and
+# numpy, which the CI runner does not have, so the check failed there with
+# `ModuleNotFoundError: No module named 'numpy'` while passing locally: a gate
+# red for a reason that has nothing to do with what it guards. Pinning
+# versions would not have fixed it either, since PNG encoding is not
+# guaranteed stable across Pillow releases, so a green runner would have been
+# one upgrade away from a false drift report on every push.
+#
+# Comparing against the manifest needs nothing but hashlib, catches what this
+# is for — an export edited or redrawn instead of derived — and, because the
+# manifest carries the builder's and the master's hashes too, catches a change
+# to either that was not followed by a regeneration.
 import hashlib
-import subprocess
-import tempfile
 
-GENERATED = [
-    'assets/images/app_icon_large.png',
-    'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png',
-    'android/app/src/main/res/drawable-xxxhdpi/ic_launcher_foreground.png',
-]
-builder = REPO / 'scripts' / 'build_brand_assets.py'
-if builder.is_file() and (REPO / 'Plateau_Eye_Logo.png').is_file():
-    before = {f: hashlib.sha256((REPO / f).read_bytes()).hexdigest()
-              for f in GENERATED if (REPO / f).is_file()}
-    run = subprocess.run([sys.executable, str(builder)],
-                         capture_output=True, text=True, cwd=REPO)
-    if run.returncode != 0:
-        print('scripts/build_brand_assets.py no longer runs:\n'
-              f'{run.stderr.strip()[:400]}')
-        sys.exit(1)
-    drifted = [f for f, h in before.items()
-               if hashlib.sha256((REPO / f).read_bytes()).hexdigest() != h]
-    if drifted:
-        print('Brand assets have drifted from the master logo:\n')
-        for f in drifted:
-            print(f'  * {f} is not what build_brand_assets.py produces from '
-                  'Plateau_Eye_Logo.png. Regenerate rather than editing an '
-                  'export: the last time these were drawn by hand instead of '
-                  'derived, the app shipped a picture of the logo with the '
-                  'wrong state outline.\n')
-        sys.exit(1)
-    print(f'  * {len(before)} sampled brand assets match what '
-          'build_brand_assets.py derives from the master logo')
+MANIFEST = REPO / 'assets' / 'brand_manifest.json'
+MASTER = REPO / 'Plateau_Eye_Logo.png'
+BUILDER = REPO / 'scripts' / 'build_brand_assets.py'
+
+drift: list[str] = []
+if not MANIFEST.is_file():
+    drift.append(
+        f'{MANIFEST.relative_to(REPO)} is missing. Run `python3 '
+        'scripts/build_brand_assets.py`, which writes it: without it nothing '
+        'here can tell a derived asset from a redrawn one.')
+else:
+    try:
+        manifest = json.loads(MANIFEST.read_text())
+    except json.JSONDecodeError as error:
+        manifest = None
+        drift.append(f'{MANIFEST.relative_to(REPO)} is not valid JSON '
+                     f'({error}).')
+
+    if manifest is not None:
+        recorded = manifest.get('assets') or {}
+        if not recorded:
+            drift.append(f'{MANIFEST.relative_to(REPO)} lists no assets, so '
+                         'this check would pass over anything.')
+
+        for source, key, what in (
+            (BUILDER, 'generator_sha256', 'the generator'),
+            (MASTER, 'master_sha256', 'the master logo'),
+        ):
+            if not source.is_file():
+                drift.append(f'{source.relative_to(REPO)} is missing, and it '
+                             f'is {what} every asset is built from.')
+            elif manifest.get(key) != hashlib.sha256(
+                    source.read_bytes()).hexdigest():
+                drift.append(
+                    f'{source.relative_to(REPO)} has changed since the assets '
+                    f'were generated — {what} does not match '
+                    f'{MANIFEST.name}. Run `python3 '
+                    'scripts/build_brand_assets.py` so the exports and the '
+                    'manifest describe the same thing.')
+
+        missing = [f for f in sorted(recorded) if not (REPO / f).is_file()]
+        for f in missing:
+            drift.append(f'{f} is in {MANIFEST.name} and not in the tree.')
+
+        edited = [
+            f for f in sorted(recorded)
+            if (REPO / f).is_file()
+            and hashlib.sha256((REPO / f).read_bytes()).hexdigest()
+            != recorded[f]
+        ]
+        for f in edited:
+            drift.append(
+                f'{f} is not what build_brand_assets.py produced from '
+                'Plateau_Eye_Logo.png. Regenerate rather than editing an '
+                'export: the last time these were drawn by hand instead of '
+                'derived, the app shipped a picture of the logo with the '
+                'wrong state outline.')
+
+if drift:
+    print('Brand assets have drifted from the master logo:\n')
+    for message in drift:
+        print(f'  * {message}\n')
+    sys.exit(1)
+
+print(f'  * {len(json.loads(MANIFEST.read_text())["assets"])} generated brand '
+      'assets match their hashes in assets/brand_manifest.json, as do the '
+      'generator and the master logo')

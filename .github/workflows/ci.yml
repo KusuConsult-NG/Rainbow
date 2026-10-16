@@ -940,6 +940,16 @@ jobs:
       # at. Also: every iOS icon carried an alpha channel, which Apple rejects
       # on upload, and the generated assets were a REDRAW of the logo rather
       # than the logo.
+      # Without Pillow the iOS alpha check cannot run, and that check is the
+      # only thing standing between a release and ITMS-90717 — Apple rejects
+      # an app icon with an alpha channel on upload, and the rebrand's 21
+      # icons all had one. The gate says so and passes rather than claiming a
+      # result it did not measure, so this step is what makes it measure one.
+      # Reading a PNG's mode is deterministic; nothing here regenerates an
+      # asset, so no Pillow version can turn this red on its own.
+      - name: Install Pillow, so the iOS icon check can actually look
+        run: python3 -m pip install --quiet --disable-pip-version-check pillow
+
       - name: Assert the app can find what it needs to launch
         run: python3 scripts/check_app_launch_resources.py
 

@@ -41,6 +41,8 @@ goes: the white disc inside the ring is part of the mark and stays.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -105,9 +107,48 @@ def on(colour, mark: Image.Image, size: int, scale: float = 1.0,
     return canvas if alpha else canvas.convert('RGB')
 
 
+WRITTEN: list[Path] = []
+
+
 def write(im: Image.Image, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     im.save(path, 'PNG', optimize=True)
+    WRITTEN.append(path)
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def write_manifest() -> Path:
+    """Record what was generated, from what, by what.
+
+    `check_app_launch_resources.py` used to verify these assets by RE-RUNNING
+    this script and diffing the bytes. That needs Pillow and numpy, which the
+    CI runner does not have — so the check failed there with
+    `ModuleNotFoundError` while passing locally, which is the worst of both:
+    a gate that is red for a reason that has nothing to do with what it
+    guards. Pinning the versions would not have fixed it either, since PNG
+    encoding is not guaranteed stable across Pillow releases.
+
+    A manifest needs nothing but hashlib. It catches what the check is
+    actually for — an asset redrawn or hand-edited instead of derived — and,
+    because it records the hashes of this script and of the master logo too, a
+    change to either without regenerating is caught as well.
+    """
+    manifest = REPO / 'assets' / 'brand_manifest.json'
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(json.dumps({
+        'generator': 'scripts/build_brand_assets.py',
+        'generator_sha256': sha256(Path(__file__).resolve()),
+        'master': MASTER.name,
+        'master_sha256': sha256(MASTER),
+        'assets': {
+            str(path.relative_to(REPO)): sha256(path)
+            for path in sorted(set(WRITTEN))
+        },
+    }, indent=2, sort_keys=True) + '\n')
+    return manifest
 
 
 if not MASTER.is_file():
@@ -157,7 +198,12 @@ if PUB.is_dir():
     write(master.convert('RGBA'), PUB / 'logo.png')
     made += 1
 
+manifest = write_manifest()
+
 print(f'{made} assets generated from {MASTER.name}')
+print(f'  * {manifest.relative_to(REPO)} records each one\'s hash, and the '
+      'hashes of this script and the master, so drift is checkable without '
+      'Pillow')
 print(f'  * lockup trimmed to {mark.size[0]}x{mark.size[1]}, page removed by '
       'flood fill from the border')
 print('  * the whole lockup every time: transparent for the app screens, on '

@@ -7263,3 +7263,48 @@ launch would still settle the original cause, and the lines to look for are
   `workmanager` (WorkManager resolves `Worker` subclasses reflectively),
   `just_audio` (ExoPlayer) and `sentry_flutter` are not in the list. That is a
   release-only failure class with no gate on it.
+
+## A gate that was red for a reason it was not about, and said something it had not checked
+
+Found by CI on `db2cd18`, in `check_app_launch_resources.py` — a gate I had
+added one commit earlier. Two separate faults, in the same seven lines of
+output:
+
+```
+note: Pillow is not installed, so the iOS alpha check was skipped
+The app can find everything it needs to start:
+  * 21 iOS app icons, none carrying an alpha channel          <- not measured
+scripts/build_brand_assets.py no longer runs:
+ModuleNotFoundError: No module named 'numpy'
+Error: Process completed with exit code 1.
+```
+
+**It claimed a result it had just said it skipped.** The alpha check sets
+`alpha = []` on `ImportError` and prints a note to stderr; the summary then
+printed `none carrying an alpha channel` from that empty list. An empty list of
+findings means "nothing found" or "nothing looked at", and the code could not
+tell the difference — the same confusion this audit has corrected twice
+already, once about a database and once about a count of files. It now prints
+`NOT checked for alpha: Pillow is not installed here`, and CI installs Pillow
+so that path is not the one taken.
+
+**And it verified the brand assets by re-running the generator and diffing the
+bytes**, which needs Pillow and numpy. The runner has neither, so the gate was
+red on CI and green in my container, for a reason that has nothing to do with
+whether the assets are right. Pinning the versions would not have fixed it:
+PNG encoding is not guaranteed stable across Pillow releases, so a green
+runner would have been one upgrade away from reporting false drift on every
+push.
+
+`build_brand_assets.py` now writes `assets/brand_manifest.json` — the sha256 of
+each of the 37 assets, plus its own and the master logo's. Verifying it needs
+nothing but `hashlib`, so it runs anywhere, and it still catches what the check
+is for: an export edited or redrawn instead of derived, an export deleted, or a
+change to the generator or the master that was not followed by a regeneration.
+8 mutations, all caught, including with Pillow and numpy blocked to reproduce
+the runner.
+
+Worth stating as a rule, because this is the second gate in this audit to go
+wrong the same way: **a check whose dependencies are not the thing it checks
+will eventually fail for a reason it is not about**, and when it does, it
+teaches people to ignore it.
