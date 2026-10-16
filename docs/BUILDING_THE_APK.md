@@ -82,16 +82,34 @@ be regenerated.
 The versions this repository is pinned to, all of which the Gradle files
 declare rather than assume:
 
-| | |
+| | declared in |
 | --- | --- |
-| Java | 17 (`sourceCompatibility`, `jvmTarget`) |
-| Gradle | 8.14 (`gradle-wrapper.properties`) |
-| NDK | 28.2.13676358 |
-| Flutter | stable, as CI uses |
+| Java 17 or newer | `sourceCompatibility`, `jvmTarget` = 17 |
+| Android Gradle Plugin 8.9.1 | `android/settings.gradle.kts` |
+| Gradle 8.14 | `gradle-wrapper.properties` |
+| NDK 28.2.13676358 | `android/app/build.gradle.kts` |
+| Flutter stable | as CI uses |
 
-`flutter doctor -v` is the first thing to read if the build fails before it
-reaches Dart: almost every failure at that stage is a Java version other than
-17 on the `PATH`.
+The Java line is worth reading precisely. `jvmTarget = 17` is the bytecode
+the build EMITS, not the JDK it has to RUN on: AGP 8.9.1 needs JDK 17 or
+later and Gradle 8.14 is happy on 17 or 21, so either works and Android
+Studio's bundled JDK is fine. What fails is **11 or older** — and the error
+it gives names a class file version rather than a Java version, which is why
+it is worth knowing in advance.
+
+### After installing the Android SDK
+
+Two things a first build needs that installing the SDK does not do:
+
+```bash
+flutter doctor --android-licenses      # accept them, or the build refuses
+flutter doctor -v                      # read what it still says is missing
+```
+
+And Gradle has to be able to find the SDK — either `ANDROID_HOME` set in the
+environment, or `sdk.dir=/path/to/Android/Sdk` in `android/local.properties`.
+That file is gitignored, so it is yours to set and it is never wrong in the
+repository; `flutter doctor -v` prints the path it found.
 
 ## A debug build instead
 
