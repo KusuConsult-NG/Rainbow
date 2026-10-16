@@ -24,6 +24,7 @@ import 'package:rainbow_app/services/sync_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 import 'package:record/record.dart';
 import 'package:rainbow_app/services/voice_note_service.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 
 /// Documentation for this public member.
 
@@ -34,16 +35,14 @@ import 'package:rainbow_app/services/voice_note_service.dart';
 /// and everything else says plainly that it did not work here. Both endings
 /// say what they can still do, because the report matters more than the photo
 /// and a dead end mid-emergency is how a report gets abandoned.
-String attachmentErrorMessage(Object error) {
+String attachmentErrorMessage(Object error, [AppLanguage lang = AppLanguage.english]) {
   final text = error.toString().toLowerCase();
   final denied = text.contains('permission') ||
       text.contains('denied') ||
       text.contains('access');
   return denied
-      ? 'This phone has not given Operation Rainbow access to the camera. '
-          'You can still send the report without a photo.'
-      : 'That did not work on this phone. You can still send the report '
-          'without an attachment.';
+      ? Translations.get('rpt_camera_denied', lang)
+      : Translations.get('rpt_attachment_failed', lang);
 }
 
 class ReportDetailsScreen extends ConsumerStatefulWidget {
@@ -106,9 +105,10 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   void _attachmentFailed(Object error) {
     debugPrint('[ATTACH_ERR] $error');
     if (!mounted) return;
+    final lang = ref.read(languageProvider);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(attachmentErrorMessage(error)),
+        content: Text(attachmentErrorMessage(error, lang)),
         backgroundColor: AppColors.emergency,
       ),
     );
@@ -177,11 +177,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         // nothing, so RECORD VOICE REPORT was a button that did nothing on any
         // handset where the microphone had been refused.
         if (!mounted) return;
+        final lang = ref.read(languageProvider);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text(
-              'This phone has not given Operation Rainbow access to the '
-              'microphone. You can still type your report.',
+            content: Text(
+              Translations.get('rpt_mic_denied', lang),
             ),
             backgroundColor: AppColors.emergency,
           ),
@@ -192,11 +192,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       // console and never the person holding the phone.
       debugPrint('[AUDIO_REC] Start failed: $e');
       if (!mounted) return;
+      final lang = ref.read(languageProvider);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text(
-            'The voice recorder did not start on this phone. You can still '
-            'type your report.',
+          content: Text(
+            Translations.get('rpt_recorder_failed', lang),
           ),
           backgroundColor: AppColors.emergency,
         ),
@@ -263,6 +263,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     setState(() => _submitting = true);
 
     try {
+      final lang = ref.read(languageProvider);
       final userId = ref.read(authServiceProvider).currentUserId ?? 'anonymous';
       // "No narrative provided" is the right wording for a report with
       // nothing in it and the wrong one for a report whose content is a
@@ -273,7 +274,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           : _voiceNote != null
               ? '[VOICE NOTE] The reporter left a ${_voiceNote!.label} voice '
                   'note and no text. Play the recording.'
-              : 'No narrative provided';
+              : Translations.get('rpt_no_narrative', lang);
 
       final connectivityResult = await Connectivity().checkConnectivity();
       final isOffline = connectivityResult.contains(ConnectivityResult.none);
@@ -349,9 +350,10 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     } catch (e) {
       debugPrint('[REPORT_FATAL] Transmission failed: $e');
       if (mounted) {
+        final lang = ref.read(languageProvider);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('TRANSMISSION ERROR: $e'),
+            content: Text('${Translations.get('rpt_transmission_error', lang)}: $e'),
             backgroundColor: AppColors.emergency,
           ),
         );
@@ -363,14 +365,15 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final lang = ref.watch(languageProvider);
     final cat = widget.categoryInfo;
     final locAsync = ref.watch(userLocationStreamProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const RainbowAppBar(
-        title: 'INCIDENT DOSSIER',
-        subtitle: 'COMPILE TACTICAL DATA',
+      appBar: RainbowAppBar(
+        title: Translations.get('rpt_incident_dossier', lang),
+        subtitle: Translations.get('rpt_compile_tactical_data', lang),
         showBack: true,
       ),
       body: ListView(
@@ -388,7 +391,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'TRANSMITTING REPORT FOR',
+                  Translations.get('rpt_transmitting_for', lang),
                   style: GoogleFonts.outfit(
                     fontSize: 10,
                     fontWeight: FontWeight.w900,
@@ -421,7 +424,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           const SizedBox(height: 24),
 
           // Narrative
-          const _SectionLabel('MISSION NARRATIVE'),
+          _SectionLabel(Translations.get('rpt_mission_narrative', lang)),
           const SizedBox(height: 12),
           Container(
             margin: const EdgeInsets.only(bottom: 16),
@@ -442,7 +445,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      _isRecording ? 'RECORDING VOICE REPORT...' : 'VOICE REPORTING (OPTIONAL)',
+                      _isRecording
+                          ? Translations.get('rpt_recording_voice', lang)
+                          : Translations.get('rpt_voice_optional', lang),
                       style: GoogleFonts.outfit(
                         fontSize: 11,
                         fontWeight: FontWeight.w900,
@@ -452,7 +457,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     ),
                     if (_recordedAudioPath != null)
                       IconButton(
-                        tooltip: 'Delete the recording',
+                        tooltip: Translations.get('rpt_delete_recording', lang),
                         icon: const Icon(Icons.delete_forever_rounded, color: AppColors.emergency, size: 18),
                         onPressed: _deleteRecording,
                       ),
@@ -465,7 +470,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                       const Icon(Icons.fiber_manual_record_rounded, color: AppColors.emergency, size: 14),
                       const SizedBox(width: 8),
                       Text(
-                        'SPEAK NOW (TAP STOP TO FINISH)',
+                        Translations.get('rpt_speak_now_stop', lang),
                         style: GoogleFonts.outfit(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
@@ -480,7 +485,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                         icon: const Icon(Icons.stop_rounded, size: 14),
-                        label: Text('STOP', style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w900)),
+                        label: Text(Translations.get('rpt_stop', lang), style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w900)),
                         onPressed: _stopRecording,
                       ),
                     ] else if (_recordedAudioPath != null) ...[
@@ -488,7 +493,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'VOICE NOTE ATTACHED & ENCRYPTED',
+                          Translations.get('rpt_voice_attached', lang),
                           style: GoogleFonts.outfit(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
@@ -507,7 +512,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                           ),
                         ),
                         icon: const Icon(Icons.mic_none_rounded, size: 14, color: AppColors.primary),
-                        label: Text('RECORD VOICE REPORT', style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+                        label: Text(Translations.get('rpt_record_voice_report', lang), style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
                         onPressed: _startRecording,
                       ),
                     ],
@@ -527,7 +532,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               maxLines: 6,
               decoration: InputDecoration(
                 hintText:
-                    'Enter mission details, observations, and objective status...',
+                    Translations.get('rpt_enter_details_hint', lang),
                 hintStyle:
                     GoogleFonts.outfit(color: AppColors.textDim, fontSize: 13),
                 border: InputBorder.none,
@@ -560,19 +565,19 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           const SizedBox(height: 24),
 
           // Media attachment
-          const _SectionLabel('VISUAL TELEMETRY (OPTIONAL)'),
+          _SectionLabel(Translations.get('rpt_visual_telemetry', lang)),
           const SizedBox(height: 12),
           Row(
             children: [
               _MediaBtn(
                 icon: Icons.camera_alt_rounded,
-                label: 'SCAN PHOTO',
+                label: Translations.get('rpt_scan_photo', lang),
                 onTap: _takePhoto,
               ),
               const SizedBox(width: 8),
               _MediaBtn(
                 icon: Icons.videocam_rounded,
-                label: 'RECORD VIDEO',
+                label: Translations.get('rpt_record_video', lang),
                 onTap: _takeVideo,
               ),
             ],
@@ -582,13 +587,13 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             children: [
               _MediaBtn(
                 icon: Icons.photo_library_rounded,
-                label: 'PHOTO INTEL',
+                label: Translations.get('rpt_photo_intel', lang),
                 onTap: _pickImage,
               ),
               const SizedBox(width: 8),
               _MediaBtn(
                 icon: Icons.video_library_rounded,
-                label: 'VIDEO INTEL',
+                label: Translations.get('rpt_video_intel', lang),
                 onTap: _pickVideo,
               ),
             ],
@@ -641,7 +646,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           const SizedBox(height: 24),
 
           // Location
-          const _SectionLabel('GEOSPATIAL COORDINATES'),
+          _SectionLabel(Translations.get('rpt_geospatial_coords', lang)),
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(20),
@@ -661,7 +666,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'GPS TELEMETRY',
+                        Translations.get('rpt_gps_telemetry', lang),
                         style: GoogleFonts.outfit(
                           fontSize: 9,
                           fontWeight: FontWeight.w900,
@@ -676,7 +681,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                         data: (pos) {
                           if (pos == null) {
                             return Text(
-                              'GPS UNAVAILABLE',
+                              Translations.get('rpt_gps_unavailable', lang),
                               style: GoogleFonts.outfit(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w900,
@@ -688,7 +693,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'ACTIVE BEACON SIGNAL',
+                                Translations.get('rpt_active_beacon', lang),
                                 style: GoogleFonts.outfit(
                                   fontWeight: FontWeight.w900,
                                   fontSize: 14,
@@ -708,7 +713,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                           );
                         },
                         loading: () => Text(
-                          'ACQUIRING SIGNAL...',
+                          Translations.get('rpt_acquiring_signal', lang),
                           style: GoogleFonts.outfit(
                             fontSize: 12,
                             fontWeight: FontWeight.w900,
@@ -716,7 +721,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                           ),
                         ),
                         error: (_, __) => Text(
-                          'SIGNAL INTERRUPTED',
+                          Translations.get('rpt_signal_interrupted', lang),
                           style: GoogleFonts.outfit(
                             fontSize: 12,
                             fontWeight: FontWeight.w900,
@@ -759,7 +764,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'JURISDICTION OVERRIDE',
+                            Translations.get('rpt_jurisdiction_override', lang),
                             style: GoogleFonts.outfit(
                               fontSize: 9,
                               fontWeight: FontWeight.w900,
@@ -771,7 +776,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'MANUAL LOCATION ENTRY',
+                            Translations.get('rpt_manual_location_entry', lang),
                             style: GoogleFonts.outfit(
                               fontWeight: FontWeight.w900,
                               fontSize: 14,
@@ -780,7 +785,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                             ),
                           ),
                           Text(
-                            'USE IF GPS SIGNAL IS WEAK OR INACCURATE',
+                            Translations.get('rpt_use_if_gps_weak', lang),
                             style: GoogleFonts.outfit(
                               fontSize: 10,
                               color: AppColors.textDim,
@@ -807,9 +812,10 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
                   // LGA Dropdown
                   _DropdownSection(
-                    label: 'LOCAL GOVERNMENT AREA',
+                    label: Translations.get('rpt_lga', lang),
                     value: _selectedLga?.name,
                     items: plateauTacticalMap.map((lga) => lga.name).toList(),
+                    hintText: Translations.get('rpt_select_placeholder', lang),
                     onChanged: (val) {
                       setState(() {
                         _selectedLga = plateauTacticalMap
@@ -824,10 +830,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
                   // Ward Dropdown
                   _DropdownSection(
-                    label: 'FEDERAL WARD (INEC)',
+                    label: Translations.get('rpt_federal_ward', lang),
                     value: _selectedWard?.name,
                     items:
                         _selectedLga?.wards.map((w) => w.name).toList() ?? [],
+                    hintText: Translations.get('rpt_select_placeholder', lang),
                     onChanged: (val) {
                       setState(() {
                         _selectedWard = _selectedLga?.wards
@@ -840,13 +847,14 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                   const SizedBox(height: 16),
 
                   _DropdownSection(
-                    label: 'STATE WARD (SIEC)',
+                    label: Translations.get('rpt_state_ward', lang),
                     value: _selectedSiecWard?.name,
                     items: (_selectedLga?.siecWards.isNotEmpty ?? false)
                         ? _selectedLga!.siecWards.map((w) => w.name).toList()
-                        : ['N/A'],
+                        : [Translations.get('not_available', lang)],
+                    hintText: Translations.get('rpt_select_placeholder', lang),
                     onChanged: (val) {
-                      if (val == 'N/A') return;
+                      if (val == Translations.get('not_available', lang)) return;
                       setState(() {
                         _selectedSiecWard = _selectedLga?.siecWards
                                 .firstWhereOrNull((w) => w.name == val) ??
@@ -858,9 +866,10 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
                   // PU Dropdown
                   _DropdownSection(
-                    label: 'POLLING UNIT (PU)',
+                    label: Translations.get('rpt_polling_unit', lang),
                     value: _selectedPu,
                     items: _selectedWard?.pollingUnits ?? [],
+                    hintText: Translations.get('rpt_select_placeholder', lang),
                     onChanged: (val) => setState(() => _selectedPu = val),
                   ),
                 ],
@@ -897,7 +906,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'STEALTH MODE',
+                        Translations.get('rpt_stealth_mode', lang),
                         style: GoogleFonts.outfit(
                           fontWeight: FontWeight.w900,
                           fontSize: 14,
@@ -906,7 +915,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                         ),
                       ),
                       Text(
-                        'ENCRYPT SENDER IDENTITY ARCHIVE',
+                        Translations.get('rpt_encrypt_identity', lang),
                         style: GoogleFonts.outfit(
                           fontSize: 10,
                           color: AppColors.textDim,
@@ -957,7 +966,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          'INITIATE TRANSMISSION',
+                          Translations.get('rpt_initiate_transmission', lang),
                           style: GoogleFonts.outfit(
                             fontWeight: FontWeight.w900,
                             fontSize: 15,
@@ -977,7 +986,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           const SizedBox(height: 16),
           Center(
             child: Text(
-              'AES-256 ENCRYPTED TUNNEL · MISSION CRITICAL DATA',
+              Translations.get('rpt_aes_encrypted_tunnel', lang),
               style: GoogleFonts.outfit(
                 fontSize: 9,
                 fontWeight: FontWeight.w900,
@@ -999,11 +1008,13 @@ class _DropdownSection extends StatelessWidget {
     required this.value,
     required this.items,
     required this.onChanged,
+    this.hintText,
   });
   final String label;
   final String? value;
   final List<String> items;
   final ValueChanged<String?> onChanged;
+  final String? hintText;
 
   @override
   Widget build(BuildContext context) {
@@ -1051,13 +1062,15 @@ class _DropdownSection extends StatelessWidget {
               onChanged: onChanged,
               dropdownColor: AppColors.background,
               isExpanded: true,
-              hint: Text(
-                'SELECT...',
-                style: GoogleFonts.outfit(
-                  fontSize: 13,
-                  color: AppColors.textDim,
-                ),
-              ),
+              hint: hintText != null
+                  ? Text(
+                      hintText!,
+                      style: GoogleFonts.outfit(
+                        fontSize: 13,
+                        color: AppColors.textDim,
+                      ),
+                    )
+                  : null,
               icon: const Icon(
                 Icons.arrow_drop_down_rounded,
                 color: AppColors.primary,

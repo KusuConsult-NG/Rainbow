@@ -38,7 +38,7 @@
  * ## Not the same thing as `STATE_SECURITY_AGENCIES`
  *
  * That list (in `tactical_mapping.ts`) answers "which organisation does this
- * officer belong to", including Operation Rainbow itself and the vigilante
+ * officer belong to", including Plateau Eye itself and the vigilante
  * groups, and is worn as a badge in the staff directory. It is not a set of
  * handover destinations: `RAINBOW` is us, and no vigilante group has a liaison
  * account, a portal or a contact number. Escalating to one of them has nowhere

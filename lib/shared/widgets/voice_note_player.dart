@@ -12,7 +12,7 @@ import 'package:rainbow_app/core/theme/app_colors.dart';
 /// Both screens that could show an audio attachment handed the url to the
 /// platform and hoped. `mission_intel_screen.dart` drew a microphone with
 /// **TAP TO PLAY** under it and called `launchUrl()`; the HQ console opened a
-/// new browser tab. On a handset that means leaving Operation Rainbow in the
+/// new browser tab. On a handset that means leaving Plateau Eye in the
 /// middle of an incident — and this app has a re-entry lock that engages when
 /// it has been away from the foreground, so playing a voice note could cost a
 /// responder a code prompt to get back to the incident they were working.

@@ -85,7 +85,7 @@ class _OnboardingPermissionsScreenState
                 ),
               ),
               content: Text(
-                'Operation Rainbow requires location access to map emergency alerts to local responders. You cannot proceed without granting location permission.',
+                'Plateau Eye requires location access to map emergency alerts to local responders. You cannot proceed without granting location permission.',
                 style: GoogleFonts.outfit(
                   color: AppColors.textSecondary,
                 ),

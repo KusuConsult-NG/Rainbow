@@ -50,7 +50,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       const SnackBar(
         content: Text(
           'Bluetooth relay is on, but Bluetooth is off or not allowed. '
-          'Turn on Bluetooth and allow it for Operation Rainbow.',
+          'Turn on Bluetooth and allow it for Plateau Eye.',
         ),
       ),
     );

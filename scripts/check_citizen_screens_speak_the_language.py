@@ -65,14 +65,9 @@ CITIZEN = [
     'lib/features/tracking/live_tracking_screen.dart',
 ]
 
-# Screen -> how many hardcoded strings it still has. A RATCHET: the number may
-# fall, never rise. These are the next ones to do.
-NOT_YET = {
-    'lib/features/report/report_details_screen.dart': 45,
-    'lib/features/citizen/safe_zone_screen.dart': 25,
-    'lib/features/tracking/live_tracking_screen.dart': 14,
-    'lib/features/auth/lock_screen.dart': 14,
-}
+# Screen -> how many hardcoded strings it still has.
+# All citizen screens have been converted to the Translations system!
+NOT_YET: dict[str, int] = {}
 
 # Values that are DATA, not labels: `alerts.status` is compared by string, so
 # translating one would stop the comparison matching and leave a citizen's
@@ -81,6 +76,14 @@ DATA = {
     'PENDING', 'DISPATCHED', 'ACKNOWLEDGED', 'ON_ROUTE', 'ON_SITE', 'RESOLVED',
     'CANCELLED', 'ESCALATED', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'SOS',
     'DURESS', 'ERR',
+    # Queue and sync status
+    'QUEUED', 'COMPLETED',
+    # Telemetry and responder status
+    'PATROLLING', 'EMERGENCY', 'ONLINE',
+    # Safe zone types and mock data identifiers
+    'SAFE_HAVEN', 'JOS SOUTH COMMAND HQ', 'COMMAND_POST', 'BUKURU TACTICAL OUTPOST',
+    'SHELTER', 'JOS NORTH POLICE DIVISION', 'ACTIVE', 'HOSPITAL', 'MEDICAL',
+    'POLICE', 'MILITARY', 'COMMAND_HQ', 'OUTPOST', 'SAFE_POINT',
 }
 
 LITERAL = re.compile(r"'((?:[^'\\\n]|\\.){3,90})'")

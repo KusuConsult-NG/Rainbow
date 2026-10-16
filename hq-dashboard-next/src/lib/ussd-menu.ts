@@ -206,7 +206,7 @@ function pageOf(names: readonly string[], page: number): readonly string[] {
 }
 
 const ROOT_SCREEN = [
-  'Operation Rainbow',
+  'Plateau Eye',
   '1. EMERGENCY - send help',
   '2. Report an incident',
   '3. My last report',

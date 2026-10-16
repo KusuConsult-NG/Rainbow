@@ -5,7 +5,7 @@ import { inter, outfit } from './fonts';
 import { ToastProvider } from '@/components/ToastProvider';
 
 export const metadata: Metadata = {
-  title: 'Operation Rainbow — Command HQ',
+  title: 'Plateau Eye — Command HQ',
   description: 'Plateau State Emergency Response Command Dashboard',
 };
 

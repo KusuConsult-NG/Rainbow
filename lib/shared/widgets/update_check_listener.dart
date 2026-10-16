@@ -125,7 +125,7 @@ class _UpdateCheckListenerState extends ConsumerState<UpdateCheckListener> {
                   Text(
                     updateInfo.isForceUpdate
                         ? 'A mandatory security update (version ${updateInfo.latestVersion}) is required to connect to emergency dispatch servers.'
-                        : 'A new version (${updateInfo.latestVersion}) of Operation Rainbow is ready. Update now to access the latest features and bug fixes.',
+                        : 'A new version (${updateInfo.latestVersion}) of Plateau Eye is ready. Update now to access the latest features and bug fixes.',
                     style: GoogleFonts.inter(
                       color: Colors.white.withValues(alpha: 0.7),
                       fontSize: 14,

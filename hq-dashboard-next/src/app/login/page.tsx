@@ -256,7 +256,7 @@ export default function LoginPage() {
                 {/* eslint-disable-next-line @next/next/no-img-element -- a local static emblem, above the fold, with a JS fallback on error. images.unoptimized is set so next/image would serve the same bytes, and it lazy-loads by default — wrong for the first thing on the sign-in page, which would then need `priority` to undo. */}
                 <img
                   src="/app_icon.png"
-                  alt="Operation Rainbow Emblem"
+                  alt="Plateau Eye Emblem"
                   decoding="async" 
                   style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: 14 }}
                   onError={(e) => {

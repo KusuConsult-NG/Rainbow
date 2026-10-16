@@ -154,7 +154,7 @@ void main() {
       // node, not about the node having nothing else.
       expect(
         tester.getSemantics(find.bySemanticsLabel('English')),
-        isSemantics(
+        containsSemantics(
           label: 'English',
           isButton: true,
           hasSelectedState: true,
@@ -168,7 +168,7 @@ void main() {
       // And the other two say they are NOT the chosen one, on the same node.
       expect(
         tester.getSemantics(find.bySemanticsLabel('Hausa')),
-        isSemantics(
+        containsSemantics(
           label: 'Hausa',
           isButton: true,
           hasSelectedState: true,

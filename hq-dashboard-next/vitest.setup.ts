@@ -31,6 +31,29 @@ if (!globalThis.ResizeObserver) {
   } as unknown as typeof ResizeObserver;
 }
 
+// Node 22+ introduces an experimental globalThis.localStorage that throws or lacks
+// jsdom methods when run without --localstorage-file. Provide an in-memory Storage implementation.
+const createMemoryStorage = (): Storage => {
+  let store: Record<string, string> = {};
+  return {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => { store[key] = String(value); },
+    removeItem: (key: string) => { delete store[key]; },
+    clear: () => { store = {}; },
+    key: (index: number) => Object.keys(store)[index] ?? null,
+    get length() { return Object.keys(store).length; },
+  };
+};
+
+const memoryStorage = createMemoryStorage();
+try {
+  Object.defineProperty(window, 'localStorage', {
+    value: memoryStorage,
+    configurable: true,
+    writable: true,
+  });
+} catch (_) {}
+
 // jsdom performs no layout, so every element measures 0x0. Leaflet asks the
 // container for its size to decide what is visible, concludes nothing is, and
 // renders an empty marker pane — a map that looks initialised but shows no

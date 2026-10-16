@@ -24,6 +24,7 @@ import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
 import 'package:rainbow_app/providers/reentry_lock_provider.dart';
 import 'package:rainbow_app/services/auth_service.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 
 /// The re-entry lock screen.
 class LockScreen extends ConsumerStatefulWidget {
@@ -86,8 +87,10 @@ class _LockScreenState extends ConsumerState<LockScreen> {
       // No number on the account means no way to verify it. Signing out is the
       // only honest option, and saying so beats a button that does nothing.
       setState(
-        () => _message = 'This account has no phone number on it. '
-            'Sign out and sign in again.',
+        () => _message = Translations.get(
+          'lock_no_phone_error',
+          ref.read(languageProvider),
+        ),
       );
       return;
     }
@@ -129,7 +132,8 @@ class _LockScreenState extends ConsumerState<LockScreen> {
     }
     setState(() {
       _checking = false;
-      _message = auth.lastAuthError ?? 'That code was not accepted.';
+      _message = auth.lastAuthError ??
+          Translations.get('lock_code_rejected', ref.read(languageProvider));
     });
   }
 
@@ -143,6 +147,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final lang = ref.watch(languageProvider);
     final offline = _path == UnlockPath.emergencyOnly;
 
     return Scaffold(
@@ -172,7 +177,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'WELCOME BACK',
+                  Translations.get('lock_welcome_back', lang),
                   textAlign: TextAlign.center,
                   style: GoogleFonts.outfit(
                     color: AppColors.textPrimary,
@@ -183,7 +188,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  lockScreenExplanation(_path),
+                  lockScreenExplanation(_path, lang),
                   key: const ValueKey('lock_explanation'),
                   textAlign: TextAlign.center,
                   style: GoogleFonts.inter(
@@ -212,7 +217,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                     ),
                     icon: const Icon(Icons.campaign_rounded),
                     label: Text(
-                      'EMERGENCY — SEND SOS NOW',
+                      Translations.get('lock_sos_emergency', lang),
                       style: GoogleFonts.outfit(
                         fontWeight: FontWeight.w900,
                         fontSize: 14,
@@ -223,7 +228,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Works whether or not you unlock.',
+                  Translations.get('lock_sos_works_always', lang),
                   textAlign: TextAlign.center,
                   style: GoogleFonts.inter(
                     color: AppColors.textDim,
@@ -250,7 +255,9 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                           ),
                         ),
                         child: Text(
-                          _sending ? 'SENDING…' : 'SEND MY CODE',
+                          _sending
+                              ? Translations.get('lock_sending', lang)
+                              : Translations.get('lock_send_my_code', lang),
                           style: GoogleFonts.outfit(
                             fontWeight: FontWeight.w900,
                             fontSize: 14,
@@ -261,7 +268,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                     )
                   else ...[
                     Text(
-                      'CODE SENT TO $_number',
+                      '${Translations.get('lock_code_sent_to', lang)} $_number',
                       key: const ValueKey('lock_sent_to'),
                       textAlign: TextAlign.center,
                       style: GoogleFonts.outfit(
@@ -320,7 +327,9 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                           ),
                         ),
                         child: Text(
-                          _checking ? 'CHECKING…' : 'UNLOCK',
+                          _checking
+                              ? Translations.get('lock_checking', lang)
+                              : Translations.get('lock_unlock', lang),
                           style: GoogleFonts.outfit(
                             fontWeight: FontWeight.w900,
                             fontSize: 14,
@@ -333,7 +342,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                     TextButton(
                       onPressed: _sending ? null : _sendCode,
                       child: Text(
-                        'SEND ANOTHER CODE',
+                        Translations.get('lock_send_another_code', lang),
                         style: GoogleFonts.outfit(
                           color: AppColors.textSecondary,
                           fontWeight: FontWeight.w700,
@@ -349,7 +358,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                     key: const ValueKey('lock_retry_connection'),
                     onPressed: unawaitedCheckConnection,
                     child: Text(
-                      'CHECK FOR A CONNECTION AGAIN',
+                      Translations.get('lock_check_connection', lang),
                       style: GoogleFonts.outfit(
                         color: AppColors.textSecondary,
                         fontWeight: FontWeight.w700,
@@ -382,7 +391,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                     context.go(AppRoutes.login);
                   },
                   child: Text(
-                    'SIGN OUT INSTEAD',
+                    Translations.get('lock_sign_out', lang),
                     style: GoogleFonts.outfit(
                       color: AppColors.textDim,
                       fontWeight: FontWeight.w700,

@@ -10,6 +10,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/services/location_service.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
 final respondersStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
@@ -29,7 +30,7 @@ final respondersStreamProvider = StreamProvider<List<Map<String, dynamic>>>((ref
         }
         return telemetryList.map((t) => {
           ...t,
-          'officer_name': nameMap[t['user_id'] as String] ?? 'Unknown Officer',
+          'officer_name': nameMap[t['user_id'] as String] ?? Translations.get('trk_unknown_officer', ref.read(languageProvider)),
         },).toList();
       } catch (_) {
         return telemetryList;
@@ -102,6 +103,12 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
   }
 
   void _showResponderDetails(Map<String, dynamic> telemetry) {
+    final lang = ref.read(languageProvider);
+    final statusVal = telemetry['status'] as String? ?? 'ONLINE';
+    final batteryVal = telemetry['battery'] != null ? '${telemetry['battery']}%' : Translations.get('trk_unknown', lang);
+    final updatedVal = telemetry['updated_at'] as String? ?? Translations.get('trk_unknown', lang);
+    final officerName = telemetry['officer_name'] as String? ?? Translations.get('trk_unknown_officer', lang);
+
     unawaited(showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.surface,
@@ -115,7 +122,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'RESPONDER DETAILS',
+              Translations.get('trk_responder_details', lang),
               style: GoogleFonts.outfit(
                 color: AppColors.onBackground,
                 fontWeight: FontWeight.w900,
@@ -125,27 +132,27 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              telemetry['officer_name'] as String? ?? 'Unknown Officer',
+              officerName,
               style: GoogleFonts.inter(color: AppColors.onBackground, fontWeight: FontWeight.bold, fontSize: 16),
             ),
             const SizedBox(height: 4),
             Text(
-              'ID: ${(telemetry['user_id'] as String? ?? '').substring(0, 8)}...',
+              '${Translations.get('trk_id', lang)}: ${(telemetry['user_id'] as String? ?? '').substring(0, 8)}...',
               style: GoogleFonts.inter(color: AppColors.textSecondary, fontSize: 12),
             ),
             const SizedBox(height: 8),
             Text(
-              'Status: ${telemetry['status'] ?? 'ONLINE'}',
+              '${Translations.get('trk_status', lang)}: $statusVal',
               style: GoogleFonts.inter(color: _getMarkerColor(telemetry['status'] as String?)),
             ),
             const SizedBox(height: 8),
             Text(
-              'Battery: ${telemetry['battery'] != null ? "${telemetry['battery']}%" : "Unknown"}',
+              '${Translations.get('trk_battery', lang)}: $batteryVal',
               style: GoogleFonts.inter(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 8),
             Text(
-              'Last Updated: ${telemetry['updated_at'] ?? 'Unknown'}',
+              '${Translations.get('trk_last_updated', lang)}: $updatedVal',
               style: GoogleFonts.inter(color: AppColors.textDim),
             ),
           ],
@@ -158,12 +165,13 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
   Widget build(BuildContext context) {
     final respondersAsync = ref.watch(respondersStreamProvider);
     final alertsAsync = ref.watch(alertsMapStreamProvider);
+    final lang = ref.watch(languageProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const RainbowAppBar(
-        title: 'TACTICAL MAP',
-        subtitle: 'LIVE COMMAND FEED',
+      appBar: RainbowAppBar(
+        title: Translations.get('trk_tactical_map', lang),
+        subtitle: Translations.get('trk_live_command_feed', lang),
       ),
       body: _locationDenied
           ? Center(
@@ -175,7 +183,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                     const Icon(Icons.location_off_rounded, color: AppColors.danger, size: 64),
                     const SizedBox(height: 16),
                     Text(
-                      'LOCATION ACCESS DENIED',
+                      Translations.get('trk_location_denied', lang),
                       style: GoogleFonts.outfit(
                         color: AppColors.danger,
                         fontWeight: FontWeight.w900,
@@ -185,7 +193,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Enable location in device Settings to use the tactical map.',
+                      Translations.get('trk_enable_location_settings', lang),
                       style: GoogleFonts.inter(color: AppColors.textSecondary, fontSize: 12),
                       textAlign: TextAlign.center,
                     ),
@@ -208,7 +216,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                 // tree; the legend below stays readable.
                 Semantics(
                   container: true,
-                  label: 'Tactical map of incidents and responders',
+                  label: Translations.get('trk_semantics_map_label', lang),
                   excludeSemantics: true,
                   child: FlutterMap(
                   options: MapOptions(
@@ -292,14 +300,14 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: AppColors.outline),
                     ),
-                    child: const Column(
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _LegendItem(color: AppColors.success, label: 'PATROLLING'),
-                        SizedBox(height: 4),
-                        _LegendItem(color: AppColors.warning, label: 'DISPATCHED / ALERT'),
-                        SizedBox(height: 4),
-                        _LegendItem(color: AppColors.danger, label: 'EMERGENCY'),
+                        const _LegendItem(color: AppColors.success, label: 'PATROLLING'),
+                        const SizedBox(height: 4),
+                        _LegendItem(color: AppColors.warning, label: Translations.get('trk_dispatched_alert', lang)),
+                        const SizedBox(height: 4),
+                        const _LegendItem(color: AppColors.danger, label: 'EMERGENCY'),
                       ],
                     ),
                   ),

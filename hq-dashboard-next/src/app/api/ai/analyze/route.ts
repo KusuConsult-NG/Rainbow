@@ -48,7 +48,7 @@ interface AlertRow {
 }
 
 function summaryPrompt(a: AlertRow): string {
-  return `You are the Operation Rainbow Forensic AI Assistant. Your task is to analyze the following resolved incident report and compile a premium, structured Post-Action Operational Summary.
+  return `You are the Plateau Eye Forensic AI Assistant. Your task is to analyze the following resolved incident report and compile a premium, structured Post-Action Operational Summary.
 
 INCIDENT METADATA:
 - ID: ${a.id}
@@ -67,7 +67,7 @@ Provide your analysis formatted in Markdown. Your summary MUST contain the follo
 
 function triagePrompt(a: AlertRow): string {
   const description = a.description ?? '';
-  return `You are the Operation Rainbow Emergency Triage AI. Analyze: "${description}".
+  return `You are the Plateau Eye Emergency Triage AI. Analyze: "${description}".
 Respond ONLY with a JSON object with this exact shape:
 {
   "recommended_type": "CRIME",

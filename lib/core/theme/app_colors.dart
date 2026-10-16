@@ -1,34 +1,43 @@
 import 'package:flutter/material.dart';
 
-/// Operation Rainbow brand colour palette — White and Red Theme
+/// Plateau Eye brand colour palette — Oxford Navy, Highland Emerald, and Warm Gold
 class AppColors {
   AppColors._();
 
-  // Core Palette (White and Red)
-  /// Documentation for this public member.
-  static const Color background = Color(0xFFFFFFFF); // Pure White
-  /// Documentation for this public member.
-  static const Color surface = Color(0xFFFBFBFB); // Off-white
-  /// Documentation for this public member.
-  static const Color surfaceLight = Color(0xFFF5F5F5);
+  // Core Palette (Plateau Eye: Oxford Navy, Highland Emerald, Warm Gold)
+  /// Background
+  static const Color background = Color(0xFFFAFAF7); // Crisp Warm White
+  /// Surface
+  static const Color surface = Color(0xFFFFFFFF); // Pure White
+  /// Surface Light
+  static const Color surfaceLight = Color(0xFFF4F5F0);
 
-  /// Documentation for this public member.
-  static const Color primary = Color(0xFFE31E24); // Sharp Vibrant Red
-  /// Documentation for this public member.
-  static const Color primaryDark = Color(0xFFB0171B);
+  /// Primary Brand Color: Oxford Navy
+  static const Color primary = Color(0xFF0B234B); // Oxford Navy
+  /// Deep Navy
+  static const Color primaryDark = Color(0xFF06142C);
+  /// Medium Navy
+  static const Color primaryLight = Color(0xFF163B72);
+
+  /// Highland Emerald Green
+  static const Color emerald = Color(0xFF0F6C32);
+  /// Light Emerald
+  static const Color emeraldLight = Color(0xFF1E8244);
+
+  /// Warm Gold Accent
+  static const Color gold = Color(0xFFB99123);
 
   // Status Palette
-  /// Documentation for this public member.
-  static const Color danger = Color(0xFFE31E24);
+  /// Emergency / Critical Alert
+  static const Color danger = Color(0xFFD32F2F); // Emergency Red
 
-  /// Documentation for this public member.
+  /// Warning
   static const Color warning = Color(0xFFFF9800);
 
-  /// Documentation for this public member.
-  static const Color success =
-      Color(0xFF1B5E20); // Darker Green for better contrast on white
-  /// Documentation for this public member.
-  static const Color info = Color(0xFF0277BD); // Deep Blue
+  /// Success / Clear (Highland Emerald)
+  static const Color success = Color(0xFF0F6C32);
+  /// Info / Intelligence (Oxford Navy)
+  static const Color info = Color(0xFF0B234B);
 
   // Content Palette
   /// Documentation for this public member.
@@ -100,7 +109,7 @@ class AppColors {
 
   // Missing semantic tokens
   /// Documentation for this public member.
-  static const Color secondary = Color(0xFF0277BD);
+  static const Color secondary = Color(0xFFB99123);
 
   /// Documentation for this public member.
   static const Color onSurfaceVariant = Color(0xFF616161);

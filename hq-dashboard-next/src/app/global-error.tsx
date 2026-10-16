@@ -34,7 +34,7 @@ export default function GlobalError({
   return (
     <html lang="en">
       <body style={{ margin: 0 }}>
-        <title>Console failed — Operation Rainbow</title>
+        <title>Console failed — Plateau Eye</title>
         <ConsoleFailure
           scope="Command console (root)"
           error={error}

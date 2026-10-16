@@ -8,7 +8,7 @@ import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Renders a highly polished, premium, brand-compliant prominent location disclosure
-/// and consent dialog matching Operation Rainbow's design aesthetic.
+/// and consent dialog matching Plateau Eye's design aesthetic.
 /// Satisfies the Google Play User Data Policy by explicitly explaining:
 /// 1. Data Type: Fine & coarse location data.
 /// 2. Mode: In the background (even when the app is closed or not in use).
@@ -51,7 +51,7 @@ class _LocationDisclosureDialogState extends State<LocationDisclosureDialog>
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     );
-    _pulseController.repeat(reverse: true);
+    unawaited(_pulseController.repeat(reverse: true));
     _pulseAnimation = Tween<double>(begin: 1, end: 1.15).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
@@ -168,7 +168,7 @@ class _LocationDisclosureDialogState extends State<LocationDisclosureDialog>
                         _buildSectionHeader('1. DATA ACCESSED & COLLECTED'),
                         const SizedBox(height: 6),
                         _buildSectionBody(
-                            'Operation Rainbow accesses, monitors, and collects your precise, continuous GPS '
+                            'Plateau Eye accesses, monitors, and collects your precise, continuous GPS '
                             'and cellular location coordinates (both fine and coarse data).'),
                         const SizedBox(height: 16),
                         _buildSectionHeader('2. BACKGROUND TELEMETRY MODE'),

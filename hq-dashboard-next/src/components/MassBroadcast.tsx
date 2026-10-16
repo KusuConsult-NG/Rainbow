@@ -96,7 +96,7 @@ export default function MassBroadcast() {
         Inter-Agency Public Safety Communications & Dispatcher
       </h2>
       <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 28 }}>
-        Transmit real-time joint security advisories, emergency alerts, and inter-agency dispatches directly to Police, Military STF, Civil Defence, and Operation Rainbow units.
+        Transmit real-time joint security advisories, emergency alerts, and inter-agency dispatches directly to Police, Military STF, Civil Defence, and Plateau Eye units.
       </p>
 
       {error && (
@@ -188,7 +188,7 @@ export default function MassBroadcast() {
                 did to incidents.
 
                 RAINBOW and VGN are gone for the same reason they are not
-                escalation destinations: Operation Rainbow's own staff are
+                escalation destinations: Plateau Eye's own staff are
                 reached by `target_audience: AGENTS`, and no vigilante outfit
                 has a console account to read an advisory with.
               */}

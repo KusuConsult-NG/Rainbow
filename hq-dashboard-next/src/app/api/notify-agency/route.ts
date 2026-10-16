@@ -219,7 +219,7 @@ export async function POST(req: NextRequest) {
       // REFUSED, NOT SENT UNSIGNED.
       //
       // `X-Rainbow-Auth` is the only thing that tells the receiving agency this
-      // POST came from Operation Rainbow. With RAINBOW_WEBHOOK_SECRET unset
+      // POST came from Plateau Eye. With RAINBOW_WEBHOOK_SECRET unset
       // this sent the header as an empty string, which is indistinguishable
       // from anyone who guessed the URL — so either the agency refuses it (and
       // we have reported SENT for a request that was thrown away) or it accepts

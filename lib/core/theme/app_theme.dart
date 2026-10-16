@@ -34,7 +34,7 @@ class AppTheme {
       textTheme: textTheme,
       textSelectionTheme: const TextSelectionThemeData(
         cursorColor: AppColors.primary,
-        selectionColor: Color(0x33E31E24),
+        selectionColor: Color(0x330B234B),
         selectionHandleColor: AppColors.primary,
       ),
       appBarTheme: AppBarTheme(

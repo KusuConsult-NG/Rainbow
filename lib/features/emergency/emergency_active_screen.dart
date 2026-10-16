@@ -100,7 +100,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
       vsync: this,
       duration: const Duration(seconds: 2),
     );
-    _pulseController.repeat(reverse: true);
+    unawaited(_pulseController.repeat(reverse: true));
 
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) ref.read(emergencyProvider.notifier).tick();
@@ -227,18 +227,18 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
 
   void _startCancel() {
     unawaited(HapticFeedback.mediumImpact());
-    _cancelController.forward();
+    unawaited(_cancelController.forward());
     _cancelTimer = Timer(const Duration(seconds: 3), () {
       if (!mounted) return;
       unawaited(HapticFeedback.heavyImpact());
-      _cancelController.reverse();
+      unawaited(_cancelController.reverse());
       _showPinVerification();
     });
   }
 
   void _stopCancel() {
     _cancelTimer?.cancel();
-    _cancelController.reverse();
+    unawaited(_cancelController.reverse());
   }
 
   void _showPinVerification() {
@@ -1093,7 +1093,7 @@ class _PulseMarkerState extends State<_PulseMarker>
       vsync: this,
       duration: const Duration(seconds: 2),
     );
-    _controller.repeat();
+    unawaited(_controller.repeat());
   }
 
   @override

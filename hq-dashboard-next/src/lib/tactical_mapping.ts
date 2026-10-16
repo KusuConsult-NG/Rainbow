@@ -23,7 +23,7 @@ export interface SecurityAgency {
 }
 
 export const STATE_SECURITY_AGENCIES: SecurityAgency[] = [
-  { id: 'RAINBOW', name: 'Operation Rainbow Tactical Unit', shortCode: 'OR-TU', color: '#6366f1', badge: '🌈', description: 'State Counter-Terrorism & Rapid Security Taskforce' },
+  { id: 'RAINBOW', name: 'Plateau Eye Tactical Unit', shortCode: 'OR-TU', color: '#6366f1', badge: '🌈', description: 'State Counter-Terrorism & Rapid Security Taskforce' },
   { id: 'NPF', name: 'Nigeria Police Force', shortCode: 'NPF', color: '#3b82f6', badge: '👮‍♂️', description: 'Federal Police Force & Law Enforcement' },
   { id: 'NSCDC', name: 'Nigeria Security and Civil Defence Corps', shortCode: 'NSCDC', color: '#dc2626', badge: '🛡️', description: 'Critical Infrastructure & Civil Defence Corps' },
   { id: 'MILITARY', name: 'Operation Enduring Peace / Military STF', shortCode: 'STF-MIL', color: '#16a34a', badge: '🎖️', description: 'Joint Military Special Task Force (Army/AirForce)' },

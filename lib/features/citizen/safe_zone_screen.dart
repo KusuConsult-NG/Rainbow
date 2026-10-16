@@ -13,6 +13,7 @@ import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/services/tts_service.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
 final _safeZonesProvider = FutureProvider<List<_SafeZone>>((ref) async {
@@ -23,7 +24,7 @@ final _safeZonesProvider = FutureProvider<List<_SafeZone>>((ref) async {
         .eq('is_active', true);
         
     if (response.isEmpty) {
-      throw Exception('Empty safe zones');
+      throw Exception('empty_safe_zones');
     }
 
     return response.map((e) {
@@ -203,9 +204,11 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
       _isCalculatingRoute = false;
     });
 
-    final message = warning
-        ? 'Safe route calculated to ${zone.name}. Warning: The route passes near an active threat. Proceed with extreme caution.'
-        : 'Safe route calculated to ${zone.name}. The path is clear.';
+    final lang = ref.read(languageProvider);
+    final tmpl = warning
+        ? Translations.get('sz_route_calculated_warning', lang)
+        : Translations.get('sz_route_calculated_clear', lang);
+    final message = tmpl.replaceAll('{name}', zone.name);
     unawaited(TtsService.instance.speak(message));
   }
 
@@ -233,15 +236,16 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final lang = ref.watch(languageProvider);
     final locAsync = ref.watch(userLocationStreamProvider);
     final zonesAsync = ref.watch(_safeZonesProvider);
     final threats = ref.watch(_activeAlertsProvider).valueOrNull ?? [];
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const RainbowAppBar(
-        title: 'SAFE-ZONE ROUTING',
-        subtitle: 'EVACUATION & SECURE ZONES',
+      appBar: RainbowAppBar(
+        title: Translations.get('sz_safe_zone_routing', lang),
+        subtitle: Translations.get('sz_evacuation_zones', lang),
         showBack: true,
       ),
       body: Column(
@@ -259,7 +263,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'NAVIGATE TO NEAREST SHIELD ICON FOR IMMEDIATE PROTECTION. THESE ZONES ARE SECURED BY TACTICAL UNITS.',
+                    Translations.get('sz_navigate_shield_desc', lang),
                     style: GoogleFonts.outfit(
                       color: AppColors.textDim,
                       fontSize: 10,
@@ -289,7 +293,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    '${zones.length} ACTIVE SECURE ZONES ONLINE',
+                    '${zones.length} ${Translations.get('sz_active_zones_online', lang)}',
                     style: GoogleFonts.outfit(
                       color: AppColors.success,
                       fontSize: 10,
@@ -322,7 +326,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'GPS ACCESS DENIED\nEnable location permissions to view safe zones near you.',
+                            Translations.get('sz_gps_denied', lang),
                             style: GoogleFonts.outfit(
                               color: AppColors.textDim,
                               fontSize: 13,
@@ -435,7 +439,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                             border: Border.all(color: AppColors.outline),
                           ),
                           child: Text(
-                            'NO ACTIVE SAFE ZONES IN YOUR AREA.\nCONTACT HQ VIA DISPATCHER CHAT.',
+                            Translations.get('sz_no_active_zones', lang),
                             style: GoogleFonts.outfit(
                               color: AppColors.textDim,
                               fontSize: 11,
@@ -514,7 +518,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                               if (_selected!.capacity > 0) ...[
                                 const SizedBox(height: 4),
                                 Text(
-                                  'CAPACITY: ${_selected!.capacity} PERSONS',
+                                  '${Translations.get('sz_capacity', lang)}: ${_selected!.capacity} ${Translations.get('sz_persons', lang)}',
                                   style: GoogleFonts.outfit(
                                     color: AppColors.textDim,
                                     fontSize: 11,
@@ -536,7 +540,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                                     ),
                                     const SizedBox(width: 8),
                                     Text(
-                                      'COMPUTING RISK-AWARE EVACUATION PATH...',
+                                      Translations.get('sz_computing_path', lang),
                                       style: GoogleFonts.outfit(
                                         color: AppColors.success,
                                         fontSize: 9,
@@ -561,7 +565,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
-                                          'THREAT EN ROUTE · PATH DIVERTS AROUND ACTIVE UNREST HOTSPOTS',
+                                          Translations.get('sz_threat_en_route', lang),
                                           style: GoogleFonts.outfit(
                                             color: AppColors.warning,
                                             fontWeight: FontWeight.w900,
@@ -592,7 +596,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                                     size: 16,
                                   ),
                                   label: Text(
-                                    'NAVIGATE TO ZONE',
+                                    Translations.get('sz_navigate_to_zone', lang),
                                     style: GoogleFonts.outfit(
                                       fontWeight: FontWeight.w900,
                                       fontSize: 12,
@@ -621,7 +625,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => Center(
                 child: Text(
-                  'UNABLE TO ACQUIRE GPS SIGNAL',
+                  Translations.get('sz_unable_acquire_gps', lang),
                   style: GoogleFonts.outfit(color: AppColors.error),
                 ),
               ),

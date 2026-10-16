@@ -2743,7 +2743,7 @@ function AlertCard({ alert, agents, usersMap, dispatcher, onViewDossier, onDispa
     setTriageError(null);
     const toastId = toast.loading('Running AI Triage...', 'Analyzing incident description');
     try {
-      const prompt = `You are the Operation Rainbow Emergency Triage AI. Analyze: "${alert.description}".
+      const prompt = `You are the Plateau Eye Emergency Triage AI. Analyze: "${alert.description}".
 Respond ONLY with a JSON object with this exact shape: 
 {
   "recommended_type": "CRIME",
@@ -3548,7 +3548,7 @@ Respond ONLY with a JSON object with this exact shape:
                   BUILT FROM THE SHARED LIST, NOT WRITTEN OUT HERE.
 
                   These were seven hand-written options taken from
-                  `STATE_SECURITY_AGENCIES`, which badges Operation Rainbow's
+                  `STATE_SECURITY_AGENCIES`, which badges Plateau Eye's
                   own staff. Four of them — NPF, MILITARY, RAINBOW, VGN — are
                   not agency codes: the value chosen here is written to
                   `alerts.escalated_to_agency`, and the liaison's portal, the

@@ -632,6 +632,505 @@ class Translations {
       AppLanguage.hausa: 'An kasa fara watsawa kai tsaye',
       AppLanguage.pidgin: 'Live stream no gree start',
     },
+
+    // REPORT DETAILS SCREEN
+    'rpt_camera_denied': {
+      AppLanguage.english:
+          'This phone has not given Operation Rainbow access to the camera. '
+          'You can still send the report without a photo.',
+      AppLanguage.hausa:
+          'Wannan wayar ba ta ba Operation Rainbow damar amfani da kyamara ba. '
+          'Za ka iya tura rahoton ba tare da hoto ba.',
+      AppLanguage.pidgin:
+          'Dis phone no give Operation Rainbow access to camera. '
+          'You still fit send the report without photo.',
+    },
+    'rpt_attachment_failed': {
+      AppLanguage.english:
+          'That did not work on this phone. You can still send the report '
+          'without an attachment.',
+      AppLanguage.hausa:
+          'Wannan bai yi aiki a wannan wayar ba. Za ka iya tura rahoton ba tare '
+          'da abin da aka makala ba.',
+      AppLanguage.pidgin:
+          'Dat one no work for this phone. You still fit send the report '
+          'without attachment.',
+    },
+    'rpt_mic_denied': {
+      AppLanguage.english:
+          'This phone has not given Operation Rainbow access to the '
+          'microphone. You can still type your report.',
+      AppLanguage.hausa:
+          'Wannan wayar ba ta ba Operation Rainbow damar amfani da makirufo ba. '
+          'Za ka iya rubuta rahotonka.',
+      AppLanguage.pidgin:
+          'Dis phone no give Operation Rainbow access to microphone. '
+          'You still fit type your report.',
+    },
+    'rpt_recorder_failed': {
+      AppLanguage.english:
+          'The voice recorder did not start on this phone. You can still '
+          'type your report.',
+      AppLanguage.hausa:
+          "Na'urar daukar murya ba ta fara aiki a wannan wayar ba. Za ka iya "
+          'rubuta rahotonka.',
+      AppLanguage.pidgin:
+          'Voice recorder no start for this phone. You still fit type your '
+          'report.',
+    },
+    'rpt_no_narrative': {
+      AppLanguage.english: 'No narrative provided',
+      AppLanguage.hausa: 'Babu bayanin da aka bayar',
+      AppLanguage.pidgin: 'No story dey here',
+    },
+    'rpt_incident_dossier': {
+      AppLanguage.english: 'INCIDENT DOSSIER',
+      AppLanguage.hausa: 'BAYANAN LAMARI',
+      AppLanguage.pidgin: 'INCIDENT REPORT FILE',
+    },
+    'rpt_compile_tactical_data': {
+      AppLanguage.english: 'COMPILE TACTICAL DATA',
+      AppLanguage.hausa: 'TATTARA BAYANAN AIKI',
+      AppLanguage.pidgin: 'GATHER ALL INFORMATION',
+    },
+    'rpt_transmitting_for': {
+      AppLanguage.english: 'TRANSMITTING REPORT FOR',
+      AppLanguage.hausa: 'ANA TURA RAHOTON DOMIN',
+      AppLanguage.pidgin: 'DEY SEND REPORT FOR',
+    },
+    'rpt_mission_narrative': {
+      AppLanguage.english: 'MISSION NARRATIVE',
+      AppLanguage.hausa: 'BAYANIN AIKI',
+      AppLanguage.pidgin: 'WETIN HAPPEN',
+    },
+    'rpt_recording_voice': {
+      AppLanguage.english: 'RECORDING VOICE REPORT...',
+      AppLanguage.hausa: 'ANA DAUKAR MURYAR RAHOTO...',
+      AppLanguage.pidgin: 'DEY RECORD VOICE REPORT...',
+    },
+    'rpt_voice_optional': {
+      AppLanguage.english: 'VOICE REPORTING (OPTIONAL)',
+      AppLanguage.hausa: 'RAHOTON MURYA (ZABIN KAI)',
+      AppLanguage.pidgin: 'VOICE REPORT (IF YOU WANT)',
+    },
+    'rpt_delete_recording': {
+      AppLanguage.english: 'Delete the recording',
+      AppLanguage.hausa: 'Goge muryar da aka dauka',
+      AppLanguage.pidgin: 'Delete the recording',
+    },
+    'rpt_speak_now_stop': {
+      AppLanguage.english: 'SPEAK NOW (TAP STOP TO FINISH)',
+      AppLanguage.hausa: 'YI MAGANA YANZU (DANNA TSAIDA DOMIN KAMMALAWA)',
+      AppLanguage.pidgin: 'TALK NOW (TAP STOP TO FINISH)',
+    },
+    'rpt_stop': {
+      AppLanguage.english: 'STOP',
+      AppLanguage.hausa: 'TSAIDA',
+      AppLanguage.pidgin: 'STOP',
+    },
+    'rpt_voice_attached': {
+      AppLanguage.english: 'VOICE NOTE ATTACHED & ENCRYPTED',
+      AppLanguage.hausa: 'AN SANYA SAKON MURYA KUMA AN KARE SHI',
+      AppLanguage.pidgin: 'VOICE NOTE DEY ATTACH & SECURE',
+    },
+    'rpt_record_voice_report': {
+      AppLanguage.english: 'RECORD VOICE REPORT',
+      AppLanguage.hausa: 'DAUKI MURYAR RAHOTO',
+      AppLanguage.pidgin: 'RECORD VOICE REPORT',
+    },
+    'rpt_enter_details_hint': {
+      AppLanguage.english:
+          'Enter mission details, observations, and objective status...',
+      AppLanguage.hausa:
+          'Shigar da cikakkun bayanan aiki, abubuwan da ka lura da su, da '
+          'halin da ake ciki...',
+      AppLanguage.pidgin:
+          'Type wetin happen, wetin you see, and everything...',
+    },
+    'rpt_visual_telemetry': {
+      AppLanguage.english: 'VISUAL TELEMETRY (OPTIONAL)',
+      AppLanguage.hausa: 'HOTUNA KO BIDIYO (ZABIN KAI)',
+      AppLanguage.pidgin: 'PICTURE & VIDEO (IF YOU WANT)',
+    },
+    'rpt_scan_photo': {
+      AppLanguage.english: 'SCAN PHOTO',
+      AppLanguage.hausa: 'DAUKI HOTO',
+      AppLanguage.pidgin: 'SNAP PHOTO',
+    },
+    'rpt_record_video': {
+      AppLanguage.english: 'RECORD VIDEO',
+      AppLanguage.hausa: 'DAUKI BIDIYO',
+      AppLanguage.pidgin: 'RECORD VIDEO',
+    },
+    'rpt_photo_intel': {
+      AppLanguage.english: 'PHOTO INTEL',
+      AppLanguage.hausa: 'HOTON SHAIDA',
+      AppLanguage.pidgin: 'PHOTO EVIDENCE',
+    },
+    'rpt_video_intel': {
+      AppLanguage.english: 'VIDEO INTEL',
+      AppLanguage.hausa: 'BIDIYON SHAIDA',
+      AppLanguage.pidgin: 'VIDEO EVIDENCE',
+    },
+    'rpt_geospatial_coords': {
+      AppLanguage.english: 'GEOSPATIAL COORDINATES',
+      AppLanguage.hausa: 'BAYANAN WURI',
+      AppLanguage.pidgin: 'LOCATION COORDINATES',
+    },
+    'rpt_gps_telemetry': {
+      AppLanguage.english: 'GPS TELEMETRY',
+      AppLanguage.hausa: 'SIGINAR GPS',
+      AppLanguage.pidgin: 'GPS INFO',
+    },
+    'rpt_gps_unavailable': {
+      AppLanguage.english: 'GPS UNAVAILABLE',
+      AppLanguage.hausa: 'BABU GPS',
+      AppLanguage.pidgin: 'GPS NO DEY',
+    },
+    'rpt_active_beacon': {
+      AppLanguage.english: 'ACTIVE BEACON SIGNAL',
+      AppLanguage.hausa: 'SIGINAR WURI NA AIKI',
+      AppLanguage.pidgin: 'LOCATION SIGNAL DEY WORK',
+    },
+    'rpt_acquiring_signal': {
+      AppLanguage.english: 'ACQUIRING SIGNAL...',
+      AppLanguage.hausa: 'ANA NEMAN SIGINA...',
+      AppLanguage.pidgin: 'DEY FIND SIGNAL...',
+    },
+    'rpt_signal_interrupted': {
+      AppLanguage.english: 'SIGNAL INTERRUPTED',
+      AppLanguage.hausa: 'SIGINA TA YANKE',
+      AppLanguage.pidgin: 'SIGNAL DON CUT',
+    },
+    'rpt_jurisdiction_override': {
+      AppLanguage.english: 'JURISDICTION OVERRIDE',
+      AppLanguage.hausa: 'CANZA YANKI DA KAI',
+      AppLanguage.pidgin: 'CHANGE AREA BY HAND',
+    },
+    'rpt_manual_location_entry': {
+      AppLanguage.english: 'MANUAL LOCATION ENTRY',
+      AppLanguage.hausa: 'SHIGAR DA WURI DA HANU',
+      AppLanguage.pidgin: 'TYPE LOCATION YOURSELF',
+    },
+    'rpt_use_if_gps_weak': {
+      AppLanguage.english: 'USE IF GPS SIGNAL IS WEAK OR INACCURATE',
+      AppLanguage.hausa:
+          'YI AMFANI IDAN SIGINAR GPS TA YI RAUNI KO BA DAIDAIBAGABA',
+      AppLanguage.pidgin: 'USE THIS IF GPS SIGNAL NO STRONG WELL',
+    },
+    'rpt_lga': {
+      AppLanguage.english: 'LOCAL GOVERNMENT AREA',
+      AppLanguage.hausa: 'KARAMAR HUKUMA (LGA)',
+      AppLanguage.pidgin: 'LOCAL GOVERNMENT (LGA)',
+    },
+    'rpt_federal_ward': {
+      AppLanguage.english: 'FEDERAL WARD (INEC)',
+      AppLanguage.hausa: 'MAZABAR TARAYYA (INEC)',
+      AppLanguage.pidgin: 'FEDERAL WARD (INEC)',
+    },
+    'rpt_state_ward': {
+      AppLanguage.english: 'STATE WARD (SIEC)',
+      AppLanguage.hausa: 'MAZABAR JIHA (SIEC)',
+      AppLanguage.pidgin: 'STATE WARD (SIEC)',
+    },
+    'rpt_polling_unit': {
+      AppLanguage.english: 'POLLING UNIT (PU)',
+      AppLanguage.hausa: 'RUKUNIN ZABE (PU)',
+      AppLanguage.pidgin: 'POLLING UNIT (PU)',
+    },
+    'rpt_stealth_mode': {
+      AppLanguage.english: 'STEALTH MODE',
+      AppLanguage.hausa: 'YANAYIN ASIRCE',
+      AppLanguage.pidgin: 'SECRET MODE',
+    },
+    'rpt_encrypt_identity': {
+      AppLanguage.english: 'ENCRYPT SENDER IDENTITY ARCHIVE',
+      AppLanguage.hausa: 'BOYE SUNA DA ASALIN MAI AIKAWA',
+      AppLanguage.pidgin: 'HIDE WHO SEND DIS REPORT',
+    },
+    'rpt_initiate_transmission': {
+      AppLanguage.english: 'INITIATE TRANSMISSION',
+      AppLanguage.hausa: 'FARA TURAWA',
+      AppLanguage.pidgin: 'SEND NOW',
+    },
+    'rpt_aes_encrypted_tunnel': {
+      AppLanguage.english: 'AES-256 ENCRYPTED TUNNEL · MISSION CRITICAL DATA',
+      AppLanguage.hausa: 'KARIYA TA AES-256 · BAYANAI MASU MUHIMMANCI',
+      AppLanguage.pidgin: 'AES-256 SECURED · IMPORTANT DATA',
+    },
+    'rpt_select_placeholder': {
+      AppLanguage.english: 'SELECT...',
+      AppLanguage.hausa: 'ZABI...',
+      AppLanguage.pidgin: 'SELECT...',
+    },
+    'rpt_transmission_error': {
+      AppLanguage.english: 'TRANSMISSION ERROR',
+      AppLanguage.hausa: 'KUSKUREN TURAWA',
+      AppLanguage.pidgin: 'SENDING ERROR',
+    },
+
+    // SAFE ZONE SCREEN
+    'sz_safe_zone_routing': {
+      AppLanguage.english: 'SAFE-ZONE ROUTING',
+      AppLanguage.hausa: 'HANYAR ZUWA SASHEN TSIRA',
+      AppLanguage.pidgin: 'SAFE-ZONE ROUTE',
+    },
+    'sz_evacuation_zones': {
+      AppLanguage.english: 'EVACUATION & SECURE ZONES',
+      AppLanguage.hausa: 'WURAREN KAUCEWA DA TSARO',
+      AppLanguage.pidgin: 'SECURE & SAFE AREAS',
+    },
+    'sz_navigate_shield_desc': {
+      AppLanguage.english:
+          'NAVIGATE TO NEAREST SHIELD ICON FOR IMMEDIATE PROTECTION. THESE '
+          'ZONES ARE SECURED BY TACTICAL UNITS.',
+      AppLanguage.hausa:
+          "JE ZUWA ALAMAR GARKUWA MAFI KUSA DOMIN TSARO NAN DA NAN. JAMI'AN "
+          'TSARO NA KARE WADANNAN WURARE.',
+      AppLanguage.pidgin:
+          'FOLLOW THE SHIELD ICON TO GO TO NEAREST SAFE PLACE. TACTICAL TEAM '
+          'DEY GUARD DEM.',
+    },
+    'sz_active_zones_online': {
+      AppLanguage.english: 'ACTIVE SECURE ZONES ONLINE',
+      AppLanguage.hausa: 'SASHEN TSIRA NA AIKI',
+      AppLanguage.pidgin: 'SAFE ZONES ONLINE NOW',
+    },
+    'sz_gps_denied': {
+      AppLanguage.english:
+          'GPS ACCESS DENIED\nEnable location permissions to view safe zones '
+          'near you.',
+      AppLanguage.hausa:
+          'AN HANA DAMAR GPS\nBada izinin wuri domin ganin wuraren tsira '
+          'kusa da kai.',
+      AppLanguage.pidgin:
+          'GPS ACCESS NO GREE\nAllow location make you fit see safe zones '
+          'near you.',
+    },
+    'sz_no_active_zones': {
+      AppLanguage.english:
+          'NO ACTIVE SAFE ZONES IN YOUR AREA.\nCONTACT HQ VIA DISPATCHER CHAT.',
+      AppLanguage.hausa:
+          'BABU SASHEN TSIRA MAI AIKI A YANKINKA.\nTUNTUBI HQ TA HIKAR '
+          'DISPATCHER.',
+      AppLanguage.pidgin:
+          'NO SAFE ZONE NEAR YOUR AREA.\nMESSAGE HQ FOR DISPATCHER CHAT.',
+    },
+    'sz_capacity': {
+      AppLanguage.english: 'CAPACITY',
+      AppLanguage.hausa: 'IYAKA',
+      AppLanguage.pidgin: 'CAPACITY',
+    },
+    'sz_persons': {
+      AppLanguage.english: 'PERSONS',
+      AppLanguage.hausa: 'MUTANE',
+      AppLanguage.pidgin: 'PEOPLE',
+    },
+    'sz_computing_path': {
+      AppLanguage.english: 'COMPUTING RISK-AWARE EVACUATION PATH...',
+      AppLanguage.hausa: 'ANA GANO AMINTACCIYAR HANYAR KAUCEWA...',
+      AppLanguage.pidgin: 'DEY CALCULATE SAFE ROUTE...',
+    },
+    'sz_threat_en_route': {
+      AppLanguage.english:
+          'THREAT EN ROUTE · PATH DIVERTS AROUND ACTIVE UNREST HOTSPOTS',
+      AppLanguage.hausa:
+          'AKWAI HATSARI A HANYA · HANYA TA KAUCE WA WURAREN DA AKE RIGIMA',
+      AppLanguage.pidgin:
+          'DANGER DEY FOR ROAD · ROUTE GO PASS CORNER WEY NO GET WAHALA',
+    },
+    'sz_navigate_to_zone': {
+      AppLanguage.english: 'NAVIGATE TO ZONE',
+      AppLanguage.hausa: 'JE ZUWA WURIN TSIRA',
+      AppLanguage.pidgin: 'GO TO THE ZONE',
+    },
+    'sz_unable_acquire_gps': {
+      AppLanguage.english: 'UNABLE TO ACQUIRE GPS SIGNAL',
+      AppLanguage.hausa: 'AN KASA SAMUN SIGINAR GPS',
+      AppLanguage.pidgin: 'NO FIT GET GPS SIGNAL',
+    },
+    'sz_route_calculated_clear': {
+      AppLanguage.english: 'Safe route calculated to {name}. The path is clear.',
+      AppLanguage.hausa:
+          'An gano amintacciyar hanya zuwa {name}. Hanyar a bude take.',
+      AppLanguage.pidgin:
+          'Safe road to {name} dey ready. The road clear well.',
+    },
+    'sz_route_calculated_warning': {
+      AppLanguage.english:
+          'Safe route calculated to {name}. Warning: The route passes near '
+          'an active threat. Proceed with extreme caution.',
+      AppLanguage.hausa:
+          'An gano hanya zuwa {name}. Gargadi: Hanyar ta kusa da hatsari. '
+          'Yi tafiya da matukar kula.',
+      AppLanguage.pidgin:
+          'Route to {name} ready. Warning: Danger dey near this road. '
+          'Shine your eye well.',
+    },
+
+    // LIVE TRACKING SCREEN
+    'trk_unknown_officer': {
+      AppLanguage.english: 'Unknown Officer',
+      AppLanguage.hausa: "Jami'in da ba a sani ba",
+      AppLanguage.pidgin: 'Unknown Officer',
+    },
+    'trk_responder_details': {
+      AppLanguage.english: 'RESPONDER DETAILS',
+      AppLanguage.hausa: "BAYANAN JAMI'I",
+      AppLanguage.pidgin: 'RESPONDER DETAILS',
+    },
+    'trk_tactical_map': {
+      AppLanguage.english: 'TACTICAL MAP',
+      AppLanguage.hausa: 'TASWIRAR AIKI',
+      AppLanguage.pidgin: 'TACTICAL MAP',
+    },
+    'trk_live_command_feed': {
+      AppLanguage.english: 'LIVE COMMAND FEED',
+      AppLanguage.hausa: 'BAYANAN CIBIYAR UMARNI',
+      AppLanguage.pidgin: 'LIVE COMMAND UPDATE',
+    },
+    'trk_location_denied': {
+      AppLanguage.english: 'LOCATION ACCESS DENIED',
+      AppLanguage.hausa: 'AN HANA DAMAR WURI',
+      AppLanguage.pidgin: 'LOCATION ACCESS DENIED',
+    },
+    'trk_enable_location_settings': {
+      AppLanguage.english:
+          'Enable location in device Settings to use the tactical map.',
+      AppLanguage.hausa:
+          'Kunna wuri a Settings na wayarka domin amfani da taswira.',
+      AppLanguage.pidgin:
+          'Turn on location for device Settings to use this map.',
+    },
+    'trk_semantics_map_label': {
+      AppLanguage.english: 'Tactical map of incidents and responders',
+      AppLanguage.hausa: "Taswirar aiki ta lamurra da jami'ai",
+      AppLanguage.pidgin: 'Tactical map of incidents and responders',
+    },
+    'trk_dispatched_alert': {
+      AppLanguage.english: 'DISPATCHED / ALERT',
+      AppLanguage.hausa: "AN TURA JAMI'I / SANARWA",
+      AppLanguage.pidgin: 'TEAM SENT / ALERT',
+    },
+    'trk_status': {
+      AppLanguage.english: 'Status',
+      AppLanguage.hausa: 'Hali',
+      AppLanguage.pidgin: 'Status',
+    },
+    'trk_battery': {
+      AppLanguage.english: 'Battery',
+      AppLanguage.hausa: 'Baturi',
+      AppLanguage.pidgin: 'Battery',
+    },
+    'trk_last_updated': {
+      AppLanguage.english: 'Last Updated',
+      AppLanguage.hausa: 'Sabuntawa ta karshe',
+      AppLanguage.pidgin: 'Last Updated',
+    },
+    'trk_unknown': {
+      AppLanguage.english: 'Unknown',
+      AppLanguage.hausa: 'Ba a sani ba',
+      AppLanguage.pidgin: 'Unknown',
+    },
+    'trk_id': {
+      AppLanguage.english: 'ID',
+      AppLanguage.hausa: 'LAMBA',
+      AppLanguage.pidgin: 'ID',
+    },
+
+    // LOCK SCREEN
+    'lock_no_phone_error': {
+      AppLanguage.english:
+          'This account has no phone number on it. Sign out and sign in again.',
+      AppLanguage.hausa:
+          'Wannan asusun ba shi da lambar waya a kai. Fita sannan ka sake shiga.',
+      AppLanguage.pidgin:
+          'Dis account no get phone number. Sign out make you sign in again.',
+    },
+    'lock_code_rejected': {
+      AppLanguage.english: 'That code was not accepted.',
+      AppLanguage.hausa: 'Ba a karbi wannan lambar ba.',
+      AppLanguage.pidgin: 'Dat code no work.',
+    },
+    'lock_welcome_back': {
+      AppLanguage.english: 'WELCOME BACK',
+      AppLanguage.hausa: 'BARKA DA DAWOWA',
+      AppLanguage.pidgin: 'WELCOME BACK',
+    },
+    'lock_sos_emergency': {
+      AppLanguage.english: 'EMERGENCY — SEND SOS NOW',
+      AppLanguage.hausa: 'GAGGAWA — NEMI TAIMAKON SOS YANZU',
+      AppLanguage.pidgin: 'EMERGENCY — SEND SOS NOW',
+    },
+    'lock_sos_works_always': {
+      AppLanguage.english: 'Works whether or not you unlock.',
+      AppLanguage.hausa: 'Yana aiki ko da ka bude wayar ko ba ka bude ba.',
+      AppLanguage.pidgin: 'E dey work whether you unlock or not.',
+    },
+    'lock_sending': {
+      AppLanguage.english: 'SENDING…',
+      AppLanguage.hausa: 'ANA TURAWA…',
+      AppLanguage.pidgin: 'DEY SEND…',
+    },
+    'lock_send_my_code': {
+      AppLanguage.english: 'SEND MY CODE',
+      AppLanguage.hausa: 'TURA MIN LAMBATA',
+      AppLanguage.pidgin: 'SEND MY CODE',
+    },
+    'lock_code_sent_to': {
+      AppLanguage.english: 'CODE SENT TO',
+      AppLanguage.hausa: 'AN TURA LAMBA ZUWA',
+      AppLanguage.pidgin: 'CODE DON GO TO',
+    },
+    'lock_checking': {
+      AppLanguage.english: 'CHECKING…',
+      AppLanguage.hausa: 'ANA DUBAWA…',
+      AppLanguage.pidgin: 'DEY CHECK…',
+    },
+    'lock_unlock': {
+      AppLanguage.english: 'UNLOCK',
+      AppLanguage.hausa: 'BUDE',
+      AppLanguage.pidgin: 'UNLOCK',
+    },
+    'lock_send_another_code': {
+      AppLanguage.english: 'SEND ANOTHER CODE',
+      AppLanguage.hausa: 'SAKE TURA WATA LAMBAR',
+      AppLanguage.pidgin: 'SEND ANOTHER CODE',
+    },
+    'lock_check_connection': {
+      AppLanguage.english: 'CHECK FOR A CONNECTION AGAIN',
+      AppLanguage.hausa: 'SAKE DUBA HANYAR SADARWA',
+      AppLanguage.pidgin: 'CHECK NETWORK AGAIN',
+    },
+    'lock_sign_out': {
+      AppLanguage.english: 'SIGN OUT INSTEAD',
+      AppLanguage.hausa: 'FITA DAGA ASUSU MAIMAKON HAKA',
+      AppLanguage.pidgin: 'SIGN OUT INSTEAD',
+    },
+    'lock_explanation_code_sms': {
+      AppLanguage.english:
+          'For your safety, confirm this is your phone. We will send a '
+          'code to your number.',
+      AppLanguage.hausa:
+          'Domin amincinka, tabbatar da wannan wayarka ce. Za mu tura lamba '
+          'zuwa lambarka.',
+      AppLanguage.pidgin:
+          'For your safety, make sure say na your phone. We go send code to '
+          'your number.',
+    },
+    'lock_explanation_offline': {
+      AppLanguage.english:
+          'You are offline, so a code cannot be sent. Your emergency '
+          'button still works — everything else is locked until you have a '
+          'connection.',
+      AppLanguage.hausa:
+          'Ba ka da intanet, don haka ba za a iya tura lamba ba. Maballin '
+          'gaggawa na nan yana aiki — sauran abubuwa duk a kulle suke har sai '
+          'ka sami hanyar sadarwa.',
+      AppLanguage.pidgin:
+          'You dey offline, so code no fit enter. Your emergency button '
+          'still dey work — everything else don lock till network show.',
+    },
   };
 
   /// The string for [key] in [lang].

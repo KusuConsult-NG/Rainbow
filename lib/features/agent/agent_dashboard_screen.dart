@@ -474,7 +474,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
       // Answered here as well as in `alertsStreamProvider`, because this is a
       // SECOND filter and it was the one that actually hid the incident. The
       // stream filter delivered the row; `tierCanSee` below then dropped it,
-      // because the tier ladder is Operation Rainbow's own hierarchy and a
+      // because the tier ladder is Plateau Eye's own hierarchy and a
       // liaison has no rung on it. `ResponderTier.unknown` ranks below
       // everything, and an incident handed to an agency always has a Rainbow
       // tier owning it — so the rule meant "a liaison sees nothing that was
@@ -2056,7 +2056,7 @@ class _PulseMarkerState extends State<_PulseMarker>
     super.initState();
     _ctrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 2));
-    _ctrl.repeat();
+    unawaited(_ctrl.repeat());
   }
 
   @override

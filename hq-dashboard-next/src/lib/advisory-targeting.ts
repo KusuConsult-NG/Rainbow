@@ -43,7 +43,7 @@
 /** Everything this decision needs to know about the person at the console. */
 export interface AdvisoryViewer {
   /**
-   * The agency this account belongs to, or null for Operation Rainbow staff.
+   * The agency this account belongs to, or null for Plateau Eye staff.
    * Comes from `consoleAccess(role).agency`, which derives it from the role —
    * not from `profiles.agency`, which is a decorative badge (T-28).
    */

@@ -116,8 +116,8 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
       return;
     }
 
-    _waveformController.repeat(reverse: true);
-    _pulseController.repeat(reverse: true);
+    unawaited(_waveformController.repeat(reverse: true));
+    unawaited(_pulseController.repeat(reverse: true));
 
     // Recording starts BEFORE transcription and does not depend on it. If the
     // microphone is refused, say so once and let the speech recogniser try

@@ -54,13 +54,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       vsync: this,
       duration: const Duration(milliseconds: 2500),
     );
-    _breathingController.repeat(reverse: true);
+    unawaited(_breathingController.repeat(reverse: true));
 
     _safePulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
     );
-    _safePulseController.repeat(reverse: true);
+    unawaited(_safePulseController.repeat(reverse: true));
 
     // Initial sync
     unawaited(ref.read(alertServiceProvider).flushOfflineQueue());
@@ -103,7 +103,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
             content: Text(
-              'Operation Rainbow requires active location permissions to route emergency responders to your position. Please enable location in device settings.',
+              'Plateau Eye requires active location permissions to route emergency responders to your position. Please enable location in device settings.',
               style: GoogleFonts.outfit(
                 color: AppColors.textSecondary,
               ),

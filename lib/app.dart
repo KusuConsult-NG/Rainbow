@@ -38,7 +38,7 @@ class _RainbowAppState extends ConsumerState<RainbowApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: 'Operation Rainbow',
+      title: 'Plateau Eye',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       routerConfig: ref.watch(appRouter),

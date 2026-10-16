@@ -39,6 +39,8 @@
 /// docs/PRODUCTION_DEPLOYMENT.md § 2b.
 library;
 
+import 'package:rainbow_app/shared/localization/translations.dart';
+
 /// How long the app may be away before it asks who is holding it.
 ///
 /// Two minutes. Long enough to take a photo, copy a number, answer a call or
@@ -117,15 +119,12 @@ UnlockPath unlockPathFor({required bool online}) =>
     online ? UnlockPath.codeBySms : UnlockPath.emergencyOnly;
 
 /// What the lock screen tells the person, given the path open to them.
-String lockScreenExplanation(UnlockPath path) {
+String lockScreenExplanation(UnlockPath path, [AppLanguage lang = AppLanguage.english]) {
   switch (path) {
     case UnlockPath.codeBySms:
-      return 'For your safety, confirm this is your phone. '
-          'We will send a code to your number.';
+      return Translations.get('lock_explanation_code_sms', lang);
     case UnlockPath.emergencyOnly:
-      return 'You are offline, so a code cannot be sent. '
-          'Your emergency button still works — everything else is locked until '
-          'you have a connection.';
+      return Translations.get('lock_explanation_offline', lang);
   }
 }
 

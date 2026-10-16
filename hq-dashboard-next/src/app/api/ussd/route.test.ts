@@ -159,12 +159,12 @@ describe('reading the callback', () => {
     // Africa's Talking and several carrier integrations post a form. Reading
     // only JSON would fail every single callback.
     const { text } = await post({ sessionId: 'S2', phoneNumber: '08030001111' }, { form: true });
-    expect(text).toContain('Operation Rainbow');
+    expect(text).toContain('Plateau Eye');
   });
 
   it('accepts a JSON body', async () => {
     const { text } = await post({ sessionId: 'S3', phoneNumber: '08030001111' });
-    expect(text).toContain('Operation Rainbow');
+    expect(text).toContain('Plateau Eye');
   });
 
   it('refuses a shape it does not recognise, and says which keys arrived', async () => {
@@ -463,7 +463,7 @@ describe('the session record', () => {
     const saved = updates.find(u => u.table === 'ussd_sessions');
     expect(saved).toBeDefined();
     expect(saved!.row.last_input).toBe('');
-    expect(String(saved!.row.last_screen)).toContain('Operation Rainbow');
+    expect(String(saved!.row.last_screen)).toContain('Plateau Eye');
     expect(saved!.row.state).toMatchObject({ step: 'ROOT' });
   });
 

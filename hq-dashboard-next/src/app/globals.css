@@ -44,57 +44,53 @@
 
 :root {
   /* Ground. The app is pure white — not slate-50, which reads blue beside it. */
-  --bg-primary: #ffffff;        /* AppColors.background */
-  --bg-secondary: #fbfbfb;      /* AppColors.surface */
-  --bg-card: #ffffff;           /* AppColors.surfaceContainerLowest */
+  --bg-primary: #FAFAF7;        /* AppColors.background */
+  --bg-secondary: #FFFFFF;      /* AppColors.surface */
+  --bg-card: #FFFFFF;           /* AppColors.surfaceContainerLowest */
 
-  /* Brand AND emergency. One colour, as in the app: this product is about
-     emergencies, and its identity says so. Severity stays readable through the
-     status scale in src/lib/incident-dossier.ts, not by giving the brand its
-     own competing hue. */
-  --primary: #e31e24;           /* AppColors.primary */
-  --primary-dark: #b0171b;      /* AppColors.primaryDark */
-  --primary-dim: rgba(227, 30, 36, 0.08);
-  --primary-glow: 0 0 20px rgba(227, 30, 36, 0.18);
+  /* Plateau Eye Brand Palette: Oxford Navy primary, Highland Emerald, Warm Gold */
+  --primary: #0B234B;           /* AppColors.primary (Oxford Navy) */
+  --primary-dark: #06142C;      /* AppColors.primaryDark */
+  --primary-dim: rgba(11, 35, 75, 0.08);
+  --primary-glow: 0 0 20px rgba(11, 35, 75, 0.20);
 
-  /* Information, and the quieter interactive accent — so that not everything
-     on a command screen shouts. */
-  --accent: #0277bd;            /* AppColors.secondary / .accent */
-  --accent-dim: rgba(2, 119, 189, 0.08);
+  /* Warm Gold accent */
+  --accent: #B99123;            /* AppColors.secondary / .accent */
+  --accent-dim: rgba(185, 145, 35, 0.10);
 
-  --warning: #ff9800;           /* AppColors.warning */
+  --warning: #FF9800;           /* AppColors.warning */
   --warning-dim: rgba(255, 152, 0, 0.10);
   --warning-glow: 0 0 20px rgba(255, 152, 0, 0.18);
 
-  --duress: #e31e24;            /* AppColors.danger — the same red as the app */
-  --duress-dim: rgba(227, 30, 36, 0.10);
-  --duress-glow: 0 0 25px rgba(227, 30, 36, 0.25);
+  --duress: #D32F2F;            /* AppColors.danger — emergency red */
+  --duress-dim: rgba(211, 47, 47, 0.10);
+  --duress-glow: 0 0 25px rgba(211, 47, 47, 0.25);
 
-  --success: #1b5e20;           /* AppColors.success */
-  --success-dim: rgba(27, 94, 32, 0.08);
-  --success-glow: 0 0 20px rgba(27, 94, 32, 0.15);
+  --success: #0F6C32;           /* AppColors.success — Highland Emerald */
+  --success-dim: rgba(15, 108, 50, 0.08);
+  --success-glow: 0 0 20px rgba(15, 108, 50, 0.20);
 
-  --info: #0277bd;              /* AppColors.info */
-  --info-dim: rgba(2, 119, 189, 0.08);
+  --info: #0B234B;              /* AppColors.info */
+  --info-dim: rgba(11, 35, 75, 0.08);
 
   /* Neutral greys, not blue-tinted slate. */
-  --text-primary: #1a1a1a;      /* AppColors.textPrimary */
+  --text-primary: #1A1A1A;      /* AppColors.textPrimary */
   --text-secondary: #212121;    /* AppColors.onSurface */
   --text-muted: #616161;        /* AppColors.textSecondary */
   --text-dim: #757575;          /* see departure 1 above */
 
-  --border: #e0e0e0;            /* AppColors.outline */
-  --border-subtle: #eeeeee;     /* AppColors.outlineVariant */
-  --border-active: rgba(227, 30, 36, 0.45);
-  --glass: #ffffff;
+  --border: #E0E0E0;            /* AppColors.outline */
+  --border-subtle: #EEEEEE;     /* AppColors.outlineVariant */
+  --border-active: rgba(11, 35, 75, 0.45);
+  --glass: #FFFFFF;
   --glow: 0 10px 30px rgba(26, 26, 26, 0.08);
   --shadow-sm: 0 4px 12px rgba(26, 26, 26, 0.05);
   --shadow-md: 0 12px 36px rgba(26, 26, 26, 0.12);
 
   /* Inputs */
-  --input-bg: #f5f5f5;          /* AppColors.surfaceLight */
-  --input-border: #e0e0e0;
-  --input-focus: rgba(227, 30, 36, 0.2);
+  --input-bg: #F4F5F0;          /* AppColors.surfaceLight */
+  --input-border: #E0E0E0;
+  --input-focus: rgba(11, 35, 75, 0.2);
 
   /* Shape. The app rounds cards at 16 and controls at 12 (AppColors
      .glassSurface / .hudSurface); the console had 8, 12, 14, 16, 20 and 24 in
@@ -110,14 +106,14 @@
   --bg-secondary: #1c1c1e;
   --bg-card: rgba(28, 28, 30, 0.72);
 
-  /* The same red, lifted just enough to hold on a dark ground. */
-  --primary: #ff4a4f;
-  --primary-dark: #e31e24;
-  --primary-dim: rgba(255, 74, 79, 0.12);
-  --primary-glow: 0 0 25px rgba(255, 74, 79, 0.28);
+  /* Plateau Eye Navy, lifted to hold on dark ground */
+  --primary: #2d5d9b;
+  --primary-dark: #0B234B;
+  --primary-dim: rgba(45, 93, 155, 0.20);
+  --primary-glow: 0 0 25px rgba(45, 93, 155, 0.35);
 
-  --accent: #4fc3f7;
-  --accent-dim: rgba(79, 195, 247, 0.12);
+  --accent: #D4AF37;
+  --accent-dim: rgba(212, 175, 55, 0.15);
 
   --warning: #ffb74d;
   --warning-dim: rgba(255, 183, 77, 0.12);
@@ -142,7 +138,7 @@
 
   --border: rgba(255, 255, 255, 0.10);
   --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-active: rgba(255, 74, 79, 0.45);
+  --border-active: rgba(45, 93, 155, 0.50);
   --glass: rgba(18, 18, 18, 0.72);
   --glow: 0 8px 32px rgba(0, 0, 0, 0.45);
   --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.35);
@@ -151,7 +147,7 @@
   /* Inputs */
   --input-bg: rgba(255, 255, 255, 0.05);
   --input-border: rgba(255, 255, 255, 0.10);
-  --input-focus: rgba(255, 74, 79, 0.3);
+  --input-focus: rgba(45, 93, 155, 0.35);
 }
 
 /* ─── Global Base Settings ────────────────────────────────────────── */

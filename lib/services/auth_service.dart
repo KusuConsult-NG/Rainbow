@@ -18,7 +18,7 @@ final authServiceProvider = Provider<AuthService>((ref) {
   return AuthService(ref.read(secureStorageProvider));
 });
 
-/// Handles all authentication logic for Operation Rainbow users on Supabase.
+/// Handles all authentication logic for Plateau Eye users on Supabase.
 class AuthService {
   AuthService(this._secureStorage);
   final SecureStorageService _secureStorage;

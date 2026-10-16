@@ -5,7 +5,7 @@
  *
  * Six agencies send liaison officers to this console — the Police, the Army,
  * the DSS, the NSCDC, the FRSC and Operation Enduring Peace. They are not
- * Operation Rainbow staff. They are officers of other organisations, given an
+ * Plateau Eye staff. They are officers of other organisations, given an
  * account so that an incident handed to their agency reaches them.
  *
  * What they got was the command console. The navigation offered them the
@@ -88,7 +88,7 @@ export interface ConsoleAccess {
   tabs: ConsoleTab[];
   /** Where this role lands when it signs in. */
   landing: ConsoleTab;
-  /** The agency this account belongs to, or null for Operation Rainbow staff. */
+  /** The agency this account belongs to, or null for Plateau Eye staff. */
   agency: AgencyCode | null;
   /** What the sidebar calls this console for them. */
   title: string;
@@ -185,7 +185,7 @@ export function consoleAccess(
     tabs: ['map', 'alerts'],
     landing: 'map',
     agency: null,
-    title: 'Operation Rainbow',
+    title: 'Plateau Eye',
     subtitle: 'RESOLVING ACCESS',
     administration: false,
   };
