@@ -918,6 +918,19 @@ jobs:
       - name: Assert every policy says which roles it is for
         run: python3 scripts/check_every_policy_names_its_roles.py
 
+      # The language picker worked, persisted, was reachable from two places,
+      # and `check_translation_keys.py` confirmed every key asked for was
+      # defined in all three languages — and a citizen who chose HAUSA got a
+      # Hausa home screen and an English emergency. Five files in the app asked
+      # the table for anything; the situation chooser, the live SOS screen, the
+      # confirmation, the safe-zone map and the lock screen were written with
+      # the English string in the widget. A screen that requests NO keys passes
+      # a key-integrity check perfectly. This asks the other question: does the
+      # screen hardcode the words on it? Converted screens must stay at zero,
+      # and the four still to do are capped at their current counts.
+      - name: Assert the citizen path reads the language they chose
+        run: python3 scripts/check_citizen_screens_speak_the_language.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

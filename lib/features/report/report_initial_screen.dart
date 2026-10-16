@@ -1,16 +1,18 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rainbow_app/core/router/safe_pop.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 
 /// Documentation for this public member.
 
-class ReportInitialScreen extends StatelessWidget {
+class ReportInitialScreen extends ConsumerWidget {
   /// Documentation for this public member.
   const ReportInitialScreen({super.key});
 
@@ -20,7 +22,8 @@ class ReportInitialScreen extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lang = ref.watch(languageProvider);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Stack(
@@ -46,7 +49,7 @@ class ReportInitialScreen extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: IconButton(
-                           tooltip: 'Close',
+                           tooltip: Translations.get('close', lang),
                     onPressed: () => context.popOrGo(AppRoutes.home),
                     icon: const Icon(
                       Icons.close_rounded,
@@ -78,7 +81,7 @@ class ReportInitialScreen extends StatelessWidget {
                             ),
                             const SizedBox(width: 12),
                             Text(
-                              'SITUATION REPORT',
+                              Translations.get('rpt_situation_report', lang),
                               style: GoogleFonts.outfit(
                                 color: AppColors.primary,
                                 fontWeight: FontWeight.w900,
@@ -90,7 +93,7 @@ class ReportInitialScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'What is the\nsituation?',
+                          Translations.get('rpt_what_situation', lang),
                           style: GoogleFonts.outfit(
                             fontSize: 40,
                             fontWeight: FontWeight.w900,
@@ -101,7 +104,7 @@ class ReportInitialScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Select the most accurate category to ensure rapid response deployment.',
+                          Translations.get('rpt_pick_category', lang),
                           style: GoogleFonts.outfit(
                             fontSize: 16,
                             color: AppColors.textSecondary,
@@ -111,29 +114,35 @@ class ReportInitialScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 48),
                         _TacticalIntentCard(
-                          title: 'THREAT TO LIFE',
-                          subtitle: 'Immediate danger to persons',
+                          title: Translations.get('rpt_threat_to_life', lang),
+                          subtitle:
+                              Translations.get('rpt_threat_to_life_desc', lang),
                           icon: Icons.warning_amber_rounded,
                           accent: AppColors.emergency,
                           onTap: () => _proceed(context, 'danger'),
                         ),
                         _TacticalIntentCard(
-                          title: 'CRIMINAL ACTIVITY',
-                          subtitle: 'Ongoing or witnessed crime',
+                          title:
+                              Translations.get('rpt_criminal_activity', lang),
+                          subtitle: Translations.get(
+                              'rpt_criminal_activity_desc', lang),
                           icon: Icons.security_rounded,
                           accent: Colors.blueAccent,
                           onTap: () => _proceed(context, 'crime'),
                         ),
                         _TacticalIntentCard(
-                          title: 'SUSPICIOUS ACTIVITY',
-                          subtitle: 'Something feels wrong',
+                          title:
+                              Translations.get('rpt_suspicious_activity', lang),
+                          subtitle: Translations.get(
+                              'rpt_suspicious_activity_desc', lang),
                           icon: Icons.visibility_rounded,
                           accent: Colors.amber,
                           onTap: () => _proceed(context, 'suspicious'),
                         ),
                         _TacticalIntentCard(
-                          title: 'CIVIL HAZARD',
-                          subtitle: 'Environmental or infrastructure risk',
+                          title: Translations.get('rpt_civil_hazard', lang),
+                          subtitle:
+                              Translations.get('rpt_civil_hazard_desc', lang),
                           icon: Icons.alt_route_rounded,
                           accent: Colors.tealAccent,
                           onTap: () => _proceed(context, 'environment'),
