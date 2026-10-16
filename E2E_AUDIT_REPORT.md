@@ -7609,3 +7609,107 @@ silhouette, no wordmark — while the splash, the in-app mark and the console
 keep the whole lockup. The crop is measured, not typed: the gold inner ring is
 the only gold in the artwork, so its bounding box locates the emblem, and the
 outer navy stroke is walked out along the centre row.
+
+### T-53. The app told a citizen on four bars of 4G that they had no connection
+
+Reported from a handset, with a photograph of the screen:
+
+> **NO CONNECTION. THE CODE CANNOT BE SENT WITHOUT ONE.**
+
+The status bar in the same photograph showed 4G+ and a full signal. The
+operator's note was one line: *"the code wasn't thoroughly verified by you."*
+
+Nothing in the app had asked the handset anything. The message is not a
+connectivity check — it is a branch in `describeOtpSendFailure`, and this is
+what that branch was:
+
+```dart
+if (text.contains('socket') ||
+    text.contains('timeout') ||
+    text.contains('failed host lookup') ||   // <- lumped in here
+    text.contains('network')) {
+  return 'NO CONNECTION. THE CODE CANNOT BE SENT WITHOUT ONE.';
+}
+```
+
+What had actually failed was resolving the backend's own hostname —
+`SocketException: Failed host lookup: '<project>.supabase.co' (OS Error: No
+address associated with hostname, errno = 7)`, the same underlying failure as
+T-52's blank page, one layer up. A name that will not resolve and a connection
+that is not there are different faults with different remedies: one is the
+person's to fix, the other is HQ's. The code called them the same thing and
+picked the one that blames the person.
+
+That is the exact fault this method exists to avoid, two branches above it:
+
+```dart
+return 'SMS SENDING IS NOT SWITCHED ON FOR THIS SERVICE. '
+    'REPORT THIS TO HQ — IT IS NOT YOUR PHONE.';
+```
+
+Sign-in is phone plus a one-time code. There is no password, no email path and
+no other way in, so this message is the whole of what a person has to go on
+when the code does not arrive — and it sent them to go and fix a phone that
+was working. The person pulling that lever may be reporting a kidnapping.
+
+#### What was done
+
+`hasNetwork` — what the handset says about its own connection, or null when
+nobody asked — now reaches both classifiers, and a resolve failure is its own
+branch with three honest answers instead of one guess:
+
+| the handset says | what the citizen is told |
+| --- | --- |
+| offline | NO CONNECTION. THE CODE CANNOT BE SENT WITHOUT ONE. |
+| online | THIS PHONE IS ONLINE BUT THE SERVICE ADDRESS WILL NOT RESOLVE. REPORT THIS TO HQ — IT IS NOT YOUR PHONE. |
+| nothing — it was not asked | THE SERVICE ADDRESS WILL NOT RESOLVE. IF THIS PHONE IS ONLINE, REPORT IT TO HQ. |
+
+The third row is the one worth defending. The first version of this fix said
+*"THIS PHONE IS ONLINE"* whenever the check came back null, which is the same
+unevidenced guess as the defect, pointing the other way. The conditional
+wording claims nothing and is the honest message for when nobody found out.
+
+`_handsetIsOnline()` asks `connectivity_plus` with a two-second bound and
+returns null on anything — a timeout, a missing plugin registration, a
+platform-channel error. It is used **only** to tell the two faults apart,
+never to decide whether to attempt a request: a connectivity result is a
+statement about an interface, not about whether anything answers on it.
+`ACCESS_NETWORK_STATE` is already in the release manifest, which was checked
+rather than assumed.
+
+The socket/timeout/network branch no longer says "no connection" either unless
+the handset confirms it; otherwise it is *"THE SERVICE DID NOT ANSWER. TRY
+AGAIN IN A MOMENT."*
+
+#### Coverage
+
+`test/otp_send_failure_message_test.dart` — 21 tests. The `no connection`
+group **used to pin the defect**: it asserted that `Failed host lookup`, a
+timeout and an unreachable network all produce "NO CONNECTION", with nobody
+having asked the handset. It now states the corrected contract, with the old
+assertion left in the comment so the next person can see what it used to
+demand.
+
+`scripts/check_no_blame_without_evidence.py`, 6 mutations, all caught:
+
+| mutation | caught by |
+| --- | --- |
+| `failed host lookup` put back in the socket/timeout condition | both classifiers, 2 findings |
+| `NO CONNECTION` returned with no guard | the claim check |
+| a call site drops `hasNetwork:` | the call-site check |
+| the unknown state starts declaring the phone online | the claim check |
+| the guard kept but no longer reading the handset | the claim check |
+| **the shipped file from `HEAD`, verbatim** | 4 findings, both classifiers, both counts |
+
+The last row is the one that matters: the gate fires on the exact code that
+produced the photograph.
+
+#### What this does not fix
+
+The handset's `Failed host lookup` is real and still blocks sign-in. The
+message is now honest about whose fault it is; it does not make the hostname
+resolve. Whether `<project>.supabase.co` resolves **cannot be determined from
+this container** — DNS is disabled here, and the proxy returns `000` for
+`supabase.com` itself, so there is nothing to report either way rather than a
+negative result. That one is the operator's to check: whether the Supabase
+project is live, unpaused, and reachable from the network that phone is on.

@@ -16,8 +16,11 @@ import 'package:rainbow_app/services/auth_service.dart';
 void main() {
   // Static, so no SecureStorageService fixture is needed for a method that
   // does nothing but map an error to words.
-  String describe(String error) =>
-      AuthService.describeOtpSendFailure(Exception(error));
+  String describe(String error, {bool? hasNetwork}) =>
+      AuthService.describeOtpSendFailure(
+        Exception(error),
+        hasNetwork: hasNetwork,
+      );
 
   group('the provider is not switched on at all', () {
     // Supabase refuses signInWithOtp outright when the project has no SMS
@@ -90,14 +93,53 @@ void main() {
   });
 
   group('no connection', () {
-    test('is distinguished from everything else, because it IS the person\'s to fix', () {
-      for (final wording in [
-        'SocketException: Failed host lookup',
-        'Connection timeout',
-        'network is unreachable',
-      ]) {
+    // THIS TEST USED TO PIN THE DEFECT.
+    //
+    // It asserted that `Failed host lookup`, a timeout and an unreachable
+    // network ALL produce "NO CONNECTION", with nobody having asked the
+    // handset anything. That is what a citizen saw on a phone showing four
+    // bars of 4G: the app told them their connection was missing when what
+    // had failed was resolving the service's own hostname.
+    //
+    // "No connection" is the one message in this method that IS the person's
+    // to fix, so it has to be earned: say it when the handset says it is
+    // offline, and not otherwise.
+    const offline = [
+      'SocketException: Failed host lookup',
+      'Connection timeout',
+      'network is unreachable',
+    ];
+
+    test('is said when the handset says it is offline', () {
+      for (final wording in offline) {
+        expect(
+          describe(wording, hasNetwork: false),
+          contains('NO CONNECTION'),
+          reason: wording,
+        );
+      }
+    });
+
+    test('is never said when the handset says it is online', () {
+      for (final wording in offline) {
+        final said = describe(wording, hasNetwork: true);
+        expect(said, isNot(contains('NO CONNECTION')), reason: wording);
+      }
+    });
+
+    test('is not guessed at when nobody asked the handset', () {
+      for (final wording in offline) {
         final said = describe(wording);
-        expect(said, contains('NO CONNECTION'), reason: wording);
+        expect(said, isNot(contains('NO CONNECTION')), reason: wording);
+        // The DECLARATIVE claim is what must not appear. "IF THIS PHONE IS
+        // ONLINE, REPORT IT TO HQ" is a conditional, and is the honest
+        // wording when nobody checked — it is this assertion that was wrong
+        // the first time, not the message.
+        expect(
+          said,
+          isNot(contains('PHONE IS ONLINE BUT')),
+          reason: 'unknown is unknown, in both directions: $wording',
+        );
       }
     });
   });
@@ -122,6 +164,45 @@ void main() {
         expect(said, said.toUpperCase(), reason: wording);
         expect(said, isNot(contains('INVALID')), reason: wording);
       }
+    });
+  });
+
+
+  const lookupFailed =
+      "SocketException: Failed host lookup: 'abc.supabase.co' "
+      '(OS Error: No address associated with hostname, errno = 7)';
+
+  group('a resolve failure on a live network', () {
+    test('does not tell an online citizen they have no connection', () {
+      final said = describe(lookupFailed, hasNetwork: true);
+      expect(said, isNot(contains('NO CONNECTION')));
+      expect(said, contains('IT IS NOT YOUR PHONE'));
+      expect(said, contains('WILL NOT RESOLVE'));
+    });
+
+    test('still says no connection when the handset really is offline', () {
+      final said = describe(lookupFailed, hasNetwork: false);
+      expect(said, contains('NO CONNECTION'));
+    });
+
+    test('says the honest thing when nobody asked the handset', () {
+      // null means "we did not find out". Blaming the phone needs evidence.
+      final said = describe(lookupFailed);
+      expect(said, isNot(contains('NO CONNECTION')));
+    });
+  });
+
+  group('a timeout on a live network', () {
+    test('blames the service, not the phone', () {
+      final said =
+          describe('TimeoutException after 0:00:10.000000', hasNetwork: true);
+      expect(said, contains('DID NOT ANSWER'));
+      expect(said, isNot(contains('NO CONNECTION')));
+    });
+
+    test('and says no connection when there is none', () {
+      final said = describe('SocketException: failed', hasNetwork: false);
+      expect(said, contains('NO CONNECTION'));
     });
   });
 }

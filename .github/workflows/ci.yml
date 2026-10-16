@@ -998,6 +998,18 @@ jobs:
       - name: Assert no async read can rethrow into a build
         run: python3 scripts/check_async_reads_cannot_rethrow.py
 
+      # The same missing DNS, one layer up and reported again: a citizen on a
+      # handset showing four bars of 4G asked for a sign-in code and was told
+      # "NO CONNECTION. THE CODE CANNOT BE SENT WITHOUT ONE." Nothing had
+      # asked the handset anything — `describeOtpSendFailure` classified
+      # `failed host lookup` in one condition with socket and timeout errors
+      # and returned a single message blaming the phone. Sign-in is phone plus
+      # a one-time code, with no password and no email path, so that message is
+      # the whole of what a person has to go on, and it sent them to fix
+      # something that was not broken.
+      - name: Assert no message blames a phone without asking it
+        run: python3 scripts/check_no_blame_without_evidence.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

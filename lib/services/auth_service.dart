@@ -1,6 +1,7 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'dart:async';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -162,9 +163,26 @@ class AuthService {
       debugPrint('[AUTH] a code was sent');
       return true;
     } catch (e) {
-      _lastAuthError = describeOtpSendFailure(e);
+      _lastAuthError =
+          describeOtpSendFailure(e, hasNetwork: await _handsetIsOnline());
       debugPrint('[AUTH] the code could not be sent: $e');
       return false;
+    }
+  }
+
+  /// What the handset says about its own connection, or null if it will not
+  /// say. Used only to tell "you are offline" apart from "the service cannot
+  /// be reached from here" — never to decide whether to attempt a request,
+  /// because a connectivity result is a statement about an interface, not
+  /// about whether anything answers on it.
+  static Future<bool?> _handsetIsOnline() async {
+    try {
+      final results = await Connectivity()
+          .checkConnectivity()
+          .timeout(const Duration(seconds: 2));
+      return !results.contains(ConnectivityResult.none);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -182,7 +200,12 @@ class AuthService {
   /// produces are the only thing a citizen ever sees when a code does not
   /// arrive. Constructing an AuthService to test them would mean supplying a
   /// SecureStorageService this method never uses.
-  static String describeOtpSendFailure(Object e) {
+  ///
+  /// [hasNetwork] is what the handset says about its own connection, or null
+  /// when nobody asked. It exists because "no connection" and "cannot resolve
+  /// the service" are different faults with different remedies, and this
+  /// function used to call both of them the first one.
+  static String describeOtpSendFailure(Object e, {bool? hasNetwork}) {
     final text = e.toString().toLowerCase();
     if (text.contains('sms provider') ||
         text.contains('phone provider') ||
@@ -217,11 +240,36 @@ class AuthService {
         text.contains('too many')) {
       return 'TOO MANY CODES REQUESTED. WAIT A MINUTE AND TRY AGAIN.';
     }
+    // A NAME THAT WILL NOT RESOLVE IS NOT A MISSING CONNECTION.
+    //
+    // This branch used to swallow `failed host lookup` along with socket and
+    // timeout errors and tell everyone "NO CONNECTION". It was reported from a
+    // handset showing four bars of 4G: the phone was online, the service's
+    // hostname would not resolve, and the app blamed the phone. That is the
+    // same fault this method exists to avoid two branches above — sending
+    // somebody to fix something that is not broken at their end.
+    final cannotResolve = text.contains('failed host lookup') ||
+        text.contains('no address associated') ||
+        text.contains('nodename nor servname');
+    if (cannotResolve) {
+      if (hasNetwork == false) {
+        return 'NO CONNECTION. THE CODE CANNOT BE SENT WITHOUT ONE.';
+      }
+      if (hasNetwork == true) {
+        return 'THIS PHONE IS ONLINE BUT THE SERVICE ADDRESS WILL NOT '
+            'RESOLVE. REPORT THIS TO HQ — IT IS NOT YOUR PHONE.';
+      }
+      // Nobody asked the handset. Claiming it is online is the same kind of
+      // guess as claiming it is offline, in the other direction.
+      return 'THE SERVICE ADDRESS WILL NOT RESOLVE. IF THIS PHONE IS ONLINE, '
+          'REPORT IT TO HQ.';
+    }
     if (text.contains('socket') ||
         text.contains('timeout') ||
-        text.contains('failed host lookup') ||
         text.contains('network')) {
-      return 'NO CONNECTION. THE CODE CANNOT BE SENT WITHOUT ONE.';
+      return hasNetwork == false
+          ? 'NO CONNECTION. THE CODE CANNOT BE SENT WITHOUT ONE.'
+          : 'THE SERVICE DID NOT ANSWER. TRY AGAIN IN A MOMENT.';
     }
     return 'THE CODE COULD NOT BE SENT. TRY AGAIN.';
   }
@@ -286,7 +334,10 @@ class AuthService {
       _lastAuthError = 'THAT CODE WAS NOT ACCEPTED.';
       return false;
     } catch (e) {
-      _lastAuthError = _describeOtpCheckFailure(e);
+      _lastAuthError = _describeOtpCheckFailure(
+        e,
+        hasNetwork: await _handsetIsOnline(),
+      );
       debugPrint('[AUTH] the code was not accepted: $e');
       return false;
     }
@@ -304,7 +355,7 @@ class AuthService {
   }
 
   /// Turns a verification failure into something a person can act on.
-  String _describeOtpCheckFailure(Object e) {
+  String _describeOtpCheckFailure(Object e, {bool? hasNetwork}) {
     final text = e.toString().toLowerCase();
     if (text.contains('expired')) {
       return 'THAT CODE HAS EXPIRED. ASK FOR A NEW ONE.';
@@ -312,11 +363,25 @@ class AuthService {
     if (text.contains('invalid') || text.contains('token')) {
       return 'THAT CODE IS NOT RIGHT. CHECK THE MESSAGE AND TRY AGAIN.';
     }
+    if (text.contains('failed host lookup') ||
+        text.contains('no address associated') ||
+        text.contains('nodename nor servname')) {
+      if (hasNetwork == false) {
+        return 'NO CONNECTION. THE CODE CANNOT BE CHECKED WITHOUT ONE.';
+      }
+      if (hasNetwork == true) {
+        return 'THIS PHONE IS ONLINE BUT THE SERVICE ADDRESS WILL NOT '
+            'RESOLVE. REPORT THIS TO HQ — IT IS NOT YOUR PHONE.';
+      }
+      return 'THE SERVICE ADDRESS WILL NOT RESOLVE. IF THIS PHONE IS ONLINE, '
+          'REPORT IT TO HQ.';
+    }
     if (text.contains('socket') ||
         text.contains('timeout') ||
-        text.contains('failed host lookup') ||
         text.contains('network')) {
-      return 'NO CONNECTION. THE CODE CANNOT BE CHECKED WITHOUT ONE.';
+      return hasNetwork == false
+          ? 'NO CONNECTION. THE CODE CANNOT BE CHECKED WITHOUT ONE.'
+          : 'THE SERVICE DID NOT ANSWER. TRY AGAIN IN A MOMENT.';
     }
     return 'THAT CODE WAS NOT ACCEPTED.';
   }
