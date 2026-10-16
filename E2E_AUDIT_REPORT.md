@@ -1266,6 +1266,7 @@ only thing that distinguishes a defect from a preference.
 | T-51 | **The other policy PUBLIC could reach — on the incident table, twelve lines above the comment explaining the defect.** *(Scope corrected the same day: I described this as live on production from a three-column query output that did not include `roles`. A later query with that column returned zero rows on the database checked, where the policy does not exist at all. The CODE defect below is real and proven on real PostgreSQL; which databases carry it is not something this repository can answer, and I wrote as though it could — the same "checked against the repository rather than the database" mistake this report records as a defect elsewhere.)* A policy query returned two rows: `alerts_select_geo_lga_scoped` and `telemetry_select_geo_lga_scoped`. The second was known — it had sat on a live database as the single policy reaching PUBLIC and was repaired by `20261016000000`. Both are created by `20260725000000_v6_geo_lga_scoping_staging.sql`, twelve lines apart: the telemetry one is written `TO authenticated`, the **alerts** one with no `TO` clause at all — and PostgreSQL records that as **TO PUBLIC**, which includes `anon`. That is a policy naming the anonymous key over the incident table: the reporter, their phone number, what they said, where they are. The earlier fix had written *"TO authenticated is not decoration"* into that very file, directly beneath the policy that still lacked it; nobody looked at the sibling. Three structural reasons it survived: `20260813` drops 98 policies BY NAME and cannot name one from a later file (0 occurrences of `geo_lga_scoped` in it); the v6 file is STAGING_ONLY so it is not in the paste at all, so only a database it was run on by hand can have these policies — and that era was applied by hand somewhere, which is why `20261016000000` exists; and the verifier asserts no policy reaches anon or public **at the end of the full replay**, which passes because `20261006000000` drops this policy on the way to a narrower one, so a database that ran v6 and has not had `20261006` applied sits in the MIDDLE, which no assertion described. Where the policy is present and open, one layer stands in the way: the table-level REVOKE from `anon`. | ✅ `TO authenticated` added at the source so no new database creates it open, plus `20261025000000_the_other_policy_public_could_reach.sql` to repair the one that exists. It runs `ALTER POLICY … TO authenticated` — roles and nothing else — because a database carrying this policy got it BY HAND and the first draft's drop-and-recreate would have imposed this repository's `USING` text on a copy whose body may differ by a character, rewriting a read path as a side effect of closing an anon hole. Idempotent, a no-op both where the policy is already scoped and where `20261006` has replaced it, and it ends by naming anything still reaching anon or public. `check_every_policy_names_its_roles.py` now requires every `CREATE POLICY` in the repository to WRITE its `TO` clause — any roles, even `TO public`, because the rule is that the intent is visible; silence means PUBLIC and reads like nothing. The 43 policies of the v2–v6 and phase1 era are grandfathered as an exact frozen inventory, so a new policy in an old file still fails. 10 mutations, and 5 SQL assertions that read `pg_policies.roles` — the state, not the text — including a planted TO-PUBLIC probe, because the earlier version of this claim passed every run for weeks while the telemetry policy was open |
 | T-52 | **"What a production database still needs" was a list of filenames, and I repeated it to the operator all day as the top blocker.** `migration_sets.outstanding()` had that sentence as its docstring and this body: `all_files()` minus a hand-maintained exclusion set. Nothing updates it when a migration is applied anywhere, so it answered a question about a DATABASE with a fact about a DIRECTORY. Both runbooks opened with *"N migrations are proven in CI on every push and **not yet applied** to the production Supabase project"*, T-50 added a gate that ENFORCED that wording, and I named it first on every list of what was left — "the agency liaison desks return nothing against production until they go in". Then the operator ran `which_migrations_are_applied.sql`: **32 of the 38 were already applied**, everything through `20261015`. Six were genuinely missing. The number was out by a factor of six, in the direction that makes a deployment look impossible — and the one real consequence I had predicted was buried under 32 that were not. | ✅ The concept is now `in_the_paste()`: what the paste carries, which is a fact about this repository and checkable here. Both runbooks say that instead, and send the operator to `which_migrations_are_applied.sql` for what their own database needs — the gate now REFUSES the words "not yet applied" in front of a count, requires that pointer in any doc naming migrations, and skips backticked quotations so a doc explaining the defect can quote it. Two of its three new mutations are sentences I wrote myself two hours earlier. Also: the probe labelled `20261023000000` "APPLIED PARTWAY, look here first" at 5 of 8 — but that is a CONVERGENCE migration, and the 5 present are production's own pre-existing columns while the 3 missing are the ones it adds, so the file written to handle a divergent database was reported as the worst case. It now says "PARTLY PRESENT: either applied partway, or a convergence migration whose objects already existed here" |
 | T-53 | **The language picker worked perfectly and the app did not speak the language.** Everything around it was right: the picker persisted to the one preference key, was reachable from Settings and the home app bar, both controls wrote through the one provider, and `check_translation_keys.py` confirmed every key requested was defined in all three languages. **Five files in the whole app asked the table for anything** — the picker, the home screen, the voice dialog, the category list, the dispatcher chat. A citizen who chose HAUSA got a Hausa home screen and an English emergency: the situation chooser, the subtype list, the live SOS screen, the confirmation, the safe-zone map and the lock screen all had the English string written into the widget. Nothing could have caught it — a key-integrity check asks whether the keys that ARE requested are defined, and a screen requesting none passes it perfectly. The table being complete and the screen being translated are two claims and only the first had a gate. | ✅ 71 keys added across Hausa and Nigerian Pidgin, and the four screens a citizen walks during an emergency wired to them: the situation chooser, the subtype list, the live SOS screen and the confirmation. 8 widget tests that pump each screen with the language set and assert on the STRING ON SCREEN — reverting one hardcoded label fails two of them — plus one that reads `languagesFor(key)` rather than `get()`, because `get()` falls back to English and would let a half-translated key pass. `PENDING`, `DISPATCHED`, `ACKNOWLEDGED`, `ON_ROUTE`, `ON_SITE` and `RESOLVED` are deliberately NOT in the table and a test asserts it: they look like labels on the SOS screen and they are `alerts.status` compared by string, so translating one would leave a citizen reading LOCATION BROADCASTING with a squad beside them. `check_citizen_screens_speak_the_language.py` is a RATCHET — converted screens must stay at zero hardcoded labels, the four remaining are capped at their current counts (98 strings), and the cap can only fall. 3 mutations, including raising a cap to hide new work |
+| T-54 | **The app installed, opened a blank page and stopped there — and the blank page WAS the error message.** Four silences compose into it, each one of them loud in a debug build and mute in a release build. (1) `main()` caught a `SupabaseConfig.init()` failure, logged it and carried on to `runApp`. (2) `AuthNotifier`'s constructor calls `initAuth()`, which reached `SupabaseConfig.client` **synchronously** — and that constructor runs inside the `appRouter` provider, which `RainbowApp.build` watches, so it runs during the app's FIRST build. (3) `Supabase.instance` is guarded only by an `assert` (`supabase_flutter/lib/src/supabase.dart:43-49`) over a `late client` field (line 173); release strips asserts, so the explanatory message became `LateInitializationError`. (4) A throw during `build()` goes to `ErrorWidget.builder`, whose default composes its message inside `assert(() { ... }())` (`flutter/lib/src/widgets/framework.dart:5680-5692`) — so in release the message is `''`, `RenderErrorBox` builds no paragraph at all (`rendering/error.dart:37-60`) and paints only its background: `const Color(0xF0C0C0C0)`, pale grey (lines 112-117, 156). A second, independent path to the same page: `main()` ran its platform set-up as bare statements with `runApp` LAST, so a throw from any of them jumped to the zone handler and no Flutter frame was ever produced — the window simply kept the launch background. And the repository had a green test named *"app boots without throwing"* the whole time: it overrides `AuthNotifier` with one whose `initAuth()` does nothing, which is the exact line that died, and its own comment says so. | ✅ `main()` installs a readable `ErrorWidget.builder` **before** anything that can throw, so no build-time exception anywhere in the app can present as a blank page again; every step it awaits before the first frame goes through `runStartupStep`, which cannot stop that frame; and a start-up that genuinely cannot finish runs `StartupFailureScreen` instead of returning with no root widget. That screen needs no `Theme`, `Directionality`, `MediaQuery` or `Material` — it can be asked to replace `MaterialApp` itself — shows the error verbatim so the user has something to report, and carries its headline in English, Hausa and Pidgin, because it is the one screen that renders before any locale has been loaded. `SupabaseConfig.client` now refuses with a `StateError` that names start-up as the culprit, in release as well as debug, and `initAuth()` reports a missing client as a `resolutionError` the router already knows how to read — the user lands on the login screen rather than on nothing. 7 tests in `test/first_frame_test.dart`, two of which fail against the old `auth_provider.dart` with the first build throwing. `check_first_frame_is_never_blank.py`, 15 mutations |
 
 ### T-20. One published password for every staff account — LIVE, not legacy
 
@@ -7039,3 +7040,226 @@ errors" beside a green suite, and a green suite is what a reader takes away.
 `LiveMap.test.tsx` now registers an `uncaughtException` listener, unmounts with
 a popup open, waits for the frames to run against the dead map, and fails on
 anything that arrives.
+
+## The blank page
+
+> *"when the app is installed, it loads a blank page and stops there"*
+
+That sentence is what cracked it, and it is worth saying why: **a blank page is
+not a crash**. A crash closes the app. A blank page that stops there means the
+process is alive and something is being painted — just nothing legible. Two
+things in a Flutter release build paint exactly that, and both were reachable
+here.
+
+### What Flutter paints when a build throws in release
+
+`ErrorWidget.builder` defaults to `_defaultErrorWidgetBuilder`, which composes
+the message it is going to show **inside an assert**:
+
+```dart
+static Widget _defaultErrorWidgetBuilder(FlutterErrorDetails details) {
+  var message = '';
+  assert(() {
+    message = '${_stringify(details.exception)}\nSee also: ...';
+    return true;
+  }());
+  return ErrorWidget.withDetails(message: message, error: ...);
+}
+```
+`flutter/lib/src/widgets/framework.dart:5680-5692`
+
+A release build strips asserts, so `message` stays `''`. `RenderErrorBox` then
+takes the other branch of its constructor and builds no paragraph at all:
+
+```dart
+RenderErrorBox([this.message = '']) {
+  try {
+    if (message != '') { ...build a paragraph... } else { _paragraph = null; }
+```
+`flutter/lib/src/rendering/error.dart:37-60`
+
+and `paint` draws one rectangle, in a colour that is only the familiar dark red
+inside an assert:
+
+```dart
+static Color backgroundColor = _initBackgroundColor();
+static Color _initBackgroundColor() {
+  var result = const Color(0xF0C0C0C0);         // release: pale grey
+  assert(() { result = const Color(0xF0900000); return true; }());
+  return result;
+}
+```
+`error.dart:112-117`, painted at `error.dart:156`
+
+So **any exception from any `build()` in the whole app renders a featureless
+pale rectangle in release**, and the red panel every Flutter developer has seen
+a thousand times in debug. The symptom and the diagnosis were in the same
+place, and the diagnosis was compiled out.
+
+### Why the first build was certain to throw
+
+`main()` did this:
+
+```dart
+try {
+  await SupabaseConfig.init();
+} catch (e) {
+  debugPrint('🔥 [CRITICAL_MAIN_ERR] Supabase Init Failed: $e');
+}
+...
+runApp(const ProviderScope(..., child: RainbowApp()));
+```
+
+The catch is the problem, not the init. Follow what `runApp` then does:
+
+`RainbowApp.build` → `ref.watch(appRouter)` → the `appRouter` provider body →
+`ref.watch(routerNotifierProvider)` → `RouterNotifier`'s constructor →
+`_ref.listen(authProvider, ...)` → `AuthNotifier()` → `initAuth()` →
+
+```dart
+_authSubscription = SupabaseConfig.client.auth.onAuthStateChange...
+```
+`lib/providers/auth_provider.dart:169`
+
+Every arrow there is synchronous. That line therefore ran **inside the app's
+first `build()`**, and `SupabaseConfig.client` was:
+
+```dart
+static SupabaseClient get client => _override ?? Supabase.instance.client;
+```
+
+`Supabase.instance` guards itself with an assert, over a `late` field:
+
+```dart
+static Supabase get instance {
+  assert(_instance._isInitialized, 'You must initialize the supabase instance...');
+  return _instance;
+}
+...
+late SupabaseClient client;
+```
+`supabase_flutter/lib/src/supabase.dart:43-49` and `:173`
+
+In debug that assertion fires and names the cause. In release the assert is
+gone, `client` has never been assigned, and the app throws
+`LateInitializationError: Field 'client' has not been initialized` from inside
+a `build()` — which paints the pale rectangle above. A swallowed start-up
+failure, wearing no message at all.
+
+Note which of these is the bug. Not the init failure: that can happen, for
+local reasons — storage, plugin registration, a bad URL. The bug is that the
+code chose to carry on and build a UI that could not possibly work, and that
+every layer below it had been written to explain itself only in debug.
+
+### A second path to the same page
+
+`main()` also ran its platform set-up as a straight run of statements inside
+`runZonedGuarded`, with `runApp` last: the connectivity listener, the lifecycle
+observer, the orientation lock, the overlay style. A throw from any of them — a
+plugin that failed to register, a platform channel that rejected a call — jumped
+to the zone handler, which logged it and returned. `runApp` was then **never
+called**, no Flutter frame was ever produced, and the window kept showing the
+launch background for as long as the user was willing to stare at it. Same
+symptom, no exception anywhere near the widget tree.
+
+### What the verification estate was doing meanwhile
+
+`test/widget_test.dart` contained a test called *"app boots without throwing"*.
+It passed. It boots `RainbowApp` with this override:
+
+```dart
+class FakeAuthNotifier extends AuthNotifier {
+  @override
+  void initAuth() {}          // <- the line that killed the release APK
+}
+```
+
+and the file's own header comment explains why: *"it was skipped because
+pumping RainbowApp reaches AuthNotifier.initAuth(), which subscribes to
+Supabase auth before Supabase.initialize() has been called"*. The difficulty
+was noticed, written down, and worked around rather than fixed — so the app had
+a passing boot test and no test of the way it actually boots.
+
+### The fix
+
+* `installReadableErrorWidget()` runs in `main()` **before anything that can
+  throw**, including the error handlers. After it, a build-time exception
+  anywhere in the app renders a screen carrying the exception's own text, which
+  survives a release build.
+* `StartupFailureScreen` is built from the smallest set of widgets that can
+  draw: no `Theme`, no `Directionality` ancestor, no `MediaQuery`, no
+  `Material`, because it can be asked to replace `MaterialApp` itself. Its one
+  asset has an `errorBuilder`, and it counts its own nesting depth — a screen
+  whose job is to report a failure must not be able to fail, and if it did,
+  Flutter would ask `ErrorWidget.builder` for a replacement and get it again.
+* It shows the error verbatim, so the person holding the phone has something
+  concrete to report, and its headline is in English, Hausa and Pidgin. It is
+  the only screen in the app that renders before a locale has been loaded, so
+  it cannot ask which language was chosen; a person who reads only Hausa gets
+  nothing from a blank page either.
+* Everything `main()` awaits before the first frame goes through
+  `runStartupStep`, which logs a failure and returns. Everything not needed to
+  draw a frame moved **after** `runApp`. Nothing between the top of `boot()`
+  and `runApp` can throw past it.
+* A start-up that cannot finish — no client, so every screen would throw
+  reaching for one — runs `StartupFailureScreen` with a **Try Again** control
+  rather than returning with no root widget. Retrying is worth offering because
+  `Supabase.initialize` does no network I/O: it reads local storage and
+  registers a deep-link observer, and the token refresh it starts
+  (`recoverSession()`) is deliberately not awaited by the SDK
+  (`supabase.dart:146-155`). A failure there is local, and
+  `Supabase.initialize` returns the existing instance rather than re-running,
+  so a retry after a partial failure genuinely can succeed.
+* `SupabaseConfig.client` throws a `StateError` naming start-up as the culprit,
+  in release as well as debug, and `SupabaseConfig.isInitialized` lets `main()`
+  ask before it builds anything.
+* `AuthNotifier.initAuth()` catches, clears `isLoading` and reports
+  `resolutionError`. The router already knew how to read that — `computeRedirect`
+  has a branch for *authenticated but role unresolved, resolution failed* — so
+  the user lands on the login screen, where the failure is visible and
+  recoverable, instead of on nothing.
+
+### Coverage
+
+`test/first_frame_test.dart`, 7 tests. Two of them fail against the previous
+`auth_provider.dart`, with the first build throwing out of `pumpWidget` —
+verified by reverting that one file and running them. The most important one
+overrides the push, sync and update services and **not** `authProvider`, which
+is the gap the old smoke test left.
+
+`scripts/check_first_frame_is_never_blank.py`, 15 mutations, all caught. It
+holds the rules a device would have enforced: the error-widget installer comes
+before `runApp`; nothing awaited before the first frame is unguarded (matched
+by balancing brackets, so an await inside a `runStartupStep` closure counts as
+guarded); a failed start-up renders a screen; the client getter refuses with a
+message release keeps; `Supabase.instance` appears nowhere in `lib/` except
+behind that getter; `initAuth` cannot throw out of a build and reports a
+non-null `resolutionError` with `isLoading` cleared; and the failure screen
+touches no `Theme`, `MediaQuery`, `Scaffold` or `GoogleFonts`, renders the
+error, keeps its `errorBuilder`, and reads its headline from the translation
+table in all three languages.
+
+### What this does not establish
+
+Which exception the user's handset actually threw. This container has no
+Android SDK beyond `cmdline-tools`, no build-tools, and no device or emulator,
+so nothing here can build the APK, let alone launch it. What the fix changes is
+that it no longer matters as much: whatever throws, the app now says what it
+was doing and what went wrong, on screen, in release. `adb logcat` during a
+launch would still settle the original cause, and the lines to look for are
+`🔥 [CRITICAL_MAIN_ERR]`, `🔥 [AUTH]`, `⚠️ [STARTUP]` and
+`[CRITICAL_UNCAUGHT_ERR]`.
+
+### Two things found on the way, not fixed here
+
+* **`Sentry.captureException` is called from four places in `main()` and
+  `SentryFlutter.init` is never called anywhere.** Every one of those reports
+  goes nowhere — including the start-up failures above, which is why this was
+  only ever visible as a blank page and not as an alert. Worth wiring up or
+  removing; leaving it looks like error reporting and is not.
+* **`android/app/build.gradle.kts` sets `isMinifyEnabled = true`, and
+  `proguard-rules.pro` keeps a hand-maintained list of six plugins.** The ones
+  that instantiate classes by name are the ones that need rules, and
+  `workmanager` (WorkManager resolves `Worker` subclasses reflectively),
+  `just_audio` (ExoPlayer) and `sentry_flutter` are not in the list. That is a
+  release-only failure class with no gate on it.

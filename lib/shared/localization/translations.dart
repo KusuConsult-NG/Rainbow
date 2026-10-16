@@ -40,6 +40,36 @@ final languageProvider = StateNotifierProvider<LanguageNotifier, AppLanguage>((r
 
 class Translations {
   static const Map<String, Map<AppLanguage, String>> _keys = {
+    // Shown by `core/startup/startup_failure.dart` when the app cannot
+    // start, or when a build threw. In a release build Flutter's own error
+    // widget paints a pale rectangle with NO TEXT, which is the blank page an
+    // installed APK opened to. These three strings are what replaces it, so
+    // they are the only user-visible strings in the app that must render with
+    // no Theme, no locale loaded and no provider scope alive.
+    'startup_failed_title': {
+      AppLanguage.english: 'Plateau Eye could not start',
+      AppLanguage.hausa: 'Plateau Eye bai iya farawa ba',
+      AppLanguage.pidgin: 'Plateau Eye no gree start',
+    },
+    'startup_failed_body': {
+      AppLanguage.english:
+          'This is a fault in the app, not in your phone. Tap Try Again. If it '
+          'keeps happening, report the line below to the Plateau Eye team, and '
+          'in an emergency call your local emergency number directly.',
+      AppLanguage.hausa:
+          'Wannan matsalar manhaja ce, ba ta wayarka ba. Danna Sake Gwadawa. '
+          'Idan ya ci gaba, ka kai rahoton layin da ke ƙasa ga tawagar Plateau '
+          'Eye, kuma a cikin gaggawa ka kira lambar gaggawa kai tsaye.',
+      AppLanguage.pidgin:
+          'Na the app get problem, no be your phone. Press Try Again. If e '
+          'continue, send the line below to Plateau Eye team, and if e be '
+          'emergency call your emergency number one time.',
+    },
+    'startup_failed_retry': {
+      AppLanguage.english: 'TRY AGAIN',
+      AppLanguage.hausa: 'SAKE GWADAWA',
+      AppLanguage.pidgin: 'TRY AGAIN',
+    },
     'choose_language': {
       AppLanguage.english: 'LANGUAGE',
       AppLanguage.hausa: 'HARSHE',

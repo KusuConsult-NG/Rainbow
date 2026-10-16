@@ -166,7 +166,31 @@ class AuthNotifier extends StateNotifier<AuthState> {
       }
     });
 
-    _authSubscription = SupabaseConfig.client.auth.onAuthStateChange.map((data) {
+    // The subscription below is set up SYNCHRONOUSLY, inside this notifier's
+    // constructor, which runs inside the `appRouter` provider, which is
+    // `ref.watch`ed inside `RainbowApp.build`. So a throw from
+    // `SupabaseConfig.client` here is a throw during the app's first build —
+    // and in a release build that paints a pale rectangle with no text and
+    // stops. That was the blank page an installed APK opened to.
+    //
+    // A missing backend client must not be able to kill the whole widget
+    // tree. Report it as a resolution failure instead: the router already
+    // knows how to read that (`computeRedirect`, the `resolutionError`
+    // branch) and sends the user to the login screen, where the failure is
+    // visible and recoverable, rather than to nothing at all.
+    final SupabaseClient supabase;
+    try {
+      supabase = SupabaseConfig.client;
+    } catch (error) {
+      debugPrint('🔥 [AUTH] No Supabase client — cannot watch auth: $error');
+      state = state.copyWith(
+        isLoading: false,
+        resolutionError: 'auth-unavailable: $error',
+      );
+      return;
+    }
+
+    _authSubscription = supabase.auth.onAuthStateChange.map((data) {
       return data;
     }).asyncMap((data) async {
       final session = data.session;

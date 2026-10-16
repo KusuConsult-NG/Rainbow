@@ -951,6 +951,19 @@ jobs:
       - name: Assert one brand name, everywhere a person reads it
         run: python3 scripts/check_one_brand_name.py
 
+      # The installed APK opened to a featureless pale page and stopped there.
+      # In a RELEASE build Flutter's own error widget composes its message
+      # inside an `assert`, so the message is empty and `RenderErrorBox` paints
+      # nothing but `Color(0xF0C0C0C0)`. Any throw from any `build()` therefore
+      # looked like that blank page — and `main()` guaranteed one, because it
+      # caught a Supabase init failure, carried on to `runApp`, and
+      # `AuthNotifier`'s constructor reaches the client synchronously during
+      # the first build. `Supabase.instance` is guarded only by an assert,
+      # which release strips, over a `late` field. The one test named "app
+      # boots without throwing" overrode that constructor to do nothing.
+      - name: Assert the first frame can never be blank
+        run: python3 scripts/check_first_frame_is_never_blank.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04
