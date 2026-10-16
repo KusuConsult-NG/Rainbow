@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { usePersistedTheme } from '@/hooks/usePersistedTheme';
-import { Shield, ShieldAlert, Loader2, Eye, EyeOff, Lock, User as UserIcon, Radio, Sparkles, KeyRound, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Shield, ShieldAlert, Loader2, Eye, EyeOff, Lock, User as UserIcon, Radio, KeyRound, CheckCircle2, ArrowRight } from 'lucide-react';
 
 // Quick-fill presets are a development convenience only. They are compiled out of
 // production builds so operational badge IDs and the shared demo password are never
@@ -268,16 +268,6 @@ export default function LoginPage() {
                 <div className="logo-fb" style={{ display: 'none', alignItems: 'center', justifyContent: 'center' }}>
                   <Shield size={44} color="var(--primary)" />
                 </div>
-              </div>
-              <div style={{
-                position: 'absolute',
-                bottom: -4,
-                right: -4,
-                background: 'var(--success)',
-                borderRadius: '50%',
-                padding: 4
-              }}>
-                <Sparkles size={12} color="#ffffff" />
               </div>
             </div>
 
