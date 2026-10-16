@@ -30,7 +30,7 @@ class BackgroundTrackingService {
           autoStart: false,
           isForegroundMode: true,
           notificationChannelId: 'rainbow_tracking',
-          initialNotificationTitle: 'OPERATION RAINBOW',
+          initialNotificationTitle: 'PLATEAU EYE',
           initialNotificationContent: 'System Ready',
           foregroundServiceNotificationId: 888,
         ),
@@ -392,7 +392,7 @@ Future<void> onStart(ServiceInstance service) async {
             if (service is AndroidServiceInstance) {
               unawaited(
                 service.setForegroundNotificationInfo(
-                  title: 'OPERATION RAINBOW',
+                  title: 'PLATEAU EYE',
                   content: modeStr == 'sos'
                       ? 'SOS: ACTIVE TRANSMISSION'
                       : "UNIT: ${currentStatus ?? 'ONLINE'}",

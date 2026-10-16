@@ -5,10 +5,10 @@ import { Radio, Send, ShieldAlert, Loader2, MapPin, Users, MessageSquare } from 
 import { plateauTacticalMap } from '@/lib/tactical_mapping';
 
 const TEMPLATES = [
-  '[OPERATION RAINBOW]: PUBLIC SAFETY ALERT - A security incident has been reported in your sector. Stay indoors and await official guidance.',
-  '[OPERATION RAINBOW]: TACTICAL ADVISORY - Heightened security patrols deployed to your sector. Report any suspicious activity via the RainBow app.',
-  '[OPERATION RAINBOW]: ALL CLEAR - The security situation in your sector has been successfully resolved. Normal activities may resume. Stay alert.',
-  '[OPERATION RAINBOW]: EMERGENCY REFUGE NOTICE - Move calmly to the nearest verified safe zone or police post. Follow directions from uniformed personnel.',
+  '[PLATEAU EYE]: PUBLIC SAFETY ALERT - A security incident has been reported in your sector. Stay indoors and await official guidance.',
+  '[PLATEAU EYE]: TACTICAL ADVISORY - Heightened security patrols deployed to your sector. Report any suspicious activity via the Plateau Eye app.',
+  '[PLATEAU EYE]: ALL CLEAR - The security situation in your sector has been successfully resolved. Normal activities may resume. Stay alert.',
+  '[PLATEAU EYE]: EMERGENCY REFUGE NOTICE - Move calmly to the nearest verified safe zone or police post. Follow directions from uniformed personnel.',
 ];
 
 export default function MassBroadcast() {

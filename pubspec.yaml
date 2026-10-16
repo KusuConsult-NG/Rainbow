@@ -29,6 +29,15 @@ dependencies:
   http: ^1.6.0
   image_picker: ^1.2.2
   json_annotation: any
+  # Playing a voice note back INSIDE the app.
+  #
+  # Both screens that showed an audio attachment handed the url to the
+  # platform: the responder's mission intel called `launchUrl()` and the
+  # console opened a browser tab. On a handset that means leaving Plateau
+  # Eye mid-incident — and this app has a re-entry lock that can then ask
+  # for a code to get back in, so "play the reporter's voice note" could cost a
+  # responder their place in the incident they were working.
+  just_audio: ^0.9.46
   latlong2: ^0.9.1
   local_auth: ^2.2.0
   logger: any
@@ -46,15 +55,6 @@ dependencies:
   # here, so this went in one line too early and turned the analyze gate red.
   pointycastle: ^4.0.0
   record: ^6.2.1
-  # Playing a voice note back INSIDE the app.
-  #
-  # Both screens that showed an audio attachment handed the url to the
-  # platform: the responder's mission intel called `launchUrl()` and the
-  # console opened a browser tab. On a handset that means leaving Operation
-  # Rainbow mid-incident — and this app has a re-entry lock that can then ask
-  # for a code to get back in, so "play the reporter's voice note" could cost a
-  # responder their place in the incident they were working.
-  just_audio: ^0.9.46
   riverpod_annotation: any
   sentry_flutter: ^8.14.2
   share_plus: ^12.0.2

@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#0B234B</color>
+    <!-- The page the logo is drawn on. The adaptive icon's foreground is the
+         whole lockup on transparency, so this layer supplies its background —
+         and the lockup's own wordmark is Oxford Navy, which on a navy tile
+         would be navy text on navy. The logo is designed on white; the tile
+         is white. -->
+    <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Crisp Warm White: AppColors.background, the colour the Flutter splash
+         paints. The native splash uses the SAME value on purpose — the system
+         draws this window first and Flutter's splash second, so any other
+         colour here is a flash of it at every single launch. -->
+    <color name="splash_background">#FAFAF7</color>
 </resources>

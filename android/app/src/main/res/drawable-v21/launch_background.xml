@@ -1,12 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="?android:colorBackground" />
+<!-- Plateau Eye launch splash.
 
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
+     The background is `splash_background` (#FAFAF7), the same value
+     AppColors.background paints on the Flutter splash, so the handover from
+     the system window to the Flutter UI is invisible. A navy window here
+     flashes navy then white at every launch.
+
+     The centred mark MUST be a raster. `@mipmap/ic_launcher` is NOT one from
+     API 26: `mipmap-anydpi-v26/ic_launcher.xml` is an <adaptive-icon>, and
+     <bitmap> cannot inflate that. `@drawable/ic_launcher_foreground` is the
+     emblem as a PNG in five densities. `scripts/check_app_launch_resources.py`
+     holds this rule. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_background" />
+    <item>
         <bitmap
             android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+            android:src="@drawable/ic_launcher_foreground" />
+    </item>
 </layer-list>

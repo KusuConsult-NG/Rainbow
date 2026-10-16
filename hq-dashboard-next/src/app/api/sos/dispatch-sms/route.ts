@@ -123,7 +123,7 @@ export async function POST(request: Request) {
         : 'NO GPS FIX — location unknown';
 
     const smsBody = [
-      '[OPERATION RAINBOW — CITIZEN SOS]',
+      '[PLATEAU EYE — CITIZEN SOS]',
       `Ref: ${alertRef || 'PENDING'}`,
       `User: ${auth.userId.slice(0, 8).toUpperCase()}`,
       `Location: ${location}`,

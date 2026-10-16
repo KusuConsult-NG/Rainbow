@@ -290,7 +290,7 @@ export default function LoginPage() {
               fontFamily: "var(--font-outfit), sans-serif",
               marginBottom: 4
             }}>
-              OPERATION RAINBOW
+              PLATEAU EYE
             </h1>
             <p style={{
               fontSize: 11,

@@ -23,7 +23,7 @@ void main() {
       ]) {
         expect(
           attachmentErrorMessage(error),
-          contains('has not given Operation Rainbow access'),
+          contains('has not given Plateau Eye access'),
           reason: '$error should read as a permission problem',
         );
       }

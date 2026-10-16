@@ -66,10 +66,14 @@ class Translations {
       AppLanguage.hausa: 'LAMARIN DAUKI',
       AppLanguage.pidgin: 'ALERT NUMBER',
     },
+    // The app's own name, which is a proper noun and so reads the same in all
+    // three. The rebrand changed the launcher label, the iOS bundle name and
+    // the browser tab, and left this — the single most prominent line in the
+    // app, at the top of the home screen.
     'title': {
-      AppLanguage.english: 'OPERATION RAINBOW',
-      AppLanguage.hausa: 'AIKIN RAINBOW',
-      AppLanguage.pidgin: 'OPERATION RAINBOW',
+      AppLanguage.english: 'PLATEAU EYE',
+      AppLanguage.hausa: 'PLATEAU EYE',
+      AppLanguage.pidgin: 'PLATEAU EYE',
     },
     'sos_button': {
       AppLanguage.english: 'TRIGGER SOS',
@@ -217,15 +221,15 @@ class Translations {
     // has to tell them what to do instead.
     'voice_note_unavailable': {
       AppLanguage.english:
-          'This phone has not given Operation Rainbow access to the '
+          'This phone has not given Plateau Eye access to the '
           'microphone, so your voice cannot be recorded. Allow it in your '
           'phone settings, or send a photo instead.',
       AppLanguage.hausa:
-          'Wannan wayar ba ta ba Operation Rainbow damar amfani da makirufo '
+          'Wannan wayar ba ta ba Plateau Eye damar amfani da makirufo '
           'ba, don haka ba za a iya naɗa muryar ka ba. Ba da izini a cikin '
           'saitunan wayar, ko ka aika hoto maimakon haka.',
       AppLanguage.pidgin:
-          'Dis phone no gree give Operation Rainbow access to di microphone, '
+          'Dis phone no gree give Plateau Eye access to di microphone, '
           'so we no go fit record your voice. Allow am inside your phone '
           'settings, abi send picture instead.',
     },
@@ -636,13 +640,13 @@ class Translations {
     // REPORT DETAILS SCREEN
     'rpt_camera_denied': {
       AppLanguage.english:
-          'This phone has not given Operation Rainbow access to the camera. '
+          'This phone has not given Plateau Eye access to the camera. '
           'You can still send the report without a photo.',
       AppLanguage.hausa:
-          'Wannan wayar ba ta ba Operation Rainbow damar amfani da kyamara ba. '
+          'Wannan wayar ba ta ba Plateau Eye damar amfani da kyamara ba. '
           'Za ka iya tura rahoton ba tare da hoto ba.',
       AppLanguage.pidgin:
-          'Dis phone no give Operation Rainbow access to camera. '
+          'Dis phone no give Plateau Eye access to camera. '
           'You still fit send the report without photo.',
     },
     'rpt_attachment_failed': {
@@ -658,13 +662,13 @@ class Translations {
     },
     'rpt_mic_denied': {
       AppLanguage.english:
-          'This phone has not given Operation Rainbow access to the '
+          'This phone has not given Plateau Eye access to the '
           'microphone. You can still type your report.',
       AppLanguage.hausa:
-          'Wannan wayar ba ta ba Operation Rainbow damar amfani da makirufo ba. '
+          'Wannan wayar ba ta ba Plateau Eye damar amfani da makirufo ba. '
           'Za ka iya rubuta rahotonka.',
       AppLanguage.pidgin:
-          'Dis phone no give Operation Rainbow access to microphone. '
+          'Dis phone no give Plateau Eye access to microphone. '
           'You still fit type your report.',
     },
     'rpt_recorder_failed': {

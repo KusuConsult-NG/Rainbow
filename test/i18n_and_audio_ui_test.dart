@@ -100,7 +100,7 @@ void main() {
     await pumpSettleWithMax(tester);
 
     // 1. Verify default title is in English
-    expect(find.text('OPERATION RAINBOW'), findsOneWidget);
+    expect(find.text('PLATEAU EYE'), findsOneWidget);
     expect(find.text('SAFE ZONES'), findsOneWidget);
 
     // 2. Verify the Language dropdown button itself is visible on the App Bar
@@ -115,15 +115,16 @@ void main() {
     await pumpSettleWithMax(tester);
 
     // 4. Verify title and bottom navigation options update immediately to Hausa translations
-    expect(find.text('AIKIN RAINBOW'), findsOneWidget);
+    expect(find.text('PLATEAU EYE'), findsOneWidget);
     expect(find.text('SASHEN TSIRA'), findsOneWidget);
 
     // 5. Programmatically change language to Pidgin
     await container.read(languageProvider.notifier).setLanguage(AppLanguage.pidgin);
     await pumpSettleWithMax(tester);
 
-    // 6. Verify title updates back (Pidgin uses English title but translates nav actions)
-    expect(find.text('OPERATION RAINBOW'), findsOneWidget);
+    // 6. The name is a proper noun in all three languages; the nav actions are
+    //    what changes.
+    expect(find.text('PLATEAU EYE'), findsOneWidget);
     expect(find.text('SAFE AREA DEM'), findsOneWidget); 
 
     // Restore platform inside the test body before invariant check runs

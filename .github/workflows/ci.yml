@@ -931,6 +931,26 @@ jobs:
       - name: Assert the citizen path reads the language they chose
         run: python3 scripts/check_citizen_screens_speak_the_language.py
 
+      # The rebrand reported "all gates green, you can build the APK now" and
+      # the APK's splash was a type error: <bitmap android:src="@mipmap/
+      # ic_launcher"> where that name resolves to an <adaptive-icon> from API
+      # 26. aapt2 compiles it, 734 Flutter tests never inflate an Android
+      # resource, and 25 gates all read Dart, TypeScript or SQL — so the whole
+      # verification estate was green on a native resource nothing had looked
+      # at. Also: every iOS icon carried an alpha channel, which Apple rejects
+      # on upload, and the generated assets were a REDRAW of the logo rather
+      # than the logo.
+      - name: Assert the app can find what it needs to launch
+        run: python3 scripts/check_app_launch_resources.py
+
+      # The rename to Plateau Eye changed the launcher label and the browser
+      # tab, and left the old name in the home-screen title, three permission
+      # messages, the background-tracking notification and EVERY outbound SMS
+      # — including the four statewide broadcast templates and the citizen SOS
+      # dispatch. Three Flutter tests asserted the old name and passed.
+      - name: Assert one brand name, everywhere a person reads it
+        run: python3 scripts/check_one_brand_name.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

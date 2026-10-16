@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
 
     if (termiiKey && senderPhone) {
       const smsBody = [
-        `[OPERATION RAINBOW — INTER-AGENCY ESCALATION]`,
+        `[PLATEAU EYE — INTER-AGENCY ESCALATION]`,
         `Agency: ${code}`,
         `Sector: ${targetLga}`,
         `Alert ID: ${alertId.slice(0, 8).toUpperCase()}`,
