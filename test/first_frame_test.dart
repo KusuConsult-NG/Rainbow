@@ -20,6 +20,8 @@
 //
 // So the app's own start-up failure wore no message at all. Every test here
 // fails against the code as it was.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -193,6 +195,26 @@ void main() {
             'blank page either',
       );
     }
+  });
+
+  test('a required step that never finishes gives up in bounded time', () async {
+    final clock = Stopwatch()..start();
+    final outcome = await runRequiredStartupStep(
+      'a step that never finishes',
+      () => Completer<void>().future,
+      limit: const Duration(milliseconds: 300),
+    );
+    clock.stop();
+
+    expect(
+      outcome,
+      isA<TimeoutException>(),
+      reason: 'the first version of main() wrapped SupabaseConfig.init() in a '
+          'try/catch and argued it could not hang. A try/catch catches a '
+          'throw; a step that never completes before runApp is the same blank '
+          'page as one that throws',
+    );
+    expect(clock.elapsedMilliseconds, lessThan(3000));
   });
 
   test('a failing start-up step cannot stop start-up', () async {

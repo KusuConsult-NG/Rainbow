@@ -7308,3 +7308,91 @@ Worth stating as a rule, because this is the second gate in this audit to go
 wrong the same way: **a check whose dependencies are not the thing it checks
 will eventually fail for a reason it is not about**, and when it does, it
 teaches people to ignore it.
+
+## The fix for the blank page had the blank page in it
+
+CI went red on the browser harness two pushes later:
+
+```
+PASS  the launch screen is the login, not a crash or a blank canvas
+      shot  80-mobile-signed-out-splash.png  -> /login, 150 chars
+TimeoutError: Waiting failed: 120000ms exceeded
+    at .../scripts/local_e2e/mobile_capture.js:387:16
+```
+
+Line 387 waits for the Flutter engine's own DOM element to appear. On the
+previous push the same step took **nine seconds**, and the two commits contain
+**byte-identical application code** — the later one touched only CI config,
+two scripts and this document. So the first thing to establish was that this
+was not a difference in the app, and it was not.
+
+That is the shape of a race, and "flake" is not a root cause. Two things were
+wrong, and both are real.
+
+### The harness raced its own storage clear against the app's start-up
+
+```js
+await page.goto(origin, { waitUntil: 'domcontentloaded' });
+await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+await page.goto(`${origin}/#${route}`, { waitUntil: 'domcontentloaded' });
+await page.waitForFunction(() => !!document.querySelector('flutter-view, …'));
+```
+
+Measured rather than assumed, with a marker on `window` that only survives if
+the document is not replaced:
+
+```
+engine already up when the clear ran?  false
+window marker survived the second goto?  true   <- no reload happened
+```
+
+So: `goto` resolves at DOMContentLoaded, which is **before** Flutter boots —
+the clear therefore landed in the middle of start-up, while
+`Supabase.initialize` was reading the very keys being deleted. And the second
+`goto` differs from the first only by fragment (for a signed-out visit the app
+has already redirected itself to `#/login`), so it is a same-document
+navigation: **nothing reloads.** Whether the engine ever appeared depended
+entirely on that one interfered-with boot, with no second chance, and when it
+stalled the wait burned its full two minutes and said only "timeout".
+
+It now clears the origin's storage through `Storage.clearDataForOrigin`, which
+is browser-level and needs no page, then navigates once. The app boots a
+single time, from clean storage, at the route being captured. Verified: four
+loads, engine up in ~3.3s every time, including a repeated `/login`.
+
+### And the app had an unbounded step before its first frame — mine
+
+This is the part worth being plain about. The whole point of T-54 was that
+nothing may stop the first frame being drawn. Every optional step went through
+`runStartupStep`. The one **required** step I left like this:
+
+```dart
+try {
+  await SupabaseConfig.init();     // no timeout
+} catch (e) { … }
+```
+
+with a comment arguing that `Supabase.initialize` does no network I/O and so
+cannot hang. The argument is true about the network and irrelevant as a bound:
+a try/catch catches a throw, not a step that never finishes — and a step that
+never finishes before `runApp` is **exactly the blank page I had just spent the
+commit fixing**. `Supabase.initialize` does not reach the network, but it does
+read local storage and call platform channels, and the harness demonstrated a
+way for that to stall.
+
+So the fix for the blank page shipped with a path to the blank page in it, and
+my own gate passed it, because the gate asked for a guard and a try/catch is a
+guard. "It cannot hang" was an argument, not a bound.
+
+`runRequiredStartupStep(label, body, limit:)` now bounds it at 8 seconds and
+returns what went wrong — a `TimeoutException` when it simply never finished —
+and a failure leads to the same readable screen with **Try Again**. The gate
+now requires the bound: that the required step goes through that helper, that
+the call carries a `limit:`, and that the helper actually applies it with
+`.timeout(`. Three new mutations, including the exact try/catch I had written.
+18 mutations, all caught.
+
+The lesson is narrower and more useful than "add timeouts": **a guard that
+only catches throws is not a bound, and a check that accepts one cannot tell
+the difference.** The gate I wrote to stop this defect returning had been
+written to accept the form of it I had left in.

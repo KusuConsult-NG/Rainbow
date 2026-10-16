@@ -89,15 +89,24 @@ Future<void> boot() async {
   // constructor reaches it synchronously during the first build. Building
   // `RainbowApp` without a client guarantees a build-time throw, so this is
   // checked rather than swallowed.
+  //
+  // BOUNDED, not merely guarded. The first version of this function wrapped
+  // this in a try/catch and argued that `Supabase.initialize` does no network
+  // I/O and therefore cannot hang. A try/catch catches a throw; it does not
+  // catch a step that never finishes — and a step that never finishes here is
+  // the same blank page as one that throws, because `runApp` is never
+  // reached. The browser harness found the stall the argument had ruled out.
   debugPrint('🚀 [MAIN] Starting Supabase initialization...');
-  Object? supabaseFailure;
-  try {
-    await SupabaseConfig.init();
+  final supabaseFailure = await runRequiredStartupStep(
+    'Supabase initialization',
+    SupabaseConfig.init,
+    limit: const Duration(seconds: 8),
+  );
+  if (supabaseFailure == null) {
     debugPrint('🚀 [MAIN] Supabase initialized.');
-  } catch (error, stackTrace) {
-    supabaseFailure = error;
-    debugPrint('🔥 [CRITICAL_MAIN_ERR] Supabase Init Failed: $error');
-    unawaited(Sentry.captureException(error, stackTrace: stackTrace));
+  } else {
+    debugPrint('🔥 [CRITICAL_MAIN_ERR] Supabase Init Failed: $supabaseFailure');
+    unawaited(Sentry.captureException(supabaseFailure));
   }
 
   if (!SupabaseConfig.isInitialized) {

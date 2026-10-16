@@ -137,6 +137,13 @@ async function launch({
 } = {}) {
   const browser = await puppeteer.launch({
     headless: true,
+    // CI installs the Chrome that puppeteer-core expects. A container that
+    // already has a Chromium — and cannot download another — sets this
+    // instead, so these harnesses can be reproduced outside CI rather than
+    // only read about.
+    ...(process.env.PUPPETEER_EXECUTABLE_PATH
+      ? { executablePath: process.env.PUPPETEER_EXECUTABLE_PATH }
+      : {}),
     args: [
       '--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none',
       ...(fakeMedia

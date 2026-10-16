@@ -24,6 +24,8 @@
 // again". Everything here exists to make sure the first frame always says
 // something a person can act on.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
@@ -50,6 +52,37 @@ Future<void> runStartupStep(
   } catch (error, stackTrace) {
     debugPrint('⚠️ [STARTUP] $label failed: $error');
     debugPrintStack(stackTrace: stackTrace, label: label);
+  }
+}
+
+/// Runs a step the app cannot be built without, in bounded time.
+///
+/// Returns null on success, or what went wrong — a [TimeoutException] when the
+/// step simply never finished.
+///
+/// The distinction matters because the first version of this file bounded
+/// every OPTIONAL step and left the one required step — `SupabaseConfig.init`
+/// — in a bare try/catch, on the reasoning that it does no network I/O and so
+/// cannot hang. A try/catch catches a throw. It does not catch a step that
+/// never completes, and a step that never completes before `runApp` is the
+/// same blank page as one that throws: no Flutter frame is ever produced.
+///
+/// `Supabase.initialize` does not reach the network, but it does read local
+/// storage and call platform channels, and the browser harness showed a way
+/// for that to stall: clearing the origin's storage while initialization was
+/// reading it. "It cannot hang" was an argument, not a bound.
+Future<Object?> runRequiredStartupStep(
+  String label,
+  Future<void> Function() body, {
+  required Duration limit,
+}) async {
+  try {
+    await body().timeout(limit);
+    return null;
+  } catch (error, stackTrace) {
+    debugPrint('🔥 [STARTUP] $label failed: $error');
+    debugPrintStack(stackTrace: stackTrace, label: label);
+    return error;
   }
 }
 

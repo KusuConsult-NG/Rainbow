@@ -195,12 +195,14 @@ else:
     # matched by balancing brackets rather than by counting keywords, so a
     # nested await inside a guarded closure is recognised as guarded.
     guards = (spans(before_frame, 'runStartupStep(', '(', ')')
+              + spans(before_frame, 'runRequiredStartupStep(', '(', ')')
               + spans(before_frame, 'try {', '{', '}'))
     unguarded: list[str] = []
     for match in re.finditer(r'^\s*(?:await|final\s+\w+\s*=\s*await)\s+(.+)$',
                              before_frame, re.M):
         statement = match.group(1).strip()
-        if statement.startswith(('runStartupStep(', 'boot()')):
+        if statement.startswith(
+                ('runStartupStep(', 'runRequiredStartupStep(', 'boot()')):
             continue
         if any(start <= match.start() <= end for start, end in guards):
             continue
@@ -214,6 +216,29 @@ else:
                ' keeps showing the launch background. Wrap it in'
                ' `runStartupStep(...)` or a try/catch, or move it after the'
                ' first frame.')
+
+# The one step the app cannot be built without gets a bound, not just a
+# catch. The first version of main.dart wrapped `SupabaseConfig.init()` in a
+# try/catch, on the argument that it does no network I/O and so cannot hang.
+# That argument is not a bound, and a step that never finishes before `runApp`
+# produces exactly the blank page this check exists to prevent.
+required = re.search(
+    r'runRequiredStartupStep\(.*?\n\s*\)', main_src, re.S)
+if not required:
+    fail('lib/main.dart no longer runs its required start-up step through '
+         '`runRequiredStartupStep`, which is the only thing bounding it. A '
+         'try/catch around `SupabaseConfig.init()` catches a throw and not a '
+         'stall, and a stall before `runApp` is the same blank page.')
+elif 'limit:' not in required.group():
+    fail('lib/main.dart calls `runRequiredStartupStep` with no `limit:`, so '
+         'the one step the first frame waits on is unbounded again.')
+
+if 'runRequiredStartupStep' not in startup_src:
+    fail(f'{STARTUP.relative_to(REPO)} no longer defines '
+         '`runRequiredStartupStep`.')
+elif '.timeout(' not in startup_src:
+    fail(f'{STARTUP.relative_to(REPO)}: `runRequiredStartupStep` no longer '
+         'applies its `limit` with `.timeout(`, so it bounds nothing.')
 
 if 'runStartupStep' not in startup_src:
     fail(f'{STARTUP.relative_to(REPO)} no longer defines `runStartupStep`, '
@@ -349,6 +374,7 @@ if failures:
 print('OK: start-up always ends in a frame that says something.')
 print('  * lib/main.dart installs a readable error widget before runApp')
 print('  * nothing it awaits before the first frame can stop that frame')
+print('  * the one required step is bounded, not merely caught')
 print('  * a start-up that cannot finish renders a screen that explains it')
 print('  * SupabaseConfig.client refuses with a message release keeps')
 print('  * lib/ reaches the client only through that getter')

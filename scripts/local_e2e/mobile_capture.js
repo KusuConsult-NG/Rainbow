@@ -379,10 +379,32 @@ async function semanticsText(page) {
     state.screen = `mobile:signed-out:${slug}`;
     try { await page.close(); } catch { /* already gone */ }
     page = await newPage();
-    await page.goto(origin, { waitUntil: 'domcontentloaded' });
-    await page.evaluate(() => {
-      try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
+    // Clear this origin's storage WITHOUT booting the app to get at it.
+    //
+    // This used to `goto(origin)`, then clear `localStorage` from the page,
+    // then `goto(origin + '/#' + route)`. Both halves of that are a race:
+    //
+    //   * `goto` resolves at DOMContentLoaded, which is BEFORE Flutter boots.
+    //     So the clear landed in the middle of start-up, while
+    //     `Supabase.initialize` was reading the very keys being deleted.
+    //   * the second `goto` differs from the first only by fragment — and for
+    //     a signed-out visit the app has already redirected itself to
+    //     `#/login` — so it is a same-document navigation. Nothing reloads.
+    //     Whether `flutter-view` ever appears therefore depends entirely on
+    //     that first, interfered-with boot completing.
+    //
+    // When it did not, the wait below burned its full 120s and the job failed
+    // on a timeout with no explanation. It passed on the previous push with
+    // byte-identical application code, which is what a race looks like.
+    //
+    // `Storage.clearDataForOrigin` is browser-level: it needs no page, so the
+    // app boots once, from clean storage, at the route being captured.
+    const cdp = await page.createCDPSession();
+    await cdp.send('Storage.clearDataForOrigin', {
+      origin,
+      storageTypes: 'local_storage,session_storage,indexeddb,websql,cache_storage',
     });
+    await cdp.detach();
     await page.goto(`${origin}/#${route}`, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(
       () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
