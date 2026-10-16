@@ -43,6 +43,7 @@
  */
 
 import type { Alert } from '@/app/dashboard/types';
+import { BRAND } from './brand';
 
 // ── Escaping ────────────────────────────────────────────────────────────────
 
@@ -229,30 +230,34 @@ export function resolveAssignee(
  * still carry them, not because anything produces them now.
  */
 export function statusColour(status?: string): string {
+  // The colours are a progression, not a set of labels: gold while it waits
+  // on someone, navy while command holds it, emerald as a responder closes on
+  // it, and the one red for duress. They were eight unrelated hues — sky,
+  // teal, deep purple, violet — none of them in the Plateau Eye mark.
   switch ((status || '').toUpperCase()) {
     case 'DURESS':
-      return '#E31E24'; // AppColors.danger
+      return BRAND.danger;
     case 'PENDING':
     case 'OPEN':
     case 'ACTIVE':
-      return '#FF9800'; // AppColors.warning
+      return BRAND.warning;
     case 'DISPATCHED':
-      return '#0277BD'; // AppColors.info
+      return BRAND.navy;
     case 'ACKNOWLEDGED':
     case 'IN_PROGRESS':
-      return '#00838F';
+      return BRAND.navyLight;
     case 'ESCALATED':
-      return '#4527A0';
+      return BRAND.dangerDeep;
     case 'ON_ROUTE':
-      return '#6A1B9A';
+      return BRAND.emeraldDeep;
     case 'ON_SITE':
-      return '#00695C';
+      return BRAND.emerald;
     case 'RESOLVED':
-      return '#1B5E20'; // AppColors.success
+      return BRAND.emeraldLight;
     case 'CANCELLED':
-      return '#757575';
+      return BRAND.textDim;
     default:
-      return '#FF9800';
+      return BRAND.warning;
   }
 }
 
@@ -287,19 +292,22 @@ export function statusLabel(status?: string): string {
 }
 
 export function severityColour(severity?: string): string {
+  // The same four values the app paints a report category with
+  // (`lib/core/constants/alert_categories.dart`), so a grade means one colour
+  // on the handset and on the board.
   switch ((severity || '').toUpperCase()) {
     case 'CRITICAL':
-      return '#E31E24'; // AppColors.danger
+      return BRAND.danger;
     case 'HIGH':
-      return '#EF6C00';
+      return BRAND.warning;
     case 'MEDIUM':
-      return '#FF9800'; // AppColors.warning
+      return BRAND.navy;
     case 'LOW':
-      return '#1B5E20'; // AppColors.success
+      return BRAND.emeraldDeep;
     default:
       // UNKNOWN is what the page assigns to a row with no severity. It must not
       // borrow the colour of a grade nobody gave it.
-      return '#757575';
+      return BRAND.textDim;
   }
 }
 
@@ -640,11 +648,11 @@ export function incidentPopupHtml(alert: Alert, opts: PopupOptions): string {
     `<button type="button" data-hq-action="${action}" data-hq-id="${escapeHtml(id)}" style="flex:1 1 auto;min-width:74px;padding:7px 10px;background:${bg};color:#fff;border:none;border-radius:7px;font-size:10px;font-weight:800;letter-spacing:0.5px;cursor:pointer">${label}</button>`;
 
   const actions = [
-    button('DOSSIER', '#4F46E5', 'dossier'),
-    canDispatch(alert.status) ? button('DISPATCH', '#0277BD', 'dispatch') : '',
-    canResolve(alert.status) ? button('RESOLVE', '#1B5E20', 'resolve') : '',
+    button('DOSSIER', '#0B234B', 'dossier'),
+    canDispatch(alert.status) ? button('DISPATCH', '#0B234B', 'dispatch') : '',
+    canResolve(alert.status) ? button('RESOLVE', '#0B5027', 'resolve') : '',
     isDiallable(reporter.contact)
-      ? `<a href="tel:${escapeHtml(reporter.contact.replace(/[^\d+]/g, ''))}" style="flex:1 1 auto;min-width:74px;padding:7px 10px;background:#0F766E;color:#fff;border-radius:7px;font-size:10px;font-weight:800;letter-spacing:0.5px;text-align:center;text-decoration:none">CALL</a>`
+      ? `<a href="tel:${escapeHtml(reporter.contact.replace(/[^\d+]/g, ''))}" style="flex:1 1 auto;min-width:74px;padding:7px 10px;background:#0B5027;color:#fff;border-radius:7px;font-size:10px;font-weight:800;letter-spacing:0.5px;text-align:center;text-decoration:none">CALL</a>`
       : '',
   ]
     .filter(Boolean)

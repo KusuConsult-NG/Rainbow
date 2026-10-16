@@ -127,7 +127,7 @@ class ReportInitialScreen extends ConsumerWidget {
                           subtitle: Translations.get(
                               'rpt_criminal_activity_desc', lang),
                           icon: Icons.security_rounded,
-                          accent: Colors.blueAccent,
+                          accent: AppColors.primary,
                           onTap: () => _proceed(context, 'crime'),
                         ),
                         _TacticalIntentCard(
@@ -136,7 +136,7 @@ class ReportInitialScreen extends ConsumerWidget {
                           subtitle: Translations.get(
                               'rpt_suspicious_activity_desc', lang),
                           icon: Icons.visibility_rounded,
-                          accent: Colors.amber,
+                          accent: AppColors.warning,
                           onTap: () => _proceed(context, 'suspicious'),
                         ),
                         _TacticalIntentCard(
@@ -144,7 +144,7 @@ class ReportInitialScreen extends ConsumerWidget {
                           subtitle:
                               Translations.get('rpt_civil_hazard_desc', lang),
                           icon: Icons.alt_route_rounded,
-                          accent: Colors.tealAccent,
+                          accent: AppColors.emerald,
                           onTap: () => _proceed(context, 'environment'),
                         ),
                         const SizedBox(height: 40),

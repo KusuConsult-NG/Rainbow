@@ -58,11 +58,14 @@
   --accent: #B99123;            /* AppColors.secondary / .accent */
   --accent-dim: rgba(185, 145, 35, 0.10);
 
-  --warning: #FF9800;           /* AppColors.warning */
+  --warning: #7E6112;           /* AppColors.warning — the brand gold,
+                                   darkened until text on white clears
+                                   4.5:1; #B99123 itself is 2.8:1 */
   --warning-dim: rgba(255, 152, 0, 0.10);
   --warning-glow: 0 0 20px rgba(255, 152, 0, 0.18);
 
-  --duress: #D32F2F;            /* AppColors.danger — emergency red */
+  --duress: #B3261E;            /* AppColors.danger — the one emergency
+                                   red, deep enough to sit beside navy */
   --duress-dim: rgba(211, 47, 47, 0.10);
   --duress-glow: 0 0 25px rgba(211, 47, 47, 0.25);
 
@@ -115,19 +118,19 @@
   --accent: #D4AF37;
   --accent-dim: rgba(212, 175, 55, 0.15);
 
-  --warning: #ffb74d;
+  --warning: #D8B45A;
   --warning-dim: rgba(255, 183, 77, 0.12);
   --warning-glow: 0 0 25px rgba(255, 183, 77, 0.2);
 
-  --duress: #ff4a4f;
+  --duress: #E36A62;
   --duress-dim: rgba(255, 74, 79, 0.16);
   --duress-glow: 0 0 30px rgba(255, 74, 79, 0.35);
 
-  --success: #66bb6a;
+  --success: #5FA97A;
   --success-dim: rgba(102, 187, 106, 0.12);
   --success-glow: 0 0 25px rgba(102, 187, 106, 0.2);
 
-  --info: #4fc3f7;
+  --info: #7FA3D8;
   --info-dim: rgba(79, 195, 247, 0.12);
 
   /* Neutral greys inverted — no blue-slate. */

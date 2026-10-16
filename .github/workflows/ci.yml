@@ -974,6 +974,17 @@ jobs:
       - name: Assert the first frame can never be blank
         run: python3 scripts/check_first_frame_is_never_blank.py
 
+      # The palette file named the logo's three ink colours exactly, and
+      # almost nothing used it: a crimson-to-magenta SOS button, an
+      # indigo-to-cyan voice button, twelve category pastels, a Tailwind slate
+      # dashboard, and 57 colours in the console — 35 off-brand, including the
+      # PREVIOUS brand's red in 37 places, returned by a function whose comment
+      # said "AppColors.danger" and whose test asserted it as "the app's
+      # palette spelled out". check_palette_parity.py passed throughout,
+      # because none of it was in a token file.
+      - name: Assert every colour traces back to the logo
+        run: python3 scripts/check_brand_colours.py
+
   dryrun-fresh:
     name: Supabase — production dry-run is in sync
     runs-on: ubuntu-24.04

@@ -79,21 +79,21 @@ interface AgencyActionReport {
 const AGENCIES = AGENCY_LIST;
 
 const STATUS_COLORS: Record<string, string> = {
-  AVAILABLE:   '#1B5E20',
-  DEPLOYED:    '#FF9800',
-  UNAVAILABLE: '#E31E24',
+  AVAILABLE:   '#0B5027',
+  DEPLOYED:    '#7E6112',
+  UNAVAILABLE: '#B3261E',
   OFF_DUTY:    '#757575',
-  EN_ROUTE:    '#0277BD',
-  ON_SITE:     '#1B5E20',
+  EN_ROUTE:    '#0B234B',
+  ON_SITE:     '#0B5027',
   WITHDRAWN:   '#757575',
-  RESOLVED:    '#1B5E20',
+  RESOLVED:    '#0B5027',
 };
 
 const OUTCOME_COLORS: Record<string, string> = {
-  CONTAINED:    '#1B5E20',
-  RESOLVED:     '#1B5E20',
-  ONGOING:      '#FF9800',
-  REQUIRES_HQ:  '#E31E24',
+  CONTAINED:    '#0B5027',
+  RESOLVED:     '#0B5027',
+  ONGOING:      '#7E6112',
+  REQUIRES_HQ:  '#B3261E',
   INCONCLUSIVE: '#757575',
 };
 
@@ -408,10 +408,10 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
         gap: 1, background: 'var(--border)',
       }}>
         {[
-          { label: 'ACTIVE INCIDENTS', value: incidents.length, color: '#E31E24' },
-          { label: 'PERSONNEL', value: personnel.filter(p => p.status === 'AVAILABLE').length + '/' + personnel.length, color: '#1B5E20' },
-          { label: 'DEPLOYED', value: deployments.length, color: '#FF9800' },
-          { label: 'UNREAD REPORTS', value: isHq ? unreadReports : reports.length, color: '#8b5cf6' },
+          { label: 'ACTIVE INCIDENTS', value: incidents.length, color: '#B3261E' },
+          { label: 'PERSONNEL', value: personnel.filter(p => p.status === 'AVAILABLE').length + '/' + personnel.length, color: '#0B5027' },
+          { label: 'DEPLOYED', value: deployments.length, color: '#7E6112' },
+          { label: 'UNREAD REPORTS', value: isHq ? unreadReports : reports.length, color: '#0B234B' },
         ].map(stat => (
           <div key={stat.label} style={{ padding: '12px 16px', background: 'var(--surface)', textAlign: 'center' }}>
             <div style={{ fontSize: 20, fontWeight: 900, color: stat.color, fontFamily: "var(--font-outfit), sans-serif" }}>{stat.value}</div>
@@ -451,7 +451,7 @@ export default function AgencyPortal({ userRole, userAgency, isHq, userEmail, us
             {tab.icon} {tab.label}
             {tab.badge !== undefined && tab.badge > 0 && (
               <span style={{
-                background: '#E31E24', color: 'white', borderRadius: 10,
+                background: '#B3261E', color: 'white', borderRadius: 10,
                 fontSize: 9, fontWeight: 900, padding: '1px 5px', minWidth: 16,
               }}>{tab.badge}</span>
             )}
@@ -565,7 +565,7 @@ function IncidentCard({ incident, agencyColor, onDeploy, onReport, deployments, 
   isHq: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const sevColor = incident.severity === 'CRITICAL' ? '#E31E24' : incident.severity === 'HIGH' ? '#FF9800' : '#1B5E20';
+  const sevColor = incident.severity === 'CRITICAL' ? '#B3261E' : incident.severity === 'HIGH' ? '#7E6112' : '#0B5027';
   const activeDeployment = deployments.find(d => d.status === 'EN_ROUTE' || d.status === 'ON_SITE');
 
   return (
@@ -832,7 +832,7 @@ function ReportsPanel({ reports, agencyColor, isHq, onAcknowledge }: {
                 }}>{report.outcome}</span>
               )}
               {!report.read_by_hq && isHq && (
-                <span style={{ fontSize: 9, fontWeight: 900, padding: '3px 8px', borderRadius: 4, background: '#E31E2422', color: '#E31E24' }}>UNREAD</span>
+                <span style={{ fontSize: 9, fontWeight: 900, padding: '3px 8px', borderRadius: 4, background: '#B3261E22', color: '#B3261E' }}>UNREAD</span>
               )}
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -847,14 +847,14 @@ function ReportsPanel({ reports, agencyColor, isHq, onAcknowledge }: {
           {(report.personnel_count > 0 || report.casualties > 0) && (
             <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-muted)' }}>
               {report.personnel_count > 0 && <span>👮 {report.personnel_count} personnel</span>}
-              {report.casualties > 0 && <span style={{ color: '#E31E24' }}>⚠️ {report.casualties} casualties</span>}
+              {report.casualties > 0 && <span style={{ color: '#B3261E' }}>⚠️ {report.casualties} casualties</span>}
             </div>
           )}
 
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
             Filed by: {report.submitted_by_name || '—'}
             {report.read_by_hq && report.hq_acknowledged_by && (
-              <span style={{ marginLeft: 12, color: '#1B5E20' }}>
+              <span style={{ marginLeft: 12, color: '#0B5027' }}>
                 ✓ Acknowledged by {report.hq_acknowledged_by}
               </span>
             )}
@@ -922,7 +922,7 @@ function AddPersonnelForm({ agency, agencyColor, userId, onSuccess }: {
         Register New Officer
       </h3>
       {error && (
-        <div style={{ padding: 10, background: '#E31E2422', border: '1px solid #E31E24', borderRadius: 8, color: '#E31E24', fontSize: 12, marginBottom: 16 }}>
+        <div style={{ padding: 10, background: '#B3261E22', border: '1px solid #B3261E', borderRadius: 8, color: '#B3261E', fontSize: 12, marginBottom: 16 }}>
           {error}
         </div>
       )}
@@ -1048,7 +1048,7 @@ function DeployModal({ incident, personnel, agency, userId, userEmail, agencyCol
           <span style={{ marginLeft: 8 }}>· {[incident.geo_lga, incident.geo_ward].filter(Boolean).join(' › ')}</span>
         </div>
 
-        {error && <div style={{ padding: 10, background: '#E31E2422', border: '1px solid #E31E24', borderRadius: 8, color: '#E31E24', fontSize: 12, marginBottom: 14 }}>{error}</div>}
+        {error && <div style={{ padding: 10, background: '#B3261E22', border: '1px solid #B3261E', borderRadius: 8, color: '#B3261E', fontSize: 12, marginBottom: 14 }}>{error}</div>}
 
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8 }}>SELECT OFFICERS ({selected.length} selected)</div>
@@ -1167,7 +1167,7 @@ function ReportModal({ incident, agency, userId, userEmail, agencyColor, onClose
           Reporting on: <strong style={{ color: 'var(--text-primary)' }}>{incident.type}</strong>
         </div>
 
-        {error && <div style={{ padding: 10, background: '#E31E2422', border: '1px solid #E31E24', borderRadius: 8, color: '#E31E24', fontSize: 12, marginBottom: 14 }}>{error}</div>}
+        {error && <div style={{ padding: 10, background: '#B3261E22', border: '1px solid #B3261E', borderRadius: 8, color: '#B3261E', fontSize: 12, marginBottom: 14 }}>{error}</div>}
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>

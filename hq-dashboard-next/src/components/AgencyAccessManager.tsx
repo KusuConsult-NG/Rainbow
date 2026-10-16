@@ -179,8 +179,8 @@ export default function AgencyAccessManager() {
       </div>
 
       {/* Success / Error */}
-      {success && <div style={{ padding: 12, background: '#1B5E2022', border: '1px solid #1B5E20', borderRadius: 8, color: '#1B5E20', fontSize: 12, marginBottom: 16 }}>{success}</div>}
-      {error && <div style={{ padding: 12, background: '#E31E2422', border: '1px solid #E31E24', borderRadius: 8, color: '#E31E24', fontSize: 12, marginBottom: 16 }}>{error}</div>}
+      {success && <div style={{ padding: 12, background: '#0B502722', border: '1px solid #0B5027', borderRadius: 8, color: '#0B5027', fontSize: 12, marginBottom: 16 }}>{success}</div>}
+      {error && <div style={{ padding: 12, background: '#B3261E22', border: '1px solid #B3261E', borderRadius: 8, color: '#B3261E', fontSize: 12, marginBottom: 16 }}>{error}</div>}
 
       {/* Create form */}
       {showForm && (
@@ -227,9 +227,9 @@ export default function AgencyAccessManager() {
 
       {/* A refresh failed but an earlier read succeeded: keep the roster, mark it stale. */}
       {loadError && liaisons.length > 0 && !loading && (
-        <div role="alert" style={{ padding: '10px 12px', marginBottom: 12, borderRadius: 8, background: '#FF980018', border: '1px solid #FF980066', color: '#FF9800', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <div role="alert" style={{ padding: '10px 12px', marginBottom: 12, borderRadius: 8, background: '#7E611218', border: '1px solid #7E611266', color: '#7E6112', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
           <span>Could not refresh — showing the last list that loaded. {loadError}</span>
-          <button onClick={fetchLiaisons} style={{ background: 'none', border: '1px solid #FF9800', borderRadius: 6, padding: '4px 10px', color: '#FF9800', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>RETRY</button>
+          <button onClick={fetchLiaisons} style={{ background: 'none', border: '1px solid #7E6112', borderRadius: 6, padding: '4px 10px', color: '#7E6112', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>RETRY</button>
         </div>
       )}
 
@@ -241,11 +241,11 @@ export default function AgencyAccessManager() {
       ) : loadError && liaisons.length === 0 ? (
         // The read failed and there is nothing to fall back on. Say that —
         // never "none registered", which is the one thing we do not know.
-        <div role="alert" style={{ textAlign: 'center', padding: 32, color: '#E31E24', background: '#E31E2411', border: '1px solid #E31E2455', borderRadius: 12 }}>
+        <div role="alert" style={{ textAlign: 'center', padding: 32, color: '#B3261E', background: '#B3261E11', border: '1px solid #B3261E55', borderRadius: 12 }}>
           <Shield size={36} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
           <div style={{ fontSize: 13, fontWeight: 700 }}>Could not load liaison accounts</div>
           <div style={{ fontSize: 11, marginTop: 4, color: 'var(--text-muted)' }}>{loadError}</div>
-          <button onClick={fetchLiaisons} style={{ marginTop: 14, padding: '8px 16px', borderRadius: 8, border: '1px solid #E31E24', background: 'transparent', color: '#E31E24', fontWeight: 700, fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <button onClick={fetchLiaisons} style={{ marginTop: 14, padding: '8px 16px', borderRadius: 8, border: '1px solid #B3261E', background: 'transparent', color: '#B3261E', fontWeight: 700, fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <RefreshCw size={12} /> RETRY
           </button>
         </div>
@@ -270,7 +270,7 @@ export default function AgencyAccessManager() {
                 </div>
                 <button
                   onClick={() => revokeLiaison(liaison.id, liaison.full_name)}
-                  style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #E31E24', background: '#E31E2422', color: '#E31E24', fontWeight: 700, fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                  style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #B3261E', background: '#B3261E22', color: '#B3261E', fontWeight: 700, fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
                 >
                   <Trash2 size={12} /> REVOKE
                 </button>

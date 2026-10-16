@@ -120,6 +120,35 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def sample_ink(master: Image.Image) -> dict[str, str]:
+    """The three ink colours of the mark, counted off the master itself.
+
+    The palette is not allowed to be a thing somebody typed. These are the
+    three most common non-white, non-grey colours in Plateau_Eye_Logo.png —
+    the ring and wordmark, the state silhouette, the inner ring — and
+    `check_brand_colours.py` holds every declaration of the palette to them.
+    Recording them here rather than re-sampling in the check keeps that check
+    free of Pillow, which the CI runner does not have.
+    """
+    rgb = master.convert('RGB')
+    counts: dict[tuple[int, int, int], int] = {}
+    for pixel in rgb.getdata():
+        r, g, b = pixel
+        if r + g + b > 600:                      # the page
+            continue
+        if max(pixel) - min(pixel) < 24:         # a grey or an edge pixel
+            continue
+        counts[pixel] = counts.get(pixel, 0) + 1
+    top = sorted(counts.items(), key=lambda kv: -kv[1])[:3]
+    named = {}
+    for (r, g, b), _ in top:
+        role = ('emerald' if g > r and g > b
+                else 'gold' if r > 120 and g > 100
+                else 'navy')
+        named[role] = f'#{r:02X}{g:02X}{b:02X}'
+    return dict(sorted(named.items()))
+
+
 def write_manifest() -> Path:
     """Record what was generated, from what, by what.
 
@@ -143,6 +172,7 @@ def write_manifest() -> Path:
         'generator_sha256': sha256(Path(__file__).resolve()),
         'master': MASTER.name,
         'master_sha256': sha256(MASTER),
+        'ink': sample_ink(Image.open(MASTER)),
         'assets': {
             str(path.relative_to(REPO)): sha256(path)
             for path in sorted(set(WRITTEN))

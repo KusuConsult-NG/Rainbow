@@ -328,12 +328,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           children: [
             // Background ambient pulse
             Positioned.fill(
-              child: DecoratedBox(
+              child: const DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: RadialGradient(
                     radius: 1.5,
                     colors: [
-                      AppColors.primary.withValues(alpha: 0.03),
+                      AppColors.ambientWash,
                       AppColors.background,
                     ],
                   ),
@@ -546,12 +546,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                           height: 170,
                                           decoration: BoxDecoration(
                                             shape: BoxShape.circle,
+                                            // The emergency red, deep to
+                                            // deeper. It was #FF1744 fading
+                                            // to #880E4F — a crimson that
+                                            // ended in magenta, in an app
+                                            // whose mark is navy, emerald
+                                            // and gold.
                                             gradient: const LinearGradient(
                                               begin: Alignment.topLeft,
                                               end: Alignment.bottomRight,
                                               colors: [
-                                                Color(0xFFFF1744),
-                                                Color(0xFF880E4F),
+                                                AppColors.danger,
+                                                AppColors.dangerDeep,
                                               ],
                                             ),
                                             boxShadow: [
@@ -645,12 +651,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                           height: 170,
                                           decoration: BoxDecoration(
                                             shape: BoxShape.circle,
+                                            // Oxford Navy. This was indigo
+                                            // to cyan — the only cyan in the
+                                            // product, beside a crimson SOS,
+                                            // on the first screen a citizen
+                                            // sees.
                                             gradient: const LinearGradient(
                                               begin: Alignment.topLeft,
                                               end: Alignment.bottomRight,
                                               colors: [
-                                                Color(0xFF3F51B5),
-                                                Color(0xFF00BCD4),
+                                                AppColors.primaryLight,
+                                                AppColors.primary,
                                               ],
                                             ),
                                             boxShadow: [

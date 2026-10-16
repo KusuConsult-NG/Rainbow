@@ -1,4 +1,4 @@
-# Operation Rainbow
+# Plateau Eye
 
 Emergency security response for Plateau State, Nigeria. A citizen and responder
 mobile app, a command console for HQ, and a Supabase backend they share.

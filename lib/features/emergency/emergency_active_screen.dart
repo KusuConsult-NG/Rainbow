@@ -69,7 +69,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(deliveredEvidenceMessage(res.delivered.length)),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.success,
           ),
         );
       }),
@@ -211,7 +211,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('📷 Evidence captured and sent to HQ'),
-                backgroundColor: Colors.green,
+                backgroundColor: AppColors.success,
                 duration: Duration(seconds: 2),
               ),
             );
@@ -297,12 +297,25 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
               builder: (context, child) {
                 return Container(
                   decoration: BoxDecoration(
+                    // Both stops OPAQUE. This pulse used to run from
+                    // `emergency` at up to 15% alpha to an opaque
+                    // `background`, and a gradient between a translucent
+                    // colour and an opaque one passes through ~50% alpha
+                    // halfway along — which at `radius: 1.5` is most of the
+                    // screen. The live SOS screen washed out to a muddy
+                    // pink-grey on every beat. Blending the pulse down onto
+                    // the background first keeps the breath and drops the
+                    // mud.
                     gradient: RadialGradient(
                       center: Alignment.topCenter,
                       radius: 1.5,
                       colors: [
-                        AppColors.emergency
-                            .withValues(alpha: 0.15 * _pulseController.value),
+                        Color.alphaBlend(
+                          AppColors.emergency.withValues(
+                            alpha: 0.15 * _pulseController.value,
+                          ),
+                          AppColors.background,
+                        ),
                         AppColors.background,
                       ],
                     ),
@@ -341,21 +354,21 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                         child: OutlinedButton.icon(
                           onPressed: _isCapturingEvidence ? null : _captureEvidence,
                           icon: _isCapturingEvidence
-                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange))
-                              : const Icon(Icons.camera_alt_rounded, size: 16, color: Colors.orange),
+                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.warning))
+                              : const Icon(Icons.camera_alt_rounded, size: 16, color: AppColors.warning),
                           label: Text(
                             _isCapturingEvidence
                                 ? _t('eme_capturing')
                                 : _t('eme_photo_evidence'),
                             style: GoogleFonts.outfit(
-                              color: Colors.orange,
+                              color: AppColors.warning,
                               fontWeight: FontWeight.w800,
                               fontSize: 10,
                               letterSpacing: 1,
                             ),
                           ),
                           style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Colors.orange, width: 1.5),
+                            side: const BorderSide(color: AppColors.warning, width: 1.5),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             padding: const EdgeInsets.symmetric(vertical: 10),
                           ),

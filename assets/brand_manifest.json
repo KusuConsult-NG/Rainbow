@@ -39,7 +39,12 @@
     "ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-83.5x83.5@2x.png": "19edd54df2c8438e582ed9bc652e4682ee2457df2f56877207dd27278b6f3e9c"
   },
   "generator": "scripts/build_brand_assets.py",
-  "generator_sha256": "e9435ea1f15fafcad13eb0e148fd72e0761939a2ee4e0d063f55f0b40854eabd",
+  "generator_sha256": "9fd1ba51e30673e3ac06cb10991c406bf5dd585af0034bd9edbc3be790f0ed5b",
+  "ink": {
+    "emerald": "#0F6C32",
+    "gold": "#B99123",
+    "navy": "#0B234B"
+  },
   "master": "Plateau_Eye_Logo.png",
   "master_sha256": "613ad52a82720fc4665998688aa562d06cbcf5a425b12e059a7d26260019c3f7"
 }

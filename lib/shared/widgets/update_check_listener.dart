@@ -63,8 +63,8 @@ class _UpdateCheckListenerState extends ConsumerState<UpdateCheckListener> {
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                   colors: [
-                    Color(0xFF1E1E2F),
-                    Color(0xFF151522),
+                    AppColors.primary,
+                    AppColors.primaryDark,
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,

@@ -14,7 +14,7 @@ export default function NotFound() {
         alignItems: 'center',
         justifyContent: 'center',
         padding: 24,
-        background: '#F5F5F5',
+        background: '#F7F7F7',
         color: '#1A1A1A',
         fontFamily: 'var(--font-inter), system-ui, -apple-system, sans-serif',
         textAlign: 'center',

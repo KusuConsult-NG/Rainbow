@@ -162,7 +162,7 @@ export default function LiveFeedViewer({ alertId }: Props) {
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Radio size={16} color={status === 'LIVE' ? '#E31E24' : 'var(--text-muted)'} className={status === 'LIVE' ? 'animate-pulse' : ''} />
+          <Radio size={16} color={status === 'LIVE' ? '#B3261E' : 'var(--text-muted)'} className={status === 'LIVE' ? 'animate-pulse' : ''} />
           <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '1px', color: 'var(--text-primary)' }}>
             LIVE INTELLIGENCE STREAM
           </span>
@@ -172,8 +172,8 @@ export default function LiveFeedViewer({ alertId }: Props) {
             padding: '2px 8px',
             borderRadius: '12px',
             background: status === 'LIVE' ? 'rgba(239,68,68,0.2)' : status === 'CONNECTING' ? 'rgba(245,158,11,0.2)' : 'rgba(100,116,139,0.2)',
-            color: status === 'LIVE' ? '#E31E24' : status === 'CONNECTING' ? '#FF9800' : '#757575',
-            border: `1px solid ${status === 'LIVE' ? '#E31E24' : status === 'CONNECTING' ? '#FF9800' : '#616161'}`
+            color: status === 'LIVE' ? '#B3261E' : status === 'CONNECTING' ? '#7E6112' : '#757575',
+            border: `1px solid ${status === 'LIVE' ? '#B3261E' : status === 'CONNECTING' ? '#7E6112' : '#616161'}`
           }}>
             {status === 'LIVE' ? '🔴 BROADCASTING LIVE' : status === 'CONNECTING' ? '⚡ CONNECTING P2P' : status === 'DISCONNECTED' ? 'OFFLINE' : 'STANDBY'}
           </span>
@@ -188,7 +188,7 @@ export default function LiveFeedViewer({ alertId }: Props) {
               gap: '6px',
               padding: '6px 12px',
               borderRadius: '8px',
-              background: '#E31E24',
+              background: '#B3261E',
               color: 'white',
               border: 'none',
               fontSize: '10px',
@@ -252,12 +252,12 @@ export default function LiveFeedViewer({ alertId }: Props) {
           <div style={{ textAlign: 'center', padding: '24px', color: '#616161' }}>
             {status === 'CONNECTING' ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                <RefreshCw size={24} style={{ animation: 'spin 1s linear infinite', color: '#FF9800' }} />
-                <span style={{ fontSize: '11px', fontWeight: 700, color: '#FF9800' }}>Awaiting WebRTC P2P stream from field device...</span>
+                <RefreshCw size={24} style={{ animation: 'spin 1s linear infinite', color: '#7E6112' }} />
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#7E6112' }}>Awaiting WebRTC P2P stream from field device...</span>
               </div>
             ) : status === 'DISCONNECTED' ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                <VideoOff size={24} style={{ color: '#E31E24' }} />
+                <VideoOff size={24} style={{ color: '#B3261E' }} />
                 <span style={{ fontSize: '11px', color: '#757575' }}>Stream ended or field device offline</span>
               </div>
             ) : (
@@ -271,7 +271,7 @@ export default function LiveFeedViewer({ alertId }: Props) {
       </div>
 
       {error && (
-        <div style={{ marginTop: '8px', fontSize: '10px', color: '#E31E24', fontWeight: 600 }}>
+        <div style={{ marginTop: '8px', fontSize: '10px', color: '#B3261E', fontWeight: 600 }}>
           ⚠️ {error}
         </div>
       )}

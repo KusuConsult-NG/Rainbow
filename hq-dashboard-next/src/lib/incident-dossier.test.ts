@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BRAND } from './brand';
 
 import type { Alert } from '@/app/dashboard/types';
 import {
@@ -463,10 +464,19 @@ describe('incidentPopupHtml, as a whole', () => {
   it('keeps status and severity as literal colours, because they are concatenated', () => {
     // `${colour}22` builds a hex with an alpha suffix, and the same value goes
     // on a Leaflet div icon. A var() cannot do either, so these two stay
-    // literal — and are the app's palette spelled out.
-    expect(severityColour('CRITICAL')).toBe('#E31E24'); // AppColors.danger
-    expect(statusColour('RESOLVED')).toBe('#1B5E20');   // AppColors.success
-    expect(statusColour('PENDING')).toBe('#FF9800');    // AppColors.warning
+    // literal — but they come from BRAND rather than being typed in here.
+    //
+    // They used to be typed in, with the comment "AppColors.danger" beside a
+    // red the app has never had: E3-1E-24, the previous brand's. Asserting
+    // the literal is what let that stand, so the assertion now reads the same
+    // module the code does.
+    expect(severityColour('CRITICAL')).toBe(BRAND.danger);
+    expect(severityColour('HIGH')).toBe(BRAND.warning);
+    expect(severityColour('MEDIUM')).toBe(BRAND.navy);
+    expect(severityColour('LOW')).toBe(BRAND.emeraldDeep);
+    expect(statusColour('RESOLVED')).toBe(BRAND.emeraldLight);
+    expect(statusColour('PENDING')).toBe(BRAND.warning);
+    expect(statusColour('DURESS')).toBe(BRAND.danger);
   });
 
   it('says so when there is no description, instead of leaving a gap', () => {

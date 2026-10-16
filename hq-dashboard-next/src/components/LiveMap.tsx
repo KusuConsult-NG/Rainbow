@@ -395,15 +395,15 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
 
         if (cellAlerts.length === 0) continue;
 
-        let color = '#FFC107'; // Moderate
+        let color = '#7E6112'; // Moderate
         let riskLabel = 'MODERATE RISK CELL';
         let opacity = 0.15;
         if (cellAlerts.length >= 4) {
-          color = '#F44336'; // Critical
+          color = '#B3261E'; // Critical
           riskLabel = 'CRITICAL HOTSPOT CELL';
           opacity = 0.4;
         } else if (cellAlerts.length >= 2) {
-          color = '#FF9800'; // Elevated
+          color = '#7E6112'; // Elevated
           riskLabel = 'ELEVATED RISK CELL';
           opacity = 0.28;
         }
@@ -504,7 +504,7 @@ function approximateDossier(html: string, alert: Alert, where: IncidentLocation)
   return (
     '<div style="background:rgba(245,158,11,0.18);border:1px solid rgba(245,158,11,0.5);'
     + 'padding:6px 8px;border-radius:6px;margin-bottom:8px;font-size:10px;font-weight:800;'
-    + 'color:#b45309;line-height:1.35">'
+    + 'color:#7E6112;line-height:1.35">'
     + note
     + landmarkRow
     + '<br>Do not dispatch to this circle as an address.'
@@ -776,7 +776,7 @@ function drawApproximateArea(
 
     const latlngs = incidentTrack.map((p) => [p.lat, p.lng]);
     const line = L.polyline(latlngs, {
-      color: '#4527A0',
+      color: '#0B234B',
       weight: 4,
       opacity: 0.9,
       lineCap: 'round',
@@ -789,14 +789,14 @@ function drawApproximateArea(
       radius: 6,
       color: '#ffffff',
       weight: 2,
-      fillColor: '#4527A0',
+      fillColor: '#0B234B',
       fillOpacity: 1,
     }).bindTooltip('Route start', { direction: 'top' });
     const end = L.circleMarker(latlngs[latlngs.length - 1], {
       radius: 7,
       color: '#ffffff',
       weight: 2,
-      fillColor: '#E31E24',
+      fillColor: '#B3261E',
       fillOpacity: 1,
     }).bindTooltip('Last known position', { direction: 'top' });
 
@@ -821,7 +821,7 @@ function drawApproximateArea(
       const isOutOfBounds = agent.geo_integrity === 'OUT_OF_BOUNDS';
       const isCitizenSos = agent.mode === 'sos' || agent.status === 'EMERGENCY' || isDuress;
       
-      const color = isDuress || isOutOfBounds ? 'var(--duress)' : agent.status === 'BUSY' ? '#FFC107' : '#4CAF50';
+      const color = isDuress || isOutOfBounds ? 'var(--duress)' : agent.status === 'BUSY' ? '#7E6112' : '#0F6C32';
       const anim = isDuress || isOutOfBounds ? 'animation:pulse-ring 1.2s infinite;' : '';
 
       // 1. Draw pulsing target-radar icon for Citizen Distress signals
@@ -868,7 +868,7 @@ function drawApproximateArea(
           existingPolyline.setLatLngs(latlngs);
         } else {
           const polyline = L.polyline(latlngs, {
-            color: isDuress ? '#E31E24' : '#0277BD',
+            color: isDuress ? '#B3261E' : '#0B234B',
             weight: 3.5,
             opacity: 0.8,
             dashArray: '5, 8',
@@ -1053,13 +1053,13 @@ function drawApproximateArea(
         WebkitBackdropFilter: 'blur(8px)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '1.5px', color: theme === 'dark' ? '#F5F5F5' : '#1A1A1A' }}>
+          <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '1.5px', color: theme === 'dark' ? '#F7F7F7' : '#1A1A1A' }}>
             FORECASTING HUD
           </span>
           <button
             onClick={() => setShowRiskGrid(!showRiskGrid)}
             style={{
-              background: showRiskGrid ? 'var(--duress, #ff4d4d)' : (theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'),
+              background: showRiskGrid ? 'var(--duress, #B3261E)' : (theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'),
               color: showRiskGrid ? 'white' : (theme === 'dark' ? '#E0E0E0' : '#616161'),
               border: 'none',
               borderRadius: '8px',
@@ -1080,15 +1080,15 @@ function drawApproximateArea(
               SPATIAL-TEMPORAL RISK DENSITY:
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', background: '#F44336', borderRadius: '3px', opacity: 0.8 }} />
+              <div style={{ width: '12px', height: '12px', background: '#B3261E', borderRadius: '3px', opacity: 0.8 }} />
               <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>Critical Hotspot (4+ alerts)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', background: '#FF9800', borderRadius: '3px', opacity: 0.8 }} />
+              <div style={{ width: '12px', height: '12px', background: '#7E6112', borderRadius: '3px', opacity: 0.8 }} />
               <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>Elevated Risk (2-3 alerts)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', background: '#FFC107', borderRadius: '3px', opacity: 0.8 }} />
+              <div style={{ width: '12px', height: '12px', background: '#7E6112', borderRadius: '3px', opacity: 0.8 }} />
               <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>Moderate Risk (1 alert)</span>
             </div>
           </div>

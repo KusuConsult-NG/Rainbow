@@ -312,7 +312,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     duration: const Duration(seconds: 2),
-                    backgroundColor: const Color(0xFF0F172A),
+                    backgroundColor: AppColors.primaryDark,
                     content: Text(
                       'TACTICAL AUDIO MODE: ${TtsService.instance.outputMode == AudioOutputMode.speaker ? "LOUDSPEAKER 🔊" : "STEALTH EARPIECE 🎧"}',
                       style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold),
@@ -674,8 +674,8 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: criticalCount > 0
-                    ? [const Color(0xFF3B0000), const Color(0xFF1F0000)]
-                    : [const Color(0xFF0F172A), const Color(0xFF020617)],
+                    ? [AppColors.danger, AppColors.dangerDeep]
+                    : [AppColors.primary, AppColors.primaryDark],
               ),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
@@ -2266,7 +2266,7 @@ class _DispatchDialogState extends State<_DispatchDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: AppColors.primaryDark,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
         side: const BorderSide(color: AppColors.primary, width: 1.5),
@@ -2296,14 +2296,14 @@ class _DispatchDialogState extends State<_DispatchDialog> {
                     // need different actions: nobody is posted to this
                     // command, or this account has no posting at all.
                     emptyRosterReason(_commander),
-                    style: GoogleFonts.inter(color: const Color(0xFF94A3B8), fontSize: 12),
+                    style: GoogleFonts.inter(color: AppColors.onPrimaryMuted, fontSize: 12),
                   )
                 : Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         'Select active field officers to assign to this mission squad:',
-                        style: GoogleFonts.inter(color: const Color(0xFFE2E8F0), fontSize: 11),
+                        style: GoogleFonts.inter(color: AppColors.onPrimarySoft, fontSize: 11),
                       ),
                       const SizedBox(height: 12),
                       ConstrainedBox(
@@ -2333,7 +2333,7 @@ class _DispatchDialogState extends State<_DispatchDialog> {
                                 // `JOS` is not one of Plateau's seventeen
                                 // LGAs. See place_label.dart.
                                 responderPosting(r),
-                                style: GoogleFonts.inter(fontSize: 10, color: const Color(0xFF94A3B8)),
+                                style: GoogleFonts.inter(fontSize: 10, color: AppColors.onPrimaryMuted),
                               ),
                               onChanged: (val) {
                                 setState(() {

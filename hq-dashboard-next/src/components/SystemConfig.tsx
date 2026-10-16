@@ -204,8 +204,8 @@ export default function SystemConfig() {
   ) => {
     const colours = {
       ok: { bg: 'var(--success-dim)', line: 'var(--success)', text: 'var(--success)' },
-      bad: { bg: 'rgba(239,68,68,0.1)', line: '#E31E24', text: '#E31E24' },
-      warn: { bg: 'rgba(245,158,11,0.12)', line: '#F59E0B', text: '#F59E0B' },
+      bad: { bg: 'rgba(239,68,68,0.1)', line: '#B3261E', text: '#B3261E' },
+      warn: { bg: 'rgba(245,158,11,0.12)', line: '#7E6112', text: '#7E6112' },
     }[tone];
     return (
       <div style={{

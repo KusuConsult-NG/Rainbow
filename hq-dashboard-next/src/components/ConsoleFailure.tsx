@@ -36,7 +36,7 @@ export interface ConsoleFailureProps {
   onRetry?: () => void;
 }
 
-const DURESS = '#E31E24';
+const DURESS = '#B3261E';
 
 export default function ConsoleFailure({ scope, error, onRetry }: ConsoleFailureProps) {
   return (
@@ -49,7 +49,7 @@ export default function ConsoleFailure({ scope, error, onRetry }: ConsoleFailure
         alignItems: 'center',
         justifyContent: 'center',
         padding: 24,
-        background: '#F5F5F5',
+        background: '#F7F7F7',
         color: '#1A1A1A',
         fontFamily: 'var(--font-inter), system-ui, -apple-system, sans-serif',
       }}
@@ -117,7 +117,7 @@ export default function ConsoleFailure({ scope, error, onRetry }: ConsoleFailure
               padding: '11px 18px',
               borderRadius: 10,
               border: '1px solid rgba(148, 163, 184, 0.5)',
-              background: '#F5F5F5',
+              background: '#F7F7F7',
               color: '#1A1A1A',
               fontSize: 13,
               fontWeight: 700,

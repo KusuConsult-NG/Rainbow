@@ -82,7 +82,11 @@ NAME = label.group(1)
 failures: list[str] = []
 scanned = 0
 
-sources = [p for p in (REPO / 'lib').rglob('*.dart')]
+# The repository's own front door, which people read too. `README.md` opened
+# with "# Operation Rainbow" for the whole rebrand, because this check looked
+# only at strings a person sees INSIDE the app.
+sources = [REPO / 'README.md']
+sources += [p for p in (REPO / 'lib').rglob('*.dart')]
 console = REPO / 'hq-dashboard-next' / 'src'
 if console.is_dir():
     sources += [p for p in console.rglob('*.ts')] + [p for p in console.rglob('*.tsx')]

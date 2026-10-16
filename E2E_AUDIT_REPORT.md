@@ -7396,3 +7396,97 @@ The lesson is narrower and more useful than "add timeouts": **a guard that
 only catches throws is not a bound, and a check that accepts one cannot tell
 the difference.** The gate I wrote to stop this defect returning had been
 written to accept the form of it I had left in.
+
+## The palette was right and almost nothing used it
+
+> *"the color of the entire app doesn't match the colors of the logo"*
+
+`lib/core/theme/app_colors.dart` declared Oxford Navy `#0B234B`, Highland
+Emerald `#0F6C32` and Warm Gold `#B99123`. Counted off the master logo, those
+are **exactly** its three ink colours — ring and wordmark, state silhouette,
+inner ring. The palette file was never the problem.
+
+What used it was. Every one of these was written straight into a widget or a
+component, where changing the palette could not reach it:
+
+| Where | What it was |
+|---|---|
+| The citizen SOS button | a gradient from `#FF1744` to `#880E4F` — crimson ending in magenta |
+| The voice-report button beside it | `#3F51B5` to `#00BCD4`, the only cyan in the product |
+| All twelve report categories | a hue each: Fire orange, Police brutality cobalt, Child abuse purple, Cattle rustling brown, Flood sky, Public property teal |
+| The responder dashboard | Tailwind slate `#0F172A`, `#94A3B8`, `#E2E8F0`, from an older console |
+| The HQ console | 57 distinct colours, 35 off-brand |
+| `incident-dossier.ts` | `#E31E24` in 37 places — the **previous brand's** red |
+
+The last one is worth dwelling on. `severityColour('CRITICAL')` returned
+`#E31E24` with the comment `// AppColors.danger`, and its own test asserted it
+with the comment *"these two stay literal — and are the app's palette spelled
+out"*. `AppColors.danger` was `#D32F2F`. It was never that red. A test, a
+comment and a function all agreed with each other and none of them agreed with
+the app.
+
+`check_palette_parity.py` passed through all of it, correctly: it compares two
+token files, and none of this was in a token file.
+
+### What changed
+
+**One red.** Red stays — this is an emergency app and the convention is a
+safety feature, not a style choice — but it is now one deliberate red,
+`#B3261E`, deep enough to sit beside Oxford Navy instead of vibrating against
+it, at 6.5:1 under white text. The app had four.
+
+**Categories are coloured by priority, not by topic.** Red for an emergency,
+gold for high, navy for medium, emerald for the two everyday reports — the
+same emerald as the silhouette in the mark, and the same split the database
+enforces when it decides whether to page anyone. The colour now says something
+true, and the priority word sits beside it, because a colour that is the only
+thing saying "emergency" says it to nobody using a screen reader.
+
+**The console got one source too.** `src/lib/brand.ts`, for the places a CSS
+variable cannot reach — a Leaflet polygon style, a hex with an alpha suffix.
+`incident-dossier.ts` reads it, and its test asserts against it rather than
+against a literal, which is what let the previous brand's red stand.
+
+**Six agencies, six brand values.** They need to be told apart on a shared
+board, so they take navy, mid-navy, red, emerald, grey and gold — far apart in
+both hue and lightness, all inside the mark. Plateau Eye's own unit was still
+badged `OR-TU 🌈`; it is `PE-TU 👁️`.
+
+### Two things the recolour exposed
+
+**The home screen was `#C1C7CE`.** Not warm white — a cool grey, on the first
+screen a citizen opens. The cause is a gradient rule worth writing down: its
+stops were `primary.withValues(alpha: 0.03)` and an opaque `background`.
+Lerping a 3%-alpha colour to an opaque one runs the midpoint through roughly
+**50% alpha and halfway to navy** — a muddy blue-grey — and at `radius: 1.5`
+that midpoint is most of the screen. The same mistake was on the live SOS
+screen, where the pulse washed the whole page pink-grey on every beat. Both
+stops are opaque now. **A gradient's stops must be all opaque or all
+translucent, never one of each.**
+
+Nothing could have caught that: it is not an off-brand colour anywhere in the
+source. It is two in-brand colours combined in a way that produces a third.
+Only looking at the rendered screen finds it, which is what finally did.
+
+**`README.md` still opened with `# Operation Rainbow`.** The brand-name check
+reads strings a person sees *in the app*, so it passed over the project's own
+front door.
+
+### Coverage
+
+`scripts/check_brand_colours.py`, 10 mutations, all caught. It holds the three
+anchors to the logo's own ink — `build_brand_assets.py` counts it off
+`Plateau_Eye_Logo.png` and records it in `assets/brand_manifest.json`, so the
+check needs no image library — then requires the Flutter palette, `brand.ts`
+and `globals.css` to agree with it and with each other; refuses a colour
+literal anywhere in `lib/` outside the palette file; refuses a Material palette
+colour beyond white, black and transparent; refuses a colour in the console
+that the palette does not declare; and **measures** eleven text-on-fill pairs
+rather than assuming them. That last one caught a real failure while this was
+being written: the brand gold at `#8A6A14` is 4.3:1 on its own tint, so the
+warning tone is `#7E6112`.
+
+A colour sweep that cannot tell code from prose rewrote one of these very
+explanations into nonsense mid-task — *"`AppColors.danger` was `#B3261E` and is
+now `#B3261E`; it was never `#B3261E`"* — which is why the check blanks
+comments before reading, and why `brand.ts` spells the old red with dashes.

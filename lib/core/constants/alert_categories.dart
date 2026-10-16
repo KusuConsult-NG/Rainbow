@@ -64,14 +64,30 @@ class AlertCategoryInfo {
 
 /// Documentation for this public member.
 
+// COLOURED BY PRIORITY, NOT BY TOPIC.
+//
+// Each category used to carry a hue of its own — Fire orange, Police
+// brutality cobalt, Child abuse purple, Cattle rustling brown, Flood sky,
+// Public property teal. Twelve hues, none of them in the Plateau Eye mark,
+// written into this file where no palette change could reach them. A citizen
+// scrolling the list saw a paint chart.
+//
+// Now the colour says something true instead: it is the priority. Red is an
+// emergency, gold is high, navy is medium, emerald is one of the two everyday
+// reports — the same emerald as the state silhouette in the logo, and the
+// same split the database enforces when it decides whether to page anyone.
+//
+// The priority word is on every card beside the colour, because a colour that
+// is the only thing saying "this is an emergency" says it to nobody using a
+// screen reader, and to nobody who cannot tell these hues apart.
 const List<AlertCategoryInfo> alertCategories = [
   AlertCategoryInfo(
     category: AlertCategory.lifeThreatening,
     label: 'Kidnap',
     emoji: '🟥',
     priority: 'CRITICAL',
-    color: AppColors.primary,
-    bg: Color(0xFFFFDAD6),
+    color: AppColors.danger,
+    bg: AppColors.dangerTint,
     icon: Icons.person_off_rounded,
     subTypes: ['Immediate Abduction', 'Held Hostage', 'Attempted Kidnap'],
   ),
@@ -80,8 +96,8 @@ const List<AlertCategoryInfo> alertCategories = [
     label: 'Fire',
     emoji: '🔥',
     priority: 'CRITICAL',
-    color: Color(0xFFE65100),
-    bg: Color(0xFFFFE0B2),
+    color: AppColors.danger,
+    bg: AppColors.dangerTint,
     icon: Icons.local_fire_department_rounded,
     subTypes: ['Building Fire', 'Bush Fire', 'Vehicle Fire'],
   ),
@@ -90,8 +106,8 @@ const List<AlertCategoryInfo> alertCategories = [
     label: 'Drug abuse',
     emoji: '💊',
     priority: 'MEDIUM',
-    color: Color(0xFFF57F17),
-    bg: Color(0xFFFFF9C4),
+    color: AppColors.primary,
+    bg: AppColors.navyTint,
     icon: Icons.medication_liquid_rounded,
     subTypes: ['Public Drug Use', 'Drug Distribution', 'Overdose'],
   ),
@@ -100,8 +116,8 @@ const List<AlertCategoryInfo> alertCategories = [
     label: 'Police brutality',
     emoji: '👮',
     priority: 'HIGH',
-    color: Color(0xFF0D47A1),
-    bg: Color(0xFFE3F2FD),
+    color: AppColors.warning,
+    bg: AppColors.goldTint,
     icon: Icons.local_police_rounded,
     subTypes: ['Physical Assault', 'Extortion', 'Unlawful Arrest'],
   ),
@@ -110,8 +126,8 @@ const List<AlertCategoryInfo> alertCategories = [
     label: 'Flood',
     emoji: '🌊',
     priority: 'MEDIUM',
-    color: Color(0xFF0288D1),
-    bg: Color(0xFFE1F5FE),
+    color: AppColors.primary,
+    bg: AppColors.navyTint,
     icon: Icons.water_damage_rounded,
     subTypes: ['Flash Flood', 'Blocked Drainage', 'Submerged Property'],
   ),
@@ -120,8 +136,8 @@ const List<AlertCategoryInfo> alertCategories = [
     label: 'Cyber crime',
     emoji: '💻',
     priority: 'MEDIUM',
-    color: Color(0xFF1B5E20),
-    bg: Color(0xFFE8F5E9),
+    color: AppColors.primary,
+    bg: AppColors.navyTint,
     icon: Icons.computer_rounded,
     subTypes: ['Online Fraud', 'Identity Theft', 'Blackmail'],
   ),
@@ -130,8 +146,8 @@ const List<AlertCategoryInfo> alertCategories = [
     label: 'Child abuse',
     emoji: '🧒',
     priority: 'CRITICAL',
-    color: Color(0xFF6A1B9A),
-    bg: Color(0xFFF3E5F5),
+    color: AppColors.danger,
+    bg: AppColors.dangerTint,
     icon: Icons.child_care_rounded,
     subTypes: ['Physical Abuse', 'Neglect', 'Labor'],
   ),
@@ -140,8 +156,8 @@ const List<AlertCategoryInfo> alertCategories = [
     label: 'Domestic violence',
     emoji: '🏠',
     priority: 'HIGH',
-    color: Color(0xFFC2185B),
-    bg: Color(0xFFFCE4EC),
+    color: AppColors.warning,
+    bg: AppColors.goldTint,
     icon: Icons.family_restroom_rounded,
     subTypes: ['Physical Violence', 'Threats', 'Trapped'],
   ),
@@ -150,8 +166,8 @@ const List<AlertCategoryInfo> alertCategories = [
     label: 'Cattle rustling',
     emoji: '🐄',
     priority: 'HIGH',
-    color: Color(0xFF4E342E),
-    bg: Color(0xFFEFEBE9),
+    color: AppColors.warning,
+    bg: AppColors.goldTint,
     icon: Icons.agriculture_rounded,
     subTypes: ['Armed Rustling', 'Missing Herd', 'Trespassing'],
   ),
@@ -160,8 +176,8 @@ const List<AlertCategoryInfo> alertCategories = [
     label: 'Community attack',
     emoji: '⚔️',
     priority: 'CRITICAL',
-    color: Color(0xFFB71C1C),
-    bg: Color(0xFFFFEBEE),
+    color: AppColors.danger,
+    bg: AppColors.dangerTint,
     icon: Icons.warning_rounded,
     subTypes: ['Armed Invasion', 'Riot', 'Vandalism'],
   ),
@@ -185,8 +201,8 @@ const List<AlertCategoryInfo> alertCategories = [
     label: 'Public property',
     emoji: '🏛️',
     priority: 'LOW',
-    color: Color(0xFF00695C),
-    bg: Color(0xFFE0F2F1),
+    color: AppColors.emeraldDeep,
+    bg: AppColors.emeraldTint,
     icon: Icons.account_balance_rounded,
     subTypes: [
       'Abandoned or derelict',
@@ -202,8 +218,8 @@ const List<AlertCategoryInfo> alertCategories = [
     label: 'Public service',
     emoji: '🛠️',
     priority: 'LOW',
-    color: Color(0xFF4E342E),
-    bg: Color(0xFFEFEBE9),
+    color: AppColors.emeraldDeep,
+    bg: AppColors.emeraldTint,
     icon: Icons.handyman_rounded,
     subTypes: [
       'No water supply',

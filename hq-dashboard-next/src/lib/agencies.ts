@@ -84,12 +84,12 @@ export const AGENCY_NAMES: Record<AgencyCode, string> = {
  * mean one agency on the portal header and another in the escalation menu.
  */
 export const AGENCY_CHROME: Record<AgencyCode, { color: string; icon: string }> = {
-  POLICE: { color: '#3b82f6', icon: '🚔' },
-  ARMY:   { color: '#22c55e', icon: '🪖' },
-  DSS:    { color: '#8b5cf6', icon: '🕵️' },
-  NSCDC:  { color: '#f59e0b', icon: '🛡️' },
-  FRSC:   { color: '#ef4444', icon: '🚨' },
-  OPSH:   { color: '#14b8a6', icon: '🛰️' },
+  POLICE: { color: '#0B234B', icon: '🚔' },
+  ARMY:   { color: '#0F6C32', icon: '🪖' },
+  DSS:    { color: '#0B234B', icon: '🕵️' },
+  NSCDC:  { color: '#7E6112', icon: '🛡️' },
+  FRSC:   { color: '#B3261E', icon: '🚨' },
+  OPSH:   { color: '#0F6C32', icon: '🛰️' },
 };
 
 export interface AgencyDescriptor {

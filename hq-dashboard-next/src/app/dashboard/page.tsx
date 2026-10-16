@@ -1569,8 +1569,8 @@ export default function DashboardPage() {
                   boxShadow: '0 0 15px rgba(245, 158, 11, 0.2)'
                 }}
               >
-                <Radio size={13} color="#FF9800" className="spin-slow" />
-                <span style={{ fontSize: 10, fontWeight: 900, color: '#FF9800' }}>{smsFallbackCount} SMS</span>
+                <Radio size={13} color="#7E6112" className="spin-slow" />
+                <span style={{ fontSize: 10, fontWeight: 900, color: '#7E6112' }}>{smsFallbackCount} SMS</span>
               </button>
             )}
 
@@ -1663,7 +1663,7 @@ export default function DashboardPage() {
                 value={filterStatus}
                 options={statusSelectOptions}
                 onChange={v => setFilterStatus(v)}
-                accentColor="#FF9800"
+                accentColor="#7E6112"
                 maxWidth={160}
               />
               
@@ -1678,7 +1678,7 @@ export default function DashboardPage() {
                   setFilterWard('ALL');
                   setFilterPu('ALL');
                 }}
-                accentColor="#1B5E20"
+                accentColor="#0B5027"
                 maxWidth={180}
                 icon={<MapPin size={13} />}
                 placeholder="LGA"
@@ -1724,7 +1724,7 @@ export default function DashboardPage() {
                     }
                   }
                 }}
-                accentColor="#FF9800"
+                accentColor="#7E6112"
                 maxWidth={210}
                 placeholder="BEAT (PU)"
                 searchable
@@ -1737,7 +1737,7 @@ export default function DashboardPage() {
                 value={filterTier}
                 options={tierSelectOptions}
                 onChange={v => setFilterTier(v)}
-                accentColor="#38bdf8"
+                accentColor="#0B234B"
                 maxWidth={140}
               />
             </div>
@@ -2285,7 +2285,7 @@ export default function DashboardPage() {
                           display: 'flex', gap: 8, alignItems: 'flex-start',
                           padding: 10, borderRadius: 8,
                           background: 'rgba(245,158,11,0.12)',
-                          border: '1px solid #F59E0B', color: '#F59E0B',
+                          border: '1px solid #7E6112', color: '#7E6112',
                         }}>
                           <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
                           <div style={{ fontSize: 11 }}>
@@ -2936,10 +2936,10 @@ Respond ONLY with a JSON object with this exact shape:
           alignItems: 'center',
           justifyContent: 'space-between'
         }}>
-          <span style={{ fontSize: 10, fontWeight: 900, color: '#FF9800', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 10, fontWeight: 900, color: '#7E6112', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
             📡 SMS FALLBACK REPORT (OFFLINE CITIZEN)
           </span>
-          <span style={{ fontSize: 9, fontWeight: 700, color: '#fde68a', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: '#F6ECD2', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4 }}>
             TERMII CPaaS SMS GATEWAY
           </span>
         </div>
@@ -2959,7 +2959,7 @@ Respond ONLY with a JSON object with this exact shape:
           <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--accent)', letterSpacing: 0.8, display: 'flex', alignItems: 'center', gap: 6 }}>
             👥 HIGH-SCALE CLUSTER: {alert.witness_count.toLocaleString()} WITNESS REPORTS AGGREGATED
           </span>
-          <span style={{ fontSize: 9, fontWeight: 800, color: '#c7d2fe', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4 }}>
+          <span style={{ fontSize: 9, fontWeight: 800, color: '#E6EAF1', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4 }}>
             AUTO-CLUSTERED
           </span>
         </div>
@@ -3414,8 +3414,8 @@ Respond ONLY with a JSON object with this exact shape:
                     name: a.displayName || a.name || `Unit ${(a.user_id || a.id).substring(0, 6)}`,
                     badge: 'PATROL UNIT',
                     agencyBadge: '🌈',
-                    agencyShort: 'OR-TU',
-                    agencyColor: '#6366f1',
+                    agencyShort: 'PE-TU',
+                    agencyColor: '#0B234B',
                     status: a.status || 'PATROLLING',
                     isLive: true,
                   }));

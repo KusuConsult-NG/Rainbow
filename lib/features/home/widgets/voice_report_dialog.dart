@@ -436,7 +436,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                               shape: BoxShape.circle,
                               gradient: LinearGradient(
                                 colors: _isListening
-                                    ? [const Color(0xFFFF1744), const Color(0xFFC2185B)]
+                                    ? [AppColors.danger, AppColors.dangerDeep]
                                     : [AppColors.textDim, AppColors.textSecondary],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,

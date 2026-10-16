@@ -634,7 +634,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                       onTap: () => setState(() => _attachedFiles.remove(f)),
                       child: const Icon(
                         Icons.close_rounded,
-                        color: Colors.redAccent,
+                        color: AppColors.danger,
                         size: 18,
                       ),
                     ),
@@ -725,7 +725,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                           style: GoogleFonts.outfit(
                             fontSize: 12,
                             fontWeight: FontWeight.w900,
-                            color: Colors.redAccent,
+                            color: AppColors.danger,
                           ),
                         ),
                       ),
