@@ -188,8 +188,13 @@ class RainbowAppBar extends StatelessWidget implements PreferredSizeWidget {
                             subtitle!.toUpperCase(),
                             maxLines: 1,
                             softWrap: false,
+                            // textDim (#9E9E9E) reaches only 2.56:1 on the
+                            // warm white this bar is painted in, at 9px with
+                            // 1.5 letter-spacing — the smallest text in the
+                            // app, on fourteen screens. textSecondary is the
+                            // same grey family at 5.92:1.
                             style: GoogleFonts.outfit(
-                              color: AppColors.textDim,
+                              color: AppColors.textSecondary,
                               fontWeight: FontWeight.w800,
                               fontSize: 9,
                               letterSpacing: 1.5,

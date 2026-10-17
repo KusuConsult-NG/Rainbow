@@ -213,7 +213,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             builder: (context) => IconButton(
                                     tooltip: 'Open the menu',
               icon:
-                  const Icon(Icons.menu_rounded, color: AppColors.onBackground),
+                  const Icon(Icons.menu_rounded, color: AppColors.onPrimary),
               onPressed: () {
                 var state = Scaffold.maybeOf(context);
                 if (state != null && !state.hasDrawer) {
@@ -246,10 +246,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
               child: Container(
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.08),
+                  color: AppColors.onPrimary.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: AppColors.primary.withValues(alpha: 0.15),
+                    color: AppColors.onPrimary.withValues(alpha: 0.38),
                     width: 1.5,
                   ),
                 ),
@@ -266,14 +266,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           style: GoogleFonts.outfit(
                             fontSize: 10,
                             fontWeight: FontWeight.w900,
-                            color: AppColors.primary,
+                            color: AppColors.onPrimary,
                             letterSpacing: 0.5,
                           ),
                         ),
                         const SizedBox(width: 4),
                         const Icon(
                           Icons.keyboard_arrow_down_rounded,
-                          color: AppColors.primary,
+                          color: AppColors.onPrimary,
                           size: 14,
                         ),
                       ],
@@ -314,7 +314,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               tooltip: 'Notifications',
               icon: const Icon(
                 Icons.notifications_none_rounded,
-                color: AppColors.textSecondary,
+                color: AppColors.onPrimary,
               ),
               onPressed: () {
                 unawaited(HapticFeedback.lightImpact());

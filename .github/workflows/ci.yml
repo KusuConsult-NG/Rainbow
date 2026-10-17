@@ -985,6 +985,40 @@ jobs:
       - name: Assert every colour traces back to the logo
         run: python3 scripts/check_brand_colours.py
 
+      # Reported from a handset, first run: "the colors of the menu on the top
+      # left where the SOS button is are hidden. all the features on the top
+      # are swallowed by the deep-blue color". The app bar is Oxford Navy and
+      # the home screen painted AppColors.onBackground (#1A1A1A) and
+      # AppColors.primary ON it — 1.12:1 and 1.00:1. It was legible when
+      # `primary` was a bright red; the rebrand made the bar navy and nothing
+      # re-checked what was being drawn on it. check_brand_colours.py holds
+      # the PALETTE's declared pairs and has no view on what a widget paints
+      # on which surface, which is where this lived.
+      #
+      # The first version of this gate counted "3 AppBar(...) blocks" and said
+      # "everything on every app bar can be seen" — having never read
+      # RainbowAppBar, which is not an AppBar at all but a Container, and which
+      # paints the top of FOURTEEN of the seventeen screens. It now measures
+      # every class implementing PreferredSizeWidget too, and fails outright if
+      # it finds none, so that blind spot cannot reopen silently. Extending it
+      # found one more real fault: the 9px subtitle on all fourteen of those
+      # screens at 2.56:1.
+      - name: Assert nothing on a top bar is invisible
+        run: python3 scripts/check_nothing_is_painted_invisible.py
+
+      # Reported from the same handset, same run: "No splash screens, no auth
+      # page, no input for phone number auth, no OTP confirmation input page,
+      # why? i just installed and i was taken to the report page." The router
+      # was innocent — `computeRedirect` sends an unauthenticated user to
+      # /login from anywhere and a test has pinned that since T-39. The user
+      # was not unauthenticated: `android:allowBackup` was unset, which Android
+      # reads as TRUE, so the SharedPreferences holding the Supabase session
+      # (and the duress PIN) were eligible to be backed up and restored into
+      # the next install. 767 Flutter tests and 35 gates read Dart, SQL and
+      # TypeScript; this one lived in four words of XML that nothing read.
+      - name: Assert a reinstall cannot restore the previous session
+        run: python3 scripts/check_a_reinstall_cannot_restore_a_session.py
+
       # Reported from a real handset once the blank page became legible:
       # "Failed while drawing the screen. RealtimeSubscribeException(... Failed
       # host lookup ... errno = 7)". `AsyncValue.value` RETHROWS on an error

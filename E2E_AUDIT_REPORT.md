@@ -8227,3 +8227,221 @@ SQL editor an hour earlier, so it is not short of access to the project; the
 CLI's token is a different identity from the browser session, or its
 organisation role is below what a function deploy needs. Neither is knowable
 from here. The bundle routes around it; it does not explain it.
+
+---
+
+### T-61. A reinstall handed the new install the old install's session
+
+Reported from the handset, immediately after installing a fresh APK:
+
+> No splash screens, no auth page, no input for phone number auth, no OTP
+> confirmation input page, why? i just installed and i was taken to the report
+> page.
+
+#### What it was not
+
+The router. `computeRedirect` in `lib/core/router/app_router.dart` reads:
+
+```dart
+if (!isAuthenticated) {
+  return loggingIn ? null : AppRoutes.login;
+}
+```
+
+and `test/router_redirect_test.dart` has pinned exactly this case —
+`redirect(isAuthenticated: false, location: AppRoutes.home)` must return
+`/login` — since T-39. There is no debug bypass, no demo account, no
+`kDebugMode` branch around auth anywhere in `lib/`; the one `grep` hit for
+"demo bypass" is a comment in `auth_service.dart` explaining that there isn't
+one. The splash is `initialLocation` and holds the app for 3.2 seconds
+(`4 × 800ms`) before `splashFinishedProvider` goes true.
+
+So the user was not unauthenticated. They were signed in, and the app did
+exactly what it should do for a signed-in, onboarded citizen: show them the
+home screen with the SOS button on it — the "report page".
+
+#### What it was
+
+`android/app/src/main/AndroidManifest.xml` did not set
+`android:allowBackup`, and **Android reads an absent `allowBackup` as
+`true`**. `supabase_flutter` persists the session in `SharedPreferences`.
+Android was therefore free to back those preferences up and restore them into
+the next install of the same package id.
+
+For this app that is not a convenience bug. The same `SharedPreferences` holds
+the duress PIN and `hasOnboarded`; the same backup set follows the package id
+onto a *different handset* through device-to-device transfer. "The previous
+owner's session is restored from the cloud" is the threat model inverted.
+
+#### The fix
+
+```xml
+<application
+    android:label="Plateau Eye"
+    android:icon="@mipmap/ic_launcher"
+    android:allowBackup="false"
+    android:fullBackupContent="@xml/backup_rules"
+    android:dataExtractionRules="@xml/data_extraction_rules">
+```
+
+`allowBackup="false"` is the whole fix. The two rules files —
+`res/xml/backup_rules.xml` for Android 11 and below,
+`res/xml/data_extraction_rules.xml` for Android 12+ — exist so that setting
+`allowBackup` back to `true` later cannot quietly re-open it. Both exclude
+every storage domain (`root`, `file`, `database`, `sharedpref`, `external`),
+and the Android 12+ file excludes them in **both** `<cloud-backup>` and
+`<device-transfer>`: a rules file that stops the cloud but not D2D leaves the
+session walking onto the next phone.
+
+#### The gate
+
+`scripts/check_a_reinstall_cannot_restore_a_session.py` parses the manifest
+and both rules files and proves four things: `allowBackup` is `"false"`; both
+rules attributes are present; both referenced files exist and parse; every
+domain is excluded in `<full-backup-content>`, `<cloud-backup>` and
+`<device-transfer>`. Six mutations, all caught:
+
+| mutation | caught as |
+|---|---|
+| `allowBackup` attribute deleted (the shipped state) | "unset… Android reads an absent allowBackup as TRUE" |
+| `allowBackup="true"` | `is "true", must be "false"` |
+| `dataExtractionRules` attribute deleted | "nothing constrains what Android 12+ copies" |
+| `sharedpref` exclude removed from `backup_rules.xml` | "does not exclude sharedpref" |
+| `<device-transfer>` section removed | "device-to-device transfer is then unconstrained" |
+| `fullBackupContent` pointed at a missing file | "points at …which does not exist" |
+
+#### What is honestly still unproven
+
+**That auto-backup is the mechanism that bit this particular tester.** I
+cannot reproduce it from here — there is no Android device in this
+environment, and the fault is in platform behaviour, not in code a test can
+drive. Two other explanations fit the same symptom:
+
+1. The install was an **in-place upgrade**, not a reinstall. An upgrade keeps
+   `SharedPreferences` outright, no backup involved, and that is correct
+   behaviour — an app update must not sign everybody out.
+   `docs/BUILDING_THE_APK.md` tells the operator to run
+   `adb uninstall com.RainbowEwer.RainbowEwer || true` first, and the `|| true`
+   means a failure there is silent. The package id in the doc does match
+   `android/app/build.gradle.kts`, so it should have worked — but "should have"
+   is not "did". `adb shell pm list packages | grep -i rainbow` settles it.
+2. `adb install` does not reliably trigger Android's restore-at-install path;
+   it is most reliable through the Play Store and during device setup. So even
+   with `allowBackup` true, a sideloaded install may not have restored
+   anything.
+
+Either way `allowBackup="false"` is the right setting for an app holding a
+duress PIN, and the gate is worth having on its own terms. What should not be
+claimed is that it is *the* explanation for this report. The next fresh
+install on a wiped package will say.
+
+---
+
+### T-62. The top bar was painted navy on navy
+
+From the same message, the same run:
+
+> the colors of the menu on the top left where the SOS button is are hidden.
+> all the features on the top are swallowed by the deep-blue color
+
+#### What was on the bar
+
+`appBarTheme.backgroundColor` is `AppColors.primary` — Oxford Navy,
+`#0B234B`. On it, `lib/features/home/home_screen.dart` painted:
+
+| what | colour | contrast |
+|---|---|---|
+| the menu button | `AppColors.onBackground` `#1A1A1A` | **1.12:1** |
+| the language chip's fill | `AppColors.primary` @ 0.08 | **1.00:1** |
+| the language chip's border | `AppColors.primary` @ 0.15 | **1.00:1** |
+| the language label | `AppColors.primary` | **1.00:1** |
+| the chevron | `AppColors.primary` | **1.00:1** |
+| the notifications bell | `AppColors.textSecondary` `#616161` | **2.50:1** |
+
+The language switcher was *literally* invisible — navy ink on a navy bar —
+and the menu button and the bell were close to it. The user's wording was
+precise: swallowed.
+
+#### Why it was ever right
+
+`git log -L` on the palette shows `primary` used to be `#E31E24`, a bright
+red. Dark grey on red is poor but legible, and navy-on-red is fine. Commit
+`21536cb`, the Plateau Eye rebrand, made the bar navy. Nothing re-checked
+what was being drawn on it, because nothing could: `onBackground` is the
+colour for content on the **warm white screen**, and it kept its name while
+the surface beneath it changed colour.
+
+`check_palette_parity.py` and `check_brand_colours.py` both passed throughout.
+They hold every declared colour to the logo and check the contrast of the
+pairs **the palette declares**. Neither has any view on which colour a widget
+paints on which surface, and that is exactly where this lived.
+
+#### The fix
+
+All six moved to `AppColors.onPrimary` (white, 15.48:1 on navy); the chip's
+fill went to white @ 0.12 (1.42:1 — a wash, which is what a fill should be)
+and its border to white @ 0.38 (3.41:1), so the control reads as a control
+rather than vanishing into the bar.
+
+#### The gate, and the gate's own blind spot
+
+`scripts/check_nothing_is_painted_invisible.py` composites every
+`color: AppColors.X` inside a top bar over that bar's background — alpha
+included, because a translucent foreground over its own hue is the most
+invisible of the lot — and holds content (icons, labels) to 3.0:1, the WCAG
+floor for icons and large text, and decoration (a `BoxDecoration` fill, a
+`Border`/`BorderSide`) to 1.05:1. The split matters: a deliberate wash sits at
+1.09:1 and a hairline at 1.26:1, both correct, and holding them to 3:1 would
+mean they were not washes — while 1.05 still catches the thing this gate is
+for, a border painted in exactly its background's colour at 1.00:1.
+
+**Three false positives, each found by running it rather than by reading it:**
+a `BoxDecoration` fill measured as content; a bar whose background is
+`Colors.transparent` measured against the theme's navy (the screen was
+right — the scaffold shows through, so the theme colour is the wrong
+comparison, and it is now reported as "not measured" rather than guessed at);
+and a `PopupMenuButton`'s `itemBuilder:` contents, which are lexically inside
+the `AppBar(...)` but render on the menu surface. The first attempt to excise
+that builder used a regex, matched too little, and left two correct menu
+colours being measured against the bar; it is now a balanced-bracket scan. The
+`rfind('BoxDecoration(')` heuristic that misclassified fills is now
+`open_calls()`, which walks the brackets and returns the actual enclosing call
+chain.
+
+**And then the gate's own overclaim.** Its first version printed:
+
+```
+OK: everything on every app bar can be seen.
+  * 3 AppBar(...) blocks, default background AppColors.primary
+```
+
+Three. `grep -c 'AppBar('` over `lib/` returns **seventeen**. Fourteen of
+those are `RainbowAppBar`, a shared widget which is not an `AppBar` at all —
+it is a `Container` with a `BoxDecoration` — so `(?<![A-Za-z0-9_])AppBar\(`
+never matched it, and the gate reported a clean sweep of "every app bar"
+having never read the widget that paints the top of fourteen of the
+seventeen screens. The same class of fault as T-60's blind spot: a check that
+looked at a fraction of its subject and announced a result for all of it.
+
+It now also walks every class that `implements PreferredSizeWidget`, takes the
+bar's surface from the fill of the widget `build()` returns, and **fails
+outright if it finds no such class at all** — so renaming the shared bar, or
+dropping that interface, cannot silently restore the blind spot.
+
+Extending it found one more real fault: the 9px, 1.5-letter-spaced subtitle
+in `RainbowAppBar`, `AppColors.textDim` `#9E9E9E` at **2.56:1** on warm white
+— the smallest text in the app, on fourteen screens. Moved to
+`AppColors.textSecondary` `#616161`, 5.92:1, the same grey family.
+
+Seven mutations, all caught: the menu icon back to `onBackground` (1.12:1);
+the bell back to `textSecondary` (2.50:1); the chip border back to `primary` @
+0.15 and the chip fill back to `primary` @ 0.12 (1.00:1 each, caught as
+decoration); the subtitle back to `textDim` (2.56:1); `RainbowAppBar`'s
+surface turned navy (seven findings at once); and `implements
+PreferredSizeWidget` removed from `RainbowAppBar` — caught by the
+no-custom-bar guard, which is the blind spot itself as a test.
+
+`textDim` is used in 111 other places in the app and is **not** changed here.
+Whether a 2.56:1 grey belongs in the palette at all is a palette-level
+question for the brand, not something to alter silently across a hundred
+screens while fixing a bar.
