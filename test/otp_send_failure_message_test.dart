@@ -54,6 +54,23 @@ void main() {
       'TERMII_API_KEY is not set in Supabase secrets',
       'Termii refused the message',
       'could not reach Termii: socket hang up',
+      // The five below are the rest of what send-sms can return, and they were
+      // missing. The list above was written from the CLASSIFIER's branches
+      // rather than from the function's actual strings, so it could only ever
+      // confirm what the branch already matched.
+      //
+      // `no v1 signature matched` is the one that matters. It is what a
+      // signing-secret MISMATCH produces — the dashboard holds one value and
+      // SEND_SMS_HOOK_SECRET holds another — and that is the likeliest
+      // remaining misconfiguration of the lot, because
+      // `wire_up_sms_provider.sh --check` cannot see it: its POST probe proves
+      // the secret is SET and rejects a BAD signature, which a mismatched
+      // secret does too. Every probe stays green and nobody can sign in.
+      'no v1 signature matched',
+      'webhook-timestamp is outside the tolerance',
+      'payload has neither user.phone nor sms.otp',
+      'payload has no user.phone',
+      'body is not JSON',
     ];
 
     for (final wording in wordings) {

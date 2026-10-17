@@ -8518,3 +8518,138 @@ Whether the Send SMS hook is pointed at this function, and whether Termii has
 credit on an approved sender ID. The first needs the management API
 (`--commit` sets it); the second needs a real sign-in. The script now says so
 *instead of* a tick, rather than underneath one.
+
+---
+
+### T-64. Five of the hook's fourteen refusals told the citizen to try again
+
+With T-63's third probe in place, the operator enabled the Phone provider and
+`--check` went green on all three:
+
+```
+GET  -> OK_REACHABLE   POST -> OK_VERIFYING   AUTH -> OK_PHONE_ON
+```
+
+Which raised the next question: when the hook *does* refuse, what does the
+citizen actually read? `AuthService.describeOtpSendFailure` sorts a failure
+into one of two useful things to say — *this is yours to retry*, or *this is
+ours, report it*. Its branch for the hook's own failures matched three
+substrings:
+
+```dart
+if (text.contains('hook') ||
+    text.contains('termii') ||
+    text.contains('not configured')) {
+```
+
+and `test/otp_send_failure_message_test.dart` asserted five wordings against
+it, all five passing.
+
+#### The test could not have failed
+
+All five were written **from those branches**, not from the function. So the
+test confirmed that `hook` matches `'hook is not configured'` — which is true,
+and proves nothing about what `supabase/functions/send-sms` can actually
+return.
+
+It can return fourteen distinct reasons. Reading them out of the source:
+
+| reason | matched? |
+|---|---|
+| `hook is not configured` | ✓ `hook` |
+| `hook secret is configured under the old name` | ✓ |
+| `hook secret is missing or not base64` | ✓ |
+| `missing webhook-id, webhook-timestamp or webhook-signature` | ✓ (`web`**`hook`**) |
+| `webhook-timestamp is not a number` | ✓ |
+| `webhook-timestamp is outside the tolerance` | ✓ |
+| `TERMII_API_KEY is not set in Supabase secrets` | ✓ `termii` |
+| `Termii refused the message` | ✓ |
+| `could not reach Termii: …` | ✓ |
+| **`no v1 signature matched`** | **✗** |
+| `payload has neither user.phone nor sms.otp` | **✗** |
+| `payload has no user.phone` | **✗** |
+| `payload has no sms.otp` | **✗** |
+| `body is not JSON` | **✗** |
+
+Five fell through every branch to the final fallback:
+
+```
+THE CODE COULD NOT BE SENT. TRY AGAIN.
+```
+
+which is the lever-not-connected-to-anything message that whole method exists
+to avoid, said to somebody who may be reporting a kidnapping. Three of the
+five caught by `hook` are caught **by accident**, because the word "webhook"
+contains it.
+
+#### The one that matters
+
+`no v1 signature matched` is what a **signing-secret mismatch** produces — the
+Hooks page holding one value and the function's `SEND_SMS_HOOK_SECRET` holding
+another, which is a copy-paste away and a secret regeneration away. It fails
+every sign-in, forever, and it is the likeliest misconfiguration left once
+everything else is wired.
+
+**And T-63's new probe cannot see it.** `OK_VERIFYING` means the function
+rejected a deliberately invalid signature — which is exactly what a function
+holding the *wrong* secret also does. Every probe green, every sign-in
+failing, and the app saying "try again". The diagnostic and the message were
+wrong in the same direction at the same time.
+
+#### What was done
+
+Four new cases were added to `test/otp_send_failure_message_test.dart` first,
+and failed:
+
+```
+Failing tests:
+  "body is not JSON" is reported as misconfiguration, not as retry
+  "no v1 signature matched" is reported as misconfiguration, not as retry
+  "payload has neither user.phone nor sms.otp" …
+  "payload has no user.phone" …
+```
+
+Then `signature`, `payload has` and `body is not json` were added to the
+branch. 772 tests pass.
+
+The real fix is the gate.
+`scripts/check_every_hook_failure_is_explained.py` reads every
+`hookError(...)`, `notSent(...)` and `reason:` literal out of the Deno
+function, reads the `text.contains('…')` substrings out of the Dart branch,
+and requires each reason to be caught by one of them. Neither side can be
+edited into disagreeing with the other, and a reason added to the hook next
+year fails the build rather than quietly becoming "try again".
+
+One reason is excluded by name, with the reason written down:
+`send-sms accepts POST` answers a GET, and Auth only ever POSTs — it is the
+healthy verdict `--check`'s GET probe relies on.
+
+Four mutations, all caught: `signature` removed from the branch (the shipped
+state); `payload has` removed (three findings); a hook reason reworded so
+nothing matches it; and the branch's message reworded, which trips the
+could-not-find-the-branch guard rather than silently passing.
+
+**Why nothing caught this.** 772 Flutter tests never read TypeScript. The
+hook's own Deno tests never read Dart. The contract between them — *these
+strings must be classifiable by that function* — lived in nobody's file, which
+is the same shape as T-62's app bar (a palette gate that held declared pairs
+and never asked what a widget painted on which surface) and T-63's probe (a
+function check that never asked whether Auth would call it).
+
+#### The assumption underneath all of this, which is not verified
+
+That Supabase Auth surfaces the hook's `message` to the client at all. Every
+one of these branches — including the three that were already correct before
+today — assumes a failing hook's `{"error":{"message":"…"}}` reaches
+`signInWithOtp`'s thrown error. That assumption predates this finding; the
+branch's own comment describes matching "the hook's own messages".
+
+It is not checked here, and could not be: `supabase.com` and the project host
+are both denied by this environment's network policy, so neither the
+documentation nor a live call was reachable. If the message does **not** come
+through, these five still fall to "try again" and the fix achieves nothing —
+it makes nothing worse either. The first real failed sign-in settles it: a
+Termii failure that reads `SMS SIGN-IN IS MISCONFIGURED` proves the message
+passes through; one that reads `THE CODE COULD NOT BE SENT. TRY AGAIN` proves
+it does not, and the whole branch needs rebuilding on whatever Supabase does
+send.

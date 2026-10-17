@@ -1174,6 +1174,21 @@ jobs:
       - name: Assert the dashboard bundle matches its two sources
         run: python3 scripts/check_send_sms_bundle_is_current.py
 
+      # Reported from a handset after every other probe went green. The
+      # classifier that turns a send failure into words matched three
+      # substrings — hook, termii, not configured — and its test asserted five
+      # wordings taken FROM THOSE BRANCHES rather than from the function. The
+      # function can refuse for fourteen reasons; five matched nothing and
+      # reached the citizen as "THE CODE COULD NOT BE SENT. TRY AGAIN."
+      # The worst was `no v1 signature matched` — what a signing-secret
+      # MISMATCH produces — which fails every sign-in forever and which
+      # wire_up_sms_provider.sh --check cannot see, because its POST probe
+      # proves only that the secret is SET and rejects a BAD signature, as a
+      # mismatched secret does. A cross-language contract: 767 Flutter tests
+      # never read TypeScript and the hook's Deno tests never read Dart.
+      - name: Assert every way send-sms can refuse is explained to the citizen
+        run: python3 scripts/check_every_hook_failure_is_explained.py
+
       - name: Assert no stray COMMIT survived generation
         run: |
           set -euo pipefail

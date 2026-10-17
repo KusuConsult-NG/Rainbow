@@ -226,9 +226,29 @@ class AuthService {
     // none of these clears by trying again. Telling a person to retry a
     // deployment fault is the lever-not-connected-to-anything problem described
     // above, which is the thing this whole method exists to avoid.
+    //
+    // The list below is every reason `supabase/functions/send-sms` can return,
+    // and it is kept honest by `scripts/check_every_hook_failure_is_explained.py`,
+    // which reads the reasons out of the function itself. It used to be five
+    // strings written from THESE BRANCHES rather than from the function, so it
+    // could only ever confirm what was already matched; five more reasons fell
+    // through to TRY AGAIN.
+    //
+    // `signature` is the one that matters. A signing-secret MISMATCH — the
+    // dashboard holding one value and SEND_SMS_HOOK_SECRET another — produces
+    // `no v1 signature matched` on every single sign-in, and it is the
+    // likeliest misconfiguration left once everything else is wired, because
+    // `wire_up_sms_provider.sh --check` cannot see it: its POST probe proves
+    // the secret is SET and rejects a BAD signature, and a mismatched secret
+    // does exactly that too. Every probe stays green and nobody can sign in.
+    // Telling that citizen to TRY AGAIN is the lever-not-connected-to-anything
+    // problem this whole method exists to avoid.
     if (text.contains('hook') ||
         text.contains('termii') ||
-        text.contains('not configured')) {
+        text.contains('not configured') ||
+        text.contains('signature') ||
+        text.contains('payload has') ||
+        text.contains('body is not json')) {
       return 'SMS SIGN-IN IS MISCONFIGURED FOR THIS SERVICE. '
           'REPORT THIS TO HQ — IT IS NOT YOUR PHONE.';
     }
