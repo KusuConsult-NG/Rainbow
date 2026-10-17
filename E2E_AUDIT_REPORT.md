@@ -8168,3 +8168,62 @@ refuses to deploy the function to this project — **403, "your account does not
 have the necessary privileges"** — while the same account can evidently run SQL
 in its dashboard. That is an access-token or org-role question, and it is the
 last thing standing between a citizen and an account.
+
+### T-60. Neither of the two files was the one to paste
+
+`supabase functions deploy` refused three times:
+
+```
+unexpected deploy status 403: Your account does not have the necessary
+privileges to access this endpoint.
+```
+
+So the operator did the reasonable thing and used the dashboard's function
+editor. They pasted `index.ts`. Then, told that was not enough, they pasted
+`hook.ts` — *"i added this as the function"*.
+
+**Neither file is the thing to paste.** `index.ts` imports six names from
+`./hook.ts`, so on its own it cannot boot; the function answers nothing and
+logs nothing, because nothing in it runs. `hook.ts` has no `serve()` at all —
+it is a library, split out precisely so the logic could be tested without
+deploying, which is how the two faults that stopped every citizen signing in
+were found in the first place.
+
+The split is right. What was missing is that nothing in the repository said
+what to do when the CLI is not available, and the CLI not being available is
+not hypothetical — it is where this operator has been for an hour.
+
+#### What was done
+
+`scripts/build_send_sms_bundle.py` generates
+`supabase/functions/send-sms/bundled_for_dashboard.ts`: both files in one, with
+the `./hook.ts` import removed because the names are then in the same module.
+450 lines, one paste, nothing to get wrong.
+
+The generator refuses rather than guesses. `hook.ts` imports nothing today,
+which is what makes inlining it safe; if an import is ever added there the
+generator stops and says so, instead of silently dropping it and leaving a
+bundle that fails at runtime in a dashboard — the worst place there is to
+debug one. It also checks the result structurally, because there is no Deno
+here to type-check with: no `./hook.ts` import survives, `serve()` is present,
+and every name `index.ts` imported is defined.
+
+**That last check caught its own author.** The first version looked for
+`export (function|const|type)` and reported the bundle as broken, because
+`verifyStandardWebhook` is declared `export async function`. The bundle was
+fine; the check was wrong, and it was wrong in the safe direction.
+
+`scripts/check_send_sms_bundle_is_current.py` regenerates and compares on every
+push — the same discipline as the apply-all paste against `supabase/migrations/`
+and the brand assets against the master logo. A generated copy that drifts is
+worse than no copy: it looks authoritative, it gets pasted into a live project,
+and the fault it carries was fixed weeks ago in the file everybody reads. Both
+directions are mutation-tested — editing a source, and editing the bundle.
+
+#### What is still not fixed
+
+The 403 itself. The same account ran thirty-eight migrations in that project's
+SQL editor an hour earlier, so it is not short of access to the project; the
+CLI's token is a different identity from the browser session, or its
+organisation role is below what a function deploy needs. Neither is knowable
+from here. The bundle routes around it; it does not explain it.

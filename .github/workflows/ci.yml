@@ -1132,6 +1132,14 @@ jobs:
       - name: Assert the hand-assembled bundle refuses to run
         run: python3 scripts/check_the_stale_bundle_refuses.py
 
+      # send-sms is two files so its logic can be tested without deploying.
+      # The CLI handles that; the dashboard editor is where an operator ends up
+      # when the CLI returns 403 on functions deploy, and there they paste ONE
+      # file. index.ts alone cannot boot (no ./hook.ts beside it) and hook.ts
+      # alone has no serve() at all — it is a library. Both were tried.
+      - name: Assert the dashboard bundle matches its two sources
+        run: python3 scripts/check_send_sms_bundle_is_current.py
+
       - name: Assert no stray COMMIT survived generation
         run: |
           set -euo pipefail
