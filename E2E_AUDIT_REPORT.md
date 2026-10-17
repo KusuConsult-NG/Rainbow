@@ -8095,3 +8095,76 @@ wpffwoblxuogemxcqpep` returns **403, "your account does not have the necessary
 privileges"**, while the CLI's own project picker offers a different ref
 entirely. Whatever account is logged in cannot deploy to the project the app
 is pointed at, and that is not knowable or fixable from this repository.
+
+### T-59. The migrations landed, and the number in T-52 was wrong about this project
+
+`scripts/apply_all_migrations.sql`, pasted into `wpffwoblxuogemxcqpep`:
+
+```
+PASS  script version: 38 outstanding migrations, fingerprint 8b19408951c5
+PASS  no policy grants anon or public anything
+PASS  role-escalation trigger installed
+PASS  PIN hashes unreadable by the API roles
+PASS  SMS device keys exist and are unreadable through the API
+PASS  a liaison is recognised as an outside agency
+PASS  the statewide alert policies no longer rest on is_staff alone
+…34 of 34
+```
+
+and `which_migrations_are_applied.sql` afterwards:
+
+> **every object in every migration is as it should be** — nothing to apply
+
+Including `20261018000000_the_mirrors_and_two_dead_functions_are_gone`:
+**7 of 7 removed**. The pre-hardening mirrors — `profiles.lga`, `profiles.ward`,
+`alerts.lga/ward/pu`, `is_hq_or_admin`, `is_responder` — are gone.
+
+#### What it looked like an hour earlier
+
+The same query, same project, before the paste:
+
+| | |
+| --- | --- |
+| `20260813000000_rls_least_privilege` | 0 of 5 — **NEVER APPLIED** |
+| `20260902000000_per_user_emergency_pins` | 0 of 6 — **NEVER APPLIED** |
+| `20260930000000_sms_device_keys` | 0 of 6 — **NEVER APPLIED** |
+| `20261003000000_liaisons_are_not_staff` | 0 of 2 — **NEVER APPLIED** |
+| `20261006000000_alerts_scoped_to_posting` | 0 of 3 — **NEVER APPLIED** |
+| …and twenty-five more | **NEVER APPLIED** |
+
+So for the whole of this audit, the database behind the app had **no
+least-privilege RLS, no `is_liaison`, no `alert_is_ours`, no device keys, no
+duress PINs, no `alerts.category`, no voice-note columns**, and was still
+carrying the mirror columns the hardening migration removes.
+
+#### The correction
+
+**T-52 says thirty-two of thirty-eight were already applied, "every migration
+through `20261015000000`". For this project that was false.** T-52's subject
+was me leading with a number I had computed from a directory listing rather
+than from a database; the number that replaced it came from a reading of a
+database, which is why it was believed. It was still wrong about
+`wpffwoblxuogemxcqpep` — whether it described a different project, or a state
+since lost, is not knowable from here and is not worth a guess. What is
+knowable is tonight's reading, and it is recorded above.
+
+The irony is exact and is the third instance in this report: a confident
+statement of deployment state, believed because of where it came from. T-49:
+a long-lived process answering from a stale snapshot "reports the PRODUCT
+broken, convincingly". T-52: a docstring claiming a fact about a database over
+a body that listed a directory. This: a reading of the right shape taken
+against something other than the system it was believed to describe.
+
+#### What this unblocks, and what it does not
+
+Everything schema-shaped: a citizen's report can carry a category and a voice
+note, the SMS fallback has somewhere to register a device key, the liaison rule
+exists in SQL as well as in Dart, and the duress PIN has a table.
+
+It does not switch on the SMS provider. `signInWithOtp` is still refused by a
+project with no Send SMS hook, which `wire_up_sms_provider.sh --check`
+diagnoses without credentials and without sending a message. And the CLI
+refuses to deploy the function to this project — **403, "your account does not
+have the necessary privileges"** — while the same account can evidently run SQL
+in its dashboard. That is an access-token or org-role question, and it is the
+last thing standing between a citizen and an account.
