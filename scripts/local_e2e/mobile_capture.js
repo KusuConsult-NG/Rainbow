@@ -41,6 +41,8 @@ const PHONE = { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, h
 
 fs.mkdirSync(OUT, { recursive: true });
 
+const os = require('os');
+
 const checks = [];
 const shots = [];
 function check(name, pass, detail = '') {
@@ -146,9 +148,81 @@ async function semanticsText(page) {
    * looks like a crash rather than like missing coverage.
    */
   async function freshBrowser() {
+    // `browser.close()` resolves when the DevTools websocket closes, which is
+    // NOT when the process is gone: a wedged renderer can outlive it. Eight
+    // roles meant eight launches, and if even a few linger the runner is
+    // carrying several CanvasKit Chromiums at once. Wait for the process, then
+    // insist.
+    const dying = browser.process?.();
     try { await browser.close(); } catch { /* already gone */ }
+    if (dying && dying.exitCode === null) {
+      await Promise.race([
+        new Promise((r) => dying.once('exit', r)),
+        sleep(5000),
+      ]);
+      if (dying.exitCode === null) {
+        try { dying.kill('SIGKILL'); } catch { /* already gone */ }
+        await Promise.race([
+          new Promise((r) => dying.once('exit', r)),
+          sleep(2000),
+        ]);
+      }
+    }
     ({ browser, newPage } = await launch(LAUNCH));
     page = await newPage();
+  }
+
+  /** What the machine has left, so a resource failure says so rather than timing out. */
+  function freeMemory() {
+    const free = os.freemem() / 1024 / 1024;
+    const total = os.totalmem() / 1024 / 1024;
+    return `${free.toFixed(0)}MB free of ${total.toFixed(0)}MB`;
+  }
+
+  /**
+   * Wait for Flutter to paint, and say what was on the page if it never does.
+   *
+   * On a CI runner this is where the run has died twice: the 4th role, then
+   * the 6th, with nothing but `TimeoutError: Waiting failed: 120000ms
+   * exceeded` and a puppeteer stack. That names the line and says nothing
+   * about WHY — whether the bundle 404'd, the renderer was killed, or the
+   * machine was out of memory. A harness whose failure teaches you nothing
+   * costs a whole CI cycle to learn nothing twice.
+   */
+  // Overridable so a slower runner can be given longer — and so the failure
+  // path below can be exercised deliberately rather than only in production:
+  //   MOBILE_PAINT_TIMEOUT_MS=1 node scripts/local_e2e/mobile_capture.js
+  const PAINT_TIMEOUT = Number(process.env.MOBILE_PAINT_TIMEOUT_MS) || 120000;
+
+  async function waitForPaint(what, timeout = PAINT_TIMEOUT) {
+    try {
+      await page.waitForFunction(
+        () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
+        { timeout },
+      );
+      return;
+    } catch (err) {
+      const seen = await page.evaluate(() => ({
+        readyState: document.readyState,
+        htmlChars: document.documentElement.outerHTML.length,
+        scripts: [...document.querySelectorAll('script')].map((t) => t.src || 'inline'),
+        bodyText: (document.body?.innerText || '').slice(0, 200),
+      })).catch((e) => ({ unreadable: String(e) }));
+      try {
+        await page.screenshot({
+          path: path.join(OUT, `80-mobile-${what}-never-painted.png`),
+        });
+      } catch { /* the page may be gone too */ }
+      const last = problems.length
+        ? JSON.stringify(problems[problems.length - 1]).slice(0, 300)
+        : 'none';
+      throw new Error(
+        `the app never painted for ${what} within ${timeout}ms.`
+        + `\n    memory:  ${freeMemory()}`
+        + `\n    page:    ${JSON.stringify(seen)}`
+        + `\n    console problems so far: ${problems.length}, last: ${last}`,
+      );
+    }
   }
 
   // A release build fetches CanvasKit from gstatic, which the egress policy
@@ -277,10 +351,7 @@ async function semanticsText(page) {
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(
-      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-      { timeout: 120000 },
-    );
+    await waitForPaint(`${role}-signin`);
     await sleep(6000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1800);
@@ -406,10 +477,7 @@ async function semanticsText(page) {
     });
     await cdp.detach();
     await page.goto(`${origin}/#${route}`, { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(
-      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-      { timeout: 120000 },
-    );
+    await waitForPaint(`signed-out${route.replace(/\//g, '-')}`);
     await sleep(6000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1500);
@@ -426,87 +494,100 @@ async function semanticsText(page) {
   }
 
   for (const role of ROLES) {
-    state.screen = `mobile:${role}:signin`;
-    await freshBrowser();
-    const landed = await signIn(role);
-    const signedIn = !/login/.test(landed);
-    check(`${role}: signs in`, signedIn, `landed on ${landed || '#/'}`);
-    {
-      const f = `80-mobile-${role}-00-after-signin.png`;
-      await page.screenshot({ path: path.join(OUT, f) });
-      shots.push(f);
+    // One role falling over must not discard the five that worked, nor the
+    // report. The hq role timed out on a CI runner and the throw took the
+    // whole script with it: police and army were never attempted, no
+    // report was written, and the artifact held 133 screenshots nothing
+    // described. The run still fails — it records a failed check — but it
+    // finishes, and says which roles got through.
+    try {
+      state.screen = `mobile:${role}:signin`;
+      await freshBrowser();
+      const landed = await signIn(role);
+      const signedIn = !/login/.test(landed);
+      check(`${role}: signs in`, signedIn, `landed on ${landed || '#/'}`);
+      {
+        const f = `80-mobile-${role}-00-after-signin.png`;
+        await page.screenshot({ path: path.join(OUT, f) });
+        shots.push(f);
+      }
+      if (!signedIn) { roleReport[role] = { landed, reached: [] }; continue; }
+
+      // The dashboard banner names the tier; grab it before walking the routes.
+      const landingText = await semanticsText(page);
+      const banner = landingText.split('\n').map((l) => l.trim())
+        .find((l) => /COMMAND|OPERATIONAL UNIT|CITIZEN/.test(l)) || '';
+
+      // WHICH ADVISORY REACHED THIS PERSON.
+      //
+      // `SystemAlertListener` wraps every screen, so an advisory addressed to this
+      // role is on the landing screen. Two are seeded: one scoped to NARAGUTA
+      // ward, and one legacy row carrying its audience in `target_type` and
+      // addressed to AGENTS. Every fixture person is in NARAGUTA except the ARMY
+      // liaison, who is in PANYAM — so the pair tells the roles apart, and the
+      // assertions below are the only end-to-end check of T-29 outside the widget
+      // tests.
+      advisoryReport[role] = {
+        ward: /naraguta junction/i.test(landingText),
+        legacyAgents: /radio discipline/i.test(landingText),
+      };
+
+      const reached = [];
+      let n = 0;
+      for (const [route, slug] of ROUTES) {
+        state.screen = `mobile:${role}:${slug}`;
+        n += 1;
+        if (route === '/lock') {
+          // The one screen a URL cannot reach, by design: the router sends
+          // anybody at /lock who is not locked back to their home screen, which
+          // is what stops a lock screen appearing over a live emergency. So it
+          // is reached the way a person reaches it — Settings, then "Lock This
+          // Phone".
+          await page.evaluate(() => { window.location.hash = '#/settings'; });
+          await sleep(2500);
+          await tapLabelled('lock this phone');
+          await sleep(2500);
+        } else {
+          await page.evaluate((r) => { window.location.hash = `#${r}`; }, route);
+          await sleep(2500);
+        }
+        const name = `80-mobile-${role}-${String(n).padStart(2, '0')}-${slug}`;
+        await page.screenshot({ path: path.join(OUT, `${name}.png`) });
+        shots.push(`${name}.png`);
+        const here = (await page.evaluate(() => window.location.hash)).replace(/^#/, '');
+        const screenText = await semanticsText(page);
+        const chars = screenText.length;
+        // WHICH INCIDENTS THIS OFFICER'S MISSION FEED SHOWS. Asserted after the
+        // loop: the word "liaison" appeared nowhere in lib/, so the feed filter
+        // had no branch for one and answered them from their own POSTING.
+        if (route === '/agent-dashboard' && here === route) {
+          feedText[role] = screenText;
+        }
+        // THE LANGUAGE CONTROL ON THE FIRST SCREEN OF SETUP. Asserted after the
+        // loop: the picker in Settings wrote `app_language` = 'HA' while every
+        // translated string watches `app_lang` = 'ha', so choosing Hausa changed
+        // nothing, and the only working control was a flag button three screens
+        // further in.
+        if (route === '/onboarding-permissions' && here === route) {
+          setupText[role] = screenText;
+        }
+        if (here === route && chars > 0) {
+          reached.push(route);
+          if (!coverage.has(route)) coverage.set(route, []);
+          coverage.get(route).push(role);
+        }
+        console.log(
+          `      shot  ${name}.png  ${here === route ? 'reached' : `-> ${here}`}, ${chars} chars`,
+        );
+      }
+      roleReport[role] = { landed, banner, reached };
+      console.log(`  ${role}: ${reached.length}/${ROUTES.length} routes reached`);
+    } catch (err) {
+      const [first, ...rest] = String(err && err.message ? err.message : err).split('\n');
+      check(`${role}: is captured at all`, false, first);
+      for (const line of rest) console.log(line);
+      roleReport[role] = { landed: 'threw', banner: '', reached: [], error: first };
     }
-    if (!signedIn) { roleReport[role] = { landed, reached: [] }; continue; }
-
-    // The dashboard banner names the tier; grab it before walking the routes.
-    const landingText = await semanticsText(page);
-    const banner = landingText.split('\n').map((l) => l.trim())
-      .find((l) => /COMMAND|OPERATIONAL UNIT|CITIZEN/.test(l)) || '';
-
-    // WHICH ADVISORY REACHED THIS PERSON.
-    //
-    // `SystemAlertListener` wraps every screen, so an advisory addressed to this
-    // role is on the landing screen. Two are seeded: one scoped to NARAGUTA
-    // ward, and one legacy row carrying its audience in `target_type` and
-    // addressed to AGENTS. Every fixture person is in NARAGUTA except the ARMY
-    // liaison, who is in PANYAM — so the pair tells the roles apart, and the
-    // assertions below are the only end-to-end check of T-29 outside the widget
-    // tests.
-    advisoryReport[role] = {
-      ward: /naraguta junction/i.test(landingText),
-      legacyAgents: /radio discipline/i.test(landingText),
-    };
-
-    const reached = [];
-    let n = 0;
-    for (const [route, slug] of ROUTES) {
-      state.screen = `mobile:${role}:${slug}`;
-      n += 1;
-      if (route === '/lock') {
-        // The one screen a URL cannot reach, by design: the router sends
-        // anybody at /lock who is not locked back to their home screen, which
-        // is what stops a lock screen appearing over a live emergency. So it
-        // is reached the way a person reaches it — Settings, then "Lock This
-        // Phone".
-        await page.evaluate(() => { window.location.hash = '#/settings'; });
-        await sleep(2500);
-        await tapLabelled('lock this phone');
-        await sleep(2500);
-      } else {
-        await page.evaluate((r) => { window.location.hash = `#${r}`; }, route);
-        await sleep(2500);
-      }
-      const name = `80-mobile-${role}-${String(n).padStart(2, '0')}-${slug}`;
-      await page.screenshot({ path: path.join(OUT, `${name}.png`) });
-      shots.push(`${name}.png`);
-      const here = (await page.evaluate(() => window.location.hash)).replace(/^#/, '');
-      const screenText = await semanticsText(page);
-      const chars = screenText.length;
-      // WHICH INCIDENTS THIS OFFICER'S MISSION FEED SHOWS. Asserted after the
-      // loop: the word "liaison" appeared nowhere in lib/, so the feed filter
-      // had no branch for one and answered them from their own POSTING.
-      if (route === '/agent-dashboard' && here === route) {
-        feedText[role] = screenText;
-      }
-      // THE LANGUAGE CONTROL ON THE FIRST SCREEN OF SETUP. Asserted after the
-      // loop: the picker in Settings wrote `app_language` = 'HA' while every
-      // translated string watches `app_lang` = 'ha', so choosing Hausa changed
-      // nothing, and the only working control was a flag button three screens
-      // further in.
-      if (route === '/onboarding-permissions' && here === route) {
-        setupText[role] = screenText;
-      }
-      if (here === route && chars > 0) {
-        reached.push(route);
-        if (!coverage.has(route)) coverage.set(route, []);
-        coverage.get(route).push(role);
-      }
-      console.log(
-        `      shot  ${name}.png  ${here === route ? 'reached' : `-> ${here}`}, ${chars} chars`,
-      );
-    }
-    roleReport[role] = { landed, banner, reached };
-    console.log(`  ${role}: ${reached.length}/${ROUTES.length} routes reached`);
   }
 
   // THE completeness claim. Every screen the app has must have been rendered by

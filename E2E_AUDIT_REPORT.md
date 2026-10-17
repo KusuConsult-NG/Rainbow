@@ -8855,3 +8855,115 @@ answers the question directly.
 It also cannot see the Termii side, the hook wiring, or whether a code is
 actually delivered. Those remain what they were: `--commit` sets the second,
 and only a real sign-in proves the first and third.
+
+---
+
+### T-67. The CI failure that taught nothing, twice
+
+CI run 547 on `d6f9a17` failed. One of twelve jobs — the mobile capture — and
+the whole of its output was:
+
+```
+  lga: 22/25 routes reached
+TimeoutError: Waiting failed: 120000ms exceeded
+    at new WaitTask (…/puppeteer-core/lib/cjs/puppeteer/common/WaitTask.js:49:34)
+    …
+    at signIn (…/scripts/local_e2e/mobile_capture.js:280:16)
+Error: Process completed with exit code 1.
+```
+
+The `hq` role's browser never painted a Flutter canvas within 120 seconds.
+
+#### It is not a regression, and it is not new
+
+The last *completed* run before it, `d5138f6`, was green; 543–546 were
+cancelled by newer pushes, so 547 was the first full run in three hours. The
+five commits between them touched the error-message classifier in
+`auth_service.dart`, the Edge Function, the console's incident card and four
+scripts. None of them can stop a Flutter web app painting.
+
+And `mobile_capture.js` already describes this failure, in a comment written
+the last time it happened:
+
+> Reusing one page meant booting the whole Flutter app a fourth time in a tab
+> that had already rendered ~100 screenshots, and on a CI runner the fourth
+> boot never finished: `waitForFunction` timed out after 90s and **the HQ role
+> was never captured**. Locally, with more memory, the same code passed —
+> which is the CI-only failure this project keeps producing.
+
+It has now moved three times: role 8 (`TargetCloseError`), role 4, and now
+role 6. Each fix bought more headroom and none removed the cause. Run locally
+here — 16GB, eight roles, 211 screenshots — it passes 27/27, and free memory
+ends where it started (15646MB → 15630MB), so nothing is leaking *in a machine
+with room*. That is precisely why it cannot be chased from here.
+
+#### The finding is what the failure told us
+
+Nothing. Two CI cycles have now been spent learning that a wait timed out,
+which was already known from the line number. It did not say whether the
+bundle 404'd, the renderer was killed, or the machine was out of memory —
+the three explanations needing three different fixes.
+
+This is the same shape as T-62, T-63, T-65 and T-66: a check that reports
+*that* something is wrong without reporting *what it saw*.
+
+Worse, the throw aborted the whole script. The `police` and `army` roles were
+never attempted, no report was written, and the artifact held 133 screenshots
+that nothing described.
+
+#### What was done
+
+Three changes, each verified by running it rather than by reading it.
+
+**1. `waitForPaint()` says what was on the page.** On timeout it captures
+`document.readyState`, the HTML size, which scripts the page loaded, any body
+text, free memory, and the last browser console problem — then screenshots the
+blank page and throws with all of it. Proved by forcing it
+(`MOBILE_PAINT_TIMEOUT_MS=1`, an override that also lets a slow runner be
+given longer):
+
+```
+Error: the app never painted for signed-out-splash within 1ms.
+    memory:  15361MB free of 16093MB
+    page:    {"readyState":"interactive","htmlChars":1188,
+              "scripts":["http://127.0.0.1:8080/flutter_bootstrap.js"],"bodyText":""}
+    console problems so far: 2, last: {…"at Object.e (…/main.dart.js:4232:20)"…}
+```
+
+Next time this fires on CI it will distinguish the three explanations on sight.
+
+**2. One role's failure no longer discards the rest.** The loop body is
+wrapped; a throw records a failed check named `<role>: is captured at all` and
+carries on. Mutation-tested by forcing `hq` to fail exactly as CI did:
+
+```
+  lga: 22/25 routes reached
+FAIL  hq: is captured at all  — the app never painted for hq-signin within 1ms.
+PASS  police: signs in  — landed on #/agent-dashboard
+  police: 21/25 routes reached
+PASS  army: signs in  — landed on #/agent-dashboard
+  army: 21/25 routes reached
+FAIL  every rung of the command chain identifies itself — hq should read HQ COMMAND, read "(nothing)"
+25/27 checks passed, 185 mobile screenshots
+```
+
+The run still fails, with exit 1 — it reports the real damage instead of
+vanishing at the first throw.
+
+**3. `freshBrowser()` waits for the process to die.** `browser.close()`
+resolves when the DevTools websocket closes, not when the process exits; a
+wedged renderer can outlive it, and eight launches means eight chances to
+accumulate one. It now waits up to 5s for `exit`, then `SIGKILL`s and waits
+again.
+
+#### What is honestly unresolved
+
+**Whether (3) is the cause.** It is the leading hypothesis and it is cheap and
+safe, but it is a hypothesis: this container has too much memory to reproduce
+the failure, and a fix that cannot be shown to fix anything is a guess with a
+commit message. It is committed on its own merits — a harness that leaks
+browser processes is wrong regardless — and not claimed as the cure.
+
+(1) and (2) are what actually settle it. The next time this fires, the log will
+name the mechanism instead of the line number, and the remaining roles will
+still have been captured. If it is memory, the `memory:` line will say so.
