@@ -16,9 +16,18 @@
 #
 # ## --check needs no credentials at all, and sends no SMS
 #
-# Two unauthenticated requests to the function's public URL are enough to tell
-# the four failure modes apart, because this function's own error bodies are
-# distinguishable from the platform's:
+# THREE unauthenticated requests. Two to the function's public URL, which tell
+# the four deployment failure modes apart because this function's own error
+# bodies are distinguishable from the platform's — and one to the project's
+# PUBLIC auth settings document, which answers the question the first two
+# cannot: whether Auth will ever call the hook at all.
+#
+# That third one was missing, and its absence had a cost. This script reported
+# "✓ The function is deployed, reachable without a JWT, and verifying
+# signatures" against a project where every citizen sign-in failed, because the
+# Phone provider was switched off and Auth refuses `signInWithOtp` before the
+# hook is consulted. A green diagnostic beside a red product is worse than no
+# diagnostic: it sends the operator looking everywhere except at the fault.
 #
 #   GET  /functions/v1/send-sms
 #     401 from the PLATFORM     -> deployed WITH JWT verification. The hook can
@@ -28,6 +37,15 @@
 #                                  Fix: deploy with --no-verify-jwt.
 #     405 {"error":{...}}       -> our code answered. Deployed correctly.
 #     404                       -> not deployed at all.
+#
+#   GET  /auth/v1/settings       with the publishable key
+#     external.phone false      -> the Phone provider is OFF. Auth refuses every
+#                                  sign-in before the hook is consulted, and the
+#                                  app says "SMS SIGN-IN IS NOT SWITCHED ON FOR
+#                                  THIS SERVICE YET".
+#     disable_signup true       -> the provider is on, but a number that has
+#                                  never signed in is refused.
+#     both clear                -> Auth will call the hook.
 #
 #   POST /functions/v1/send-sms  with a deliberately invalid signature
 #     503 hook is not configured-> deployed, but SEND_SMS_HOOK_SECRET is unset.
@@ -96,6 +114,15 @@ fi
   echo "Pass the ref, not the whole URL." >&2; exit 2; }
 
 FN_URL="https://${REF}.supabase.co/functions/v1/send-sms"
+AUTH_URL="https://${REF}.supabase.co/auth/v1/settings"
+
+# The publishable key, which is public by design — it ships inside the APK and
+# row-level security is the access model. Read from the file that declares it so
+# there is one source of truth, and overridable for a project that is not the
+# default one.
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ANON="${SUPABASE_ANON_KEY:-$(sed -n "s/.*defaultValue: '\\(sb_publishable_[^']*\\)'.*/\\1/p" \
+  "$REPO/lib/core/supabase/supabase_config.dart" | head -1)}"
 
 mask() {  # never print a secret, only its shape
   local v="$1"
@@ -154,6 +181,55 @@ classify_post() {
   esac
 }
 
+# The third probe, and the one that was missing.
+#
+# `--check` used to end by saying "What this CANNOT see from outside: whether
+# the Send SMS hook is enabled and pointed here". Half of that is visible, with
+# no credentials at all: GET /auth/v1/settings returns the project's PUBLIC auth
+# configuration, including whether the Phone provider is switched on and whether
+# signups are allowed.
+#
+# That matters because those two are checked by Auth BEFORE the hook is ever
+# consulted. With the Phone provider off, a perfectly deployed, perfectly
+# signing hook is never called at all — which is exactly the state this script
+# reported as "✓ The function is deployed, reachable without a JWT, and
+# verifying signatures" while every citizen sign-in failed with
+# "SMS SIGN-IN IS NOT SWITCHED ON FOR THIS SERVICE YET".
+#
+# No writes, no SMS: a GET of a public settings document.
+classify_auth() {
+  local code="$1" body="$2"
+  case "$code" in
+    000) echo "UNREACHABLE  could not reach $AUTH_URL"; return ;;
+    401|403) echo "KEY_REFUSED  the publishable key was refused ($code). Pass the project's current one as SUPABASE_ANON_KEY"; return ;;
+    404) echo "NO_SETTINGS  404 from /auth/v1/settings — check the project ref"; return ;;
+    200) : ;;
+    *) echo "UNEXPECTED_$code  $body"; return ;;
+  esac
+
+  # `external` is a flat object of booleans, so everything up to the first `}`
+  # is the whole of it. Nothing here needs a JSON parser, which this script
+  # cannot assume is installed.
+  local external phone signup
+  external=$(printf '%s' "$body" | sed -n 's/.*"external"[[:space:]]*:[[:space:]]*{\([^}]*\)}.*/\1/p')
+  phone=$(printf '%s' "$external" | grep -o '"phone"[[:space:]]*:[[:space:]]*[a-z]*' | sed 's/.*:[[:space:]]*//')
+  signup=$(printf '%s' "$body" | grep -o '"disable_signup"[[:space:]]*:[[:space:]]*[a-z]*' | sed 's/.*:[[:space:]]*//')
+
+  if [ -z "$phone" ]; then
+    echo "NO_PHONE_FIELD  /auth/v1/settings answered but named no phone provider: $body"
+    return
+  fi
+  if [ "$phone" != true ]; then
+    echo "PHONE_OFF  the Phone provider is switched OFF, so Auth refuses every sign-in before the hook is consulted — the app says \"SMS SIGN-IN IS NOT SWITCHED ON FOR THIS SERVICE YET\". Dashboard: Authentication -> Sign In / Providers -> Phone -> enable it"
+    return
+  fi
+  if [ "$signup" = true ]; then
+    echo "SIGNUPS_OFF  the Phone provider is on, but new signups are disabled, so a number that has never signed in is refused with \"Signups not allowed for otp\". Dashboard: Authentication -> Sign In / Providers -> Allow new users to sign up"
+    return
+  fi
+  echo "OK_PHONE_ON  the Phone provider is enabled and new numbers may sign up"
+}
+
 probe() {
   echo "▶ Probing $FN_URL (no credentials, no SMS sent)"
   local g gcode gbody p pcode pbody
@@ -174,14 +250,34 @@ probe() {
   pcode=$(printf '%s' "$p" | tail -1); pbody=$(printf '%s' "$p" | sed '$d')
   echo "  POST -> $(classify_post "$pcode" "$pbody")"
 
-  case "$(classify_get "$gcode" "$gbody")$(classify_post "$pcode" "$pbody")" in
+  # The function can be perfect and sign-in still fail, because Auth checks the
+  # Phone provider before it ever reaches the hook. Read-only, sends no SMS.
+  local a acode abody
+  if [ -z "$ANON" ]; then
+    echo "  AUTH -> NO_KEY  could not find a publishable key to read "
+    echo "          /auth/v1/settings with. Set SUPABASE_ANON_KEY."
+  else
+    a=$(curl -sS -m 20 -H "apikey: $ANON" -w '\n%{http_code}' "$AUTH_URL" 2>/dev/null || echo $'\n000')
+    acode=$(printf '%s' "$a" | tail -1); abody=$(printf '%s' "$a" | sed '$d')
+    echo "  AUTH -> $(classify_auth "$acode" "$abody")"
+  fi
+
+  case "$(classify_get "$gcode" "$gbody")$(classify_post "$pcode" "$pbody")$(classify_auth "${acode:-000}" "${abody:-}")" in
+    OK_REACHABLE*OK_VERIFYING*OK_PHONE_ON*)
+      echo
+      echo "✓ The function is deployed, reachable without a JWT and verifying"
+      echo "  signatures, and the Phone provider is on with signups allowed."
+      echo "  What this still CANNOT see from outside: whether the Send SMS hook"
+      echo "  is pointed at this function, and whether Termii has credit on an"
+      echo "  approved sender ID. --commit sets the first; only a real sign-in"
+      echo "  proves the second."
+      return 0 ;;
     OK_REACHABLE*OK_VERIFYING*)
       echo
-      echo "✓ The function is deployed, reachable without a JWT, and verifying"
-      echo "  signatures. What this CANNOT see from outside: whether the Send SMS"
-      echo "  hook is enabled and pointed here, and whether Termii has credit."
-      echo "  --commit sets the first; only a real sign-in proves the second."
-      return 0 ;;
+      echo "✗ The function is healthy, but Auth will not call it. The AUTH line"
+      echo "  above names what to switch on. Until then every citizen sign-in"
+      echo "  fails before the hook is ever consulted."
+      return 1 ;;
   esac
   return 1
 }

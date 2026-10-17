@@ -8445,3 +8445,76 @@ no-custom-bar guard, which is the blind spot itself as a test.
 Whether a 2.56:1 grey belongs in the palette at all is a palette-level
 question for the brand, not something to alter silently across a hundred
 screens while fixing a bar.
+
+---
+
+### T-63. The diagnostic said ✓ while every sign-in failed
+
+The APK from `main` reached the sign-in screen (T-61 and T-62 confirmed from a
+handset: splash, sign-in, legible top bar, `v1.0.8 (29)` at the foot). Entering
+a real number returned:
+
+> SMS SIGN-IN IS NOT SWITCHED ON FOR THIS SERVICE YET. REPORT THIS TO HQ — IT
+> IS NOT YOUR PHONE.
+
+That message is `AuthService.describeOtpSendFailure` doing its job: Supabase
+refused `signInWithOtp` with one of `phone provider`, `sms provider`,
+`unsupported phone provider`, `phone_provider_disabled` or `signups not
+allowed`. The app is reporting correctly, and the fault is in the project's
+configuration, not in the handset and not in the code.
+
+#### The finding is not that message. It is that the tool said everything was fine.
+
+An hour earlier `./scripts/wire_up_sms_provider.sh --check` had printed:
+
+```
+GET  -> OK_REACHABLE  our code answered (405, POST only)
+POST -> OK_VERIFYING  the secret is set and the signature check rejected a bad signature
+✓ The function is deployed, reachable without a JWT, and verifying signatures.
+```
+
+Every word of that was true and the product was still completely broken for
+every citizen. The script's own closing line admitted the gap — *"What this
+CANNOT see from outside: whether the Send SMS hook is enabled and pointed
+here"* — but admitting a gap in prose, under a green tick, is not the same as
+not having one. The operator reads the tick.
+
+**Half of that gap was visible all along, with no credentials.**
+`GET /auth/v1/settings` returns the project's *public* auth configuration —
+the same document the console's own status light already fetches
+(`hq-dashboard-next/src/app/login/page.tsx`) — and it names
+`external.phone` and `disable_signup`. Those two are checked by Auth **before
+the hook is ever consulted**, which is precisely why a perfectly deployed,
+perfectly signing function can sit there being perfect while nothing works.
+
+#### What was done
+
+`classify_auth()`, a third probe beside `classify_get` and `classify_post`,
+and the readiness verdict now requires all three. The publishable key is read
+out of `lib/core/supabase/supabase_config.dart` so there is one source of truth
+for it, and overridable with `SUPABASE_ANON_KEY`. It is a `GET` of a public
+document: no writes, no SMS, no Termii credit spent.
+
+| verdict | means |
+|---|---|
+| `PHONE_OFF` | the Phone provider is off — **this deployment's fault** |
+| `SIGNUPS_OFF` | provider on, but a new number is refused |
+| `OK_PHONE_ON` | Auth will call the hook |
+| `KEY_REFUSED` / `NO_SETTINGS` / `NO_PHONE_FIELD` / `UNREACHABLE` | the probe could not tell, and says so rather than guessing |
+
+Eleven new assertions in `scripts/wire_up_sms_provider_test.sh`, which CI runs.
+Two of them are the point:
+
+* a body where `"phone":false` sits beside `"sms_provider":"phone"` must still
+  read `PHONE_OFF` — a reader that grepped the whole body for the word would
+  call a dead project healthy;
+* a healthy GET + healthy POST + `PHONE_OFF` must **not** match the readiness
+  pattern. That combination is exactly the state this script used to call
+  "✓ deployed".
+
+#### What is still not knowable from outside
+
+Whether the Send SMS hook is pointed at this function, and whether Termii has
+credit on an approved sender ID. The first needs the management API
+(`--commit` sets it); the second needs a real sign-in. The script now says so
+*instead of* a tick, rather than underneath one.

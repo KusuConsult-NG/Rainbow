@@ -31,11 +31,14 @@ SRC="$REPO/scripts/wire_up_sms_provider.sh"
 # Pull in just the two classifiers. Sourcing the whole script would run it, so
 # the function bodies are extracted. FN_URL is referenced by classify_get.
 FN_URL='https://example00000000000.supabase.co/functions/v1/send-sms'
+AUTH_URL='https://example00000000000.supabase.co/auth/v1/settings'
 eval "$(awk '/^classify_get\(\) \{/,/^\}/' "$SRC")"
 eval "$(awk '/^classify_post\(\) \{/,/^\}/' "$SRC")"
+eval "$(awk '/^classify_auth\(\) \{/,/^\}/' "$SRC")"
 
 type classify_get  >/dev/null 2>&1 || { echo "could not load classify_get" >&2; exit 2; }
 type classify_post >/dev/null 2>&1 || { echo "could not load classify_post" >&2; exit 2; }
+type classify_auth >/dev/null 2>&1 || { echo "could not load classify_auth" >&2; exit 2; }
 
 FAILED=0
 check() {  # check <what> <expected token> <actual line>
@@ -103,6 +106,47 @@ case "${G_BAD}${P_OK}" in
   OK_REACHABLE*OK_VERIFYING*) echo "  FAIL  a platform 401 still read as ready"
      FAILED=$((FAILED + 1)) ;;
   *) echo "  PASS  a platform 401 does not read as ready" ;;
+esac
+
+echo "▶ AUTH probe (the project's public settings document)"
+# A real /auth/v1/settings body, trimmed to the fields this reads. `external`
+# is a flat object of booleans, which is what lets a sed extract it safely.
+PHONE_OFF_BODY='{"external":{"anonymous_users":false,"apple":false,"email":true,"phone":false},"disable_signup":false,"mailer_autoconfirm":false}'
+PHONE_ON_BODY='{"external":{"anonymous_users":false,"apple":false,"email":true,"phone":true},"disable_signup":false,"mailer_autoconfirm":false}'
+NO_SIGNUP_BODY='{"external":{"email":true,"phone":true},"disable_signup":true}'
+
+check "phone provider off — the reported fault" PHONE_OFF \
+  "$(classify_auth 200 "$PHONE_OFF_BODY")"
+check "phone provider on, signups allowed" OK_PHONE_ON \
+  "$(classify_auth 200 "$PHONE_ON_BODY")"
+check "phone on but signups disabled" SIGNUPS_OFF \
+  "$(classify_auth 200 "$NO_SIGNUP_BODY")"
+# `"phone":true` also appears in `external`; make sure the reader is not simply
+# grepping the whole body, which would call a project with phone OFF healthy
+# the moment any other field spelled the word.
+check "phone off, the word phone elsewhere" PHONE_OFF \
+  "$(classify_auth 200 '{"external":{"phone":false},"disable_signup":false,"sms_provider":"phone"}')"
+check "key refused" KEY_REFUSED "$(classify_auth 401 '{"message":"Invalid API key"}')"
+check "settings not found" NO_SETTINGS "$(classify_auth 404 '{}')"
+check "no answer" UNREACHABLE "$(classify_auth 000 '')"
+check "no phone field at all" NO_PHONE_FIELD \
+  "$(classify_auth 200 '{"external":{"email":true},"disable_signup":false}')"
+
+echo "▶ readiness pattern, with the AUTH verdict in it"
+A_OK=$(classify_auth 200 "$PHONE_ON_BODY")
+A_OFF=$(classify_auth 200 "$PHONE_OFF_BODY")
+case "${G_OK}${P_OK}${A_OK}" in
+  OK_REACHABLE*OK_VERIFYING*OK_PHONE_ON*) echo "  PASS  all three healthy reads as ready" ;;
+  *) echo "  FAIL  all three healthy does not read as ready"; FAILED=$((FAILED + 1)) ;;
+esac
+# The whole point: a healthy FUNCTION with the provider off must NOT read as
+# ready. That combination is what the script used to call "✓ deployed" while
+# every sign-in failed.
+case "${G_OK}${P_OK}${A_OFF}" in
+  OK_REACHABLE*OK_VERIFYING*OK_PHONE_ON*)
+     echo "  FAIL  a healthy function with the phone provider OFF read as ready"
+     FAILED=$((FAILED + 1)) ;;
+  *) echo "  PASS  a healthy function with the phone provider OFF is not ready" ;;
 esac
 
 echo
