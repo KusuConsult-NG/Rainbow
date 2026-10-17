@@ -216,8 +216,16 @@ export function normalisePhone(phone: string): string {
   return digits;
 }
 
+/// The single most-read string in the product: every citizen reads it to get
+/// in. It said "Rainbow EWER" — the name from two rebrands ago — for every
+/// code ever sent, and was reported from a real handset receiving a real one.
+///
+/// `scripts/check_one_brand_name.py` did not catch it. The gate read `lib/`
+/// and the console's `src/`, and this file is in neither; and its list of
+/// former names did not carry "Rainbow EWER" either, so it would have passed
+/// this string even if it had been reading it. Both are fixed.
 export function otpMessage(otp: string): string {
-  return `Your Rainbow EWER verification code is: ${otp}. `
+  return `Your Plateau Eye verification code is: ${otp}. `
     + 'It expires in 5 minutes. Do not share this code.';
 }
 

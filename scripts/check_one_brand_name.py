@@ -60,17 +60,46 @@ REPO = Path(__file__).resolve().parent.parent
 MANIFEST = REPO / 'android' / 'app' / 'src' / 'main' / 'AndroidManifest.xml'
 
 # Names this app has had. A new rename adds its predecessor here.
+#
+# 'Rainbow EWER' was missing until a tester received the real sign-in SMS and
+# read it back: "Your Rainbow EWER verification code is: …". Two failures at
+# once — this list did not carry the name, and the scan below did not read the
+# file it was in. Either alone would have been enough to miss it.
 FORMER_NAMES = [
     'Operation Rainbow', 'OPERATION RAINBOW', 'Operation RainBow',
     'RainBow app', 'Rainbow App', 'AIKIN RAINBOW',
+    'Rainbow EWER', 'RAINBOW EWER', 'RainBow EWER',
 ]
+
+# The bare word, standing alone. Not in FORMER_NAMES because it is not a name
+# this app ever had in full — but "First time this number has ever contacted
+# Rainbow." was on the console's incident card, read by an operator, and no
+# entry in that list matches it. A hand-written list of full names can only
+# catch the spellings somebody thought of.
+#
+# Capitalised and word-bounded on purpose: it must not fire inside
+# `RainbowMap`, `rainbow_offline.db` or `com.operationrainbow.app/sim`, which
+# are identifiers, nor on the `rainbow-97f1e` project slug in the README.
+BARE_NAME = re.compile(r'(?<![\w-])Rainbow(?![\w-])')
 
 # Internal identifiers, which are not read by anyone using the app.
 EXEMPT = re.compile(
     r'rainbow_app|package:rainbow|RainbowApp|RainbowMap|RainbowBottomNav|'
-    r'RainbowAppBar|RAINBOW_WEBHOOK_SECRET|RAINBOW_[A-Z_]+')
+    r'RainbowAppBar|RAINBOW_WEBHOOK_SECRET|RAINBOW_[A-Z_]+|X-Rainbow-Auth')
 
 DART_COMMENT = re.compile(r'///[^\n]*|//[^\n]*|/\*.*?\*/', re.S)
+
+
+def strip_comments(text: str) -> str:
+    """Blank the comments, keeping every newline.
+
+    This used to be `' ' * len(match)`, which eats the newlines inside a
+    `/* … */` block and shifts every line number after it. The finding for
+    `ussd-provenance.ts` pointed at line 96; the string is on line 158. A gate
+    that names the wrong line sends somebody to read the wrong code.
+    """
+    return DART_COMMENT.sub(
+        lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)
 
 label = re.search(r'android:label="([^"]+)"', MANIFEST.read_text(encoding='utf-8'))
 if not label:
@@ -91,6 +120,24 @@ console = REPO / 'hq-dashboard-next' / 'src'
 if console.is_dir():
     sources += [p for p in console.rglob('*.ts')] + [p for p in console.rglob('*.tsx')]
 
+# The Edge Functions, which compose the one string EVERY citizen reads: the
+# sign-in code's SMS. This was not scanned, and the message named the app from
+# two rebrands ago for every code ever sent. `lib/` and the console's `src/`
+# are where a person reads the app; they are not where the app WRITES to a
+# person, and this is.
+functions = REPO / 'supabase' / 'functions'
+if functions.is_dir():
+    sources += [p for p in functions.rglob('*.ts')]
+
+# Which roots were actually read. A check that quietly stops reading one of
+# them still prints a clean sweep, which is how the sign-in SMS went two
+# rebrands without anybody noticing: the gate said "everywhere a person can
+# read it" over a scan that never opened the file the SMS is written in.
+roots = {'lib': REPO / 'lib',
+         'the console': console,
+         'the Edge Functions': functions}
+read_from = {label: 0 for label in roots}
+
 for path in sorted(sources):
     # A test that asserts the OLD name is the defect, not an exemption — three
     # of them were pinning it. But a test file naming it in a description is
@@ -98,10 +145,14 @@ for path in sorted(sources):
     if '.test.' in path.name or path.name.endswith('_test.dart'):
         continue
     scanned += 1
-    text = DART_COMMENT.sub(lambda m: ' ' * len(m.group(0)),
-                            path.read_text(encoding='utf-8'))
-    for former in FORMER_NAMES:
-        for match in re.finditer(re.escape(former), text):
+    for label, root in roots.items():
+        if root.is_dir() and root in path.parents:
+            read_from[label] += 1
+    text = strip_comments(path.read_text(encoding='utf-8'))
+    hunts = [(former, re.compile(re.escape(former))) for former in FORMER_NAMES]
+    hunts.append(('Rainbow', BARE_NAME))
+    for former, pattern in hunts:
+        for match in pattern.finditer(text):
             window = text[max(0, match.start() - 30):match.end() + 30]
             if EXEMPT.search(window):
                 continue
@@ -113,12 +164,18 @@ for path in sorted(sources):
                 'were sent. Use the current name, or move the old one into a '
                 'comment if it is being explained.')
 
+for label, root in roots.items():
+    if root.is_dir() and read_from[label] == 0:
+        failures.append(
+            f'nothing under {root.relative_to(REPO)} was read, so this check '
+            f'cannot say anything about {label}. It reported a clean sweep '
+            'over exactly that gap once already.')
+
 # Tests must not pin a former name.
 for path in sorted(list((REPO / 'test').rglob('*.dart'))
                    + ([p for p in console.rglob('*.test.ts')] if console.is_dir() else [])
                    + ([p for p in console.rglob('*.test.tsx')] if console.is_dir() else [])):
-    text = DART_COMMENT.sub(lambda m: ' ' * len(m.group(0)),
-                            path.read_text(encoding='utf-8'))
+    text = strip_comments(path.read_text(encoding='utf-8'))
     for former in FORMER_NAMES:
         for match in re.finditer(
                 rf'(?:expect|find\.text|toBe|toContain|equals|contains|'
@@ -140,6 +197,8 @@ if failures:
     sys.exit(1)
 
 print(f'One name, used everywhere a person can read it: {NAME!r}')
-print(f'  * {scanned} app and console source files carry no former name')
-print(f'  * no test pins one, and {len(FORMER_NAMES)} former spellings are '
-      'watched for')
+print(f'  * {scanned} source files carry no former name')
+for label, count in read_from.items():
+    print(f'      {count:>4} in {label}')
+print(f'  * no test pins one, and {len(FORMER_NAMES)} former spellings plus the '
+      'bare word are watched for')

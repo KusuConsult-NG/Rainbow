@@ -276,6 +276,20 @@ describe('what reaches Termii', () => {
     expect(text).toMatch(/expires/i);
     expect(text).toMatch(/do not share/i);
   });
+
+  // Reported by a tester who received the real SMS: "I got an OE Alert …
+  // for Rainbow EWER authentication code". The app is Plateau Eye. This is
+  // the single most-read string in the product — every citizen reads it to
+  // get in — and it carried the name from two rebrands ago.
+  //
+  // The assertions above are why it survived. They check the code, the
+  // expiry and the warning, which is everything in the message EXCEPT whose
+  // app it is.
+  it('calls the app by its current name', () => {
+    const text = otpMessage('561166');
+    expect(text).toContain('Plateau Eye');
+    expect(text).not.toMatch(/rainbow/i);
+  });
 });
 
 describe('what the hook says back', () => {

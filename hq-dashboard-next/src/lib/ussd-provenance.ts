@@ -155,7 +155,7 @@ export function credibilityConcerns(c: UssdCredibility): Concern[] {
   if (c.first_time_caller) {
     out.push({
       level: 'medium',
-      text: 'First time this number has ever contacted Rainbow.',
+      text: 'First time this number has ever contacted Plateau Eye.',
     });
   } else {
     out.push({

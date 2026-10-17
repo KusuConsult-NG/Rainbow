@@ -160,7 +160,7 @@ async function deliverSms(payload: Record<string, unknown>): Promise<void> {
     body: JSON.stringify({
       to:      phone,
       from:    TERMII_SENDER,
-      sms:     payload.message ?? 'Operation Rainbow notification.',
+      sms:     payload.message ?? 'Plateau Eye notification.',
       type:    'plain',
       api_key: TERMII_API_KEY,
       channel: 'dnd',

@@ -8653,3 +8653,112 @@ Termii failure that reads `SMS SIGN-IN IS MISCONFIGURED` proves the message
 passes through; one that reads `THE CODE COULD NOT BE SENT. TRY AGAIN` proves
 it does not, and the whole branch needs rebuilding on whatever Supabase does
 send.
+
+---
+
+### T-65. The sign-in SMS named the app from two rebrands ago
+
+The chain works. Reported from the handset:
+
+> I got an OE Alert at 11:48AM for Rainbow EWER authentication code
+
+Termii delivered, the hook fired, the code arrived. Phone sign-in is live, and
+T-63's `PHONE_OFF` was the last thing standing in its way.
+
+And the message a citizen reads to get into **Plateau Eye** said:
+
+```
+Your Rainbow EWER verification code is: 561166. It expires in 5 minutes. Do not share this code.
+```
+
+#### The most-read string in the product
+
+Every citizen reads this one. There is no email path and no password; the SMS
+is the front door. It carried `Rainbow EWER` for every code ever sent.
+
+`scripts/check_one_brand_name.py` has existed since the Plateau Eye rebrand
+and passed throughout, for **two independent reasons, either of which alone
+would have been enough**:
+
+1. **It never read the file.** Its sources were `README.md`, `lib/**/*.dart`
+   and the console's `src/`. `supabase/functions/` was not among them.
+   `lib/` and `src/` are where a person *reads* the app. They are not where the
+   app *writes to* a person, and that is where this lived.
+2. **`Rainbow EWER` was not in `FORMER_NAMES`.** The list had six spellings of
+   two earlier names. Even pointed at the file, it would have passed the string.
+
+The vitest suite had the same shape of hole. `send-sms-hook.test.ts` asserted
+`otpMessage` contains the code, matches `/expires/i` and matches
+`/do not share/i` — everything in the message except whose app it is.
+
+#### What widening the gate found immediately
+
+Pointing it at `supabase/functions/` failed the build on a second one:
+
+```
+supabase/functions/drain-outbox/index.ts:163 reads 'Operation Rainbow'
+```
+
+the fallback body of every outbound alert SMS whose payload carries no message.
+
+And a third, found while testing whether a bare `rainbow` stem rule would be
+clean (it would not — 20 hits, nearly all method-channel names, the
+`@operationrainbow.plateau.gov.ng` staff email domain, HKDF info strings and a
+project slug):
+
+```
+hq-dashboard-next/src/lib/ussd-provenance.ts:158
+  'First time this number has ever contacted Rainbow.'
+```
+
+on the console's incident card, read by an operator. No entry in `FORMER_NAMES`
+matches a bare `Rainbow`, because it is not a full name this app ever had.
+
+#### What was done
+
+A failing vitest case first — `calls the app by its current name`, asserting
+`Plateau Eye` and `not.toMatch(/rainbow/i)` — which failed against the exact
+string the tester received. Then all three strings fixed and the bundle
+regenerated.
+
+The gate gained three things:
+
+* `supabase/functions/**/*.ts` as a source root, with `Rainbow EWER` and its
+  case variants in `FORMER_NAMES`;
+* `BARE_NAME = (?<![\w-])Rainbow(?![\w-])`, which catches the standalone word
+  without firing inside `RainbowMap`, `rainbow_offline.db`,
+  `com.operationrainbow.app/sim` or the `rainbow-97f1e` project slug.
+  `X-Rainbow-Auth`, an HTTP header, joins the exemptions;
+* **a scan-coverage guard.** If a configured root exists and nothing under it
+  was read, the gate fails rather than printing a clean sweep. That is the
+  defect itself expressed as a check: it said "one name, used everywhere a
+  person can read it" over a scan that never opened the file the SMS is
+  written in. It now also reports the count per root — 126 in `lib`, 75 in the
+  console, 6 in the Edge Functions — so a root going quiet is visible even
+  when the guard does not trip.
+
+Four mutations, all caught, including the two that matter: removing the Edge
+Functions root (caught by the coverage guard, naming it); and deleting
+`Rainbow EWER` from `FORMER_NAMES` *while* reverting the SMS — which the
+hand-written list alone missed, and which `BARE_NAME` now catches.
+
+#### A line-number bug, found by running it
+
+The first finding read `ussd-provenance.ts:96`. The string is on line 158.
+Comments were blanked with `' ' * len(match)`, which eats the newlines inside
+a `/* … */` block and shifts every line number after it. Now blanked
+character-by-character with newlines kept. A gate that names the wrong line
+sends somebody to read the wrong code, and this one had been doing it since it
+was written.
+
+#### What this does not fix
+
+**The deployed function still sends the old text.** `hook.ts` and
+`bundled_for_dashboard.ts` are source; the running Edge Function is whatever
+was last deployed. Until `send-sms` is redeployed — CLI, or pasting the
+regenerated bundle into the dashboard — every code still says Rainbow EWER.
+Nothing in `lib/` changed, so the APK does not need rebuilding for this.
+
+The Termii **sender ID** is `OE Alert`, which is also not the app's name. That
+one is not ours to change in code: Termii approves sender IDs, and an
+unapproved one is not delivered. It is an operational request, not a commit.
