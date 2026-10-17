@@ -156,7 +156,10 @@ classify_get() {
         local live
         live=$(printf '%s' "$body" | sed -n 's/.*"build"[[:space:]]*:[[:space:]]*"\([0-9a-f]*\)".*/\1/p')
         if [ -z "$live" ]; then
-          echo "UNMARKED_BUILD  our code answered, but it is a build from before the version marker existed, so there is no way to tell which one. Redeploy from this checkout."
+          # Name the value to aim for. Without it the operator pastes, re-runs,
+          # and has to take the verdict's word for it a second time — which is
+          # the habit that let a stale deployment read as confirmed.
+          echo "UNMARKED_BUILD  our code answered, but it is a build from before the version marker existed, so there is no way to tell which one${WANT_BUILD:+ — not even whether it is older than this checkout, which is build $WANT_BUILD}. Paste supabase/functions/send-sms/bundled_for_dashboard.ts into the dashboard editor and deploy, then run this again."
         elif [ -z "$WANT_BUILD" ]; then
           echo "OK_REACHABLE  our code answered (405, POST only) — deployed with JWT verification OFF, which is correct. Build $live; this run could not read the sources to compare it with."
         elif [ "$live" != "$WANT_BUILD" ]; then
