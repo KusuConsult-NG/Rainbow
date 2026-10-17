@@ -1,4 +1,38 @@
 -- ############################################################################
+-- #  THIS FILE REFUSES TO RUN. Paste scripts/apply_all_migrations.sql.        #
+-- ############################################################################
+--
+-- The warning below used to be a comment, and a comment cannot stop a paste.
+-- Somebody pasted this file into the SQL editor of a live project and it died
+-- 1,385 lines in:
+--
+--     ERROR: 42703: column "badge_number" does not exist
+--     LINE 1385:   badge_number,
+--
+-- because the view at line 1385 selects `profiles.badge_number` while the only
+-- statement that creates that column is an ALTER TABLE 1,231 lines further
+-- down, at line 2616. This file cannot run to completion on any database,
+-- empty or not, and nothing in CI applies it — so nothing caught that.
+--
+-- So it now says no out loud, in SQL, as its first statement. Everything below
+-- is kept because T-13 and the policy checks cite it by line number.
+DO $refuse$
+BEGIN
+  RAISE EXCEPTION USING
+    ERRCODE = 'raise_exception',
+    MESSAGE = 'supabase/rainbow_full_migration.sql is not the file to paste.',
+    DETAIL  = 'It is hand-assembled, nothing regenerates it, CI never applies '
+              'it, and it fails at line 1385 on profiles.badge_number because '
+              'the column is not added until line 2616.',
+    HINT    = 'Paste scripts/apply_all_migrations.sql instead - generated from '
+              'supabase/migrations/, checked both ways in CI, and run twice '
+              'against a production-shaped PostgreSQL before it ships. For a '
+              'project from zero use scripts/bootstrap_staging.sql; to see '
+              'what a database already has, scripts/which_migrations_are_applied.sql.';
+END
+$refuse$;
+
+-- ############################################################################
 -- #  PREFER scripts/apply_all_migrations.sql. THIS FILE IS HAND-ASSEMBLED.    #
 -- ############################################################################
 --

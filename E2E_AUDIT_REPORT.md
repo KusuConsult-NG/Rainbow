@@ -8009,3 +8009,89 @@ And sign-in still needs the SMS provider switched on in the Supabase project.
 `describeOtpSendFailure` has said so in plain words since T-53; it is the
 other thing standing between a citizen and an account, and it is not
 reachable from here either.
+
+### T-58. A warning comment cannot stop a paste
+
+The operator pasted `supabase/rainbow_full_migration.sql` into the SQL editor
+of a live project. It died 1,385 lines in:
+
+```
+ERROR: 42703: column "badge_number" does not exist
+LINE 1385:   badge_number,
+```
+
+| line | what is there |
+| --- | --- |
+| 1385 | `CREATE OR REPLACE VIEW public.officers_missing_geo_lga` — selects `badge_number` **FROM public.profiles** |
+| 2616 | `ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS badge_number TEXT` |
+
+Nothing between them creates that column. The other two mentions, at 874 and
+1456, are `agency_personnel`, a different table. **So the file cannot run to
+completion on any database, empty or not** — and it has been in the repository
+in that state, unnoticed, because nothing in CI applies it.
+`scripts/verify_apply_all.sh` proves `scripts/apply_all_migrations.sql`, which
+is a different file: generated from `supabase/migrations/`, checked against
+that directory in both directions, and run top to bottom twice against a
+production-shaped PostgreSQL.
+
+#### The part worth keeping
+
+The bundle already said all of this. Its first eleven lines read:
+
+> **PREFER scripts/apply_all_migrations.sql. THIS FILE IS HAND-ASSEMBLED.**
+> It has no generator and nothing regenerates it, so it goes stale silently…
+
+And every document already points at the generated one — `README.md`,
+`docs/APPLYING_THE_MIGRATIONS.md`, `docs/PRODUCTION_DEPLOYMENT.md`,
+`docs/STAGING.md`. The documentation did not fail. **The delivery mechanism
+did.** An operator working in a browser selects all, copies, pastes, and runs;
+the first thing PostgreSQL does with a comment is skip it. A warning that is
+only readable by someone who was already being careful is not a safeguard, and
+this one had been true and ignored for however long the file has existed.
+
+It was also, in part, mine to own: the operator went to that file because the
+previous turn had cited it by name — `rainbow_full_migration.sql:35` — while
+working out which of three Supabase project refs was real. Naming a file is
+enough to send somebody to it.
+
+#### What was done
+
+The file now refuses, in SQL, as its first statement — a `DO` block that
+`RAISE`s, names `scripts/apply_all_migrations.sql`, and says why. Proved
+against a real PostgreSQL 16 rather than reasoned about:
+
+```
+psql:bundle.sql:33: ERROR:  supabase/rainbow_full_migration.sql is not the file to paste.
+DETAIL:  It is hand-assembled, nothing regenerates it, CI never applies it, and it
+         fails at line 1385 on profiles.badge_number because the column is not
+         added until line 2616.
+HINT:    Paste scripts/apply_all_migrations.sql instead …
+--- psql exit: 3 ---
+=== how many tables did it manage to create? ===
+0
+```
+
+Deleting the file would answer the same problem. It is kept because T-13 and
+`check_every_policy_names_its_roles.py` cite it by line number, and a finding
+that cannot be looked up is worth less than a file that says no.
+
+`scripts/check_the_stale_bundle_refuses.py` holds it there: the first
+executable statement must be a `DO` block that raises and names the generated
+file, and no document may tell an operator to run the bundle. It also passes
+if the file is deleted, since that is a legitimate answer.
+
+**One mutation caught a hole in the check itself.** Removing the generated
+file's name from the refusal did *not* fail the first version, because it
+looked at the first 4,000 characters — and the preamble comment above the
+block still contained the name. The check now reads the `DO` block's own body.
+PostgreSQL does not print comments; the operator sees the error and nothing
+else, so a name that lives only in a comment is a name they never get.
+
+#### What this does not fix
+
+The migration bundle was the second thing to go wrong in that one paste. The
+first is still open: `supabase functions deploy --project-ref
+wpffwoblxuogemxcqpep` returns **403, "your account does not have the necessary
+privileges"**, while the CLI's own project picker offers a different ref
+entirely. Whatever account is logged in cannot deploy to the project the app
+is pointed at, and that is not knowable or fixable from this repository.

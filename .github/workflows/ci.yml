@@ -1123,6 +1123,15 @@ jobs:
 
       # The generated file must contain no top-level transaction control of its
       # own beyond the wrapper's single BEGIN/ROLLBACK.
+      # An operator pasted supabase/rainbow_full_migration.sql into a live
+      # project's SQL editor and it died 1,385 lines in, on a view that selects
+      # profiles.badge_number while the ALTER that creates it sits 1,231 lines
+      # further down. Nothing in CI applies that file — verify_apply_all.sh
+      # proves scripts/apply_all_migrations.sql, a different one. The bundle
+      # carried a warning comment, and a comment cannot stop a paste.
+      - name: Assert the hand-assembled bundle refuses to run
+        run: python3 scripts/check_the_stale_bundle_refuses.py
+
       - name: Assert no stray COMMIT survived generation
         run: |
           set -euo pipefail
