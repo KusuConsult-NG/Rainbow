@@ -41,6 +41,7 @@ import {
   extractOtp,
   hookError,
   maskPhone,
+  SOURCE_FINGERPRINT,
   termiiRequest,
   verifyStandardWebhook,
 } from './hook.ts';
@@ -101,8 +102,21 @@ serve(async (req: Request) => {
       },
     });
   }
+  // The one request that is safe to answer with anything: a GET sends no SMS
+  // and reads no body. It carries the build marker so an operator can tell
+  // WHICH version is live, which no other signal here can.
+  //
+  // Built inline rather than through hookError() so the documented error
+  // envelope stays exactly as it is — `--check` keys on `"http_code":405` to
+  // tell our answer from the platform's, and that must not move.
   if (req.method !== 'POST') {
-    return respond(hookError(405, 'send-sms accepts POST'));
+    return new Response(
+      JSON.stringify({
+        error: { http_code: 405, message: 'send-sms accepts POST' },
+        build: SOURCE_FINGERPRINT,
+      }),
+      { status: 405, headers: { 'Content-Type': 'application/json' } },
+    );
   }
 
   // ── 1. Authenticate the caller ─────────────────────────────────────────────

@@ -55,6 +55,10 @@ DART = REPO / 'lib' / 'services' / 'auth_service.dart'
 # and Auth only ever POSTs. `--check` relies on it as the healthy GET verdict.
 # Named here rather than filtered by accident, so that adding a second
 # exception is a deliberate act somebody has to write down.
+# Matches nothing as of the build-marker change, which moved the 405 out of
+# hookError() so the GET answer could carry a `build` field. Kept because the
+# reason still exists in index.ts and would be extracted again the moment it
+# goes back through hookError().
 NOT_FROM_A_REAL_CALL = {'send-sms accepts post'}
 
 

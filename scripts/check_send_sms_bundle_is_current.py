@@ -46,5 +46,26 @@ if want != have:
           'regenerated\n')
     sys.exit(1)
 
+# The build marker, which is what lets --check tell a current deployment from
+# a stale one. A bundle regenerated without re-stamping carries the previous
+# build's fingerprint, so the probe would call a fresh paste stale, or worse,
+# call a stale one fresh.
+from stamp_send_sms_version import current, fingerprint  # noqa: E402
+
+stamped, implied = current(), fingerprint()
+if stamped != implied:
+    print('The build marker is stale:\n')
+    print(f'  * SOURCE_FINGERPRINT says {stamped!r}, the sources hash to '
+          f'{implied!r}.\n')
+    print('  * Re-stamp and regenerate:\n'
+          '      python3 scripts/stamp_send_sms_version.py\n'
+          '      python3 scripts/build_send_sms_bundle.py\n')
+    print('  * Until then `wire_up_sms_provider.sh --check` compares the live '
+          'deployment\n    against the wrong value and its verdict means '
+          'nothing.')
+    sys.exit(1)
+
 print('OK: the dashboard bundle is exactly what index.ts and hook.ts say.')
 print(f'  * {len(have.splitlines())} lines, regenerated and compared')
+print(f'  * build marker {implied}, which --check compares the live function '
+      f'against')

@@ -59,8 +59,29 @@ check "platform 401 (JWT verification left on)" JWT_ON \
 check "platform 403" JWT_ON \
   "$(classify_get 403 '{"message":"Invalid JWT"}')"
 # Our own bodies always carry error.http_code.
+# The build marker. WANT_BUILD is what the checkout hashes to; the body is
+# what the live function says it is running.
+WANT_BUILD=aaaaaaaaaaaaaaaa
+MARKED='{"error":{"http_code":405,"message":"send-sms accepts POST"},"build":"aaaaaaaaaaaaaaaa"}'
+OLDER='{"error":{"http_code":405,"message":"send-sms accepts POST"},"build":"bbbbbbbbbbbbbbbb"}'
+UNMARKED='{"error":{"http_code":405,"message":"send-sms accepts POST"}}'
+
+check "our 405, build matches the checkout" OK_REACHABLE \
+  "$(classify_get 405 "$MARKED")"
+# The one this exists for: a function that answers, verifies and has its
+# provider on, but is running YESTERDAY's code. Every other probe is green.
+check "our 405, build is an OLDER deployment" STALE_BUILD \
+  "$(classify_get 405 "$OLDER")"
+check "our 405, build from before the marker existed" UNMARKED_BUILD \
+  "$(classify_get 405 "$UNMARKED")"
+# Run from outside a checkout there is nothing to compare with, and the probe
+# must report what it saw rather than call it stale.
+WANT_BUILD='' check_outside=$(classify_get 405 "$MARKED")
+check "no sources to compare with, so no claim" OK_REACHABLE "$check_outside"
+WANT_BUILD=aaaaaaaaaaaaaaaa
+
 check "our 405 (POST only) — healthy" OK_REACHABLE \
-  "$(classify_get 405 '{"error":{"http_code":405,"message":"send-sms accepts POST"}}')"
+  "$(classify_get 405 "$MARKED")"
 check "our 401 reached us" OK_REACHABLE \
   "$(classify_get 401 '{"error":{"http_code":401,"message":"signature did not verify"}}')"
 check "not deployed" NOT_DEPLOYED "$(classify_get 404 'Function not found')"
@@ -94,7 +115,7 @@ fi
 
 # And the healthy pair must be the only combination the script treats as ready.
 echo "▶ Only the healthy pair reads as ready"
-G_OK=$(classify_get 405 '{"error":{"http_code":405,"message":"send-sms accepts POST"}}')
+G_OK=$(classify_get 405 "$MARKED")
 P_OK=$(classify_post 401 '{"error":{"http_code":401,"message":"bad sig"}}')
 case "${G_OK}${P_OK}" in
   OK_REACHABLE*OK_VERIFYING*) echo "  PASS  the healthy pair matches the readiness pattern" ;;
@@ -142,6 +163,15 @@ esac
 # The whole point: a healthy FUNCTION with the provider off must NOT read as
 # ready. That combination is what the script used to call "✓ deployed" while
 # every sign-in failed.
+# A stale deployment must not read as ready either, however green the rest is.
+G_STALE=$(classify_get 405 "$OLDER")
+case "${G_STALE}${P_OK}${A_OK}" in
+  OK_REACHABLE*OK_VERIFYING*OK_PHONE_ON*)
+     echo "  FAIL  a STALE deployment read as ready"
+     FAILED=$((FAILED + 1)) ;;
+  *) echo "  PASS  a stale deployment is not ready" ;;
+esac
+
 case "${G_OK}${P_OK}${A_OFF}" in
   OK_REACHABLE*OK_VERIFYING*OK_PHONE_ON*)
      echo "  FAIL  a healthy function with the phone provider OFF read as ready"

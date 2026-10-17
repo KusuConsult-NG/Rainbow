@@ -8762,3 +8762,96 @@ Nothing in `lib/` changed, so the APK does not need rebuilding for this.
 The Termii **sender ID** is `OE Alert`, which is also not the app's name. That
 one is not ours to change in code: Termii approves sender IDs, and an
 unapproved one is not delivered. It is an operational request, not a commit.
+
+---
+
+### T-66. The probe could not tell a fresh deployment from a stale one
+
+The CLI deploy refused again, with the same 403 as T-60:
+
+```
+unexpected deploy status 403: {"message":"Your account does not have the
+necessary privileges to access this endpoint."}
+```
+
+so T-65's fix went in by pasting the bundle into the dashboard editor, and the
+operator confirmed it with `--check`:
+
+```
+GET  -> OK_REACHABLE   POST -> OK_VERIFYING   AUTH -> OK_PHONE_ON
+```
+
+and read that as *the paste landed*.
+
+**It is not evidence of that.** Those three verdicts were all green an hour
+earlier, against the deployment whose sign-in SMS said `Rainbow EWER`. They
+report that the endpoint answers, that it verifies signatures, and that the
+Phone provider is on. None of them has ever been able to say **which version
+of the code is running**, and the operator had no other way to find out short
+of requesting a real code and reading the SMS.
+
+That matters more here than it would almost anywhere else: the CLI deploy is
+403 for this account, so *every* change to this function is a manual paste into
+a web editor, with nothing to confirm it took. The one deployment mechanism
+available is the one with no receipt.
+
+This is the fourth time in two days the same shape has turned up — a green
+check over a gap it never looked at. T-62's palette gate held declared colour
+pairs and never asked what a widget painted on which surface. T-63's probe
+checked the function and never asked whether Auth would call it. T-65's brand
+gate read `lib/` and the console and never opened the file the SMS is written
+in. Here: three probes that cannot see the code they are probing.
+
+#### What was done
+
+`SOURCE_FINGERPRINT` in `hook.ts` — sixteen hex characters, the SHA-256 of
+`hook.ts` (with the fingerprint line itself blanked) and `index.ts`. Not a
+secret: a hash of two files in a public repository, which says nothing about
+the signing secret, Termii, or any phone number.
+
+The GET answer carries it:
+
+```json
+{"error":{"http_code":405,"message":"send-sms accepts POST"},"build":"c75cc2893c5f76fd"}
+```
+
+built inline rather than through `hookError()`, so the documented error
+envelope stays exactly as it is — `classify_get` keys on `"http_code":405` to
+tell our answer from the platform's, and that must not move. A GET sends no
+SMS and reads no body, so it is the one request that is safe to answer with
+anything at all.
+
+`--check` now hashes the checkout and compares:
+
+| verdict | means |
+|---|---|
+| `OK_REACHABLE … it is build X, which is this checkout` | the paste landed |
+| `STALE_BUILD` | **answers, verifies, provider on — and running older code** |
+| `UNMARKED_BUILD` | a deployment from before the marker existed |
+| `OK_REACHABLE … could not read the sources to compare` | run outside a checkout; reports what it saw and claims nothing |
+
+`STALE_BUILD` does not match the readiness pattern, so a stale deployment can
+no longer print the ✓.
+
+`scripts/stamp_send_sms_version.py` writes the value and `--check`s it;
+`check_send_sms_bundle_is_current.py` now fails if the stamp and the sources
+disagree, because a bundle regenerated without re-stamping carries the previous
+build's fingerprint — which would make the probe call a fresh paste stale, or
+a stale one fresh. Three mutations, all caught: a source edited with neither
+bundle nor stamp updated; a source edited and the bundle regenerated but not
+re-stamped; and the marker hand-edited to a wrong value. Four new assertions in
+`wire_up_sms_provider_test.sh`, including the one this exists for — a stale
+build with everything else green must not read as ready.
+
+#### What this cannot do
+
+Tell you anything about a deployment made before this change, which is every
+deployment that exists today. The first `--check` after this lands will say
+`UNMARKED_BUILD` — correctly, because the running function has no marker and
+there is genuinely no way to identify it. One more paste of
+`bundled_for_dashboard.ts` fixes that permanently, and from then on the probe
+answers the question directly.
+
+It also cannot see the Termii side, the hook wiring, or whether a code is
+actually delivered. Those remain what they were: `--commit` sets the second,
+and only a real sign-in proves the first and third.

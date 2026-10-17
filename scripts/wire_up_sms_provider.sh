@@ -124,6 +124,12 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ANON="${SUPABASE_ANON_KEY:-$(sed -n "s/.*defaultValue: '\\(sb_publishable_[^']*\\)'.*/\\1/p" \
   "$REPO/lib/core/supabase/supabase_config.dart" | head -1)}"
 
+# What the sources in THIS checkout hash to. The deployed function reports its
+# own marker on GET, so the two can be compared — which is the only way to tell
+# a current deployment from a stale one. Empty if this is run from outside the
+# repository; the probe then says what it found and makes no claim about it.
+WANT_BUILD="$(python3 -c "import sys; sys.path.insert(0, '$REPO/scripts'); from stamp_send_sms_version import fingerprint; print(fingerprint())" 2>/dev/null || true)"
+
 mask() {  # never print a secret, only its shape
   local v="$1"
   if [ -z "$v" ]; then echo "(unset)"; else
@@ -143,7 +149,21 @@ classify_get() {
     404) echo "NOT_DEPLOYED  the function is not deployed. Run: supabase functions deploy send-sms --no-verify-jwt"; return ;;
     405)
       if printf '%s' "$body" | grep -q '"http_code":405'; then
-        echo "OK_REACHABLE  our code answered (405, POST only) — deployed with JWT verification OFF, which is correct"
+        # Which build answered. Every other signal this script reads was
+        # already green against a deployment whose sign-in SMS named the app
+        # from two rebrands ago (T-65), and the operator read the tick as
+        # "my paste landed". It could not have told them either way.
+        local live
+        live=$(printf '%s' "$body" | sed -n 's/.*"build"[[:space:]]*:[[:space:]]*"\([0-9a-f]*\)".*/\1/p')
+        if [ -z "$live" ]; then
+          echo "UNMARKED_BUILD  our code answered, but it is a build from before the version marker existed, so there is no way to tell which one. Redeploy from this checkout."
+        elif [ -z "$WANT_BUILD" ]; then
+          echo "OK_REACHABLE  our code answered (405, POST only) — deployed with JWT verification OFF, which is correct. Build $live; this run could not read the sources to compare it with."
+        elif [ "$live" != "$WANT_BUILD" ]; then
+          echo "STALE_BUILD  our code answered, but it is build $live and this checkout is $WANT_BUILD. The deployment is an OLDER version of this function. Redeploy, or paste supabase/functions/send-sms/bundled_for_dashboard.ts again."
+        else
+          echo "OK_REACHABLE  our code answered (405, POST only) — deployed with JWT verification OFF, and it is build $live, which is this checkout"
+        fi
       else
         echo "ODD_405  something returned 405 that is not this function: $body"
       fi
