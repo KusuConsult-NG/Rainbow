@@ -561,12 +561,46 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               ],
             ),
           ),
-          // WHAT A RESPONDER NEEDS, AS TAPS.
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.03),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.outline),
+            ),
+            child: TextField(
+              controller: _narrativeCtrl,
+              maxLines: 6,
+              decoration: InputDecoration(
+                hintText:
+                    Translations.get('rpt_enter_details_hint', lang),
+                hintStyle:
+                    GoogleFonts.outfit(color: AppColors.textDim, fontSize: 13),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.all(20),
+              ),
+              style: GoogleFonts.outfit(
+                fontSize: 14,
+                height: 1.6,
+                color: AppColors.onBackground,
+                fontWeight: FontWeight.w500,
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          // BELOW the narrative box, not above it.
           //
-          // Above the narrative box on purpose: these are the three facts that
-          // decide who is sent and how fast, and they are answerable in a
-          // second each by somebody who has no time to type. Nothing here is
-          // required.
+          // They sat above it, which pushed the text field off the first
+          // screen. Four things broke on that: three widget tests whose
+          // finders reported the field as DELETED rather than off-screen,
+          // because a lazy scroll view had not built it — and the
+          // command-chain harness, which taps the field by its hint text,
+          // missed it for one category in ten and filed a report carrying no
+          // narrative at all.
+          //
+          // The reporter's own account is the first field because it always
+          // has been, and everything below is laid out around that. These sit
+          // directly under it, above the voice and photo controls, still
+          // three taps, still never required.
           for (final prompt in widget.categoryInfo.responsePrompts) ...[
             Padding(
               padding: const EdgeInsets.only(bottom: 8, top: 4),
@@ -606,32 +640,6 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             ),
             const SizedBox(height: 16),
           ],
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.03),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.outline),
-            ),
-            child: TextField(
-              controller: _narrativeCtrl,
-              maxLines: 6,
-              decoration: InputDecoration(
-                hintText:
-                    Translations.get('rpt_enter_details_hint', lang),
-                hintStyle:
-                    GoogleFonts.outfit(color: AppColors.textDim, fontSize: 13),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.all(20),
-              ),
-              style: GoogleFonts.outfit(
-                fontSize: 14,
-                height: 1.6,
-                color: AppColors.onBackground,
-                fontWeight: FontWeight.w500,
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-          ),
           Align(
             alignment: Alignment.centerRight,
             child: Padding(

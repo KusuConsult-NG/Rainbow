@@ -9487,3 +9487,71 @@ than the current route, so nodes from a previously rendered screen can be
 listed under whichever route the sweep is on. It did not affect this finding —
 the controls were real and really dead — but a route label in that output is
 not evidence of where a control lives.
+
+---
+
+### T-73. One displacement, four breakages, and a tap aimed outside the screen
+
+The command-chain harness went red on two checks:
+
+```
+FAIL  all 10 categories reach the database      — 9/10 written (10 new rows)
+FAIL  each category keeps its own type and severity
+```
+
+**Both are one fault.** Ten rows were inserted and nine of them began
+`Lifecycle `, which is the prefix the harness filters its own reports by. The
+distinct-type count then came up one short for the same reason — the missing
+row was never in the set being counted.
+
+#### What happened to the tenth report
+
+It was filed with no narrative at all. The harness taps the narrative field by
+its hint text and types into it. T-70's response chips sat **above** that
+field, adding roughly 250px, and for one category in ten the field was far
+enough down that the tap missed it. The typing went nowhere, and
+`report_details_screen.dart` substituted its "no narrative" default — a real
+report, correctly filed, carrying nothing the harness could recognise as its
+own.
+
+Kidnap, Domestic violence and Community attack each carry three questions and
+are all in that list, so the displacement was comfortably large enough.
+
+#### The fix is not a fourth scroll-fix
+
+That displacement had by then broken four things: three widget tests in T-70,
+whose finders reported the narrative box as **deleted** rather than
+off-screen because a lazy scroll view had not built it, and now this harness.
+Each had been answered by teaching the test to scroll.
+
+Four is a pattern rather than four coincidences. The chips moved **below** the
+narrative box. The reporter's own account is the first field again, which is
+what every layout assumption downstream was built around; the chips sit
+directly under it, still above the voice and photo controls, still three taps,
+still never required. Nothing about what reaches a responder changed.
+
+#### Moving them exposed a real bug in the test
+
+With the field no longer needing to be scrolled to, every iteration ran faster
+— and **Drug abuse** began failing: tapped, never submitted. Twelve taps,
+eleven reports.
+
+Not a race. `scrollUntilVisible` stops the instant the target *intersects* the
+viewport, which can be by a single pixel; `tester.tap` then aims at the
+widget's centre, which is still outside it, and the tap lands on nothing.
+Whether that happens depends on where the 200px steps come to rest, so it bit
+exactly one category of twelve — the only one with a single response prompt,
+whose content height differs from the rest by about that much.
+`tester.ensureVisible` scrolls it fully in.
+
+The loop also pumped a fixed number of frames after each tap and assumed the
+submit had landed. `_submit` does asynchronous work — a connectivity check, a
+read of the location stream — before it reaches the service, and a bounded
+pump that runs out mid-flight moves on to the next category, rebuilds the
+screen, and abandons that submit in silence. It now waits for **that** submit
+to register, still bounded, so one that never lands fails the test instead of
+passing quietly.
+
+That second fault was always there. It was hidden by the loop happening to be
+slow enough, and surfaced by making it faster — which is the usual way a test
+that measures time instead of state gets caught.

@@ -250,7 +250,40 @@ void main() {
         // Submit
         final submitBtn = find.text('INITIATE TRANSMISSION');
         await tester.scrollUntilVisible(submitBtn, 200, scrollable: find.byType(Scrollable).first);
+        // `scrollUntilVisible` stops the instant the widget INTERSECTS the
+        // viewport, which can be by a pixel; `tester.tap` then aims at its
+        // centre, which is still outside, and the tap hits nothing at all.
+        // Whether that happens depends on where the 200px steps land, so it
+        // bit exactly one category of twelve — Drug abuse, the only one with
+        // a single response prompt, whose content height differs from the
+        // rest by that much. `ensureVisible` scrolls it fully in.
+        await tester.ensureVisible(submitBtn);
+        await tester.pump();
+        final before = fakeAlertService.submittedAlertTypes.length;
         await tester.tap(submitBtn);
+        // Wait for THIS submit to register, rather than pumping a fixed
+        // number of frames and hoping.
+        //
+        // `_submit` does asynchronous work — a connectivity check, a read of
+        // the location stream — before it reaches the service. A bounded pump
+        // that runs out mid-flight moves the test on to the next category,
+        // the screen is rebuilt, and that submit is simply abandoned: twelve
+        // taps, eleven reports. It passed for as long as the loop happened to
+        // be slow enough, and started failing when moving the response chips
+        // below the narrative box meant the field no longer had to be
+        // scrolled to, which made every iteration faster.
+        //
+        // Still bounded, so a submit that never lands fails the test rather
+        // than hanging it.
+        for (var waited = 0; waited < 60; waited++) {
+          if (fakeAlertService.submittedAlertTypes.length > before) break;
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+        expect(
+          fakeAlertService.submittedAlertTypes.length,
+          greaterThan(before),
+          reason: '${catInfo.label} was tapped but never reached submitAlert',
+        );
         await settleFast(tester);
       }
 
