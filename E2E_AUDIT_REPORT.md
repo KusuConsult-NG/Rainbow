@@ -10241,3 +10241,68 @@ no harness named; a stale listing for a route that no longer falls back.
 
 A smaller true claim is worth more than a larger false one, and the six are no
 longer invisible — they are named in the output of every run, with an address.
+
+---
+
+### T-82. The role that never paints, for the third time
+
+CI run 559 failed on the mobile capture, and not on anything the previous
+findings touched. Two failed checks, one cause:
+
+```
+FAIL  hq: is captured at all  — the app never painted for hq-signin within 120000ms.
+    memory:  14718MB free of 15984MB
+    page:    {"readyState":"complete","htmlChars":1276,
+              "scripts":["…/main.dart.js","…/flutter_bootstrap.js"],"bodyText":""}
+FAIL  every rung of the command chain identifies itself on the dashboard
+      — hq should read HQ COMMAND, read "(nothing)"
+```
+
+The second is the first: hq never rendered, so there was no banner to read.
+
+`freshBrowser`'s own comment says this has happened before — *"On a CI runner
+this is where the run has died twice: the 4th role, then the 6th"*. This is the
+third, and the diagnostics added after the second are what made it diagnosable
+in one read rather than one cycle.
+
+#### What the evidence says it is
+
+* The HTML shell loaded — `readyState: complete`, 1276 chars, both scripts
+  requested — and `bodyText` is empty. Flutter never booted.
+* Memory was not the problem: 14.7GB of 16GB free.
+* lga finished at 16:49:10. hq was given its full 120 seconds and never
+  painted. **police signed in normally at 16:51:42, on the next browser.**
+* The same commit renders all eight roles locally, 28/28.
+* Run 558 — one commit earlier — passed this job.
+
+A transient per-browser boot stall on one role, not a broken screen. Each
+occurrence has cost a whole CI cycle, and the run before it was green.
+
+#### What was done, and why it is not just a retry
+
+One retry with a fresh browser, and it is **loud and counted**:
+
+* the log line says `RETRIED <role>: the app never painted on the first
+  browser; taking one more`;
+* only a paint stall is retried — a real sign-in failure still fails
+  immediately, because the retry matches on the message `never painted`;
+* `at most one role needed its browser restarting to boot` is a CHECK. One
+  transient stall passes, with the role named. **Two fails.** A role that needs
+  a retry every run is a different problem and shows up as one instead of being
+  absorbed into a pass;
+* the retried roles are in the JSON report.
+
+#### Proven, not described
+
+`ROLE_PAINT_MS=1` makes every role's first paint wait fail. Run that way: eight
+`RETRIED` lines, every role then failing on its second browser, and `at most one
+role needed its browser restarting` going **red** — which is the half that
+matters, because it is what stops this retry from becoming the kind of green
+check the rest of this report is about.
+
+The override stays, documented, for the same reason `MOBILE_PAINT_TIMEOUT_MS`
+does: a failure path that can only be exercised in production is a failure path
+nobody has tested.
+
+Then run normally: 28/28, exit 0, hq signs in, and the new check reads
+`none needed it`.

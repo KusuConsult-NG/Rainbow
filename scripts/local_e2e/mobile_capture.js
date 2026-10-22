@@ -351,7 +351,16 @@ async function semanticsText(page) {
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await waitForPaint(`${role}-signin`);
+    // ROLE_PAINT_MS exists so the retry below can be PROVEN rather than
+    // described. `ROLE_PAINT_MS=1` makes every role's first paint wait fail,
+    // which is how the retry was exercised: eight RETRIED lines, every role
+    // then failing on its second browser, and `at most one role needed its
+    // browser restarting` going red — so a systematic stall cannot hide inside
+    // a retry meant for a transient one.
+    await waitForPaint(
+      `${role}-signin`,
+      Number(process.env.ROLE_PAINT_MS) || PAINT_TIMEOUT,
+    );
     await sleep(6000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1800);
@@ -377,6 +386,39 @@ async function semanticsText(page) {
     // badge, tapped AUTHORIZE ACCESS and returned the hash — which stopped
     // being a sign-in the day the password step arrived. See mobile_login.js.
     return signInMobile(page, role);
+  }
+
+  // A ROLE THAT NEVER PAINTS GETS ONE MORE BROWSER.
+  //
+  // Three times now a CI runner has had one role's Chromium come up and never
+  // boot Flutter: the 4th role, then the 6th, then hq — which got its full 120
+  // seconds with `readyState: complete`, the bundle requested, `bodyText: ""`,
+  // ample free memory, and was followed immediately by the NEXT role signing in
+  // normally on a new browser. The same commit renders all eight roles locally.
+  //
+  // That is a transient per-browser boot stall, not a screen that is broken,
+  // and each occurrence has cost a whole CI cycle. So one retry — and a loud
+  // one. The line says RETRIED, the count is asserted below, and the report
+  // carries it, because a role that needs a retry EVERY run is a different
+  // problem and has to be visible as one rather than absorbed into a pass.
+  const retriedRoles = [];
+
+  async function signInWithOneRetry(role) {
+    try {
+      return await signIn(role);
+    } catch (err) {
+      // Only a paint stall. A real sign-in failure must still fail here.
+      if (!/never painted/.test(String(err && err.message ? err.message : err))) {
+        throw err;
+      }
+      retriedRoles.push(role);
+      console.log(
+        `      RETRIED ${role}: the app never painted on the first browser; `
+        + 'taking one more',
+      );
+      await freshBrowser();
+      return signIn(role);
+    }
   }
 
   // SIX ROUTES RENDER A DIFFERENT SCREEN WHEN REACHED BY URL.
@@ -531,7 +573,7 @@ async function semanticsText(page) {
     try {
       state.screen = `mobile:${role}:signin`;
       await freshBrowser();
-      const landed = await signIn(role);
+      const landed = await signInWithOneRetry(role);
       const signedIn = !/login/.test(landed);
       check(`${role}: signs in`, signedIn, `landed on ${landed || '#/'}`);
       {
@@ -627,6 +669,14 @@ async function semanticsText(page) {
   // "every screen", while every staff screen had quietly redirected to /home.
   const byUrl = ROUTES.filter(([route]) => !URL_RENDERS_A_FALLBACK[route]);
   const never = byUrl.filter(([route]) => !coverage.has(route));
+  // One transient boot stall is tolerated, named in the output above and here.
+  // Two is not a stall, it is a pattern, and it fails.
+  check(
+    'at most one role needed its browser restarting to boot',
+    retriedRoles.length <= 1,
+    retriedRoles.length ? `retried: ${retriedRoles.join(', ')}` : 'none needed it',
+  );
+
   check(
     `every one of the app's ${byUrl.length} URL-reachable screens was rendered `
     + `by at least one role`,
@@ -910,6 +960,7 @@ async function semanticsText(page) {
         rpcMisses: misses,
         rpcCalls: ctl.rpcCalls || [],
         roles: roleReport,
+        rolesRetried: retriedRoles,
         checks,
         screenshots: shots,
         mapTilesRequested: tiles.length,
