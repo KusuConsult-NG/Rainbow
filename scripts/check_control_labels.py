@@ -90,13 +90,83 @@ def main() -> int:
         print("the sighted user who does not recognise the icon at once.")
         return 1
 
+    # ── A NAME IS NOT ENOUGH IF THE BUTTON CANNOT BE PRESSED ────────────────
+    #
+    # `Semantics(button: true, excludeSemantics: true, child: <tappable>)`
+    # announces a button and offers no way to activate it: `excludeSemantics`
+    # drops the child's semantics, and the child's tap action goes with them.
+    # A screen-reader user hears "Allow location, button" and cannot press it.
+    #
+    # Found by the control sweep, which pressed seven report chips through the
+    # accessibility tree and reported that nothing happened. It was right.
+    # `lib/shared/widgets/rainbow_app_bar.dart` already carried a comment
+    # explaining this from the previous time, and the comment did not stop it
+    # being written again two screens away — which is what a check is for.
+    #
+    # `button: true` is the trigger, so a Semantics that labels a non-control
+    # (the map in live_tracking_screen.dart wraps FlutterMap with
+    # `container: true` to hide the tile layers' noise) is not caught by it.
+    unpressable = []
+    for path in sorted(LIB.rglob("*.dart")):
+        if path.name.endswith(GENERATED):
+            continue
+        text = path.read_text()
+        for match in re.finditer(r"Semantics\(", text):
+            depth, end = 0, len(text)
+            for index in range(match.end() - 1, len(text)):
+                if text[index] == "(":
+                    depth += 1
+                elif text[index] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        end = index
+                        break
+            block = text[match.start():end]
+            head = block[:block.find("child:")] if "child:" in block else block
+            if "excludeSemantics: true" not in head:
+                continue
+            if re.search(r"on(Tap|LongPress|Increase|Decrease):", head):
+                continue
+            # The trigger is what it WRAPS, not what it calls itself.
+            #
+            # `button: true` was the first version's trigger and it had a hole:
+            # dropping that one line made the check blind while the control
+            # stayed just as unpressable. The thing that matters is that a tap
+            # widget is being hidden.
+            #
+            # Named directly so that `Semantics(container: true, label: …,
+            # excludeSemantics: true, child: FlutterMap(…))` in
+            # live_tracking_screen.dart is not caught: it hides a map's tile
+            # layers, which is what excludeSemantics is for, and the onTap
+            # buried in its markers is not a control this is labelling.
+            child = block[block.find("child:") + len("child:"):].lstrip()
+            if not re.match(
+                r"(GestureDetector|InkWell|TextButton|ElevatedButton|"
+                r"OutlinedButton|IconButton|FilledButton)\(", child):
+                continue
+            if not re.search(r"on(Tap|Pressed):", block):
+                continue
+            line = text[:match.start()].count("\n") + 1
+            unpressable.append((path.relative_to(ROOT), line))
+
+    if unpressable:
+        print("Buttons a screen reader can name but never press:")
+        for path, line in unpressable:
+            print(f"  {path}:{line}")
+        print()
+        print("`excludeSemantics: true` drops the child's semantics, and the")
+        print("child's tap action with them. Put `onTap:` on the Semantics")
+        print("itself as well as on the detector underneath it.")
+        return 1
+
     total = 0
     for path in LIB.rglob("*.dart"):
         if path.name.endswith(GENERATED):
             continue
         text = path.read_text()
         total += sum(text.count(w) for w in ICON_ONLY)
-    print(f"OK: all {total} icon-only controls carry an accessible name.")
+    print(f"OK: all {total} icon-only controls carry an accessible name,")
+    print("    and every Semantics button that hides its child can be pressed.")
     return 0
 
 

@@ -1615,6 +1615,16 @@ class _EscalationDialogState extends State<_EscalationDialog> {
                       label: toWard
                           ? 'Hand to a ward'
                           : 'Escalate to ${escalationTargetFor(widget.assignedTier) ?? 'HQ'}',
+                      // On the Semantics as well as the InkWell:
+                      // `excludeSemantics` drops the child's tap action, so
+                      // without this a screen reader can announce this choice
+                      // and never make it. Same fault as the report chips.
+                      onTap: _isSubmitting || _handToWard == toWard
+                          ? null
+                          : () {
+                              setState(() => _handToWard = toWard);
+                              unawaited(_loadTargetCommanders());
+                            },
                       excludeSemantics: true,
                       child: InkWell(
                         onTap: _isSubmitting || _handToWard == toWard

@@ -9394,3 +9394,96 @@ true — somebody being watched may refuse a location prompt precisely because
 they are being watched — and the answer to it is now the settings route and the
 explanation rather than an open door. That is a product decision, made
 knowingly, and it belongs in the record rather than in a diff.
+
+---
+
+### T-72. Seven buttons a screen reader could name and never press
+
+CI went red on one check of thirty-seven:
+
+```
+FAIL  every mobile control that was pressed did something
+      7 did nothing: "Medical help needed", "Nobody hurt", "People inside",
+      "Everyone out", "Spreading fast", "Contained", "Don't know"
+```
+
+All seven are the category response chips added in T-70. The sweep pressed
+them through the accessibility tree and nothing happened, and it was right.
+
+#### The cause
+
+```dart
+Semantics(
+  button: true,
+  selected: selected,
+  label: label,
+  excludeSemantics: true,
+  child: GestureDetector(onTap: onTap, …),
+)
+```
+
+`excludeSemantics: true` drops the child's semantics — **and the child's tap
+action goes with them**. What is left is a node that announces itself as a
+button, carries a label, and offers no way to activate it. A screen-reader
+user hears *"Armed, button"* and cannot press it. The sweep, which drives the
+app through that same tree, found exactly what a blind user would have found.
+
+The selection state was fine: `selected:` lands in `aria-current` for a role
+that does not support `aria-selected`, which the harness already reads and
+documents. Nothing was wrong with how the chip reported itself. It simply
+could not be used.
+
+#### This was already written down
+
+`lib/shared/widgets/rainbow_app_bar.dart` carries this comment, from the last
+time it was got wrong:
+
+> `onTap` on the Semantics as well as the detector: excludeSemantics drops the
+> detector's own tap action, and a labelled button with no action is one a
+> screen reader can name but never press.
+
+That comment is two files away from where the same mistake was made again,
+nine days later. A note explaining a trap does not stop the trap; it only
+explains it afterwards to somebody who already fell in. That is what the check
+below is for.
+
+#### A third instance, found by looking
+
+A sweep for the same shape across `lib/` turned up one more:
+`agent_dashboard_screen.dart:1612`, the control a commander uses to choose
+between handing an incident to a ward and escalating it to HQ. Same structure,
+same consequence, never reported because the control sweep covers the citizen
+screens and six responder ones, and that choice sits behind a dialog neither
+reaches.
+
+A fourth hit was a false positive and is left alone:
+`live_tracking_screen.dart:217` wraps `FlutterMap` with `container: true` and
+`excludeSemantics: true` to stop a tile layer's internals reaching a screen
+reader. That is what `excludeSemantics` is for, and the `onTap` buried in its
+markers is not a control that Semantics is labelling.
+
+#### The check
+
+`scripts/check_control_labels.py` gains a second rule: a `Semantics(…
+excludeSemantics: true …)` whose direct child is a tap widget
+(`GestureDetector`, `InkWell`, `TextButton`, `ElevatedButton`,
+`OutlinedButton`, `IconButton`, `FilledButton`) must declare its own `onTap`.
+
+**The first version triggered on `button: true` and had a hole.** Removing that
+one line made the check blind while the control stayed exactly as unpressable
+— caught by mutating it rather than by reading it. The trigger is now what is
+being *hidden*, which is the thing that actually matters, and which keeps the
+map correctly out of scope.
+
+Three mutations, all caught: each of the two real fixes reverted, and
+`button: true` dropped from a still-broken chip.
+
+#### Worth noting about the harness
+
+The sweep attributed the chips to `/report-initial` and `/dispatcher-chat`,
+which have no chips on them. `listControls()` reads
+`document.querySelectorAll('flt-semantics')` across the whole document rather
+than the current route, so nodes from a previously rendered screen can be
+listed under whichever route the sweep is on. It did not affect this finding —
+the controls were real and really dead — but a route label in that output is
+not evidence of where a control lives.

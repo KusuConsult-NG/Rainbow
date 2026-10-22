@@ -1247,6 +1247,19 @@ class _AnswerChip extends StatelessWidget {
       button: true,
       selected: selected,
       label: label,
+      // `onTap` HERE as well as on the detector below.
+      //
+      // `excludeSemantics: true` drops the child's semantics, and the
+      // GestureDetector's tap action is part of what it drops. Without this
+      // line the chip is a labelled button with no action: a screen reader
+      // announces it and cannot press it, and the control sweep reported
+      // seven of these as doing nothing — which was exactly right.
+      //
+      // `lib/shared/widgets/rainbow_app_bar.dart` carries the same note from
+      // the last time this was got wrong. Writing it down there did not stop
+      // it happening here, so `check_control_labels.py` now fails the build
+      // for it instead.
+      onTap: onTap,
       excludeSemantics: true,
       child: GestureDetector(
         onTap: onTap,
