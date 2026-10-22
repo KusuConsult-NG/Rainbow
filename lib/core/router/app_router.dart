@@ -328,6 +328,29 @@ final appRouter = Provider<GoRouter>((ref) {
         path: AppRoutes.onboardingContacts,
         pageBuilder: (c, s) => _slide(s, const OnboardingContactsScreen()),
       ),
+      // Step 2 of 2, and so OUTSIDE the shell.
+      //
+      // It used to sit inside `GlobalNavigationShell`, which was harmless
+      // while it was only ever reached from Settings. As the last step of
+      // onboarding it is not: the shell paints the bottom navigation tabs and
+      // the drawer, so a person part-way through setup was shown a full set
+      // of destinations they are not onboarded for, and tapping one left them
+      // with no PINs and `hasOnboarded` false — back to the start.
+      //
+      // Reached from Settings it still pushes and pops normally; a top-level
+      // route is not a modal.
+      GoRoute(
+        path: AppRoutes.emergencyPins,
+        pageBuilder: (c, s) {
+          final extra = s.extra as Map<String, dynamic>?;
+          return _slide(
+            s,
+            EmergencyPinScreen(
+              fromOnboarding: extra?['onboarding'] == true,
+            ),
+          );
+        },
+      ),
       GoRoute(
         path: AppRoutes.emergencyActive,
         pageBuilder: (c, s) => _fade(s, const EmergencyActiveScreen()),
@@ -350,18 +373,6 @@ final appRouter = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.liveTracking,
             pageBuilder: (c, s) => _slide(s, const LiveTrackingScreen()),
-          ),
-          GoRoute(
-            path: AppRoutes.emergencyPins,
-            pageBuilder: (c, s) {
-              final extra = s.extra as Map<String, dynamic>?;
-              return _slide(
-                s,
-                EmergencyPinScreen(
-                  fromOnboarding: extra?['onboarding'] == true,
-                ),
-              );
-            },
           ),
           GoRoute(
             path: AppRoutes.missionIntel,

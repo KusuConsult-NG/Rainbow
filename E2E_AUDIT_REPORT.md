@@ -8967,3 +8967,171 @@ browser processes is wrong regardless — and not claimed as the cure.
 (1) and (2) are what actually settle it. The next time this fires, the log will
 name the mechanism instead of the line number, and the remaining roles will
 still have been captured. If it is memory, the `memory:` line will say so.
+
+---
+
+### T-68. A changelog for work that was never done
+
+A report was handed over describing the onboarding rebuild in detail: a
+"single unified OS batch permission request", `permissions_granted` saved to
+SharedPreferences, `_skipIfAlreadyGranted()` in `initState`, an anonymous-use
+notice, the profile and contacts steps removed, `emergencyPins` moved outside
+`GlobalNavigationShell`, and the progress bar changed from three steps to two.
+
+**None of it was in the repository.** `HEAD` was `19a8aca`, identical to
+`origin/main`, working tree clean, no commit since 2026-10-17. Checked
+symbol by symbol:
+
+| claimed | in the code |
+|---|---|
+| single batch permission request | `Permission.location.request()` at :50, then `Permission.locationAlways.request().timeout(const Duration(seconds: 3))` at :53, then three more at :125-127 |
+| `permissions_granted` in SharedPreferences | string absent from `lib/` |
+| `_skipIfAlreadyGranted()` | symbol absent from `lib/` |
+| anonymous-use notice | "No personal data is collected" absent from `lib/` |
+| profile and contacts skipped | `:164` → `context.go(AppRoutes.onboardingProfile)`; profile → `onboardingContacts` |
+| straight from permissions to the PINs | it went to the profile form |
+| `emergencyPins` outside the shell | declared inside `ShellRoute`, beside home and agentDashboard |
+| progress bar 3 → 2 | `'STEP $step / 3'`, and `List.generate(3, …)` |
+| PINs mark the user onboarded | `setOnboarded(true)` was in `onboarding_profile_screen.dart:109` |
+
+This is the fifth claim in this engagement that described work that did not
+exist or state that was not true — after the liaison "confidentiality breach",
+the `RealtimeSubscribeException` diagnosis, "thirty-two of thirty-eight
+migrations already applied" (T-59), and "the version you pasted is already
+live and verified" (T-66). The pattern is worth naming: a confident,
+well-formatted account of a change is not evidence that the change happened,
+and the cost of believing one is a day spent debugging the wrong thing.
+
+#### What setup actually was
+
+Four prompts in sequence, then a three-step wizard:
+
+1. a prominent-disclosure modal;
+2. `Permission.location.request()`;
+3. `Permission.locationAlways.request()` behind a 3-second timeout;
+4. `Permission.sms`, `.microphone`, `.ignoreBatteryOptimizations`, one at a
+   time;
+
+then **Profile** — name, NIN, gender, LGA, ward — then **Contacts**, then the
+PINs.
+
+Two faults beyond the tapping:
+
+* **The timeout raced the OS.** `locationAlways` on Android 11+ shows no
+  dialog; it opens Settings. So the 3-second timeout fired on a prompt that
+  was never coming, and the next `.request()` went out while the OS still had
+  one in flight — which Android answers by denying it without asking.
+* **A declined location ended setup.** An unskippable "You cannot proceed
+  without granting location permission" dialog, then `return`. For a duress
+  alarm this is the worst available failure: the person most likely to refuse
+  a location prompt while somebody is watching is exactly the person the
+  silent alert exists for.
+
+And the profile form was not optional — it was the gate, because it was what
+called `setOnboarded(true)`. An app whose scope is "a phone number and
+nothing else" required a national identity number before it would open.
+
+#### What it is now
+
+**Step 1 — permissions.** One `[Permission.location, Permission.sms,
+Permission.microphone, Permission.ignoreBatteryOptimizations].request()`:
+permission_handler's batch form, one flow from the OS. Every outcome continues.
+`locationAlways` is not requested at all — background tracking runs inside a
+foreground service with its own notification, which needs only foreground
+location, and asking for it here is what caused the race. The screen itself is
+the prominent disclosure, read and agreed to by tapping, so the separate modal
+is gone. `_skipIfAlreadyGranted()` means a returning user never sees it twice.
+
+**Step 2 — the two PINs.** Safe and duress, unchanged, and now what calls
+`setOnboarded(true)` — before navigating, since `computeRedirect` reads
+`hasOnboarded` and would otherwise bounce straight back. Moved outside
+`GlobalNavigationShell`: as a Settings screen it was harmless there, but as
+the last step of setup the shell painted bottom tabs and a drawer over it, and
+tapping one left a person with no PINs and `hasOnboarded` false.
+
+**Profile and contacts** are kept, reachable from Settings, and save-and-return.
+Neither marks setup complete. A person who wants to give a name so a responder
+can address them still can; nobody has to.
+
+On the permissions screen, in plain words rather than a policy: *"You stay
+anonymous. No personal data is collected — your phone number is your only
+identity in this app, and it is there so responders can reach you."*
+
+#### The gate
+
+`scripts/check_onboarding_is_two_taps.py` holds all eight properties: one
+batched request and no bare `Permission.x.request()`; no `locationAlways`; no
+`.timeout(` on a prompt; leads to the PINs and to neither form;
+`_skipIfAlreadyGranted` present; the PIN screen marks onboarded; neither
+profile nor contacts does; the PIN route outside the shell; the indicator
+reading 2.
+
+Six mutations, all caught — including the two that matter most: a sequential
+`locationAlways` request with its timeout (three findings at once), and
+`setOnboarded` reappearing in the profile screen, which is how a form becomes
+a gate again whatever the router says.
+
+#### What this change does NOT cover
+
+The rest of the scope given with it, which is about the alert rather than
+setup:
+
+* **The SOS payload already carries what was asked for.** `AlertService`
+  writes `latitude`/`longitude` and `reported_by`; the phone number hangs off
+  that profile row, put there by the `handle_new_user()` trigger from
+  `auth.users.phone`. So "phone number and coordinates" is already true — but
+  that is a reading of the code, not of a delivered alert, and it has not been
+  watched end to end on a live project.
+* **Responder tracking and "all the details required for response" per
+  category** are not touched here and are not claimed. They need their own
+  pass.
+
+#### Verified in a browser, and one harness fault found doing it
+
+The new flow was run through `mobile_capture.js` against a freshly built web
+bundle: **27/27 checks, 211 screenshots, all eight roles**. 772 Flutter tests,
+38 gates, no analyzer errors or warnings.
+
+Getting there turned up something worth keeping. The first rebuild was made
+with a plain `flutter build web --release`, and the app never painted:
+
+```
+Error: the app never painted for signed-out-splash within 120000ms.
+    memory:  15366MB free of 16091MB
+    page:    {"readyState":"complete","htmlChars":1276,
+              "scripts":["…/main.dart.js","…/flutter_bootstrap.js"],"bodyText":""}
+    console problems so far: 14, last: Failed to fetch dynamically imported module:
+      https://www.gstatic.com/flutter-canvaskit/692136cb…/chromium/canvaskit.js
+```
+
+That is T-67's diagnostic doing exactly what it was built for, one day old: the
+old failure would have printed `TimeoutError: Waiting failed: 120000ms
+exceeded` and a puppeteer stack, and the cause would have taken a cycle to
+find. Here it named it on sight.
+
+Two separate faults behind it:
+
+1. **The CanvasKit interception could not serve a module.** `browser.js`
+   intercepts the gstatic URL and serves the identical local file — but
+   CanvasKit arrives by `import()`, a cross-origin ES module import, and a
+   browser refuses one that returns without CORS headers however correct the
+   body is. `req.respond()` sent none. Now sends
+   `Access-Control-Allow-Origin` and `Cross-Origin-Resource-Policy`. This is
+   not on the sanctioned path — `run.sh` builds with `--no-web-resources-cdn`
+   and never asks gstatic for anything — but the interception exists for
+   reproducing these harnesses outside CI, and it did not work when reached.
+
+2. **My rebuild was wrong, and the app was calling production.** With CanvasKit
+   serving, every sign-in then failed: *"no VERIFY OTP control"*, *"still on
+   the login screen"*. The browser log said why —
+   `WebSocket connection to 'wss://wpffwoblxuogemxcqpep.supabase.co/…' failed`
+   and `ERR_TUNNEL_CONNECTION_FAILED`. `run.sh` builds with
+   `--dart-define=SUPABASE_URL=http://127.0.0.1:…`; without it the production
+   URL is compiled in from `supabase_config.dart`. Nothing had regressed. Built
+   the way the harness builds it, 27/27.
+
+Worth noting for its own sake: `build/web` on disk was from **2026-10-16**, so
+every local capture run in this audit before this one rendered a bundle that
+predated `423a437`, `fec1fc3` and `d38dacc`. CI builds fresh each time and was
+unaffected, but a stale local bundle is a harness that agrees with you about
+code it has never seen.

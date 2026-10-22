@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/providers/auth_provider.dart';
 
 /// Sets the user's safe PIN and duress PIN.
 ///
@@ -120,6 +121,19 @@ class _EmergencyPinScreenState extends ConsumerState<EmergencyPinScreen> {
         const SnackBar(content: Text('Emergency PINs saved.')),
       );
       if (widget.fromOnboarding) {
+        // THIS is now what completes setup. It used to be
+        // `onboarding_profile_screen.dart`, which asked for a name, an NIN, a
+        // gender and an LGA — none of which this app has any business holding,
+        // and all of which stood between a person and the SOS button. The PINs
+        // are the last step because they are the only step that still has to
+        // happen: everything else about setup is a permission the OS already
+        // remembers.
+        //
+        // Marked BEFORE navigating. `computeRedirect` reads `hasOnboarded`,
+        // so going to /home while it is still false bounces straight back
+        // into onboarding.
+        await ref.read(authProvider.notifier).setOnboarded(true);
+        if (!mounted) return;
         context.go(AppRoutes.home);
       } else {
         // The PIN is already saved; see mission_resolution_screen.

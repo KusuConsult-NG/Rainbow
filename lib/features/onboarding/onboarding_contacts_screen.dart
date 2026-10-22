@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
+import 'package:rainbow_app/core/router/safe_pop.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
@@ -121,13 +122,14 @@ class _OnboardingContactsScreenState
                     }
                     // context.mounted, not the State's mounted: this is a
                     // builder's context and the two can disagree.
-                    // PINs come last in onboarding: an SOS cannot be safely
-                    // cancelled without them, and they are per-user now.
+                    //
+                    // This no longer drives onboarding. Emergency contacts are
+                    // not in this app's scope — it holds a phone number and
+                    // nothing else — so the screen is optional and reachable
+                    // from Settings, and saving returns there instead of
+                    // pushing the next wizard step.
                     if (context.mounted) {
-                      context.go(
-                        AppRoutes.emergencyPins,
-                        extra: <String, dynamic>{'onboarding': true},
-                      );
+                      context.popOrGo(AppRoutes.settings);
                     }
                   },
                   style: ElevatedButton.styleFrom(

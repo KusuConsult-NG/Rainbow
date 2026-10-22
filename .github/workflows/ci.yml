@@ -1019,6 +1019,21 @@ jobs:
       - name: Assert a reinstall cannot restore the previous session
         run: python3 scripts/check_a_reinstall_cannot_restore_a_session.py
 
+      # "i just want users to signup using their phone number and use the app
+      # to send alert … users are supposed to use the app anonymously … Users
+      # shouldn't go through a lot before using the app. it should just be
+      # simple taps. This means that profile is optional as well."
+      #
+      # Setup asked four times for permissions — a disclosure modal, location,
+      # locationAlways behind a 3-second timeout that raced an Android 11+
+      # prompt which never appears, then three more one at a time — and then
+      # demanded a name, an NIN, a gender and an LGA before anybody could
+      # reach the SOS button, because onboarding_profile_screen.dart was what
+      # called setOnboarded(true). A declined location ended setup outright,
+      # which is the worst possible failure for a duress alarm.
+      - name: Assert setup is one prompt and two PINs
+        run: python3 scripts/check_onboarding_is_two_taps.py
+
       # Reported from a real handset once the blank page became legible:
       # "Failed while drawing the screen. RealtimeSubscribeException(... Failed
       # host lookup ... errno = 7)". `AsyncValue.value` RETHROWS on an error

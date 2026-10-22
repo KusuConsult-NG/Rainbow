@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/auth/phone_number.dart';
 import 'package:rainbow_app/core/constants/tactical_mapping.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
+import 'package:rainbow_app/core/router/safe_pop.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
@@ -103,17 +104,22 @@ class _OnboardingProfileScreenState
         'profile_complete': true,
       });
 
-      // And the half that the router actually reads first. Without this the
-      // wizard reappears on the next launch — which is the state this app has
-      // shipped in.
-      await ref.read(authProvider.notifier).setOnboarded(true);
-
+      // NOT `setOnboarded(true)` any more.
+      //
+      // This screen used to be step 2 of 3 and the thing that completed setup,
+      // which made a name, an NIN, a gender and an LGA compulsory before
+      // anybody could reach the SOS button. None of that is this app's to
+      // hold: the phone number is the only identity, and it arrives with the
+      // sign-in. The PIN screen completes setup now.
+      //
+      // The screen is kept and reachable from Settings, because a person who
+      // WANTS to give a name so a responder can address them should be able
+      // to. `profile_complete` above still records that they did.
       if (!mounted) return;
-      // On to emergency contacts and the emergency PIN. This used to go
-      // straight to the home screen, so the contacts screen and the PIN screen
-      // were never reached during first run at all — despite the per-user PIN
-      // migration saying PINs are set "at onboarding".
-      context.go(AppRoutes.onboardingContacts);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile saved.')),
+      );
+      context.popOrGo(AppRoutes.settings);
     } catch (e) {
       debugPrint('[PROFILE_ERR] could not save the profile: $e');
       if (!mounted) return;

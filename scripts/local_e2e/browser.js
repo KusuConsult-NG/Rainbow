@@ -175,6 +175,24 @@ async function launch({
             return req.respond({
               status: 200,
               contentType: contentTypeFor(local),
+              // CanvasKit arrives by `import()`, not by <script> — a
+              // CROSS-ORIGIN ES module import, from www.gstatic.com into a
+              // page served on 127.0.0.1. The browser refuses one that comes
+              // back without CORS headers, however correct the body is, and
+              // reports it as "Failed to fetch dynamically imported module"
+              // — which reads like a network failure and is not one.
+              //
+              // Never seen before because `run.sh` builds with
+              // `--no-web-resources-cdn`, which bundles CanvasKit locally and
+              // never asks gstatic for anything — so this interception is not
+              // on the sanctioned path at all. It is reached only by a build
+              // made without that flag, which is what the comment above means
+              // by reproducing these harnesses outside CI, and it did not
+              // work when it was reached.
+              headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Cross-Origin-Resource-Policy': 'cross-origin',
+              },
               body: readFile(local),
             });
           }
