@@ -54,20 +54,74 @@ REPO = Path(__file__).resolve().parent.parent
 
 # The citizen's path. Converted screens are absent from NOT_YET and must stay
 # at zero.
+#
+# THIS LIST WAS THE GAP.
+#
+# It held eight screens and reported "8 of 8 screens carry no hardcoded label",
+# which reads as though the citizen path is done. The citizen path is
+# twenty-two screens. The fourteen that were missing carried 165 English-only
+# strings between them, and they are not peripheral ones:
+#
+#   * the splash and LOGIN screens — the first things anybody sees;
+#   * the whole first-run SETUP flow, 40 strings across three screens;
+#   * the EMERGENCY PIN setup, 16 — the safe PIN and the duress PIN;
+#   * settings, 26, and the uninstall request, 20.
+#
+# A citizen who picks Hausa on the language screen then reads the next four
+# screens in English. The check that exists to prevent exactly that was passing,
+# because the screens were not on its list — the same shape as every other
+# finding in E2E_AUDIT_REPORT.md: a green check over a gap it never looked at.
+# Recorded as T-77.
+#
+# They are all listed now, capped at what they currently carry, so the number
+# can only fall. Translating them needs a Hausa and Pidgin speaker: this is an
+# emergency app, and a wrong word on the duress-PIN screen is worse than an
+# English one that is at least unambiguous to whoever set it up.
 CITIZEN = [
-    'lib/features/report/report_initial_screen.dart',
-    'lib/features/report/report_subtype_screen.dart',
-    'lib/features/report/report_success_screen.dart',
-    'lib/features/emergency/emergency_active_screen.dart',
-    'lib/features/report/report_details_screen.dart',
-    'lib/features/citizen/safe_zone_screen.dart',
+    'lib/features/splash/splash_screen.dart',
+    'lib/features/auth/login_screen.dart',
     'lib/features/auth/lock_screen.dart',
+    'lib/features/onboarding/onboarding_profile_screen.dart',
+    'lib/features/onboarding/onboarding_permissions_screen.dart',
+    'lib/features/onboarding/onboarding_contacts_screen.dart',
+    'lib/features/home/home_screen.dart',
+    'lib/features/home/widgets/voice_report_dialog.dart',
+    'lib/features/report/report_initial_screen.dart',
+    'lib/features/report/report_category_screen.dart',
+    'lib/features/report/report_subtype_screen.dart',
+    'lib/features/report/report_details_screen.dart',
+    'lib/features/report/report_success_screen.dart',
+    'lib/features/history/incident_history_screen.dart',
+    'lib/features/emergency/emergency_active_screen.dart',
+    'lib/features/settings/emergency_pin_screen.dart',
     'lib/features/tracking/live_tracking_screen.dart',
+    'lib/features/citizen/safe_zone_screen.dart',
+    'lib/features/citizen/dispatcher_chat_screen.dart',
+    'lib/features/settings/settings_screen.dart',
+    'lib/features/settings/uninstall_request_screen.dart',
+    'lib/shared/widgets/voice_note_player.dart',
 ]
 
 # Screen -> how many hardcoded strings it still has.
-# All citizen screens have been converted to the Translations system!
-NOT_YET: dict[str, int] = {}
+#
+# A cap, not a permission. Exceeding it fails the build; falling below it also
+# fails, asking for the number to be lowered. So the debt is visible, cannot
+# grow, and each screen converted is one line deleted from here.
+NOT_YET: dict[str, int] = {
+    'lib/features/splash/splash_screen.dart': 6,
+    'lib/features/auth/login_screen.dart': 13,
+    'lib/features/onboarding/onboarding_profile_screen.dart': 11,
+    'lib/features/onboarding/onboarding_permissions_screen.dart': 22,
+    'lib/features/onboarding/onboarding_contacts_screen.dart': 7,
+    'lib/features/home/home_screen.dart': 6,
+    'lib/features/home/widgets/voice_report_dialog.dart': 12,
+    'lib/features/history/incident_history_screen.dart': 12,
+    'lib/features/settings/emergency_pin_screen.dart': 16,
+    'lib/features/citizen/dispatcher_chat_screen.dart': 9,
+    'lib/features/settings/settings_screen.dart': 26,
+    'lib/features/settings/uninstall_request_screen.dart': 20,
+    'lib/shared/widgets/voice_note_player.dart': 4,
+}
 
 # Values that are DATA, not labels: `alerts.status` is compared by string, so
 # translating one would stop the comparison matching and leave a citizen's

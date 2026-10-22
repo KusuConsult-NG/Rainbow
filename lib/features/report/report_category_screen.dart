@@ -23,7 +23,7 @@ class ReportCategoryScreen extends ConsumerWidget {
       backgroundColor: AppColors.background,
       appBar: RainbowAppBar(
         title: Translations.get('incident_protocol', lang),
-        subtitle: 'SELECT CATEGORY FOR TACTICAL REPORT',
+        subtitle: Translations.get('select_category_subtitle', lang),
       ),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),

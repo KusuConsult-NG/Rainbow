@@ -308,6 +308,11 @@ class Translations {
       AppLanguage.hausa: 'TSARIN RAHOTO',
       AppLanguage.pidgin: 'GBEGE PROTOCOL',
     },
+    'select_category_subtitle': {
+      AppLanguage.english: 'SELECT CATEGORY FOR TACTICAL REPORT',
+      AppLanguage.hausa: 'ZABI RUKUNI DON RAHOTON AIKI',
+      AppLanguage.pidgin: 'PICK CATEGORY FOR THIS REPORT',
+    },
     'select_category_desc': {
       AppLanguage.english: 'SELECT THE CATEGORY THAT BEST DESCRIBES THE '
           'CURRENT EMERGENCY. LOCATION TELEMETRY IS AUTO-ATTACHED.',

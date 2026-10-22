@@ -9877,3 +9877,80 @@ OK: all 19 icon-only controls carry an accessible name,
 
 The label is written there now, correctly, so it is right the moment the list
 lands.
+
+---
+
+### T-77. "8 of 8 screens carry no hardcoded label"
+
+Found immediately after T-76, and by T-76. Localising those nine accessible
+names made `check_citizen_screens_speak_the_language.py` fail — correctly — and
+then pass with this:
+
+```
+The citizen path reads the language they chose:
+  * 8 of 8 screens carry no hardcoded label
+  * 0 still to do, 0 strings between them
+```
+
+Which reads as though the citizen path is done. **The citizen path is
+twenty-two screens.** The gate's list held eight, and the fourteen it omitted
+carried 165 English-only strings between them:
+
+| screen | strings |
+| --- | --- |
+| `settings_screen.dart` | 26 |
+| `onboarding_permissions_screen.dart` | 22 |
+| `uninstall_request_screen.dart` | 20 |
+| `emergency_pin_screen.dart` | 16 |
+| `login_screen.dart` | 13 |
+| `incident_history_screen.dart` | 12 |
+| `voice_report_dialog.dart` | 12 |
+| `onboarding_profile_screen.dart` | 11 |
+| `dispatcher_chat_screen.dart` | 9 |
+| `onboarding_contacts_screen.dart` | 7 |
+| `splash_screen.dart` | 6 |
+| `home_screen.dart` | 6 |
+| `voice_note_player.dart` | 4 |
+| `report_category_screen.dart` | 1 |
+
+Not peripheral screens. The splash and **login** screens are the first things
+anybody sees. The whole **first-run setup flow** is 40 strings across three
+screens. The **emergency PIN setup** — the safe PIN and the duress PIN, the two
+the product is built around — is 16.
+
+So a citizen picks Hausa on the language screen and then reads the next four
+screens in English, including the one where they choose the PIN that will summon
+help silently. The check that exists to prevent precisely that was green,
+because those screens were not on its list.
+
+Same shape as the rest of this report, and the third instance in two findings: a
+list written from what somebody found once, reported as if it were the whole
+subject. T-76 was `IconButton` and `FloatingActionButton` standing for every
+control. T-75 was the fixtures standing for every table. This is eight screens
+standing for the citizen path.
+
+#### What was done
+
+All twenty-two screens are on the list. The thirteen still carrying English are
+capped at what they carry now, using the ratchet the gate already had but was
+not using: over the cap fails the build, under it also fails and asks for the
+number to be lowered. The debt is visible, cannot grow, and each screen
+converted deletes one line.
+
+Mutation-tested in both directions: one string added over a cap fails and names
+it; one string converted fails and asks for the cap to come down.
+
+`report_category_screen.dart` carried exactly one — an app-bar subtitle — so it
+is converted and its line is gone. 164 left on 13 screens.
+
+#### Why the other 164 are not translated here
+
+They need a Hausa and Nigerian Pidgin speaker. This is an emergency application
+and one of those screens sets a duress PIN; a wrong word there is worse than an
+English one that is at least unambiguous to whoever set it up. Producing 164
+translations of my own confidence and committing them silently would be the
+same mistake as the invented shelters in T-74 — filling a gap with something
+that looks like an answer.
+
+What is fixed is that the gap is now counted, capped, and impossible to miss.
+What it needs is a speaker, and that is the user's call to make.
