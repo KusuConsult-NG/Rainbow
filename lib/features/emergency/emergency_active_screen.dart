@@ -584,6 +584,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
             locAsync.when(
               data: (pos) => pos != null
                   ? RainbowMap(
+                      label: _t('eme_semantics_map_label'),
                       center: LatLng(pos.latitude, pos.longitude),
                       initialZoom: 17,
                       interactive: false,

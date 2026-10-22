@@ -9,6 +9,7 @@ class RainbowMap extends StatelessWidget {
   /// Documentation for this public member.
   const RainbowMap({
     required this.center,
+    required this.label,
     super.key,
     this.initialZoom = 15.0,
     this.markers = const [],
@@ -19,6 +20,25 @@ class RainbowMap extends StatelessWidget {
 
   /// Documentation for this public member.
   final LatLng center;
+
+  /// What this map IS, for a screen reader.
+  ///
+  /// Required, with no default, on purpose. flutter_map registers a tap
+  /// recognizer for panning and zooming, so an unwrapped map reaches the
+  /// accessibility tree as an **unlabelled button covering the screen** — one
+  /// a screen reader announces as "button" and that does nothing when
+  /// activated. The control sweep found exactly that, and the fix was applied
+  /// to `live_tracking_screen.dart`, which builds its own FlutterMap, and to
+  /// nowhere else. This widget is the other three maps in the app, and it had
+  /// the defect for as long as it has existed. See E2E_AUDIT_REPORT.md T-78.
+  ///
+  /// A default would have let the next call site skip it silently, which is
+  /// the mechanism being closed here rather than one more instance of it.
+  ///
+  /// On a citizen screen this must come from `Translations.get`. Staff screens
+  /// may pass English; `check_citizen_screens_speak_the_language.py` decides
+  /// which is which.
+  final String label;
 
   /// Documentation for this public member.
   final double initialZoom;
@@ -37,7 +57,15 @@ class RainbowMap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FlutterMap(
+    // `excludeSemantics: true` is what removes the map's own tappable node,
+    // and it takes the markers' semantics with it. Any marker that needs to be
+    // reachable has to be offered somewhere else on the screen as well — see
+    // how safe_zone_screen.dart lists its shelters.
+    return Semantics(
+      container: true,
+      label: label,
+      excludeSemantics: true,
+      child: FlutterMap(
       mapController: mapController,
       options: MapOptions(
         initialCenter: center,
@@ -71,6 +99,7 @@ class RainbowMap extends StatelessWidget {
         if (polylines.isNotEmpty) PolylineLayer(polylines: polylines),
         if (markers.isNotEmpty) MarkerLayer(markers: markers),
       ],
+      ),
     );
   }
 }

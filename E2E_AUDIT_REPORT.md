@@ -9954,3 +9954,290 @@ that looks like an answer.
 
 What is fixed is that the gap is now counted, capped, and impossible to miss.
 What it needs is a speaker, and that is the user's call to make.
+
+---
+
+### T-78. The map was fixed on one screen out of four
+
+The mobile control sweep had been failing CI on every run:
+
+```
+FAIL  every mobile control that was pressed did something
+      — 1 did nothing: /safe-zone/"(icon)"
+```
+
+I had been treating that as one loose end to identify. It is a defect that was
+diagnosed, fixed, written up, and then left in place on three other screens.
+
+`live_tracking_screen.dart` carries this comment, from the last time:
+
+> **THE MAP IS NOT A BUTTON.** flutter_map registers a tap recognizer for
+> panning and zooming, so the whole map surface reached the accessibility tree
+> as an unlabelled button covering the screen — one a screen reader announced
+> as "button" and that did nothing when activated. The mobile control sweep
+> found exactly that.
+
+There are three `FlutterMap` call sites in the app. That comment sits above
+one of them. The other two are `safe_zone_screen.dart` — the shelter screen,
+where the sweep has been failing — and `rainbow_map.dart`, the **shared** map
+widget, used by the agent dashboard, mission intel, and the citizen's
+emergency screen.
+
+So the answer to "what is `(icon)` on /safe-zone?" is: the map. The same map,
+with the same defect, on the screen next door to the one that was fixed.
+
+The sweep's control query is `flt-semantics[role="button"], flt-semantics
+[flt-tappable]`, innermost only, larger than 4×4px. A map's pan recognizer is
+exactly that: tappable, no text, no label — reported as `(icon)` — and pressing
+it changes no URL, no text, no selection, and makes no request, so "did
+nothing" is literally true.
+
+#### What was done
+
+**`rainbow_map.dart`** takes `required String label`, with no default. A
+default would let the next call site skip it silently, which is the mechanism
+rather than one more instance of it. It wraps its map in
+`Semantics(container: true, label: label, excludeSemantics: true, …)`. Its
+three call sites each pass one; the citizen's emergency screen passes a
+translated one.
+
+**`safe_zone_screen.dart`** gets the same wrapper.
+
+**And the shelters are offered as a list.** `excludeSemantics: true` is what
+removes the map's tappable node, and it takes the markers' semantics with it —
+including the labels T-76 had just given them. A strip of real buttons now sits
+above the map, one per active shelter, each carrying the shelter's name and
+doing exactly what its marker does: select it and compute the route.
+
+That is not a workaround. It is better for the screen's purpose than the map
+alone: a frightened person reads NARAGUTA WARD COMMAND POST faster than they
+find a small circle among several.
+
+#### The gate
+
+`check_control_labels.py` grows a fourth check: every `FlutterMap(` is the
+direct child of a `Semantics` carrying a `label` and `excludeSemantics: true`,
+or the build fails. Two mutations, both caught — the safe-zone wrapper removed,
+and the shared widget's `excludeSemantics` removed.
+
+#### What that gate cannot see, stated rather than assumed
+
+It is lexical. `safe_zone_screen.dart` builds its markers in their own
+statement — `final markers = <Marker>[…]` — and hands them to
+`MarkerLayer(markers: markers)`. At run time those markers are inside the
+excluded subtree; in the source they are nowhere near it. So the
+unreachable-control check added in T-76 cannot connect the two, and does not
+report the shelter markers.
+
+That is why the list exists and why the reason is written at the markers. A
+check that cannot see something should say so rather than be trusted to.
+
+---
+
+### T-79. A migration no harness ever ran
+
+T-75's commit turned CI red on a job I had not run locally:
+
+```
+    column safe_zones.capacity  (20261026000000_safe_zones_capacity)
+✗ objects declared by an applied migration are absent from the schema
+```
+
+I had verified `verify_apply_all.sh` — the production paste, applied twice, 34/34
+— and not `verify_rls_migration.sh`, which is the harness that builds a real
+PostgreSQL 16 from the migrations and runs every behavioural assertion against
+it. My mistake, and the check caught it, which is the system working.
+
+What the check found is more interesting than my omission.
+
+That script's **inventory** of what must exist is extracted from
+`supabase/migrations/` by `sync_migration_inventory.py`, so it cannot drift —
+it learned about `column safe_zones.capacity` on its own, correctly. The list
+of migrations the script **applies** is a hand-written sequence of
+`psql_run -f …` lines inside the shell script. Nothing connected the two.
+
+So adding a migration silently requires editing a shell script, and the only
+thing that tells you is a red build after you have pushed.
+
+The direction that matters more is the opposite one. A migration left out of
+that replay is **executed against real PostgreSQL by nothing at all.** It
+reaches the production paste through `apply_all_migrations.sql`, which
+`verify_apply_all.sh` does run, so its syntax is covered. But none of the
+behavioural assertions, none of the idempotency replays, none of the policy-role
+checks ever see it. A migration can be wrong in a way only PostgreSQL would
+tell you and arrive in production with every gate green.
+
+#### What was done
+
+`20261026000000_safe_zones_capacity.sql` is applied in the replay, twice over
+like every migration there, and the step asserts what the migration is for
+rather than that it ran: `information_schema` says `integer/YES`, a negative
+capacity is refused by name (`safe_zones_capacity_sane`), and a NULL one is
+accepted. `ADD COLUMN IF NOT EXISTS` and a guarded `ADD CONSTRAINT` are only
+idempotent if somebody runs them twice and looks — the second run reports
+`column "capacity" of relation "safe_zones" already exists, skipping`, which is
+the proof.
+
+`scripts/check_the_replay_applies_every_migration.py` fails if any file in
+`supabase/migrations/` is not named by `verify_rls_migration.sh`, in either of
+the two shapes it uses, with one exemption listed by name: the v2–v5 era, which
+`20260812000000_agency_tables.sql` stands in for because production's agency
+tables were made by hand. The exemption also fails if one of those files stops
+existing, so it cannot outlive its subject.
+
+48 migrations on disk, 44 named by the replay, 4 exempted by name.
+Mutation-tested: dropping the new migration's two lines from the replay fails
+the gate and names the file.
+
+#### The pattern, for the fourth time in five findings
+
+T-75: the fixtures standing for every table. T-76: two widget types standing
+for every control. T-77: eight screens standing for the citizen path. T-78: one
+map screen standing for four. And here: a list of migrations maintained by hand
+beside an inventory that maintains itself.
+
+Each one is the same thing. Somebody found a problem, fixed it where they found
+it, wrote down what they had learned — and the writing down is real, these
+comments are good — and nothing asked whether the subject was larger than the
+instance. The gates added in this pass are all the same shape too: not "is this
+case right" but "is the SET complete".
+
+---
+
+### T-80. A button called NAVIGATE TO ZONE that moved the camera
+
+Found because T-75 and T-78 together made it reachable for the first time. The
+detail card only renders when a shelter is selected; `safe_zones` had never held
+a row, so in the whole life of this screen **that card had never been built and
+that button had never been pressed by anything.**
+
+Its entire body:
+
+```dart
+onPressed: () {
+  _mapCtrl.move(LatLng(_selected!.lat, _selected!.lng), 16);
+},
+```
+
+A camera pan. The label says NAVIGATE TO ZONE — in Pidgin, `GO TO THE ZONE`,
+which is how the control sweep reported it:
+
+```
+FAIL  every mobile control that was pressed did something
+      — 3 did nothing: /home/"GO TO THE ZONE",
+        /safe-zone/"GO TO THE ZONE", /dispatcher-chat/"GO TO THE ZONE"
+```
+
+#### And the thing beside it, which is the real defect
+
+`_calculateSafeRoute` ends by **speaking** its outcome and writing it nowhere:
+
+```dart
+final message = tmpl.replaceAll('{name}', zone.name);
+unawaited(TtsService.instance.speak(message));
+```
+
+That sentence is "Safe route calculated to {name}. The path is clear." or the
+warning version. The threat warning has always had a written box on the card.
+The sentence saying whether the way is **clear** was audio-only — lost on a
+muted phone, with `TtsService` unavailable, in a loud street during the
+emergency this screen exists for, or to a user who cannot hear. On the screen
+whose whole job is getting a frightened person somewhere safe.
+
+#### What was done
+
+The message is kept in state as well as spoken, and the button shows and hides
+it in writing. It still re-centres the map, and it re-speaks the sentence when
+revealing it, so somebody already walking can ask for it again. Its label says
+which of those two things pressing it will do, in all three languages.
+
+So the control's name is now true, the guidance has a written form, and its
+effect is something a harness can see — which is what made the sweep's
+complaint correct rather than a false positive.
+
+#### What is not explained, stated as not explained
+
+The sweep attributed the control to `/home` and `/dispatcher-chat` as well. It
+is used in exactly one file, and two probes — one at a 2.6s settle, one at the
+sweep's own 700ms — found the control absent from `/home` in both. I could not
+reproduce that attribution and have not exempted it; making the control
+observable everywhere means that wherever the sweep finds it, pressing it now
+does something measurable, so the question stops being load-bearing.
+
+The probe did find something else, which is T-81.
+
+---
+
+### T-81. `/dispatcher-chat` was the home screen, and the harness called it covered
+
+While probing T-80 I dumped the control list per route. `/dispatcher-chat` came
+back **identical to `/home`, control for control**:
+
+```
+--- /dispatcher-chat  (10 controls) ---
+    "Dismiss this alert"  "Open the menu"  "Show menu EN 🇬🇧"  "Notifications"
+    "SOS SILENT SOS"  "AI REPORT SPEAK TO REPORT"  "SAFE ZONES"
+    "REPORT INCIDENT"  "HOME"  "NEW REPORT"
+```
+
+The router explains it, and the router is right:
+
+```dart
+path: AppRoutes.dispatcherChat,
+pageBuilder: (c, s) {
+  final alertId = s.extra as String?;
+  if (alertId == null) return _fade(s, const HomeScreen());
+  return _slide(s, DispatcherChatScreen(alertId: alertId));
+},
+```
+
+A URL cannot carry an incident, so falling back is correct. Six routes do it:
+
+| route | what a URL actually renders |
+| --- | --- |
+| `/mission-intel` | `AgentDashboardScreen` |
+| `/mission-resolution` | `AgentDashboardScreen` |
+| `/secure-chat` | `AgentDashboardScreen` |
+| `/dispatcher-chat` | `HomeScreen` |
+| `/report-subtype` | `ReportCategoryScreen` |
+| `/report-details` | `ReportCategoryScreen` |
+
+#### The claim that was false
+
+`mobile_capture.js` walks every route by URL and ends with:
+
+> every one of the app's 24 screens was rendered by at least one role
+
+It decides "reached" by setting the hash and then asking whether the hash is
+the route it wanted. It is — **the router renders the fallback without
+redirecting the URL.** So all six were recorded as covered, and a claim about a
+quarter of the app's screens was false while reading green.
+
+`/lock` had the right treatment all along: it cannot be reached by URL either,
+so the walk reaches it the way a person does — through Settings — and a
+nine-line comment explains why it must be last. Nobody asked the same question
+about the other six.
+
+And it was already half-known. `chat_thread.js` opens with: *"chat routes
+redirect away without an alert so the screens had never actually"* been
+rendered — which is why that harness exists. The capture's claim was never
+corrected to match what the other harness had learned.
+
+#### What was done
+
+`URL_RENDERS_A_FALLBACK` names all six, what each renders by URL, and **which
+harness does drive it** — `tier_controls.js`, `chat_thread.js`,
+`mobile_interact.js`. The walk logs them as `FALLBACK (…)` rather than
+`reached`, excludes them from the completeness claim, and the claim now reads:
+
+> every one of the app's 19 URL-reachable screens was rendered by at least one
+> role — 19/19; the other 6 need an incident a URL cannot carry and are driven
+> elsewhere: /mission-intel <- tier_controls.js, …
+
+`scripts/check_the_capture_counts_only_what_it_rendered.py` asserts that map
+against `app_router.dart` in both directions, and that every entry names a
+harness. Three mutations, all caught: a fallback route delisted; an entry with
+no harness named; a stale listing for a route that no longer falls back.
+
+A smaller true claim is worth more than a larger false one, and the six are no
+longer invisible — they are named in the output of every run, with an address.

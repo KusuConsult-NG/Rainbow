@@ -809,6 +809,34 @@ jobs:
       - name: Assert the local run serves every table the product reads
         run: python3 scripts/check_the_harness_serves_every_table.py
 
+      # verify_rls_migration.sh builds a real PostgreSQL from the migrations
+      # and asserts every object an applied migration declares exists. The
+      # inventory it checks against is extracted from the migrations and
+      # cannot drift; the list of migrations it APPLIES is a hand-written
+      # sequence of psql_run lines, and nothing connected the two. So
+      # 20261026000000_safe_zones_capacity.sql was added, the inventory picked
+      # the column up by itself, the replay never applied the file, and CI
+      # went red after the push — the check noticing a gap in its own setup.
+      # The direction that matters more: a migration left out of that replay
+      # is executed against real PostgreSQL by nothing at all, so it can be
+      # wrong in a way only PostgreSQL would say and still reach production
+      # with every gate green. T-79.
+      - name: Assert the RLS replay applies every migration
+        run: python3 scripts/check_the_replay_applies_every_migration.py
+
+      # mobile_capture.js walks every route by URL and claims "every one of
+      # the app's screens was rendered". Six routes need state.extra — an
+      # alert, a category — and their pageBuilder correctly falls back to
+      # another screen when it is null, WITHOUT redirecting the URL. So the
+      # walk asked for /dispatcher-chat, was shown the home screen, found the
+      # hash still read /dispatcher-chat, and counted the route as covered. A
+      # claim about a quarter of the app's screens was false while green.
+      # Found by probing why the control sweep attributed a safe-zone control
+      # to /dispatcher-chat: that route was showing home, control for control.
+      # T-81.
+      - name: Assert the capture counts only the screens it rendered
+        run: python3 scripts/check_the_capture_counts_only_what_it_rendered.py
+
       # `tier_timeout_minutes()` is the only reader of the three escalation
       # timeouts and it refuses what it cannot use — `raw::INTEGER`, then
       # `parsed <= 0` — because, in the migration's own words, a timeout of 0

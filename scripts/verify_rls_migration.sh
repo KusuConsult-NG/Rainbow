@@ -597,6 +597,34 @@ echo "  PASS  and its USING expression is byte-identical, so no read path moved"
 psql_run "-c 'DROP POLICY \"alerts_select_geo_lga_scoped\" ON public.alerts;'" >/dev/null
 echo "  PASS  and the planted policy is removed, so the end state is the repo's own"
 
+# The capacity a shelter can take. Nullable, no backfill: the app has read this
+# column since before it existed, and every shelter recorded before this
+# migration legitimately has no figure.
+#
+# Applied twice, like every migration above, because `ADD COLUMN IF NOT EXISTS`
+# and a guarded `ADD CONSTRAINT` are only idempotent if somebody runs them
+# twice and looks.
+echo "▶ Applying 20261026000000_safe_zones_capacity.sql"
+psql_run "-f $PGROOT/20261026000000_safe_zones_capacity.sql" >/dev/null
+psql_run "-f $PGROOT/20261026000000_safe_zones_capacity.sql" >/dev/null
+CAP_OUT=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
+  \"select format('%s/%s', data_type, is_nullable) from information_schema.columns \
+    where table_schema='public' and table_name='safe_zones' and column_name='capacity';\"")
+[ "$CAP_OUT" = "integer/YES" ] || {
+  echo "    information_schema says: ${CAP_OUT:-(no such column)}"
+  echo "✗ safe_zones.capacity is not a nullable integer"; exit 1; }
+# The CHECK has to refuse a negative and accept NULL, or the column is just an
+# integer with a comment on it.
+CAP_NEG=$(psql_run "-c \"insert into public.safe_zones (name, latitude, longitude, capacity) \
+  values ('zz probe', 9.9, 8.9, -1);\"" 2>&1 || true)
+printf '%s\n' "$CAP_NEG" | grep -q "safe_zones_capacity_sane" || {
+  printf '%s\n' "$CAP_NEG" | sed 's/^/    /'
+  echo "✗ a negative capacity was not refused by safe_zones_capacity_sane"; exit 1; }
+psql_run "-c \"insert into public.safe_zones (name, latitude, longitude, capacity) \
+  values ('zz probe', 9.9, 8.9, NULL);\"" >/dev/null
+psql_run "-c \"delete from public.safe_zones where name = 'zz probe';\"" >/dev/null
+echo "  PASS  safe_zones.capacity is a nullable integer that refuses a negative"
+
 echo "▶ Asserting no policy in schema public reaches anon or public, by name"
 PR_OUT=$(psql_run "-f $PGROOT/policy_roles_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?
 echo "$PR_OUT" | grep -E "PASS|FAIL|ERROR" || true

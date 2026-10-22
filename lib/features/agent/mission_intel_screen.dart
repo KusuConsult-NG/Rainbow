@@ -189,7 +189,7 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
             Text('SEVERITY: $severity', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.warning, letterSpacing: 1.5)),
             const SizedBox(height: 16),
             if (lat != null && lng != null) ...[
-              SizedBox(height: 200, child: ClipRRect(borderRadius: BorderRadius.circular(16), child: RainbowMap(center: LatLng(lat, lng), markers: [Marker(point: LatLng(lat, lng), child: const Icon(Icons.location_on, color: AppColors.danger))]))),
+              SizedBox(height: 200, child: ClipRRect(borderRadius: BorderRadius.circular(16), child: RainbowMap(label: 'Map of this incident', center: LatLng(lat, lng), markers: [Marker(point: LatLng(lat, lng), child: const Icon(Icons.location_on, color: AppColors.danger))]))),
               const SizedBox(height: 16),
             ],
             Text(desc, style: GoogleFonts.inter(fontSize: 14, color: AppColors.onBackground)),

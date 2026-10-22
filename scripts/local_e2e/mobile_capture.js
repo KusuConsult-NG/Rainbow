@@ -379,6 +379,34 @@ async function semanticsText(page) {
     return signInMobile(page, role);
   }
 
+  // SIX ROUTES RENDER A DIFFERENT SCREEN WHEN REACHED BY URL.
+  //
+  // Their `pageBuilder` needs `state.extra` — an alert, a category — and falls
+  // back to another screen when it is null, which is correct: a URL cannot
+  // carry an incident. This walk reaches every route BY URL, so for these six
+  // it photographs the fallback, the hash still reads the route it asked for,
+  // and `here === route` holds. They were therefore counted as covered, and the
+  // claim below — "every one of the app's screens was rendered" — was false for
+  // a quarter of them while reading green.
+  //
+  // `/lock` had this treatment already, with a comment: it cannot be reached by
+  // URL either, so the walk reaches it the way a person does. These six cannot
+  // be given that treatment here, because each needs an incident that another
+  // harness creates — so they are named, excluded from the claim, and the claim
+  // says where their real coverage lives.
+  //
+  // `scripts/check_the_capture_counts_only_what_it_rendered.py` asserts this
+  // map against `app_router.dart` in both directions: a new fallback route
+  // cannot go unlisted, and a listed one cannot outlive its fallback. T-81.
+  const URL_RENDERS_A_FALLBACK = {
+    '/mission-intel': 'agent_dashboard_screen.dart — needs an alert; driven by tier_controls.js',
+    '/mission-resolution': 'agent_dashboard_screen.dart — needs an alert; driven by tier_controls.js',
+    '/secure-chat': 'agent_dashboard_screen.dart — needs an alert; driven by chat_thread.js',
+    '/dispatcher-chat': 'home_screen.dart — needs an alert; driven by chat_thread.js',
+    '/report-subtype': 'report_category_screen.dart — needs a category; driven by mobile_interact.js',
+    '/report-details': 'report_category_screen.dart — needs a category; driven by mobile_interact.js',
+  };
+
   // Every route in AppRoutes, paired with the screen widget it must render.
   // There are 24 of each, and the pairing is what makes "every screen" a
   // checkable claim rather than a hopeful one: the run asserts that each of
@@ -571,13 +599,16 @@ async function semanticsText(page) {
         if (route === '/onboarding-permissions' && here === route) {
           setupText[role] = screenText;
         }
-        if (here === route && chars > 0) {
+        const fellBack = URL_RENDERS_A_FALLBACK[route];
+        if (here === route && chars > 0 && !fellBack) {
           reached.push(route);
           if (!coverage.has(route)) coverage.set(route, []);
           coverage.get(route).push(role);
         }
         console.log(
-          `      shot  ${name}.png  ${here === route ? 'reached' : `-> ${here}`}, ${chars} chars`,
+          `      shot  ${name}.png  ${
+            fellBack ? `FALLBACK (${fellBack.split(' —')[0]})`
+            : here === route ? 'reached' : `-> ${here}`}, ${chars} chars`,
         );
       }
       roleReport[role] = { landed, banner, reached };
@@ -594,13 +625,20 @@ async function semanticsText(page) {
   // somebody. Running as one role cannot satisfy this, which is the point: the
   // first version of this file shot 23 routes as the citizen and called that
   // "every screen", while every staff screen had quietly redirected to /home.
-  const never = ROUTES.filter(([route]) => !coverage.has(route));
+  const byUrl = ROUTES.filter(([route]) => !URL_RENDERS_A_FALLBACK[route]);
+  const never = byUrl.filter(([route]) => !coverage.has(route));
   check(
-    `every one of the app's ${ROUTES.length} screens was rendered by at least one role`,
+    `every one of the app's ${byUrl.length} URL-reachable screens was rendered `
+    + `by at least one role`,
     never.length === 0,
     never.length
       ? `never rendered: ${never.map(([r, , f]) => `${r} (${f})`).join(', ')}`
-      : `${coverage.size}/${ROUTES.length}`,
+      : `${coverage.size}/${byUrl.length}; the other `
+        + `${Object.keys(URL_RENDERS_A_FALLBACK).length} need an incident a URL `
+        + `cannot carry and are driven elsewhere: `
+        + Object.entries(URL_RENDERS_A_FALLBACK)
+            .map(([r, why]) => `${r} <- ${why.split('driven by ')[1]}`)
+            .join(', '),
   );
 
   // THE LANGUAGE CAN BE CHOSEN BEFORE THE REST OF SETUP IS READ.

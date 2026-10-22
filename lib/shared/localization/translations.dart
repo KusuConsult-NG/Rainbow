@@ -984,6 +984,24 @@ class Translations {
     // everything else a citizen reads. Added with T-76, which gave a name to
     // eight controls that had none — among them SUBMIT on the emergency PIN
     // pad and the marker that picks which shelter somebody is routed to.
+    // What each map IS, for a screen reader. See RainbowMap.label and T-78:
+    // flutter_map's pan recognizer makes an unwrapped map an unlabelled button
+    // covering the screen.
+    'eme_semantics_map_label': {
+      AppLanguage.english: 'Map showing where you are',
+      AppLanguage.hausa: 'Taswira mai nuna inda kake',
+      AppLanguage.pidgin: 'Map wey show where you dey',
+    },
+    'sz_semantics_map_label': {
+      AppLanguage.english: 'Map of shelters and threats near you',
+      AppLanguage.hausa: 'Taswirar wuraren tsira da hatsari kusa da kai',
+      AppLanguage.pidgin: 'Map of shelters and danger near you',
+    },
+    'sz_semantics_shelter_list': {
+      AppLanguage.english: 'Shelters, as a list',
+      AppLanguage.hausa: 'Wuraren tsira, a jerin',
+      AppLanguage.pidgin: 'Shelters, as list',
+    },
     'sz_semantics_route_to': {
       AppLanguage.english: 'Route me to {name}',
       AppLanguage.hausa: 'Nuna mini hanya zuwa {name}',
@@ -1031,6 +1049,25 @@ class Translations {
       AppLanguage.english: 'Open the details for {who}, status {status}',
       AppLanguage.hausa: 'Bude bayanan {who}, matsayi {status}',
       AppLanguage.pidgin: 'Open the info for {who}, status {status}',
+    },
+    // The route, in writing.
+    //
+    // `_calculateSafeRoute` SPEAKS the outcome — "safe route calculated to
+    // {name}, the path is clear" — through TtsService and writes it nowhere.
+    // On a screen whose job is getting a frightened person to a shelter, the
+    // one sentence saying whether the way is clear was audio-only: gone if the
+    // phone is muted, if TTS is unavailable, if the street is loud, or if the
+    // person cannot hear. The threat warning beside it was always written; the
+    // confirmation was not. T-80.
+    'sz_show_directions': {
+      AppLanguage.english: 'SHOW THE WAY IN WRITING',
+      AppLanguage.hausa: 'NUNA HANYAR A RUBUCE',
+      AppLanguage.pidgin: 'SHOW THE ROAD IN WRITING',
+    },
+    'sz_hide_directions': {
+      AppLanguage.english: 'HIDE THE WRITTEN DIRECTIONS',
+      AppLanguage.hausa: 'BOYE HANYAR DA AKA RUBUTA',
+      AppLanguage.pidgin: 'HIDE THE WRITING',
     },
     'sz_navigate_to_zone': {
       AppLanguage.english: 'NAVIGATE TO ZONE',

@@ -127,6 +127,13 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
   bool _routePassesNearThreat = false;
   bool _isCalculatingRoute = false;
 
+  /// The sentence `_calculateSafeRoute` speaks, kept so it can also be READ.
+  ///
+  /// It used to be spoken and nowhere else — see T-80. The threat warning was
+  /// always written; the sentence saying whether the way is clear was not.
+  String? _routeMessage;
+  bool _directionsShown = false;
+
   double _calculateRouteThreatScore(List<LatLng> path, List<LatLng> threats) {
     // `0.0`, not `0`: this accumulates a double threat score. `dart fix`
     // rewrote `double score = 0.0` to `var score = 0` and silently changed the
@@ -229,6 +236,15 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
         ? Translations.get('sz_route_calculated_warning', lang)
         : Translations.get('sz_route_calculated_clear', lang);
     final message = tmpl.replaceAll('{name}', zone.name);
+    // Spoken AND kept. The screen shows it on request; a muted phone, an
+    // unavailable TtsService or a deaf user must not be the difference between
+    // knowing the way is clear and not knowing.
+    if (mounted) {
+      setState(() {
+        _routeMessage = message;
+        _directionsShown = false;
+      });
+    }
     unawaited(TtsService.instance.speak(message));
   }
 
@@ -430,7 +446,26 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
 
                 return Stack(
                   children: [
-                    FlutterMap(
+                    // THE MAP IS NOT A BUTTON.
+                    //
+                    // flutter_map registers a tap recognizer for panning and
+                    // zooming, so an unwrapped map reaches the accessibility
+                    // tree as an unlabelled button covering the screen. The
+                    // control sweep had been failing on exactly this — one
+                    // control on this route, named `(icon)`, that did nothing
+                    // when pressed — and the identical fix had already been
+                    // written on `live_tracking_screen.dart` and applied
+                    // nowhere else. See E2E_AUDIT_REPORT.md T-78.
+                    //
+                    // `excludeSemantics: true` is what removes that node, and
+                    // it takes the shelter markers' labels with it. The list
+                    // below carries the same shelters, as ordinary buttons a
+                    // screen reader can read and press.
+                    Semantics(
+                      container: true,
+                      label: Translations.get('sz_semantics_map_label', lang),
+                      excludeSemantics: true,
+                      child: FlutterMap(
                       mapController: _mapCtrl,
                       options: MapOptions(
                         initialCenter: LatLng(pos.latitude, pos.longitude),
@@ -438,6 +473,8 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                           _selected = null;
                           _currentRoute = null;
                           _routePassesNearThreat = false;
+                          _routeMessage = null;
+                          _directionsShown = false;
                         }),
                       ),
                       children: [
@@ -459,7 +496,64 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                           ),
                         MarkerLayer(markers: markers),
                       ],
+                      ),
                     ),
+
+                    // THE SHELTERS, AS A LIST.
+                    //
+                    // Not decoration, and not a second way to do the same
+                    // thing for the sake of it. The markers above are inside
+                    // the excluded subtree, so their labels — correct as they
+                    // are — cannot be read or pressed by a screen reader. This
+                    // strip carries the same shelters as ordinary buttons with
+                    // text, outside the exclusion, each doing exactly what its
+                    // marker does: select the shelter and compute the route.
+                    //
+                    // It is also simply better for the screen's purpose. A
+                    // frightened person looking for somewhere to go reads
+                    // "NARAGUTA WARD COMMAND POST" faster than they find a
+                    // small circle on a map.
+                    if (zones.isNotEmpty)
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: Semantics(
+                          container: true,
+                          label: Translations.get(
+                            'sz_semantics_shelter_list',
+                            lang,
+                          ),
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            child: Row(
+                              children: [
+                                for (final zone in zones)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: _ShelterChip(
+                                      name: zone.name,
+                                      icon: _iconForType(zone.type),
+                                      chosen: _selected?.id == zone.id,
+                                      onTap: () {
+                                        setState(() => _selected = zone);
+                                        unawaited(_calculateSafeRoute(
+                                          LatLng(pos.latitude, pos.longitude),
+                                          zone,
+                                          threats,
+                                        ),);
+                                      },
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
 
                     // Empty state overlay
                     if (zones.isEmpty)
@@ -530,18 +624,24 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                                   Semantics(
                                     button: true,
                                     label: Translations.get(
-                                        'sz_semantics_close_details', lang),
+                                      'sz_semantics_close_details',
+                                      lang,
+                                    ),
                                     excludeSemantics: true,
                                     onTap: () => setState(() {
                                       _selected = null;
                                       _currentRoute = null;
                                       _routePassesNearThreat = false;
+                                      _routeMessage = null;
+                                      _directionsShown = false;
                                     }),
                                     child: GestureDetector(
                                       onTap: () => setState(() {
                                         _selected = null;
                                         _currentRoute = null;
                                         _routePassesNearThreat = false;
+                                        _routeMessage = null;
+                                        _directionsShown = false;
                                       }),
                                       child: const Icon(
                                         Icons.close_rounded,
@@ -625,6 +725,50 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                                   ),
                                 ),
                               ],
+                              // THE WAY, IN WRITING.
+                              //
+                              // This control was labelled NAVIGATE TO ZONE and
+                              // its entire body was `_mapCtrl.move(...)` — a
+                              // camera pan. The name promised navigation and
+                              // delivered a nudge, and because the screen had
+                              // never had a shelter to select, the button had
+                              // never once been rendered or pressed by anything.
+                              //
+                              // It now shows and hides the sentence the screen
+                              // SPEAKS when it computes a route, which was
+                              // audio-only: lost on a muted phone, with TTS
+                              // unavailable, in a loud street, or to a deaf
+                              // user. It still re-centres the map, and it
+                              // re-speaks the sentence when revealing it, so a
+                              // person already walking can ask for it again.
+                              // T-80.
+                              if (_routeMessage != null && _directionsShown) ...[
+                                const SizedBox(height: 12),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.success.withValues(
+                                      alpha: 0.08,
+                                    ),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: AppColors.success.withValues(
+                                        alpha: 0.3,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    _routeMessage!,
+                                    style: GoogleFonts.outfit(
+                                      color: AppColors.onBackground,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.5,
+                                    ),
+                                  ),
+                                ),
+                              ],
                               const SizedBox(height: 16),
                               SizedBox(
                                 width: double.infinity,
@@ -637,13 +781,30 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                                       ),
                                       16,
                                     );
+                                    final showing = !_directionsShown;
+                                    setState(
+                                      () => _directionsShown = showing,
+                                    );
+                                    final said = _routeMessage;
+                                    if (showing && said != null) {
+                                      unawaited(
+                                        TtsService.instance.speak(said),
+                                      );
+                                    }
                                   },
-                                  icon: const Icon(
-                                    Icons.navigation_rounded,
+                                  icon: Icon(
+                                    _directionsShown
+                                        ? Icons.visibility_off_rounded
+                                        : Icons.navigation_rounded,
                                     size: 16,
                                   ),
                                   label: Text(
-                                    Translations.get('sz_navigate_to_zone', lang),
+                                    Translations.get(
+                                      _directionsShown
+                                          ? 'sz_hide_directions'
+                                          : 'sz_show_directions',
+                                      lang,
+                                    ),
                                     style: GoogleFonts.outfit(
                                       fontWeight: FontWeight.w900,
                                       fontSize: 12,
@@ -679,6 +840,55 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// One shelter, as a button with its name on it.
+///
+/// A `Semantics(button: true)` wrapper is not needed and would be wrong: the
+/// chip has TEXT, so its accessible name is that text, and `ElevatedButton`
+/// already announces itself as a button. The whole point of this widget is
+/// that it is an ordinary control rather than an icon in a map layer.
+class _ShelterChip extends StatelessWidget {
+  const _ShelterChip({
+    required this.name,
+    required this.icon,
+    required this.chosen,
+    required this.onTap,
+  });
+
+  final String name;
+  final IconData icon;
+  final bool chosen;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 14),
+      label: Text(
+        name.toUpperCase(),
+        style: GoogleFonts.outfit(
+          fontWeight: FontWeight.w900,
+          fontSize: 10,
+          letterSpacing: 1,
+        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: chosen
+            ? AppColors.success
+            : AppColors.surfaceContainer.withValues(alpha: 0.92),
+        foregroundColor: chosen ? Colors.white : AppColors.onBackground,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(
+            color: chosen ? AppColors.success : AppColors.outline,
+          ),
+        ),
       ),
     );
   }

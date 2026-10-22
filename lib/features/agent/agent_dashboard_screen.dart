@@ -798,6 +798,7 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
     ];
 
     return RainbowMap(
+      label: 'Map of the incidents on this board',
       // The mean of the incidents on screen. With one incident that is the
       // incident; with several it is between them, which is the view a
       // dispatcher wants.

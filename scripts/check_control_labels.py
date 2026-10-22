@@ -373,6 +373,73 @@ def unreachable_tap_targets() -> tuple[list[tuple[str, int, str]], list[tuple[st
     return bad, known
 
 
+# A MAP IS NOT A BUTTON, ON EVERY SCREEN THAT HAS ONE.
+#
+# flutter_map registers a tap recognizer for panning and zooming, so an
+# unwrapped `FlutterMap` reaches the accessibility tree as an unlabelled button
+# covering the screen — announced as "button", doing nothing when activated.
+#
+# This was diagnosed once, fixed on `live_tracking_screen.dart`, written up in
+# a comment there, and applied to none of the other three maps in the app. The
+# control sweep went on failing on the shelter screen for exactly this, every
+# run, reporting one control named `(icon)` that did nothing. Nobody had asked
+# which OTHER screens have a map. T-78.
+#
+# So: every FlutterMap carries a label and excludes its own subtree, or this
+# fails. `RainbowMap` takes the label as a required parameter with no default,
+# which closes the same hole for its three call sites.
+#
+# WHAT THIS CANNOT SEE. It is lexical. A marker list built in its own statement
+# — `final markers = <Marker>[…]` — and handed to `MarkerLayer(markers:
+# markers)` is inside the excluded subtree at RUN time and nowhere near it in
+# the SOURCE, so the unreachable-control check above cannot connect the two.
+# safe_zone_screen.dart is exactly that shape. Its shelters are offered as a
+# list of real buttons beside the map for that reason, and the reason is
+# written at the markers. A check that cannot see something should say so
+# rather than be trusted to.
+def maps_that_are_buttons() -> list[tuple[str, int]]:
+    """(file, line) for every FlutterMap that is not a labelled, excluded map."""
+    bad = []
+    for path in sorted(LIB.rglob("*.dart")):
+        if path.name.endswith(GENERATED):
+            continue
+        raw = path.read_text()
+        text = blank_strings(raw)
+        for m in re.finditer(r"\bFlutterMap\s*\(", text):
+            line = raw.count("\n", 0, m.start()) + 1
+            named = False
+            for name, paren in ancestors(text, m.start(), levels=3):
+                if name != "Semantics":
+                    continue
+                outer, _ = body_of(text, paren + 1)
+                args = own_args(outer)
+                if not re.search(r"\blabel\s*:", args):
+                    continue
+                if "excludeSemantics: true" not in args:
+                    continue
+                # Its DIRECT child, at depth 0 of its own argument list.
+                key, d = -1, 0
+                for idx, ch in enumerate(outer):
+                    if ch in "([{":
+                        d += 1
+                    elif ch in ")]}":
+                        d -= 1
+                    elif d == 0 and outer.startswith("child:", idx):
+                        key = idx
+                        break
+                if key == -1:
+                    continue
+                at = paren + 1 + key + len("child:")
+                while at < len(text) and text[at] in " \n\t":
+                    at += 1
+                if at == m.start():
+                    named = True
+                    break
+            if not named:
+                bad.append((str(path.relative_to(ROOT)), line))
+    return bad
+
+
 def main() -> int:
     bad = unlabelled()
     if bad:
@@ -403,6 +470,21 @@ def main() -> int:
         print("`(icon)` and cannot report what it does. Wrap it in")
         print("`Semantics(button: true, label: '...', onTap: <same handler>)`")
         print("— and keep the onTap on the Semantics, or see the check below.")
+        return 1
+
+    # ── A MAP IS NOT A BUTTON, ON EVERY SCREEN THAT HAS ONE ─────────────────
+    maps = maps_that_are_buttons()
+    if maps:
+        print("Maps that reach the accessibility tree as unlabelled buttons:")
+        for path, line in maps:
+            print(f"  {path}:{line}")
+        print()
+        print("flutter_map's pan-and-zoom recognizer makes an unwrapped map a")
+        print("button covering the screen: announced as \"button\", doing")
+        print("nothing when pressed. Wrap it in `Semantics(container: true,")
+        print("label: <what the map shows>, excludeSemantics: true, child:")
+        print("FlutterMap(...))`, and offer anything tappable inside it — a")
+        print("marker — somewhere outside the exclusion as well.")
         return 1
 
     # ── AND A NAME UNDER AN EXCLUDED SUBTREE IS NOT A NAME ──────────────────
