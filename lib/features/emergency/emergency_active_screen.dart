@@ -985,57 +985,90 @@ class _TacticalPinVerificationState
 
   Widget _buildSubmit() {
     final enabled = pin.length >= _minPinLength && !_verifying;
-    return GestureDetector(
+    // This is the control that ends an emergency, and it was a circle with a
+    // tick in it and no accessible name at all. A screen-reader user on this
+    // screen was offered an unnamed button, next to another unnamed button
+    // that deletes a digit.
+    //
+    // The name says what the state is, because the same control is disabled
+    // until the PIN is long enough and busy while it is being checked —
+    // "nothing is happening" and "it will not accept this" must not sound
+    // alike. `onTap` is on the Semantics too: `excludeSemantics` takes the
+    // child's tap action away with its semantics.
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: _verifying
+          ? _t('eme_semantics_pin_checking')
+          : enabled
+              ? _t('eme_semantics_pin_submit')
+              : _t('eme_semantics_pin_submit_short')
+                  .replaceAll('{count}', '$_minPinLength'),
+      excludeSemantics: true,
       onTap: enabled ? _submit : null,
-      child: Container(
-        width: 80,
-        height: 80,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: enabled
-              ? AppColors.emergency.withValues(alpha: 0.15)
-              : Colors.transparent,
-          border: Border.all(
-            color: enabled ? AppColors.emergency : AppColors.outline,
+      child: GestureDetector(
+        onTap: enabled ? _submit : null,
+        child: Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: enabled
+                ? AppColors.emergency.withValues(alpha: 0.15)
+                : Colors.transparent,
+            border: Border.all(
+              color: enabled ? AppColors.emergency : AppColors.outline,
+            ),
           ),
-        ),
-        child: Center(
-          child: _verifying
-              ? const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppColors.emergency,
+          child: Center(
+            child: _verifying
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.emergency,
+                    ),
+                  )
+                : Icon(
+                    Icons.check_rounded,
+                    color: enabled ? AppColors.emergency : AppColors.textDim,
+                    size: 32,
                   ),
-                )
-              : Icon(
-                  Icons.check_rounded,
-                  color: enabled ? AppColors.emergency : AppColors.textDim,
-                  size: 32,
-                ),
+          ),
         ),
       ),
     );
   }
 
   Widget _buildBackspace() {
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      label: _t('eme_semantics_pin_backspace'),
+      excludeSemantics: true,
       onTap: () {
         unawaited(HapticFeedback.lightImpact());
         if (pin.isNotEmpty) {
           setState(() => pin = pin.substring(0, pin.length - 1));
         }
       },
-      child: Container(
-        width: 80,
-        height: 80,
-        decoration: const BoxDecoration(shape: BoxShape.circle),
-        child: const Center(
-          child: Icon(
-            Icons.backspace_outlined,
-            color: AppColors.textSecondary,
-            size: 28,
+      child: GestureDetector(
+        onTap: () {
+          unawaited(HapticFeedback.lightImpact());
+          if (pin.isNotEmpty) {
+            setState(() => pin = pin.substring(0, pin.length - 1));
+          }
+        },
+        child: Container(
+          width: 80,
+          height: 80,
+          decoration: const BoxDecoration(shape: BoxShape.circle),
+          child: const Center(
+            child: Icon(
+              Icons.backspace_outlined,
+              color: AppColors.textSecondary,
+              size: 28,
+            ),
           ),
         ),
       ),

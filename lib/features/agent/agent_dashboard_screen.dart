@@ -976,7 +976,28 @@ class _MissionCard extends ConsumerWidget {
                               final urlLower = url.toLowerCase();
                               final isVideo = urlLower.contains('/video/') || urlLower.endsWith('.mp4') || urlLower.endsWith('.mov');
                               final isAudio = urlLower.endsWith('.m4a') || urlLower.endsWith('.mp3') || urlLower.endsWith('.wav');
-                              return GestureDetector(
+                              // An attachment thumbnail on a live incident:
+                              // tapping it opens the photo, video or voice
+                              // note the reporter sent. It had no accessible
+                              // name, so a responder on TalkBack was offered
+                              // a row of unnamed tiles.
+                              return Semantics(
+                                button: true,
+                                label: isVideo
+                                    ? 'Open the video the reporter sent'
+                                    : isAudio
+                                        ? 'Play the voice note the reporter sent'
+                                        : 'Open the photo the reporter sent',
+                                excludeSemantics: true,
+                                onTap: () => showDialog<void>(context: ctx, builder: (_) => Dialog(
+                                  backgroundColor: Colors.black,
+                                  child: isVideo
+                                      ? const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 64))
+                                      : isAudio
+                                          ? const Center(child: Icon(Icons.audiotrack, color: Colors.white, size: 64))
+                                          : InteractiveViewer(child: Image.network(url)),
+                                ),),
+                                child: GestureDetector(
                                 onTap: () => showDialog<void>(context: ctx, builder: (_) => Dialog(
                                   backgroundColor: Colors.black,
                                   child: isVideo
@@ -998,6 +1019,7 @@ class _MissionCard extends ConsumerWidget {
                                             : Image.network(url, fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: AppColors.textDim)),
                                   ),
                                 ),
+                              ),
                               );
                             },
                           ),

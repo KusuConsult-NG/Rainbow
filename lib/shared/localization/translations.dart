@@ -973,6 +973,60 @@ class Translations {
       AppLanguage.pidgin:
           'DANGER DEY FOR ROAD · ROUTE GO PASS CORNER WEY NO GET WAHALA',
     },
+    // ── ACCESSIBLE NAMES ────────────────────────────────────────────────────
+    //
+    // A screen-reader label is user-visible text, so it belongs here with
+    // everything else a citizen reads. Added with T-76, which gave a name to
+    // eight controls that had none — among them SUBMIT on the emergency PIN
+    // pad and the marker that picks which shelter somebody is routed to.
+    'sz_semantics_route_to': {
+      AppLanguage.english: 'Route me to {name}',
+      AppLanguage.hausa: 'Nuna mini hanya zuwa {name}',
+      AppLanguage.pidgin: 'Show me road go {name}',
+    },
+    'sz_semantics_close_details': {
+      AppLanguage.english: 'Close these shelter details',
+      AppLanguage.hausa: 'Rufe bayanan wurin tsira',
+      AppLanguage.pidgin: 'Close this shelter info',
+    },
+    'eme_semantics_pin_checking': {
+      AppLanguage.english: 'Checking your PIN',
+      AppLanguage.hausa: 'Ana duba PIN naka',
+      AppLanguage.pidgin: 'Dem dey check your PIN',
+    },
+    'eme_semantics_pin_submit': {
+      AppLanguage.english: 'Submit your PIN',
+      AppLanguage.hausa: 'Tura PIN naka',
+      AppLanguage.pidgin: 'Send your PIN',
+    },
+    'eme_semantics_pin_submit_short': {
+      AppLanguage.english:
+          'Submit your PIN. Enter at least {count} digits first.',
+      AppLanguage.hausa:
+          'Tura PIN naka. Da farko shigar da akalla lambobi {count}.',
+      AppLanguage.pidgin:
+          'Send your PIN. Put at least {count} numbers first.',
+    },
+    'eme_semantics_pin_backspace': {
+      AppLanguage.english: 'Delete the last digit',
+      AppLanguage.hausa: 'Share lamba ta karshe',
+      AppLanguage.pidgin: 'Clear the last number',
+    },
+    'rpt_semantics_remove_attachment': {
+      AppLanguage.english: 'Remove this attachment',
+      AppLanguage.hausa: 'Cire wannan abin da aka makala',
+      AppLanguage.pidgin: 'Remove this file',
+    },
+    'trk_semantics_a_responder': {
+      AppLanguage.english: 'A responder',
+      AppLanguage.hausa: "Wani jami'i",
+      AppLanguage.pidgin: 'One responder',
+    },
+    'trk_semantics_open_responder': {
+      AppLanguage.english: 'Open the details for {who}, status {status}',
+      AppLanguage.hausa: 'Bude bayanan {who}, matsayi {status}',
+      AppLanguage.pidgin: 'Open the info for {who}, status {status}',
+    },
     'sz_navigate_to_zone': {
       AppLanguage.english: 'NAVIGATE TO ZONE',
       AppLanguage.hausa: 'JE ZUWA WURIN TSIRA',

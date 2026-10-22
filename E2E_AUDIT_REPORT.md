@@ -9758,3 +9758,122 @@ sets it.
 That is a missing feature rather than a defect, and it is not mine to invent.
 What the fixtures do is make sure that when the rows exist, the screen is known
 to read them — which was not previously true of anything here.
+
+---
+
+### T-76. The control that ends an emergency had no name
+
+The interaction sweep had been reporting one control on the safe-zone screen as
+`(icon)` and finding that pressing it did nothing. Identifying it meant looking
+at what a hand-rolled tap target is, and the answer was not one control.
+
+`check_control_labels.py` has existed since the agent dashboard was found with
+fifteen of nineteen `IconButton`s carrying no tooltip. It knows about two
+widgets: `IconButton` and `FloatingActionButton` — the two it was written from.
+
+A tap target made by hand out of `GestureDetector` and an `Icon` is the same
+thing to a screen reader, and was outside its scope entirely. Eight of them:
+
+| where | what it does |
+| --- | --- |
+| `emergency_active_screen.dart` | **SUBMIT on the emergency PIN pad** |
+| `emergency_active_screen.dart` | backspace, beside it |
+| `safe_zone_screen.dart` | **picks which shelter somebody is routed to** |
+| `safe_zone_screen.dart` | closes the shelter detail card |
+| `agent_dashboard_screen.dart` | opens an attachment on a live incident |
+| `voice_report_dialog.dart` | **starts and stops a voice report** |
+| `onboarding_permissions_screen.dart` | back, during first-run setup |
+| `report_details_screen.dart` | removes an attachment |
+
+The first two are the worst. A screen-reader user entering a PIN under duress
+was offered two unnamed buttons, one of which ends the emergency and one of
+which deletes a digit, with nothing to tell them apart. The third is the control
+a frightened person uses to pick a shelter — and it is why the sweep could only
+call it `(icon)`, which is the same missing label turning into missing coverage
+that the gate's own docstring describes.
+
+#### What was done
+
+Each is wrapped in `Semantics(button: true, label: …, onTap: <the same
+handler>)`. `onTap` on the Semantics as well as the detector, because
+`excludeSemantics: true` takes the child's tap action away with its semantics —
+the trap `rainbow_app_bar.dart` documents and that has now been walked into
+three times in this repository.
+
+The PIN submit's name states which of three things is true, because the same
+control is disabled until the PIN is long enough and busy while it is being
+checked: "nothing is happening" and "it will not accept this" must not sound
+alike. The shelter marker's name carries the shelter's own name, because there
+is one marker per shelter and "shelter, button" does not tell them apart.
+
+All nine strings are in `translations.dart` in all three languages. An
+accessible name is user-visible text, and
+`check_citizen_screens_speak_the_language.py` said so — it caught the first
+version of this fix, correctly, with four hardcoded English labels on the
+emergency screen.
+
+#### The gate, and the three ways it was wrong first
+
+`check_control_labels.py` now also reads hand-rolled tap targets: a
+`GestureDetector`, `InkWell` or `InkResponse` with an `onTap`, an `Icon` in its
+subtree and no text of its own. Whether it is named is decided by its own
+arguments or by a wrapper **that is its direct parent**.
+
+Every one of those qualifications is there because the first version was wrong,
+and each was found by running it rather than reading it:
+
+1. **It stopped seeing.** Parentheses are balanced to find the enclosing
+   widget, so strings had to be blanked — and the first version blanked strings
+   without skipping comments. `// This screen's own state` on line 277 of
+   `emergency_active_screen.dart` opened a literal that never closed, the rest
+   of the file was blanked, and all four of its tap targets vanished from the
+   check. The PIN pad was among them. A detector that silently stops seeing is
+   worse than no detector.
+2. **A nearest-ancestor search was too generous.** `Semantics(label: 'Keypad',
+   child: Row(children: […]))` would have cleared every unnamed button in that
+   row, which is the opposite of what a label on a group means. The wrapper has
+   to be the control's direct parent, which is checkable exactly.
+3. **Reading a body as if it were flat.** Twice. `"excludeSemantics: true" in
+   body` is true for any widget CONTAINING one, so `voice_note_player.dart` —
+   the one place in this codebase that gets this right — was reported as
+   broken. And `body.find('child:')` finds a nested `child:` first: the
+   attachment thumbnail builds a `Dialog(child: …)` inside its own `onTap`, so
+   the real `child:` was forty lines later and the control read as unnamed
+   immediately after being named.
+
+Four mutations, all caught: the PIN submit's label removed; the acknowledgement
+below removed; `onTap` taken off a Semantics that hides its child; and a group
+label put over an unnamed button.
+
+#### One control that cannot be fixed with a label, and is not pretended otherwise
+
+The responder markers on `live_tracking_screen.dart` sit inside a `Semantics`
+with `excludeSemantics: true`. That exclusion is itself a fix: flutter_map
+registers a pan-and-zoom recognizer, so without it the whole map surface reaches
+the tree as one unlabelled button covering the screen — which the sweep found
+once already. Excluding a subtree excludes its markers with it, so no label
+placed on a marker can be reached.
+
+The two requirements genuinely conflict. Resolving it means giving that screen a
+responder **list** rather than relying on map pins, which is a feature and not
+mine to invent.
+
+So the gate has a third check: a tap target under an `excludeSemantics: true`
+ancestor that is not its own wrapper. It fails unless the reason is written at
+the control in a comment carrying `SEMANTICS-UNREACHABLE:`, and it prints every
+acknowledged one in its passing output. A pass that hides a known gap is the
+defect this whole report is about, so this one does not hide it:
+
+```
+OK: all 19 icon-only controls carry an accessible name,
+    all 41 hand-rolled tap targets that show only an
+    icon carry one too, and every Semantics button that hides its
+    child can be pressed.
+
+    1 control(s) carry a correct label a screen reader
+    still cannot reach, each with its reason written at the control:
+      lib/features/tracking/live_tracking_screen.dart:296
+```
+
+The label is written there now, correctly, so it is right the moment the list
+lands.

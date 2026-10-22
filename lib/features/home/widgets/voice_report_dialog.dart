@@ -406,8 +406,20 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                       ),
                     ),
                   ] else ...[
-                    // Micro-animated Sound wave visualizer
-                    GestureDetector(
+                    // Micro-animated Sound wave visualizer.
+                    //
+                    // It is also the only way to start or stop recording, and
+                    // it had no accessible name — an animated circle that a
+                    // screen reader could not announce or describe. The name
+                    // says which of the two things pressing it will do.
+                    Semantics(
+                      button: true,
+                      label: _isListening
+                          ? 'Stop recording and send this voice report'
+                          : 'Start recording a voice report',
+                      excludeSemantics: true,
+                      onTap: _isListening ? _stopListeningFlow : _startListeningFlow,
+                      child: GestureDetector(
                       onTap: _isListening ? _stopListeningFlow : _startListeningFlow,
                       child: Stack(
                         alignment: Alignment.center,
@@ -458,6 +470,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                           ),
                         ],
                       ),
+                    ),
                     ),
                     const SizedBox(height: 24),
 

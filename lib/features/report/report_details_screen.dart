@@ -723,12 +723,19 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    GestureDetector(
+                    Semantics(
+                      button: true,
+                      label: Translations.get(
+                          'rpt_semantics_remove_attachment', lang),
+                      excludeSemantics: true,
                       onTap: () => setState(() => _attachedFiles.remove(f)),
-                      child: const Icon(
-                        Icons.close_rounded,
-                        color: AppColors.danger,
-                        size: 18,
+                      child: GestureDetector(
+                        onTap: () => setState(() => _attachedFiles.remove(f)),
+                        child: const Icon(
+                          Icons.close_rounded,
+                          color: AppColors.danger,
+                          size: 18,
+                        ),
                       ),
                     ),
                   ],

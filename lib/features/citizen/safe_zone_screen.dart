@@ -387,24 +387,40 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                       point: LatLng(zone.lat, zone.lng),
                       width: 44,
                       height: 44,
-                      child: GestureDetector(
+                      // The control that picks which shelter a frightened
+                      // person is routed to, and it had no accessible name:
+                      // the interaction sweep could only report it as
+                      // `(icon)`. The name carries the shelter's own name,
+                      // because there is one of these per shelter and
+                      // "shelter" alone does not tell them apart.
+                      child: Semantics(
+                        button: true,
+                        label: Translations.get('sz_semantics_route_to', lang)
+                            .replaceAll('{name}', zone.name),
+                        excludeSemantics: true,
                         onTap: () {
                           setState(() => _selected = zone);
                           unawaited(_calculateSafeRoute(LatLng(pos.latitude, pos.longitude), zone, threats));
                         },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: AppColors.success.withValues(alpha: 0.15),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: AppColors.success.withValues(alpha: 0.5),
-                              width: 2,
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() => _selected = zone);
+                            unawaited(_calculateSafeRoute(LatLng(pos.latitude, pos.longitude), zone, threats));
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: AppColors.success.withValues(alpha: 0.15),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: AppColors.success.withValues(alpha: 0.5),
+                                width: 2,
+                              ),
                             ),
-                          ),
-                          child: Icon(
-                            _iconForType(zone.type),
-                            color: AppColors.success,
-                            size: 22,
+                            child: Icon(
+                              _iconForType(zone.type),
+                              color: AppColors.success,
+                              size: 22,
+                            ),
                           ),
                         ),
                       ),
@@ -511,16 +527,27 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                  GestureDetector(
+                                  Semantics(
+                                    button: true,
+                                    label: Translations.get(
+                                        'sz_semantics_close_details', lang),
+                                    excludeSemantics: true,
                                     onTap: () => setState(() {
                                       _selected = null;
                                       _currentRoute = null;
                                       _routePassesNearThreat = false;
                                     }),
-                                    child: const Icon(
-                                      Icons.close_rounded,
-                                      color: AppColors.textDim,
-                                      size: 20,
+                                    child: GestureDetector(
+                                      onTap: () => setState(() {
+                                        _selected = null;
+                                        _currentRoute = null;
+                                        _routePassesNearThreat = false;
+                                      }),
+                                      child: const Icon(
+                                        Icons.close_rounded,
+                                        color: AppColors.textDim,
+                                        size: 20,
+                                      ),
                                     ),
                                   ),
                                 ],

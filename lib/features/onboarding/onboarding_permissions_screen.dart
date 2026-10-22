@@ -649,18 +649,28 @@ class OnboardingBottomNav extends StatelessWidget {
       ),
       child: Row(
         children: [
-          GestureDetector(
+          // The back arrow is an icon and nothing else, so its name has to be
+          // supplied. `onTap` sits on the Semantics as well, because
+          // `excludeSemantics` drops the child's tap action with its
+          // semantics — see rainbow_app_bar.dart, which learned that twice.
+          Semantics(
+            button: true,
+            label: 'Go back to the previous setup step',
+            excludeSemantics: true,
             onTap: onBack,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceContainer,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppColors.outline),
-              ),
-              child: const Icon(
-                Icons.arrow_back_rounded,
-                color: AppColors.onBackground,
+            child: GestureDetector(
+              onTap: onBack,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceContainer,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.outline),
+                ),
+                child: const Icon(
+                  Icons.arrow_back_rounded,
+                  color: AppColors.onBackground,
+                ),
               ),
             ),
           ),

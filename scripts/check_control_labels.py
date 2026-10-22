@@ -78,6 +78,301 @@ def unlabelled() -> list[tuple[str, int, str]]:
     return found
 
 
+
+# A control nobody wrote as a control.
+#
+# `IconButton` and `FloatingActionButton` were the two widgets the first version
+# of this file knew about, because they were the two it found. A tap target
+# hand-rolled out of `GestureDetector` + `Icon` is the same thing to a screen
+# reader and was outside its scope entirely — which is how the interaction sweep
+# came to report one control named `(icon)` on the safe-zone screen.
+HAND_ROLLED = ("GestureDetector(", "InkWell(", "InkResponse(")
+
+
+def blank_strings(text: str) -> str:
+    """Blank out string literals AND comments, keeping every byte offset.
+
+    The ancestor walk below balances parentheses, so a paren inside a string or
+    a comment — `// tap (here)` — makes it walk into the wrong widget. Offsets
+    have to survive exactly, because the line numbers this prints come from
+    them.
+
+    Comments are not an afterthought here. The first version skipped only
+    strings, and `// This screen's own state` on line 277 of
+    `emergency_active_screen.dart` opened a literal that never closed — so the
+    rest of that file was blanked and all four of its tap targets vanished from
+    the check, SUBMIT on the emergency PIN pad among them. A detector that
+    silently stops seeing is worse than no detector, and this one hid three
+    real findings for as long as it existed. That is the argument for running a
+    check against known faults instead of reading it.
+
+    Handles, in order: triple-quoted strings, line comments, block comments,
+    then ordinary quoted strings with backslash escapes. A raw string
+    (`r'...'`) needs no special case — blanking its contents is right anyway.
+    """
+    out = list(text)
+    i, n = 0, len(text)
+
+    def blank(start: int, upto: int) -> None:
+        for k in range(start, min(upto, n)):
+            if out[k] != "\n":
+                out[k] = " "
+
+    TRIPLES = ("'''", '"""')
+    while i < n:
+        three = text[i:i + 3]
+        if three in TRIPLES:
+            close = text.find(three, i + 3)
+            stop = n if close == -1 else close + 3
+            blank(i, stop)
+            i = stop
+            continue
+        two = text[i:i + 2]
+        if two == "//":
+            nl = text.find("\n", i)
+            stop = n if nl == -1 else nl
+            blank(i, stop)
+            i = stop
+            continue
+        if two == "/*":
+            close = text.find("*/", i + 2)
+            stop = n if close == -1 else close + 2
+            blank(i, stop)
+            i = stop
+            continue
+        c = text[i]
+        if c == "'" or c == '"':
+            j = i + 1
+            while j < n and text[j] != c and text[j] != "\n":
+                j += 2 if text[j] == "\\" else 1
+            stop = min(j + 1, n)
+            blank(i, stop)
+            i = stop
+            continue
+        i += 1
+    return "".join(out)
+
+
+def own_args(body: str) -> str:
+    """Only the characters at depth 0 of an argument list.
+
+    `"excludeSemantics: true" in body` is wrong and quietly so: a Semantics
+    that wraps a whole widget contains every nested node's arguments too.
+    `voice_note_player.dart` labels its player at the top and its play button
+    further down, and the button's own correct `excludeSemantics` made the
+    OUTER container look like it excluded everything — so the check reported
+    the one widget in this codebase that gets this right. Twice now, in two
+    different ways, from reading a body as if it were flat.
+    """
+    out, depth = [], 0
+    for ch in body:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif depth == 0:
+            out.append(ch)
+    return "".join(out)
+
+
+def ancestors(text: str, pos: int, levels: int = 5) -> list[tuple[str, int]]:
+    """The calls enclosing `pos`, nearest first, as (identifier, paren index).
+
+    Walks backwards balancing parentheses rather than reading a fixed window of
+    lines above. A window got this wrong: `voice_note_player.dart` wraps its
+    play button in a correctly labelled `Semantics` seven non-empty lines above
+    the `InkWell`, and a six-line window reported the one control in this
+    codebase that does it right.
+    """
+    found: list[tuple[str, int]] = []
+    i, depth = pos - 1, 0
+    while i >= 0 and len(found) < levels:
+        c = text[i]
+        if c == ")":
+            depth += 1
+        elif c == "(":
+            if depth == 0:
+                j = i - 1
+                while j >= 0 and (text[j].isalnum() or text[j] in "_$."):
+                    j -= 1
+                name = text[j + 1 : i]
+                if name:
+                    found.append((name, i))
+            else:
+                depth -= 1
+        i -= 1
+    return found
+
+
+def unnamed_tap_targets() -> list[tuple[str, int, str]]:
+    """(file, line, widget) for every hand-rolled icon-only control with no name."""
+    found = []
+    for path in sorted(LIB.rglob("*.dart")):
+        if path.name.endswith(GENERATED):
+            continue
+        raw = path.read_text()
+        text = blank_strings(raw)
+        for widget in HAND_ROLLED:
+            for m in re.finditer(re.escape(widget), text):
+                body, _ = body_of(text, m.end())
+                if not re.search(r"on(Tap|LongPress)\s*:", body):
+                    continue
+                # Icon-only: an icon in the subtree and no text of its own.
+                if not re.search(r"\bIcon\s*\(", body):
+                    continue
+                if re.search(r"\bText\s*\(", body):
+                    continue
+                # Named from the inside.
+                if re.search(r"tooltip\s*:|semanticLabel\s*:|Semantics\s*\(", body):
+                    continue
+                # Or named by a wrapper — but only one whose `child:` IS this
+                # control.
+                #
+                # A nearest-ancestor search alone was too generous:
+                # `Semantics(label: 'Keypad', child: Row(children: [...]))`
+                # would have cleared every unnamed button in that row at once,
+                # which is the opposite of what a label on a group means to a
+                # screen reader. The wrapper has to be this control's direct
+                # parent, which is checkable exactly: whatever follows `child:`
+                # must be the control itself.
+                named = False
+                for name, paren in ancestors(text, m.start()):
+                    if name not in ("Semantics", "Tooltip"):
+                        continue
+                    outer, _ = body_of(text, paren + 1)
+                    if not re.search(r"\b(label|message)\s*:", outer):
+                        continue
+                    # The wrapper's OWN `child:`, at depth 0 of its argument
+                    # list. A plain `find` hits a nested one first: the
+                    # attachment thumbnail's `onTap:` builds a `Dialog(child:
+                    # …)` inline, so the first `child:` in the body belongs to
+                    # that dialog and the real one is forty lines later. The
+                    # check then reported the control as unnamed when it had
+                    # just been named, which is the sort of false positive that
+                    # gets a gate deleted.
+                    key, d = -1, 0
+                    for idx, ch in enumerate(outer):
+                        if ch in "([{":
+                            d += 1
+                        elif ch in ")]}":
+                            d -= 1
+                        elif d == 0 and outer.startswith("child:", idx):
+                            key = idx
+                            break
+                    if key == -1:
+                        continue
+                    child_at = paren + 1 + key + len("child:")
+                    while child_at < len(text) and text[child_at] in " \n\t":
+                        child_at += 1
+                    if child_at == m.start():
+                        named = True
+                        break
+                if named:
+                    continue
+                found.append(
+                    (
+                        str(path.relative_to(ROOT)),
+                        raw.count("\n", 0, m.start()) + 1,
+                        widget.rstrip("("),
+                    )
+                )
+    return found
+
+
+# A LABEL INSIDE AN EXCLUDED SUBTREE IS NOT A LABEL.
+#
+# `excludeSemantics: true` drops the semantics of the WHOLE child subtree, not
+# just one node. So a correctly labelled control nested anywhere under one is
+# invisible to a screen reader, and a check that only asks "does it have a
+# label" passes over it — which is the exact shape of defect this audit keeps
+# finding, written into the check meant to catch it.
+#
+# `live_tracking_screen.dart` is the real case. flutter_map registers a
+# pan-and-zoom recognizer, so without the exclusion the whole map surface
+# reaches the tree as one unlabelled button covering the screen — a defect the
+# sweep already found once. With the exclusion, every responder marker inside
+# it goes too. The two requirements genuinely conflict, and resolving it means
+# giving that screen a responder LIST instead of relying on map pins.
+#
+# So this does not pretend the control is fine, and it does not fail a build
+# over a decision that needs a feature. It demands the acknowledgement be
+# WRITTEN AT THE CONTROL, as a comment carrying this token, and it prints every
+# one it finds. A new unreachable control cannot appear quietly; somebody has
+# to type the token.
+ACKNOWLEDGED = "SEMANTICS-UNREACHABLE:"
+
+
+def unreachable_tap_targets() -> tuple[list[tuple[str, int, str]], list[tuple[str, int]]]:
+    """Tap targets buried under an `excludeSemantics: true` ancestor.
+
+    Returns (unacknowledged, acknowledged). The first fails the build.
+    """
+    bad: list[tuple[str, int, str]] = []
+    known: list[tuple[str, int]] = []
+    for path in sorted(LIB.rglob("*.dart")):
+        if path.name.endswith(GENERATED):
+            continue
+        raw = path.read_text()
+        text = blank_strings(raw)
+        for widget in HAND_ROLLED:
+            for m in re.finditer(re.escape(widget), text):
+                body, _ = body_of(text, m.end())
+                if not re.search(r"on(Tap|LongPress)\s*:", body):
+                    continue
+                # Which ancestor excludes this control's subtree? The control's
+                # OWN Semantics parent does not count: excluding its child is
+                # how a labelled wrapper is supposed to work.
+                excluded_by = None
+                anc = ancestors(text, m.start(), levels=8)
+                # Where this control's comment could be: above the control, or
+                # above the labelled wrapper the control sits inside. The
+                # wrapper's arguments stand between the two, so a walk from the
+                # control alone stops at `button: true` and never reaches the
+                # paragraph explaining why it is there.
+                anchors = [line_of := raw.count("\n", 0, m.start()) + 1]
+                if anc:
+                    anchors.append(raw.count("\n", 0, anc[0][1]) + 1)
+                for depth, (name, paren) in enumerate(anc):
+                    if name != "Semantics":
+                        continue
+                    outer, _ = body_of(text, paren + 1)
+                    if "excludeSemantics: true" not in own_args(outer):
+                        continue
+                    if depth == 0:
+                        continue  # its own labelled wrapper
+                    excluded_by = raw.count("\n", 0, paren) + 1
+                    break
+                if excluded_by is None:
+                    continue
+                line = raw.count("\n", 0, m.start()) + 1
+                # The acknowledgement has to be AT the control, in the
+                # comment block directly above it.
+                #
+                # NOT a fixed number of lines above it. A twenty-line window
+                # was the first version and it broke the moment the comment it
+                # was looking for grew to twenty-one lines — so rewrapping a
+                # paragraph turned this check red with nothing wrong. Walk the
+                # contiguous comment block instead, however long it is. (Third
+                # time a fixed window has been wrong in this file's history;
+                # the other two are documented above.)
+                src_lines = raw.split("\n")
+                block = []
+                for anchor in anchors:
+                    back = anchor - 2
+                    while back >= 0:
+                        stripped = src_lines[back].strip()
+                        if stripped.startswith(("//", "///")) or not stripped:
+                            block.append(src_lines[back])
+                            back -= 1
+                            continue
+                        break
+                if ACKNOWLEDGED in "\n".join(block):
+                    known.append((str(path.relative_to(ROOT)), line))
+                else:
+                    bad.append((str(path.relative_to(ROOT)), line, f"excluded by the Semantics at line {excluded_by}"))
+    return bad, known
+
+
 def main() -> int:
     bad = unlabelled()
     if bad:
@@ -88,6 +383,41 @@ def main() -> int:
         print("Add `tooltip: '...'`. Flutter uses it as the accessible name and")
         print("shows it on long-press, so it serves the screen-reader user and")
         print("the sighted user who does not recognise the icon at once.")
+        return 1
+
+    # ── AND A CONTROL NOBODY WROTE AS A CONTROL ─────────────────────────────
+    #
+    # The two widgets above are the two this file was written from. A tap
+    # target made by hand out of `GestureDetector` and an `Icon` has exactly
+    # the same problem and was never in scope, so the shelter marker — the
+    # control that picks which shelter a frightened person is routed to — had
+    # no accessible name, and neither did SUBMIT on the emergency PIN pad.
+    homemade = unnamed_tap_targets()
+    if homemade:
+        print("Hand-rolled icon-only controls with no accessible name:")
+        for path, line, widget in homemade:
+            print(f"  {path}:{line}  {widget}")
+        print()
+        print("A GestureDetector around an Icon is a button to everyone except")
+        print("a screen reader and the interaction sweep, which sees it as")
+        print("`(icon)` and cannot report what it does. Wrap it in")
+        print("`Semantics(button: true, label: '...', onTap: <same handler>)`")
+        print("— and keep the onTap on the Semantics, or see the check below.")
+        return 1
+
+    # ── AND A NAME UNDER AN EXCLUDED SUBTREE IS NOT A NAME ──────────────────
+    buried, acknowledged = unreachable_tap_targets()
+    if buried:
+        print("Tap targets a screen reader cannot reach at all:")
+        for path, line, why in buried:
+            print(f"  {path}:{line}  {why}")
+        print()
+        print("`excludeSemantics: true` drops the whole child subtree, so a")
+        print("label on something nested under one has no effect. Either stop")
+        print("excluding, or — if the exclusion is there for a reason that")
+        print("cannot be undone — write the reason at the control in a comment")
+        print(f"carrying `{ACKNOWLEDGED}`, so the next person reads it")
+        print("instead of finding it.")
         return 1
 
     # ── A NAME IS NOT ENOUGH IF THE BUTTON CANNOT BE PRESSED ────────────────
@@ -160,13 +490,25 @@ def main() -> int:
         return 1
 
     total = 0
+    homemade_total = 0
     for path in LIB.rglob("*.dart"):
         if path.name.endswith(GENERATED):
             continue
         text = path.read_text()
         total += sum(text.count(w) for w in ICON_ONLY)
+        homemade_total += sum(text.count(w) for w in HAND_ROLLED)
     print(f"OK: all {total} icon-only controls carry an accessible name,")
-    print("    and every Semantics button that hides its child can be pressed.")
+    print(f"    all {homemade_total} hand-rolled tap targets that show only an")
+    print("    icon carry one too, and every Semantics button that hides its")
+    print("    child can be pressed.")
+    # Never silent. A pass that hides a known gap is the defect this whole
+    # audit is about.
+    if acknowledged:
+        print()
+        print(f"    {len(acknowledged)} control(s) carry a correct label a screen reader")
+        print("    still cannot reach, each with its reason written at the control:")
+        for path, line in acknowledged:
+            print(f"      {path}:{line}")
     return 0
 
 

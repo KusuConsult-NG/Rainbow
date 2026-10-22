@@ -265,9 +265,40 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                             // Don't duplicate own pos if they have telemetry row
                             if (SupabaseConfig.client.auth.currentUser?.id == r['user_id']) return null;
                             
+                            final who = (r['full_name'] ?? r['badge_number']
+                                ?? Translations.get(
+                                    'trk_semantics_a_responder', lang))
+                                .toString();
+                            final how = (r['status'] as String? ?? 'unknown')
+                                .toUpperCase();
                             return Marker(
                               point: LatLng(lat, lng),
-                              child: GestureDetector(
+                              // SEMANTICS-UNREACHABLE: the label below is
+                              // correct and a screen reader cannot reach it.
+                              //
+                              // The Semantics above excludes the map surface
+                              // because flutter_map's pan-and-zoom recognizer
+                              // otherwise presents the whole screen as one
+                              // unlabelled button — a defect the control sweep
+                              // already found once. Excluding a subtree
+                              // excludes its markers with it, so the two
+                              // requirements conflict and no label here can
+                              // win. Resolving it means giving this screen a
+                              // responder LIST instead of relying on map pins,
+                              // which is a feature rather than a fix.
+                              //
+                              // Recorded in E2E_AUDIT_REPORT.md T-76. The
+                              // label is written now so it is right the moment
+                              // that lands.
+                              child: Semantics(
+                                button: true,
+                                label: Translations.get(
+                                        'trk_semantics_open_responder', lang)
+                                    .replaceAll('{who}', who)
+                                    .replaceAll('{status}', how),
+                                excludeSemantics: true,
+                                onTap: () => _showResponderDetails(r),
+                                child: GestureDetector(
                                 onTap: () => _showResponderDetails(r),
                                 child: Container(
                                   decoration: BoxDecoration(
@@ -281,6 +312,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                                     size: 16,
                                   ),
                                 ),
+                              ),
                               ),
                             );
                           }).whereType<Marker>(),
