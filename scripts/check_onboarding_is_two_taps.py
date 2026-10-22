@@ -141,6 +141,48 @@ if not re.search(r'context\.go\(\s*AppRoutes\.emergencyPins', perms):
 else:
     proved.append('permissions leads straight to the PINs')
 
+# ── 4b. location is required, and refusing it is not a dead end ─────────────
+#
+# The brief changed: "we need location access to track the device so skipping
+# permission is not an option". It is required now. What it must not become
+# again is the trap it replaced — Android stops showing the dialog after two
+# denials, so a screen that only ever offers "try again" leaves a person
+# pressing a button that cannot do anything, forever.
+if not re.search(r'if \(!location\.isGranted\)', perms):
+    faults.append(
+        'the permissions screen does not stop when location is refused. '
+        'Location is required: an alert without coordinates says that '
+        'something happened but not where.')
+else:
+    proved.append('setup does not continue without location')
+
+if 'isPermanentlyDenied' not in perms:
+    faults.append(
+        'the permissions screen never checks `isPermanentlyDenied`. After two '
+        'denials Android returns that immediately and shows no dialog, so '
+        '"try again" is a button that can no longer do anything. The only way '
+        'out is the system settings page.')
+elif 'openAppSettings' not in perms:
+    faults.append(
+        'the permissions screen knows location is permanently denied and '
+        'offers no way to the system settings page, which is the only place '
+        'it can still be granted.')
+elif 'didChangeAppLifecycleState' not in perms:
+    faults.append(
+        'nothing re-checks the grant when the person returns from settings. '
+        'They would come back to a screen still saying location is refused, '
+        'with no way to make it notice short of killing the app.')
+else:
+    proved.append('a refusal offers settings, and the return is re-checked')
+
+# Refusing SMS, the microphone or the battery exemption must NOT stop setup:
+# none of them is load-bearing, and each extra wall costs somebody the app.
+for optional in ('sms', 'microphone', 'ignoreBatteryOptimizations'):
+    if re.search(rf'if \(!{optional}\w*\.isGranted\)[^\n]*\n[^\n]*return', perms):
+        faults.append(
+            f'setup stops when {optional} is refused. Only location is '
+            f'required; walling off the rest costs installs for nothing.')
+
 if '_skipIfAlreadyGranted' not in perms:
     faults.append(
         'the permissions screen has no `_skipIfAlreadyGranted`, so a returning '

@@ -23,8 +23,22 @@ class OnboardingPermissionsScreen extends ConsumerStatefulWidget {
 }
 
 class _OnboardingPermissionsScreenState
-    extends ConsumerState<OnboardingPermissionsScreen> {
+    extends ConsumerState<OnboardingPermissionsScreen>
+    with WidgetsBindingObserver {
   bool _isProcessing = false;
+
+  /// Location was asked for and refused. Setup does not continue.
+  bool _locationRefused = false;
+
+  /// Refused in the way Android stops asking about.
+  ///
+  /// After two denials the system never shows the dialog again — calling
+  /// `request()` returns `permanentlyDenied` immediately, without anything
+  /// appearing on screen. A person in that state who is only offered "try
+  /// again" presses a button that can no longer do anything, forever. The
+  /// only route left is the app's own settings page, so that is what is
+  /// offered, and the grant is re-checked when they come back.
+  bool _locationBlockedBySystem = false;
 
   /// The key that says this handset has already been through setup.
   ///
@@ -37,7 +51,36 @@ class _OnboardingPermissionsScreenState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_skipIfAlreadyGranted());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Re-check when they come back from the system settings page.
+  ///
+  /// Without this, somebody who goes to Settings, grants location and returns
+  /// is looking at a screen still telling them location is refused, with no
+  /// way to make it notice. They would have to kill the app.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (!_locationRefused) return;
+    unawaited(_continueIfLocationNowGranted());
+  }
+
+  Future<void> _continueIfLocationNowGranted() async {
+    final status = await Permission.location.status;
+    if (!mounted || !status.isGranted) return;
+    setState(() {
+      _locationRefused = false;
+      _locationBlockedBySystem = false;
+    });
+    await _finishSetup(locationGranted: true);
   }
 
   Future<void> _skipIfAlreadyGranted() async {
@@ -95,8 +138,8 @@ class _OnboardingPermissionsScreenState
         Permission.ignoreBatteryOptimizations,
       ].request();
 
-      final locationGranted =
-          results[Permission.location]?.isGranted ?? false;
+      final location =
+          results[Permission.location] ?? PermissionStatus.denied;
       final smsGranted = results[Permission.sms]?.isGranted ?? false;
       final micGranted = results[Permission.microphone]?.isGranted ?? false;
 
@@ -105,7 +148,7 @@ class _OnboardingPermissionsScreenState
       // Keep the in-app toggles honest about what the OS actually said, so
       // Settings does not show a switch on for a permission that is off.
       final perms = ref.read(permissionsProvider);
-      if (locationGranted != perms.location) {
+      if (location.isGranted != perms.location) {
         ref.read(permissionsProvider.notifier).toggle('location');
       }
       if (smsGranted != perms.sms) {
@@ -115,31 +158,57 @@ class _OnboardingPermissionsScreenState
         ref.read(permissionsProvider.notifier).toggle('audio');
       }
 
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_grantedKey, true);
-      // The disclosure was shown on this screen and accepted by tapping.
-      await prefs.setBool('location_disclosure_accepted', true);
+      // LOCATION IS REQUIRED. The rest are not.
+      //
+      // An alert without coordinates is a report nobody can reach, and
+      // following a device through an incident is the point of the thing. SMS,
+      // the microphone and the battery exemption each make the app better and
+      // none of them is load-bearing, so a refusal of those is noted and
+      // setup carries on.
+      //
+      // Refusing location stops here instead. What this must NOT become is
+      // the dead end it replaced — a dialog saying "you cannot proceed" over
+      // a button that no longer does anything, which is what Android leaves
+      // behind after two denials.
+      if (!location.isGranted) {
+        setState(() {
+          _locationRefused = true;
+          _locationBlockedBySystem = location.isPermanentlyDenied;
+        });
+        return;
+      }
 
-      if (!mounted) return;
-      context.go(AppRoutes.emergencyPins, extra: {'onboarding': true});
+      await _finishSetup(locationGranted: true);
       // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
     } catch (e) {
       debugPrint('[PERM_ERR] the permission request failed: $e');
       if (!mounted) return;
-      // A failure here must not strand anybody in setup either. Say so, and
-      // carry on: every permission can be granted later from Settings, and
-      // none of them is needed to reach the SOS button.
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'SOME PERMISSIONS COULD NOT BE SET. YOU CAN GRANT THEM IN SETTINGS.',
-          ),
-        ),
-      );
-      context.go(AppRoutes.emergencyPins, extra: {'onboarding': true});
+      // A throw here is not a refusal — it is the plugin or the platform
+      // failing — so it must not be reported to the person as one. Ask again
+      // rather than accusing them of declining something they never saw.
+      setState(() {
+        _locationRefused = true;
+        _locationBlockedBySystem = false;
+      });
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
+  }
+
+  /// Record the grant and move on to the PINs.
+  Future<void> _finishSetup({required bool locationGranted}) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_grantedKey, locationGranted);
+    // The disclosure was shown on this screen and accepted by tapping.
+    await prefs.setBool('location_disclosure_accepted', true);
+
+    if (!mounted) return;
+    context.go(AppRoutes.emergencyPins, extra: {'onboarding': true});
+  }
+
+  /// The way out when the system has stopped asking.
+  Future<void> _openSystemSettings() async {
+    await openAppSettings();
   }
 
   @override
@@ -267,6 +336,58 @@ class _OnboardingPermissionsScreenState
                     ),
                   ),
                   const SizedBox(height: 24),
+                  // WHY SETUP STOPPED.
+                  //
+                  // Shown only after a refusal, because an app that argues
+                  // for a permission before asking for it is an app people
+                  // learn to tap past. The wording says what location is for
+                  // rather than that it is required: "we need it" is a demand,
+                  // "nobody can find you without it" is a reason.
+                  if (_locationRefused) ...[
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.dangerTint,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: AppColors.danger.withValues(alpha: 0.4),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.location_off_rounded,
+                            color: AppColors.dangerDeep,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _locationBlockedBySystem
+                                  ? 'Your phone has stopped asking about '
+                                      'location, so it can only be switched on '
+                                      'in settings. Without it an alert cannot '
+                                      'say where you are, and nobody can be '
+                                      'sent to you.'
+                                  : 'Location is how a responder finds you. '
+                                      'Without it your alert says that '
+                                      'something happened but not where, and '
+                                      'nobody can be sent. Please allow it to '
+                                      'continue.',
+                              style: GoogleFonts.outfit(
+                                color: AppColors.dangerDeep,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                                height: 1.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   // Said plainly, on the screen that asks for the most. This
                   // app takes a phone number and nothing else: no name, no
                   // NIN, no next of kin. Somebody deciding whether to let an
@@ -316,8 +437,18 @@ class _OnboardingPermissionsScreenState
       ),
       bottomNavigationBar: OnboardingBottomNav(
         onBack: () => context.go(AppRoutes.login),
-        onNext: _isProcessing ? null : _handlePermissions,
-        nextLabel: _isProcessing ? 'AUTHORIZING...' : 'GRANT CLEARANCE',
+        onNext: _isProcessing
+            ? null
+            : _locationBlockedBySystem
+                ? _openSystemSettings
+                : _handlePermissions,
+        nextLabel: _isProcessing
+            ? 'AUTHORIZING...'
+            : _locationBlockedBySystem
+                ? 'OPEN SETTINGS'
+                : _locationRefused
+                    ? 'ALLOW LOCATION'
+                    : 'GRANT CLEARANCE',
       ),
     );
   }

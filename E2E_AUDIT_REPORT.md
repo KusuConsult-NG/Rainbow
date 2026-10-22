@@ -9326,3 +9326,71 @@ and broke a third that had been relying on the default surface. What the tests
 actually assert is *that these controls exist*, so each now scrolls to the one
 it is about to check and says so in a comment. The layout is free to change
 again.
+
+
+---
+
+### T-71. Location is required again, without the dead end
+
+The brief changed after T-68 shipped:
+
+> we need location access to track the device so skipping permission is not an
+> option on the app unless if we can silently access location.
+
+**Silent access does not exist.** Android and iOS both enforce the location
+prompt at the operating-system level; there is no API, manifest entry or flag
+that reads a position without the person having granted it. What *is* silent
+is everything after the grant: once given, the person is never asked again and
+tracking during an incident runs without prompting, with only the foreground
+notification Android requires.
+
+So location is required at setup. T-68 had made every outcome continue, and
+that was right for the three optional permissions and wrong for this one: an
+alert without coordinates says that something happened but not where, and
+following a device through an incident is the point of the product.
+
+#### What this is NOT a return to
+
+The old screen blocked on refusal too, and that is what made it a trap. After
+**two** denials Android stops showing the dialog at all: `request()` returns
+`permanentlyDenied` immediately, with nothing on screen. A screen that answers
+a refusal with "you cannot proceed" over a *try again* button is then offering
+a control that can never do anything, for as long as that install exists. The
+only route left is the app's own settings page.
+
+So the refusal state has three parts:
+
+1. **An explanation of what location is for**, shown only after a refusal.
+   Arguing for a permission before asking for it teaches people to tap past
+   the argument. The wording gives the reason rather than the demand —
+   *"Location is how a responder finds you. Without it your alert says that
+   something happened but not where, and nobody can be sent."*
+2. **The right button for the state.** `ALLOW LOCATION` while the dialog can
+   still appear; `OPEN SETTINGS`, going to the system page, once it cannot.
+3. **A re-check on return.** `didChangeAppLifecycleState` re-reads the grant
+   when the app resumes, so somebody who goes to Settings, switches it on and
+   comes back continues immediately. Without it they return to a screen still
+   insisting location is refused, with no way to make it notice short of
+   killing the app — which is the same dead end wearing a different hat.
+
+A **throw** from the permission call is handled separately from a refusal. It
+is the plugin or the platform failing, not a decision by the person, and
+telling them they declined something they were never shown is both wrong and
+insulting.
+
+SMS, the microphone and the battery exemption stay optional. Each makes the
+app better and none is load-bearing; every extra wall costs installs for
+nothing, and the gate now fails if any of them starts blocking setup.
+
+Four mutations, all caught: setup continuing past a refusal; the
+permanently-denied case going undetected; no route to the settings page; and
+the return re-check removed.
+
+#### The cost, recorded
+
+This reintroduces the one thing T-68 removed for a stated reason: a person who
+refuses location cannot use the app. The duress argument has not stopped being
+true — somebody being watched may refuse a location prompt precisely because
+they are being watched — and the answer to it is now the settings route and the
+explanation rather than an open door. That is a product decision, made
+knowingly, and it belongs in the record rather than in a diff.
