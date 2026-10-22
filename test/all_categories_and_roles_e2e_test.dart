@@ -231,9 +231,20 @@ void main() {
 
         expect(find.text('INCIDENT DOSSIER'), findsOneWidget);
 
-        // Enter report description
-        final inputField = find.byType(TextField).first;
-        await tester.enterText(inputField, 'Testing automated E2E report submission for category ${catInfo.label}');
+        // Enter report description.
+        //
+        // Scrolled to first: a category with response prompts — the
+        // armed/when/how-they-left questions a responder needs — carries them
+        // above this box, so in a lazy scroll view the field below them has
+        // not been built and `.first` on an empty finder throws "Bad state:
+        // No element" rather than saying the field is off-screen.
+        final inputField = find.byType(TextField);
+        await tester.scrollUntilVisible(
+          inputField,
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.enterText(inputField.first, 'Testing automated E2E report submission for category ${catInfo.label}');
         await settleFast(tester, pumps: 2);
 
         // Submit

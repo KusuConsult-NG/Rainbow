@@ -87,6 +87,62 @@ class BackgroundTrackingService {
   /// moment the incident closes.
   static const Duration sosTrackingMaxAge = Duration(hours: 12);
 
+  /// Whether [alertId] is an id the DATABASE will accept.
+  ///
+  /// `alerts.id` is a UUID, and both `telemetry.alert_id` and
+  /// `incident_tracks.alert_id` are UUID columns with a foreign key to it. An
+  /// alert raised while the handset had no data path has no row in `alerts`
+  /// yet: it carries `OFFLINE_<millis>_<12 hex>`, minted by
+  /// `newOfflineLocalId()`, which is not a UUID at all.
+  ///
+  /// Writing that into either column fails at the TYPE, before the foreign key
+  /// is even consulted — `22P02 invalid input syntax for type uuid`. For
+  /// `incident_tracks` that costs the route. For `telemetry` it costs the
+  /// whole upsert, and with it the LIVE POSITION: a dispatcher watching an
+  /// offline SOS saw no dot at all, and the only trace was a
+  /// `[TELEMETRY_FAIL]` debug line nobody reads off a handset in an
+  /// emergency.
+  ///
+  /// So the id is checked before it is written, and a local one is simply
+  /// omitted. `telemetry.alert_id` is nullable: the position still goes out,
+  /// which is the half that matters while somebody is in danger. The route
+  /// starts once [rebindAlertId] swaps in the real id at sync.
+  static bool isServerAlertId(String? alertId) {
+    if (alertId == null) return false;
+    return RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+      r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+    ).hasMatch(alertId);
+  }
+
+  /// Point an in-flight track at the row the queued alert finally became.
+  ///
+  /// An SOS sent with no data path is tracked against its local id, because
+  /// that is the only id it has. When the queue flushes, the alert gets a real
+  /// UUID — and nothing used to tell the tracker, so the track stayed bound to
+  /// an id no table would accept for as long as the emergency lasted. The
+  /// mapping already existed in `_flushOfflineQueueOnce`; it was returned and
+  /// dropped.
+  ///
+  /// A no-op unless this handset is tracking exactly [localId], so a flush
+  /// that syncs five old reports cannot hijack a live track.
+  Future<void> rebindAlertId(String localId, String serverAlertId) async {
+    if (!isServerAlertId(serverAlertId)) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString('activeTrackingAlertId') != localId) return;
+      await prefs.setString('activeTrackingAlertId', serverAlertId);
+      FlutterBackgroundService().invoke('updateMode', {
+        'mode': prefs.getString('trackingMode') ?? 'sos',
+        'alertId': serverAlertId,
+        'userId': prefs.getString('activeTrackingUserId'),
+      });
+      debugPrint('[TRACKING] the track now points at the synced alert');
+    } catch (e) {
+      debugPrint('[TRACKING] could not rebind the track: $e');
+    }
+  }
+
   /// Starts transient tracking for a citizen SOS event.
   Future<void> startSosTracking(String alertId, String userId) async {
     try {
@@ -334,7 +390,8 @@ Future<void> onStart(ServiceInstance service) async {
 
             final telemetryPayload = {
               'user_id': userId,
-              if (currentAlertId != null) 'alert_id': currentAlertId,
+              if (BackgroundTrackingService.isServerAlertId(currentAlertId))
+                'alert_id': currentAlertId,
               'latitude': pos.latitude,
               'longitude': pos.longitude,
               'mode': modeStr ?? 'responder',
@@ -373,7 +430,7 @@ Future<void> onStart(ServiceInstance service) async {
             // Its own try/catch: a failure to keep the history must never stop
             // the live position being reported, and the live position is what
             // a dispatcher is looking at right now.
-            if (currentAlertId != null) {
+            if (BackgroundTrackingService.isServerAlertId(currentAlertId)) {
               try {
                 await SupabaseConfig.client.from('incident_tracks').insert({
                   'alert_id': currentAlertId,

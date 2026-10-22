@@ -1,5 +1,7 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'dart:async';
+
+import 'package:flutter/services.dart';
 import 'dart:io';
 
 import 'package:collection/collection.dart';
@@ -66,6 +68,13 @@ class ReportDetailsScreen extends ConsumerStatefulWidget {
 
 class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   final _narrativeCtrl = TextEditingController();
+
+  /// The responder's questions, answered by tapping. Question -> answer.
+  ///
+  /// Empty is a legitimate state and always will be: these are optional, and
+  /// a report with none of them answered must file exactly as before. Somebody
+  /// hiding in a cupboard presses the button and nothing else.
+  final Map<String, String> _responseAnswers = {};
   bool _shareLocation = true;
   bool _manualOverride = false;
   bool _anonymous = false;
@@ -269,12 +278,30 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       // nothing in it and the wrong one for a report whose content is a
       // recording: an operator reading it on the board would pass over an
       // incident that has somebody's voice attached.
-      final desc = _narrativeCtrl.text.isNotEmpty
+      final narrative = _narrativeCtrl.text.isNotEmpty
           ? _narrativeCtrl.text
           : _voiceNote != null
               ? '[VOICE NOTE] The reporter left a ${_voiceNote!.label} voice '
                   'note and no text. Play the recording.'
               : Translations.get('rpt_no_narrative', lang);
+
+      // THE ANSWERS GO IN THE DESCRIPTION, not in new columns.
+      //
+      // Deliberate. Every console, every SMS template, every agency webhook
+      // and the offline SMS fallback all read `description`; a new column
+      // would be seen by exactly one of them until each was changed, and this
+      // deployment has spent a fortnight getting migrations applied at all.
+      // Carried in the text, a kidnap report reaches a responder reading it on
+      // a phone, an HQ board, and a 160-character SMS alike.
+      //
+      // First, before the narrative, because it is what decides the response
+      // and an operator reading a long report should not have to reach the
+      // end of it to find out whether the attackers are armed.
+      final answered = widget.categoryInfo.responsePrompts
+          .where((p) => _responseAnswers.containsKey(p.question))
+          .map((p) => '${p.question} ${_responseAnswers[p.question]}')
+          .join(' | ');
+      final desc = answered.isEmpty ? narrative : '[$answered] $narrative';
 
       final connectivityResult = await Connectivity().checkConnectivity();
       final isOffline = connectivityResult.contains(ConnectivityResult.none);
@@ -534,6 +561,51 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               ],
             ),
           ),
+          // WHAT A RESPONDER NEEDS, AS TAPS.
+          //
+          // Above the narrative box on purpose: these are the three facts that
+          // decide who is sent and how fast, and they are answerable in a
+          // second each by somebody who has no time to type. Nothing here is
+          // required.
+          for (final prompt in widget.categoryInfo.responsePrompts) ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8, top: 4),
+              child: Text(
+                prompt.question.toUpperCase(),
+                style: GoogleFonts.outfit(
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final option in prompt.options)
+                  _AnswerChip(
+                    label: option,
+                    selected: _responseAnswers[prompt.question] == option,
+                    onTap: () {
+                      unawaited(HapticFeedback.selectionClick());
+                      setState(() {
+                        // Tapping the chosen answer again clears it: a wrong
+                        // tap in a hurry must be undoable without starting the
+                        // report over.
+                        if (_responseAnswers[prompt.question] == option) {
+                          _responseAnswers.remove(prompt.question);
+                        } else {
+                          _responseAnswers[prompt.question] = option;
+                        }
+                      });
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
           Container(
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.03),
@@ -1150,4 +1222,55 @@ class _MediaBtn extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// One tappable answer to a responder's question.
+///
+/// A chip rather than a dropdown or a radio list: it is one tap, it shows
+/// every option at once, and the whole set of three questions fits on screen
+/// above the keyboard. Selected state is carried by fill and border rather
+/// than a tick, so it reads at a glance on a cracked screen in sunlight.
+class _AnswerChip extends StatelessWidget {
+  const _AnswerChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primary : AppColors.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? AppColors.primary : AppColors.outline,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Text(
+            label,
+            style: GoogleFonts.outfit(
+              color: selected ? AppColors.onPrimary : AppColors.onBackground,
+              fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+              fontSize: 13,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

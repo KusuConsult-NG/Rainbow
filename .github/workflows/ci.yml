@@ -1034,6 +1034,21 @@ jobs:
       - name: Assert setup is one prompt and two PINs
         run: python3 scripts/check_onboarding_is_two_taps.py
 
+      # "when there is an SOS, what is sent as an alert, is the phone number,
+      # coordinates and the responder should be able to engage and track the
+      # alert device or monitor the movement of the alert."
+      #
+      # An SOS raised with no data path is tracked against its LOCAL id —
+      # OFFLINE_<millis>_<hex> — which is not a UUID, and both telemetry.alert_id
+      # and incident_tracks.alert_id are UUID columns with an FK to alerts(id).
+      # PostgreSQL rejected it at the type. That lost the route, and because the
+      # id rides in the same payload as the position it lost the LIVE DOT too:
+      # a dispatcher watching an offline SOS saw nothing, with [TELEMETRY_FAIL]
+      # in a debug log as the only trace. The queue flush already computed the
+      # local-id-to-UUID mapping, returned it, and nothing consumed it.
+      - name: Assert a tracked SOS reaches the map
+        run: python3 scripts/check_a_tracked_sos_reaches_the_map.py
+
       # Reported from a real handset once the blank page became legible:
       # "Failed while drawing the screen. RealtimeSubscribeException(... Failed
       # host lookup ... errno = 7)". `AsyncValue.value` RETHROWS on an error

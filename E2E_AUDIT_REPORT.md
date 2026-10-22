@@ -9135,3 +9135,192 @@ every local capture run in this audit before this one rendered a bundle that
 predated `423a437`, `fec1fc3` and `d38dacc`. CI builds fresh each time and was
 unaffected, but a stale local bundle is a harness that agrees with you about
 code it has never seen.
+
+---
+
+### T-69. An offline SOS was invisible on the map, permanently
+
+> when there is an SOS, what is sent as an alert, is the phone number,
+> coordinates and the responder should be able to engage and track the alert
+> device or monitor the movement of the alert
+
+`alerts.id` is a UUID. `telemetry.alert_id` and `incident_tracks.alert_id` are
+UUID columns with a foreign key to it.
+
+An SOS raised while the handset has no data path does not reach `alerts`. It
+goes into the local SQLite queue under `newOfflineLocalId()` —
+`OFFLINE_<millis>_<12 hex>` — and `AlertService` starts tracking against that
+id, at two of its three call sites:
+
+```dart
+await BackgroundTrackingService().startSosTracking(localId, reportedBy);  // :197
+await BackgroundTrackingService().startSosTracking(alertId,  reportedBy);  // :312 — the online path
+await BackgroundTrackingService().startSosTracking(localId, reportedBy);  // :353
+```
+
+`OFFLINE_1761…_a1b2c3d4e5f6` is not a UUID, so PostgreSQL rejects it at the
+TYPE, before the foreign key is even consulted: `22P02 invalid input syntax for
+type uuid`.
+
+#### The route was the smaller half
+
+`incident_tracks` has its own `try/catch` — a deliberate one, so that losing
+the history cannot stop the live position being reported — and it logged
+`[TRACK_FAIL]`. No route.
+
+But `alert_id` also rides in the **telemetry** payload, beside the latitude and
+longitude:
+
+```dart
+'user_id': userId,
+if (currentAlertId != null) 'alert_id': currentAlertId,
+'latitude': pos.latitude,
+'longitude': pos.longitude,
+```
+
+One bad column rejects the whole upsert. So a dispatcher watching an SOS raised
+with no signal saw **no dot at all** — not a stale position, nothing — for the
+length of the emergency, with `[TELEMETRY_FAIL]` in a debug log as the only
+trace, on a handset nobody is going to read a log off mid-incident.
+
+#### And it never recovered
+
+`_flushOfflineQueueOnce` already computes exactly what was needed:
+
+```dart
+final alertId = response['id'] as String?;
+if (alertId != null) {
+  mappings[localId] = alertId;
+  await _sqliteService.markAlertSynced(localId);
+}
+```
+
+The local-id-to-UUID mapping was built, returned to a caller that did nothing
+with it, and dropped. `activeTrackingAlertId` stayed `OFFLINE_…` for the whole
+twelve-hour `sosTrackingMaxAge` ceiling, so even once the alert had a real row
+the track never found it.
+
+This is the offline case — which is the case this app is for. A citizen with a
+working data connection has other ways to call for help.
+
+#### What was done
+
+`isServerAlertId(String?)` tests the shape of a UUID, and both writes are
+guarded by it. A local id is now simply omitted: `telemetry.alert_id` is
+nullable, so **the position still goes out** — the half that matters while
+somebody is in danger — and only the route waits.
+
+`rebindAlertId(localId, serverAlertId)` moves a live track onto the real row,
+called from both branches of the queue flush: the insert, and the
+already-delivered-by-SMS-or-mesh branch. It is a no-op unless this handset is
+tracking exactly that local id, so flushing five old reports cannot hijack a
+live track, and it refuses a destination that is not itself a UUID.
+
+Five tests on the guard, including that it is not a `startsWith('OFFLINE_')`
+check in disguise — the point is what the COLUMN will take, not what this app
+happens to mint — and that an uppercase UUID is still a UUID, since PostgreSQL
+accepts one and refusing it would drop a perfectly good route.
+
+`scripts/check_a_tracked_sos_reaches_the_map.py` holds four properties. Five
+mutations, all caught.
+
+**One false positive, found by running it.** The first version looked three
+lines above each `alert_id` write for a guard; the `incident_tracks` guard is
+four lines up, so it reported a correctly guarded write. Widening the window
+alone would have accepted a nearby guard on a *different* variable, so it now
+requires `isServerAlertId(<the same identifier>)` — tied to the value, not to
+proximity.
+
+#### Not verified
+
+That a responder watching a live incident now sees the route. The write path is
+proved by reading and by the gate; the read path is the console's `LiveMap`,
+which already draws from `incident_tracks`. Nobody has raised a real SOS on a
+real handset with the data off and watched a dispatcher's screen. That is the
+test that would settle it.
+
+---
+
+### T-70. Every report asked the same three questions, whatever had happened
+
+> When an alert is reported using the category all the details required for
+> response should be added where necessary
+
+There are thirteen categories. Every one of them produced the same report: a
+free-text narrative, optional media, and a place.
+
+For a responder that is the difference between *"Kidnap - Immediate Abduction,
+Naraguta"* and knowing whether the people who took them were armed, how long
+ago it happened, and whether they left on foot or in a vehicle. The first is a
+reason to send somebody. The second decides **who**, **how many**, and **how
+fast** — and none of it was being asked.
+
+#### What was done
+
+`ResponsePrompt(question, options)` on `AlertCategoryInfo`, rendered above the
+narrative box as rows of tappable chips, and nine categories given the
+questions that change the response:
+
+| category | asked |
+|---|---|
+| Kidnap | armed? · how long ago? · how did they leave? |
+| Domestic violence | attacker still there? · anyone hurt? · weapon? |
+| Community attack | armed? · roughly how many? · still going on? |
+| Fire | anyone inside? · spreading? |
+| Flood | anyone trapped? · how deep? |
+| Child abuse | child in danger now? · person responsible there? |
+| Police brutality | still happening? · anyone hurt? |
+| Cattle rustling | armed? · which way did they go? |
+| Drug abuse | does anyone need medical help? |
+
+**Taps, never typing, and never required.** The brief is explicit — *"Users
+shouldn't go through a lot before using the app. it should just be simple taps
+and desired results are achieved"* — and a person reporting an abduction will
+not fill in a form. Tapping a chosen answer again clears it, because a wrong
+tap in a hurry must be undoable without starting the report over. A report with
+nothing answered files exactly as it did before.
+
+Four categories have no prompts, and that is an answer rather than an omission:
+a cyber crime report is a story, not a set of fields, and asking three questions
+that do not change the response costs the same as asking three that do — paid
+by somebody in trouble.
+
+`"Don't know"` is offered wherever the question is about what the reporter can
+see. A reporter who cannot tell whether the attackers are armed must be able to
+say so: a guess and a blank look identical to a responder and mean very
+different things. A test holds that for every "armed?" question.
+
+#### Carried in the description, not in new columns
+
+Deliberate. Every console, every SMS template, every agency webhook and the
+offline SMS fallback read `description`. A new column would be seen by exactly
+one of them until each was changed — and this deployment has spent a fortnight
+getting migrations applied at all. Answers are prefixed:
+
+```
+[Are they armed? Armed | How long ago? Happening now | How did they leave? By vehicle] They took two men from the junction
+```
+
+First, before the narrative, because an operator reading a long report should
+not have to reach the end to find out whether the attackers are armed. No
+migration, and it reaches a responder on a phone, an HQ board and a
+160-character SMS alike.
+
+Twelve tests: that the urgent categories have prompts, that no category asks
+more than three questions, that every option is between two and five and short
+enough to read on a chip, and that the reporter can say they do not know.
+
+#### Three tests broke, and they were right to
+
+The prompts add roughly 250px above the narrative box. In a lazy scroll view
+that means the controls below were no longer BUILT, so the finders reported
+them as *"Found 0 widgets"* — which reads identically to the widget having been
+deleted.
+
+Two wrong turns before the right one, both recorded because the reasoning
+matters: scroll-chasing each widget individually encodes the current layout
+into the test, and forcing a phone-shaped viewport in `setUp` fixed two tests
+and broke a third that had been relying on the default surface. What the tests
+actually assert is *that these controls exist*, so each now scrolls to the one
+it is about to check and says so in a comment. The layout is free to change
+again.

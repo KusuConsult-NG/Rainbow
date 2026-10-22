@@ -121,11 +121,29 @@ void main() {
     expect(find.text('RECORD VOICE REPORT'), findsOneWidget);
 
     // Verify Visual Telemetry section (Photo & Video)
-    final visualSec = find.text('VISUAL TELEMETRY (OPTIONAL)');
-    await tester.scrollUntilVisible(visualSec, 300, scrollable: find.byType(Scrollable).first);
-    expect(visualSec, findsOneWidget);
-    expect(find.text('SCAN PHOTO'), findsOneWidget);
-    expect(find.text('RECORD VIDEO'), findsOneWidget);
-    expect(find.text('VIDEO INTEL'), findsOneWidget);
+    // Each control is scrolled to on its own.
+    //
+    // The category's response prompts — the armed/when/how-they-left questions
+    // a responder needs — now sit above the narrative box, so everything below
+    // moved down. This is a lazy scroll view: a control past the viewport is
+    // not merely off-screen, it has not been BUILT, and the finder reports
+    // "Found 0 widgets" for it, which reads identically to the control having
+    // been deleted. Scrolling to each keeps the assertion honest about what it
+    // is checking — that all four exist — without encoding how tall the screen
+    // happens to be.
+    for (final label in const [
+      'VISUAL TELEMETRY (OPTIONAL)',
+      'SCAN PHOTO',
+      'RECORD VIDEO',
+      'VIDEO INTEL',
+    ]) {
+      final control = find.text(label);
+      await tester.scrollUntilVisible(
+        control,
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(control, findsOneWidget, reason: '$label is missing');
+    }
   });
 }

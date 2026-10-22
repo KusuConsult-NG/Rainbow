@@ -25,6 +25,32 @@ enum AlertCategory {
 
 /// Documentation for this public member.
 
+/// One question a responder needs answered before they set off, and the
+/// handful of answers worth offering as a tap.
+///
+/// Every report used to carry the same three things whatever it was about: a
+/// free-text narrative, optional media, and a place. For a responder that is
+/// the difference between "Kidnap - Immediate Abduction near Naraguta" and
+/// knowing whether the people who took them were armed, how long ago it
+/// happened, and whether they left in a vehicle. The first is a reason to send
+/// somebody; the second is what decides who, and how many, and how fast.
+///
+/// Taps, not typing, and never required. The brief this came from is explicit:
+/// "Users shouldn't go through a lot before using the app. it should just be
+/// simple taps and desired results are achieved." A person reporting an
+/// abduction is not going to fill in a form, and a form that delays the report
+/// costs more than the detail gains.
+class ResponsePrompt {
+  /// Documentation for this public member.
+  const ResponsePrompt({required this.question, required this.options});
+
+  /// What a responder needs to know, phrased as somebody would ask it aloud.
+  final String question;
+
+  /// The answers offered as chips. Short enough to read at a glance.
+  final List<String> options;
+}
+
 class AlertCategoryInfo {
   /// Documentation for this public member.
   const AlertCategoryInfo({
@@ -36,6 +62,7 @@ class AlertCategoryInfo {
     required this.bg,
     required this.icon,
     required this.subTypes,
+    this.responsePrompts = const [],
   });
 
   /// Documentation for this public member.
@@ -60,6 +87,15 @@ class AlertCategoryInfo {
 
   /// Documentation for this public member.
   final List<String> subTypes;
+
+  /// What a responder needs to know about THIS kind of incident.
+  ///
+  /// Empty for a category where the narrative is the detail — a cyber crime
+  /// report is a story, not a set of fields — and that is a deliberate answer
+  /// rather than an omission. Asking three questions that do not change the
+  /// response is the same cost as asking three that do, paid by somebody in
+  /// trouble.
+  final List<ResponsePrompt> responsePrompts;
 }
 
 /// Documentation for this public member.
@@ -90,6 +126,20 @@ const List<AlertCategoryInfo> alertCategories = [
     bg: AppColors.dangerTint,
     icon: Icons.person_off_rounded,
     subTypes: ['Immediate Abduction', 'Held Hostage', 'Attempted Kidnap'],
+    responsePrompts: [
+      ResponsePrompt(
+        question: 'Are they armed?',
+        options: ['Armed', 'Not armed', "Don't know"],
+      ),
+      ResponsePrompt(
+        question: 'How long ago?',
+        options: ['Happening now', 'Under an hour', 'Over an hour'],
+      ),
+      ResponsePrompt(
+        question: 'How did they leave?',
+        options: ['On foot', 'By vehicle', 'Still here', "Don't know"],
+      ),
+    ],
   ),
   AlertCategoryInfo(
     category: AlertCategory.publicSafety,
@@ -100,6 +150,16 @@ const List<AlertCategoryInfo> alertCategories = [
     bg: AppColors.dangerTint,
     icon: Icons.local_fire_department_rounded,
     subTypes: ['Building Fire', 'Bush Fire', 'Vehicle Fire'],
+    responsePrompts: [
+      ResponsePrompt(
+        question: 'Is anyone inside?',
+        options: ['People inside', 'Everyone out', "Don't know"],
+      ),
+      ResponsePrompt(
+        question: 'Is it spreading?',
+        options: ['Spreading fast', 'Contained', "Don't know"],
+      ),
+    ],
   ),
   AlertCategoryInfo(
     category: AlertCategory.socialSensitive,
@@ -110,6 +170,12 @@ const List<AlertCategoryInfo> alertCategories = [
     bg: AppColors.navyTint,
     icon: Icons.medication_liquid_rounded,
     subTypes: ['Public Drug Use', 'Drug Distribution', 'Overdose'],
+    responsePrompts: [
+      ResponsePrompt(
+        question: 'Does anyone need medical help?',
+        options: ['Medical help needed', 'Nobody hurt'],
+      ),
+    ],
   ),
   AlertCategoryInfo(
     category: AlertCategory.general,
@@ -120,6 +186,16 @@ const List<AlertCategoryInfo> alertCategories = [
     bg: AppColors.goldTint,
     icon: Icons.local_police_rounded,
     subTypes: ['Physical Assault', 'Extortion', 'Unlawful Arrest'],
+    responsePrompts: [
+      ResponsePrompt(
+        question: 'Is it still happening?',
+        options: ['Happening now', 'Already over'],
+      ),
+      ResponsePrompt(
+        question: 'Is anyone hurt?',
+        options: ['Someone hurt', 'Nobody hurt', "Don't know"],
+      ),
+    ],
   ),
   AlertCategoryInfo(
     category: AlertCategory.publicSafety,
@@ -130,6 +206,16 @@ const List<AlertCategoryInfo> alertCategories = [
     bg: AppColors.navyTint,
     icon: Icons.water_damage_rounded,
     subTypes: ['Flash Flood', 'Blocked Drainage', 'Submerged Property'],
+    responsePrompts: [
+      ResponsePrompt(
+        question: 'Is anyone trapped?',
+        options: ['People trapped', 'Nobody trapped', "Don't know"],
+      ),
+      ResponsePrompt(
+        question: 'How deep?',
+        options: ['Ankle', 'Waist', 'Above head'],
+      ),
+    ],
   ),
   AlertCategoryInfo(
     category: AlertCategory.cyberDigital,
@@ -150,6 +236,16 @@ const List<AlertCategoryInfo> alertCategories = [
     bg: AppColors.dangerTint,
     icon: Icons.child_care_rounded,
     subTypes: ['Physical Abuse', 'Neglect', 'Labor'],
+    responsePrompts: [
+      ResponsePrompt(
+        question: 'Is the child in danger now?',
+        options: ['In danger now', 'Safe for now', "Don't know"],
+      ),
+      ResponsePrompt(
+        question: 'Is the person responsible there?',
+        options: ['Still there', 'Gone', "Don't know"],
+      ),
+    ],
   ),
   AlertCategoryInfo(
     category: AlertCategory.violentCriminal,
@@ -160,6 +256,20 @@ const List<AlertCategoryInfo> alertCategories = [
     bg: AppColors.goldTint,
     icon: Icons.family_restroom_rounded,
     subTypes: ['Physical Violence', 'Threats', 'Trapped'],
+    responsePrompts: [
+      ResponsePrompt(
+        question: 'Is the attacker still there?',
+        options: ['Still there', 'Gone', "Don't know"],
+      ),
+      ResponsePrompt(
+        question: 'Is anyone hurt?',
+        options: ['Someone hurt', 'Nobody hurt', "Don't know"],
+      ),
+      ResponsePrompt(
+        question: 'Is a weapon involved?',
+        options: ['Weapon', 'No weapon', "Don't know"],
+      ),
+    ],
   ),
   AlertCategoryInfo(
     category: AlertCategory.violentCriminal,
@@ -170,6 +280,16 @@ const List<AlertCategoryInfo> alertCategories = [
     bg: AppColors.goldTint,
     icon: Icons.agriculture_rounded,
     subTypes: ['Armed Rustling', 'Missing Herd', 'Trespassing'],
+    responsePrompts: [
+      ResponsePrompt(
+        question: 'Are they armed?',
+        options: ['Armed', 'Not armed', "Don't know"],
+      ),
+      ResponsePrompt(
+        question: 'Which way did they go?',
+        options: ['North', 'South', 'East', 'West', "Don't know"],
+      ),
+    ],
   ),
   AlertCategoryInfo(
     category: AlertCategory.lifeThreatening,
@@ -180,6 +300,20 @@ const List<AlertCategoryInfo> alertCategories = [
     bg: AppColors.dangerTint,
     icon: Icons.warning_rounded,
     subTypes: ['Armed Invasion', 'Riot', 'Vandalism'],
+    responsePrompts: [
+      ResponsePrompt(
+        question: 'Are they armed?',
+        options: ['Armed', 'Not armed', "Don't know"],
+      ),
+      ResponsePrompt(
+        question: 'Roughly how many?',
+        options: ['A few', 'Dozens', 'More than fifty', "Don't know"],
+      ),
+      ResponsePrompt(
+        question: 'Is it still going on?',
+        options: ['Happening now', 'Already over'],
+      ),
+    ],
   ),
   // ── The two that are not emergencies ──────────────────────────────────────
   //

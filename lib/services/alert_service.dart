@@ -565,6 +565,13 @@ class AlertService {
             );
             mappings[localId] = alreadyThere;
             await _sqliteService.markAlertSynced(localId);
+            // Same reasoning as below: this report reached HQ over SMS or the
+            // mesh and already has a real row, so a live track bound to the
+            // local id must follow it there.
+            await BackgroundTrackingService().rebindAlertId(
+              localId,
+              alreadyThere,
+            );
             continue;
           }
 
@@ -580,6 +587,18 @@ class AlertService {
           if (alertId != null) {
             mappings[localId] = alertId;
             await _sqliteService.markAlertSynced(localId);
+            // And tell the tracker, which until now was never told.
+            //
+            // An SOS raised with no data path is tracked against its LOCAL id
+            // — `OFFLINE_<millis>_<hex>` — because that is the only id it has.
+            // That is not a UUID, so neither `telemetry.alert_id` nor
+            // `incident_tracks.alert_id` would accept it, and the live dot and
+            // the route were both lost for the whole emergency. This mapping
+            // was already being computed here and returned to a caller that
+            // did nothing with it.
+            //
+            // A no-op unless this handset is tracking exactly this local id.
+            await BackgroundTrackingService().rebindAlertId(localId, alertId);
           }
         } catch (e) {
           debugPrint('[SYNC_ERR] Alert sync failed for $localId: $e');

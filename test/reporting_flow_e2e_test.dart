@@ -185,8 +185,25 @@ void main() {
     expect(find.byType(ReportDetailsScreen), findsOneWidget);
     expect(find.text('INCIDENT DOSSIER'), findsOneWidget);
 
-    final textField = find.byType(TextField).first;
-    await tester.enterText(textField, 'Suspect vehicle seen fleeing towards Market Square');
+    // Scroll to it first, as this test already does for the submit button.
+    //
+    // The narrative box used to be the first thing under the header. The
+    // category's response prompts now sit above it — the armed/when/how-they-
+    // left questions a responder needs, answerable in a tap — so on a short
+    // viewport the field is below the fold and a lazy scroll view has not
+    // built it yet. `find.byType(TextField).first` then threw "Bad state: No
+    // element", which is the finder saying the widget does not exist rather
+    // than that it is out of view.
+    final textField = find.byType(TextField);
+    await tester.scrollUntilVisible(
+      textField,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.enterText(
+      textField.first,
+      'Suspect vehicle seen fleeing towards Market Square',
+    );
     await pumpSettleWithMax(tester, maxPumps: 5);
 
     expect(find.text('Suspect vehicle seen fleeing towards Market Square'), findsOneWidget);
