@@ -9246,7 +9246,9 @@ test that would settle it.
 > When an alert is reported using the category all the details required for
 > response should be added where necessary
 
-There are thirteen categories. Every one of them produced the same report: a
+There are twelve categories — `grep -c 'AlertCategoryInfo('` returns 13 and
+the thirteenth is the constructor, which is how T-70 first said thirteen. Every
+one of them produced the same report: a
 free-text narrative, optional media, and a place.
 
 For a responder that is the difference between *"Kidnap - Immediate Abduction,
