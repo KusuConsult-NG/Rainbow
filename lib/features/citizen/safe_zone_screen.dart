@@ -16,34 +16,54 @@ import 'package:rainbow_app/services/tts_service.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
+/// The shelters a frightened person may be told to run to.
+///
+/// NOTHING IS INVENTED HERE, and the three things this used to do were each a
+/// way of inventing one.
+///
+/// It returned three hardcoded zones from a bare `catch (_)` — "JOS SOUTH
+/// COMMAND HQ", "BUKURU TACTICAL OUTPOST", "JOS NORTH POLICE DIVISION", with
+/// round-numbered coordinates and invented capacities. Any failure reached it:
+/// no network, a refused row, a missing table. The screen then drew a ROUTE to
+/// the nearest one. A citizen fleeing an armed attack was being given turn-by-
+/// turn directions to a position produced by a literal in a catch block, with
+/// nothing on screen to say so.
+///
+/// It also THREW when the query succeeded and returned nothing, so a correctly
+/// configured project with no shelters recorded yet showed the same three
+/// invented ones. An empty list is a true answer and is now returned as one —
+/// the screen already has an empty state that says no zones are published.
+///
+/// And a zone whose latitude or longitude was null became `0.0, 0.0`: a point
+/// in the Gulf of Guinea, 700km off the coast, drawn on the map as a shelter.
+/// Such a row is dropped instead.
+///
+/// This is C-5 again, one screen further out. A missing location must read as
+/// missing. See E2E_AUDIT_REPORT.md C-5 and T-74.
 final _safeZonesProvider = FutureProvider<List<_SafeZone>>((ref) async {
-  try {
-    final response = await SupabaseConfig.client
-        .from('safe_zones')
-        .select()
-        .eq('is_active', true);
-        
-    if (response.isEmpty) {
-      throw Exception('empty_safe_zones');
-    }
+  final response = await SupabaseConfig.client
+      .from('safe_zones')
+      .select()
+      .eq('is_active', true);
 
-    return response.map((e) {
-      return _SafeZone(
-        id: e['id'].toString(),
-        name: e['name'] as String? ?? 'Unknown',
-        type: e['type'] as String? ?? 'SAFE_HAVEN',
-        lat: (e['latitude'] as num?)?.toDouble() ?? 0.0,
-        lng: (e['longitude'] as num?)?.toDouble() ?? 0.0,
-        capacity: (e['capacity'] as num?)?.toInt() ?? 0,
-      );
-    }).toList();
-  } catch (_) {
-    return [
-      const _SafeZone(id: 'sz_1', name: 'JOS SOUTH COMMAND HQ', type: 'COMMAND_POST', lat: 9.9285, lng: 8.8921, capacity: 500),
-      const _SafeZone(id: 'sz_2', name: 'BUKURU TACTICAL OUTPOST', type: 'SHELTER', lat: 9.8000, lng: 8.8700, capacity: 250),
-      const _SafeZone(id: 'sz_3', name: 'JOS NORTH POLICE DIVISION', type: 'SAFE_HAVEN', lat: 9.9333, lng: 8.8833, capacity: 350),
-    ];
-  }
+  return response
+      .map((e) {
+        final lat = (e['latitude'] as num?)?.toDouble();
+        final lng = (e['longitude'] as num?)?.toDouble();
+        // No position, no pin. A shelter nobody can be routed to is worse
+        // than one the list does not mention.
+        if (lat == null || lng == null) return null;
+        return _SafeZone(
+          id: e['id'].toString(),
+          name: e['name'] as String? ?? 'Unknown',
+          type: e['type'] as String? ?? 'SAFE_HAVEN',
+          lat: lat,
+          lng: lng,
+          capacity: (e['capacity'] as num?)?.toInt() ?? 0,
+        );
+      })
+      .whereType<_SafeZone>()
+      .toList();
 });
 
 // Firestore-driven active threat alert geolocations

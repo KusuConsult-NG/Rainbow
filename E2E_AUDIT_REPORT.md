@@ -9555,3 +9555,86 @@ passing quietly.
 That second fault was always there. It was hidden by the loop happening to be
 slow enough, and surfaced by making it faster — which is the usual way a test
 that measures time instead of state gets caught.
+
+---
+
+### T-74. The screen that tells a frightened person where to run made places up
+
+Asked directly: *"verify if the location is hardcoded to a default value"*.
+
+**The alert path is clean.** `AlertService` leaves `latitude` and `longitude`
+NULL when there is no fix, and says so in a log line. It once defaulted to
+(9.9167, 8.8917) — the centre of Jos — which is recorded as C-5 and was fixed
+long ago. `LocationService.getCurrentPosition` returns `null` rather than a
+fallback. The responder map's empty-state centre, `LatLng(9.2182, 9.5179)`, is
+a camera position and says so in six lines of comment: a viewport may have a
+default, a position may not.
+
+**One screen was not clean, and it is the worst one for this.**
+
+```dart
+} catch (_) {
+  return [
+    _SafeZone(id: 'sz_1', name: 'JOS SOUTH COMMAND HQ',
+              lat: 9.9285, lng: 8.8921, capacity: 500),
+    _SafeZone(id: 'sz_2', name: 'BUKURU TACTICAL OUTPOST',
+              lat: 9.8000, lng: 8.8700, capacity: 250),
+    _SafeZone(id: 'sz_3', name: 'JOS NORTH POLICE DIVISION',
+              lat: 9.9333, lng: 8.8833, capacity: 350),
+  ];
+}
+```
+
+`safe_zone_screen.dart` is the screen a citizen opens to find out where to run.
+When the query for real shelters failed it returned those three — round-numbered
+coordinates, invented capacities — and the screen then **drew a route to the
+nearest one** and offered to read the directions aloud.
+
+Three things make it worse than a stale cache:
+
+* **The catch is bare.** `catch (_)` takes everything: no network, a refused
+  row, a missing table, a malformed response. There is no state in which the
+  screen says it could not load.
+* **An empty result was treated as a failure.** The provider opened with
+  `if (response.isEmpty) throw Exception('empty_safe_zones')`, so a correctly
+  configured project that has not recorded any shelters yet showed the same
+  three invented ones. The screen already has an empty state saying no zones
+  are published; it could not be reached.
+* **A null coordinate became `0.0, 0.0`** — `(e['latitude'] as num?)?.toDouble()
+  ?? 0.0`. That is the Gulf of Guinea, about 700km off the coast of Nigeria,
+  drawn on the map as a shelter with a route to it.
+
+This is C-5 one screen further out, and the consequence is larger: an alert
+filed without coordinates is a report somebody has to chase, while a shelter
+invented in a catch block is a person running towards a place that does not
+exist while being chased.
+
+#### What was done
+
+The fallback is gone. The provider returns what the database returns, an empty
+list included, and a failure propagates so the screen's error state shows. A
+zone with no latitude or longitude is dropped rather than placed at zero.
+
+`scripts/check_no_invented_coordinates.py` fails the build for any
+coordinate-shaped literal in `lib/` that is not a map viewport. The exemption
+is narrow and explicit: `center`, `initialCenter`, `zoom` and the like, within
+the few lines above the literal.
+
+**The exemption window was wrong twice, both found by running it.** It first
+read only the literal's own line and reported the one documented viewport in
+the codebase as a fault — `center:` sits above its ternary. Widening the raw
+line count then failed too, because comments are blanked while their lines are
+kept, so three raw lines covered three blank ones and stopped short. It counts
+non-empty lines now, which does not drift further into unrelated code every
+time somebody adds a comment.
+
+Three mutations, all caught: the invented shelters restored; a null position
+given a typed default; and the viewport literal with its `center:` renamed, so
+the exemption no longer applies to it.
+
+#### Why the existing gate did not catch it
+
+`check_no_invented_places.py` holds every screen that NAMES a place it never
+measured — `geo_lga ?? 'PLATEAU'`, `geo_pu ?? 'SECTOR HQ'`. It reads display
+strings. A hardcoded list of coordinates returned from a catch block is the
+same fault wearing data rather than a label, and nothing was looking at it.

@@ -782,6 +782,18 @@ jobs:
       - name: Assert no screen names a place that was never recorded
         run: python3 scripts/check_no_invented_places.py
 
+      # The safe-zone screen showed a citizen where to run. When the query
+      # failed it returned three hardcoded shelters from a bare `catch (_)` —
+      # round-numbered coordinates, invented capacities — and the screen drew a
+      # ROUTE to the nearest. Any failure reached it, and the provider THREW on
+      # a successful empty result, so a correct project with no shelters yet
+      # showed the same three. A null latitude became 0.0, 0.0: the Gulf of
+      # Guinea, drawn on the map as somewhere to go. C-5 one screen further
+      # out; check_no_invented_places.py holds screens that NAME an unmeasured
+      # place and has no view on a coordinate literal standing in for data.
+      - name: Assert nobody is placed at a coordinate nobody measured
+        run: python3 scripts/check_no_invented_coordinates.py
+
       # `tier_timeout_minutes()` is the only reader of the three escalation
       # timeouts and it refuses what it cannot use — `raw::INTEGER`, then
       # `parsed <= 0` — because, in the migration's own words, a timeout of 0
