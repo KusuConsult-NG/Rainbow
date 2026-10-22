@@ -683,6 +683,16 @@ async function chooseTactical(page, triggerText, optionText) {
     ctl.unknownColumns.join('; ') || 'none',
   );
 
+  // The same claim one level up. An undeclared table used to read EMPTY and
+  // write 201 with the row dropped, so a screen built on one photographed
+  // blank and this harness could not tell that from a feature nobody had
+  // written. Five tables the product reads were in that state. See T-75.
+  check(
+    'no query named a table no migration creates',
+    (ctl.unknownTables || []).length === 0,
+    (ctl.unknownTables || []).join('; ') || 'none',
+  );
+
   // AN ADVISORY DOCKS FOR THE PEOPLE IT NAMES, AND NOT THE OTHERS.
   //
   // The console's advisory banner honoured none of the composer's five
@@ -786,6 +796,7 @@ async function chooseTactical(page, triggerText, optionText) {
     roles: roleReport,
     checks,
     unknownColumns: ctl.unknownColumns,
+    unknownTables: ctl.unknownTables || [],
     advisories: advisoryReport,
     rpcMisses: ctl.rpcMisses || [],
     rpcCalls: ctl.rpcCalls || [],

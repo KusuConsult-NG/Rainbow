@@ -490,15 +490,44 @@ async function logMark() {
     '',
   );
 
+  // The shelters a frightened person is sent to.
+  //
+  // This check used to be `zoneText.length > 0` — "the screen has some text on
+  // it". It passed for a year while the screen had NEVER been shown a single
+  // real shelter: `safe_zones` was in neither these fixtures nor the stand-in,
+  // so the query came back empty, and the only shelters the product ever drew
+  // were the three `safe_zone_screen.dart` invented inside a `catch (_)`. It
+  // would have passed just as happily with those three on screen. T-74 removed
+  // them; T-75 seeded four real ones, with one decommissioned.
+  //
+  // Zone names appear only in the detail card, which needs a marker tap, so the
+  // count badge is the piece of text that is on screen unconditionally — and it
+  // proves both halves: that the rows were read, and that `is_active` was
+  // applied to them.
   state.screen = 'mobile:safe-zone';
   lm = await logMark();
   await go('/safe-zone', 3000);
   await shot('93-mobile-safe-zones');
   const zoneText = await screenText();
+  const zoneCount = (zoneText.match(
+    /(\d+)\s+(?:ACTIVE SECURE ZONES ONLINE|SAFE ZONES ONLINE NOW|SASHEN TSIRA NA AIKI)/i,
+  ) || [])[1];
   check(
-    'the safe zones screen shows zones or says why it cannot',
-    zoneText.length > 0,
-    (zoneText.split('\n').find((l) => l.trim()) || '').slice(0, 70),
+    'the shelter screen reads its shelters, and offers only the active ones',
+    zoneCount === '3',
+    zoneCount === undefined
+      ? `no count badge: ${(zoneText.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 3).join(' / ') || '(no text)').slice(0, 110)}`
+      : `badge reads ${zoneCount}; the fixtures hold 3 active and 1 decommissioned`,
+  );
+  check(
+    'the shelter screen reads the safe_zones table',
+    (await readsSince(lm, 'safe_zones')).length > 0,
+    '',
+  );
+  check(
+    'no shelter the app invented is on the screen',
+    !/JOS SOUTH COMMAND HQ|BUKURU TACTICAL OUTPOST|JOS NORTH POLICE DIVISION/i.test(zoneText),
+    'the three names the removed `catch (_)` fallback used',
   );
 
   state.screen = 'mobile:emergency-pins';
@@ -1196,6 +1225,16 @@ async function logMark() {
     'nothing the app did named a column the migrations do not define',
     ctl.unknownColumns.length === 0,
     ctl.unknownColumns.join('; ') || 'none',
+  );
+
+  // The same claim one level up. An undeclared table used to read EMPTY and
+  // write 201 with the row dropped, so a screen built on one photographed
+  // blank and this harness could not tell that from a feature nobody had
+  // written. Five tables the product reads were in that state. See T-75.
+  check(
+    'nothing the app did named a table no migration creates',
+    (ctl.unknownTables || []).length === 0,
+    (ctl.unknownTables || []).join('; ') || 'none',
   );
 
   fs.writeFileSync(

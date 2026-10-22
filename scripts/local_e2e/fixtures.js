@@ -378,6 +378,137 @@ const agency_notifications = [
   },
 ];
 
+/**
+ * The shelters a frightened citizen is routed to.
+ *
+ * This table had never held a row anywhere. Nothing in this repository writes
+ * one — no migration INSERT, no `seed_staging.js`, no console screen, no admin
+ * tool — and it was not declared here either. The only shelters this product
+ * ever drew on a map were the three `safe_zone_screen.dart` invented inside a
+ * `catch (_)`, which T-74 removed. These are the first real ones it has had.
+ *
+ *   sz1  the ordinary case: active, in the citizen's own LGA, with a capacity
+ *   sz2  capacity NULL  -> must read as unstated. Not 0, and not a guess.
+ *                          `capacity` was added by 20261026000000 with no
+ *                          backfill on purpose, so every shelter recorded
+ *                          before that migration looks exactly like this one.
+ *   sz3  a second LGA   -> so "nearest" has to mean something
+ *   sz4  is_active false-> must NOT appear. The screen filters on it and
+ *                          nothing had ever proved the filter.
+ */
+const safe_zones = [
+  {
+    id: '55557777-0000-4000-8000-000000005001',
+    name: 'NARAGUTA WARD COMMAND POST',
+    description: 'Ward command post, open to the public during an incident.',
+    latitude: 9.9120,
+    longitude: 8.8920,
+    type: 'COMMAND_POST',
+    geo_lga: 'JOS NORTH',
+    geo_ward: 'NARAGUTA',
+    capacity: 400,
+    is_active: true,
+    created_at: '2026-09-01T08:00:00.000Z',
+  },
+  {
+    id: '55557777-0000-4000-8000-000000005002',
+    name: "ST. PIRAN'S PARISH HALL",
+    description: 'Parish hall. Capacity was never recorded.',
+    latitude: 9.9405,
+    longitude: 8.8731,
+    type: 'SHELTER',
+    geo_lga: 'JOS NORTH',
+    geo_ward: 'NARAGUTA',
+    capacity: null,
+    is_active: true,
+    created_at: '2026-09-01T08:00:00.000Z',
+  },
+  {
+    id: '55557777-0000-4000-8000-000000005003',
+    name: 'PANYAM DISTRICT CLINIC',
+    description: 'Clinic with a standing agreement to take casualties.',
+    latitude: 9.5190,
+    longitude: 9.0310,
+    type: 'MEDICAL',
+    geo_lga: 'MANGU',
+    geo_ward: 'PANYAM',
+    capacity: 60,
+    is_active: true,
+    created_at: '2026-09-01T08:00:00.000Z',
+  },
+  {
+    id: '55557777-0000-4000-8000-000000005004',
+    name: 'GADA BIU PRIMARY SCHOOL',
+    description: 'Decommissioned after the roof was lost. Must not be offered.',
+    latitude: 9.8870,
+    longitude: 8.8640,
+    type: 'SHELTER',
+    geo_lga: 'JOS NORTH',
+    geo_ward: 'NARAGUTA',
+    capacity: 250,
+    is_active: false,
+    created_at: '2026-09-01T08:00:00.000Z',
+  },
+];
+
+/**
+ * The live route a dispatcher follows while an incident is open.
+ *
+ * `background_tracking_service.dart` writes one of these per position fix and
+ * `hq-dashboard-next` reads them back ordered by `recorded_at` to draw the
+ * trail. Neither half had ever been exercised against data: the table was in
+ * neither these fixtures nor the stand-in, so every insert was answered
+ * **201 Created** and dropped, and every read came back empty. That is the
+ * whole point of T-7x — the responder following the device — and the harness
+ * could not tell it from a feature nobody had written. See T-75.
+ *
+ * Four points against a002, the DISPATCHED incident, moving roughly north-east
+ * away from where it was first reported. A single point proves a pin; four
+ * prove a route, and prove the ordering.
+ */
+const incident_tracks = [
+  { id: '66668888-0000-4000-8000-000000006001', alert_id: alerts[1].id, user_id: byKey('citizen').id, latitude: 9.8991, longitude: 8.8620, accuracy: 12.0, speed: 0.0, recorded_at: '2026-09-26T21:40:00.000Z', created_at: '2026-09-26T21:40:00.000Z' },
+  { id: '66668888-0000-4000-8000-000000006002', alert_id: alerts[1].id, user_id: byKey('citizen').id, latitude: 9.9008, longitude: 8.8644, accuracy: 11.0, speed: 1.4, recorded_at: '2026-09-26T21:42:00.000Z', created_at: '2026-09-26T21:42:00.000Z' },
+  { id: '66668888-0000-4000-8000-000000006003', alert_id: alerts[1].id, user_id: byKey('citizen').id, latitude: 9.9031, longitude: 8.8669, accuracy: 18.0, speed: 1.1, recorded_at: '2026-09-26T21:44:00.000Z', created_at: '2026-09-26T21:44:00.000Z' },
+  { id: '66668888-0000-4000-8000-000000006004', alert_id: alerts[1].id, user_id: byKey('citizen').id, latitude: 9.9057, longitude: 8.8702, accuracy: 9.0, speed: 1.6, recorded_at: '2026-09-26T21:46:00.000Z', created_at: '2026-09-26T21:46:00.000Z' },
+];
+
+/**
+ * A SIM change noticed on a handset, unacknowledged.
+ *
+ * HQ reads this to tell a stolen phone from a new one. One open event, so the
+ * panel that lists them has something to list and the acknowledge control has
+ * something to act on — it had neither, because the table was undeclared and
+ * therefore always empty.
+ */
+const sim_channel_events = [
+  {
+    id: '77779999-0000-4000-8000-000000007001',
+    user_id: byKey('citizen').id,
+    change: 'SIM_REPLACED',
+    operator_code: '62130',
+    operator_name: 'MTN NIGERIA',
+    noticed_at: '2026-09-26T20:05:00.000Z',
+    acknowledged_at: null,
+    acknowledged_by: null,
+    created_at: '2026-09-26T20:05:00.000Z',
+  },
+];
+
+/**
+ * Written by the console's AI route, read by nothing yet. Declared, not seeded:
+ * the point is that the INSERT lands, which it did not before — the stand-in
+ * answered 201 and threw the row away.
+ */
+const incident_ai_reports = [];
+
+/**
+ * One row per in-progress USSD session, written and read by the console's USSD
+ * endpoint. Declared and empty for the same reason: a session starts when a
+ * caller dials, so a seeded one would be a session nobody is in.
+ */
+const ussd_sessions = [];
+
 module.exports = {
   DOMAIN,
   PASSWORD,
@@ -403,5 +534,17 @@ module.exports = {
     agency_deployments,
     agency_action_reports,
     agency_notifications,
+    // Five tables the shipped product reads that this dataset had never
+    // declared. An undeclared table was served EMPTY on read and answered
+    // **201 Created** on write with the row dropped, so a screen built on one
+    // photographed blank and a harness could not tell that from a feature
+    // nobody had written. See E2E_AUDIT_REPORT.md T-75, and
+    // `scripts/check_the_harness_serves_every_table.py`, which fails if the
+    // app or the console reads a table that is not in this map.
+    safe_zones,
+    incident_tracks,
+    sim_channel_events,
+    incident_ai_reports,
+    ussd_sessions,
   },
 };

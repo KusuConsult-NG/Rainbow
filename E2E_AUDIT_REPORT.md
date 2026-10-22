@@ -9638,3 +9638,123 @@ the exemption no longer applies to it.
 measured — `geo_lga ?? 'PLATEAU'`, `geo_pu ?? 'SECTOR HQ'`. It reads display
 strings. A hardcoded list of coordinates returned from a catch block is the
 same fault wearing data rather than a label, and nothing was looking at it.
+
+---
+
+### T-75. The harness answered "201 Created" and threw the row away
+
+Found while adding the shelter fixtures T-74 left the screen needing. The
+question was narrow — why has this screen never been shown a shelter? — and the
+answer was not about shelters.
+
+The stand-in resolved a table in two places:
+
+```js
+let rows = (tables[table] || []).slice();    // every read
+if (tables[table]) tables[table].push(row);  // every write
+```
+
+A table `fixtures.js` did not declare therefore **read as empty and wrote as
+201 Created, with the row echoed back in the response and nothing stored.** The
+client could not tell. The row was simply gone.
+
+Five tables the shipped product reads were in exactly that state:
+
+| table | what it holds | who reads it |
+| --- | --- | --- |
+| `safe_zones` | the shelters a citizen is routed to | the app |
+| `incident_tracks` | the live route a dispatcher follows | the app writes, the console reads |
+| `sim_channel_events` | a SIM change noticed on a handset | both |
+| `incident_ai_reports` | what the console's AI route produced | the console |
+| `ussd_sessions` | where a USSD caller is in the menu | the console |
+
+`incident_tracks` is the one that matters. Following the device for the length
+of an emergency is what the whole tracking pass was for — T-7x exists because
+an offline SOS wrote an `alert_id` PostgreSQL rejected at the type — and the
+harness had never stored a single point of it. Every insert accepted, every read
+back empty, a green run throughout.
+
+#### Why nothing caught it
+
+Because a blank screen and a screen whose table the stand-in has never heard of
+look identical, and the only assertion pointed at the first one:
+
+```js
+check(
+  'the safe zones screen shows zones or says why it cannot',
+  zoneText.length > 0,
+  …
+);
+```
+
+"The screen has some text on it." That passed with zero shelters. It would have
+passed just as happily with the three invented ones T-74 removed, and with any
+other three. It is the same shape as every other finding in this section — a
+green check sitting over a gap it never looked at — and this time the gap was
+the dataset itself.
+
+The stand-in's own design says why this should have been caught. It makes an
+unknown COLUMN a 400, deliberately, and the file explains that a tolerant fake
+turns the system's most expensive defect class into a pass. An unknown TABLE was
+the same mistake one level up, in the same file, under that comment.
+
+#### What was done
+
+**The stand-in.** `ensureTable()` runs once per request, before any verb. A
+table the migrations create but the fixtures do not declare is created empty —
+the honest answer, and what a real project with that migration applied and no
+rows in it returns — so writes to it land and reads return what was written. A
+table **no** migration creates is a 404 `PGRST205`, which is what PostgREST
+answers, and it is recorded in `unknownTables`.
+
+**The harnesses.** `capture.js`, `interact.js` and `mobile_interact.js` each
+assert `unknownTables` is empty, beside the `unknownColumns` assertion they
+already carried.
+
+**The fixtures.** All five tables are declared. Three are seeded where the data
+proves something, and two — `incident_ai_reports`, `ussd_sessions` — are
+declared empty on purpose, because a USSD session begins when somebody dials.
+
+The shelters are the first this product has ever had. Nothing in the repository
+writes one: no migration INSERT, no `seed_staging.js`, no console screen, no
+admin tool. The four are shaped to be checkable:
+
+* one ordinary active shelter in the citizen's own LGA, with a capacity;
+* one with `capacity` NULL — the column was added by `20261026000000` with no
+  backfill, so every shelter recorded before that migration looks like this,
+  and the screen must read it as unstated rather than as `0` or a guess;
+* one in a second LGA, so "nearest" has to mean something;
+* one decommissioned, `is_active false`, which must not be offered. The screen
+  filters on that column and nothing had ever proved the filter.
+
+`incident_tracks` carries four points against the DISPATCHED incident, moving
+north-east away from where it was reported. One point proves a pin; four prove a
+route, and prove the ordering the console reads them in.
+
+**The assertion.** The `zoneText.length > 0` check is replaced by the count
+badge — `3 ACTIVE SECURE ZONES ONLINE` — which proves both halves at once: that
+the rows were read, and that `is_active` was applied. Plus a read-the-table
+check, and one that none of the three invented names is on screen.
+
+**The gate.** `scripts/check_the_harness_serves_every_table.py` fails if any
+table read with `.from('x')` in `lib/` or `hq-dashboard-next/src/` is not
+declared in `fixtures.js`, if a declared table is in no migration, or if the
+stand-in stops answering 404 for a table no migration creates. 16 tables read
+across 200 files; 17 declared.
+
+Mutation-tested: removing `incident_tracks` from the fixtures fails the gate and
+names `background_tracking_service.dart:435` as the reader.
+
+#### One thing this does not fix
+
+Nothing in this product creates a shelter. `safe_zones` has exactly one consumer
+— the citizen's screen — and **no writer anywhere**: no console screen, no RPC,
+no admin tool. After T-74 removed the invented three, the screen correctly shows
+its empty state in every environment, and it will go on doing so in production
+until somebody inserts rows by hand. `capacity` is the same story one column
+down: the app has always read it, the migration now provides it, and nothing
+sets it.
+
+That is a missing feature rather than a defect, and it is not mine to invent.
+What the fixtures do is make sure that when the rows exist, the screen is known
+to read them — which was not previously true of anything here.

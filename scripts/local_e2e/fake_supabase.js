@@ -18,7 +18,10 @@
  * column that does not exist, in full, both on read and on write. A tolerant
  * fake would turn the system's most expensive defect class into a pass. So the
  * column list comes from `supabase/migrations/` and an unknown column is a 400,
- * the same as production.
+ * the same as production. An unknown TABLE — one no migration creates — is a
+ * 404, likewise. A table the migrations DO create but `fixtures.js` does not
+ * declare is served empty and accepts writes; it used to answer 201 and drop
+ * them. See E2E_AUDIT_REPORT.md T-75.
  */
 
 const http = require('http');
@@ -86,6 +89,12 @@ const PRISTINE = JSON.parse(JSON.stringify(tables));
 const log = [];
 /** Columns the app named that the migrations do not define. Any entry fails the run. */
 const unknownColumns = [];
+/**
+ * Tables the app named that NO migration creates. Any entry fails the run, for
+ * the same reason an unknown column does: a tolerant fake turns a defect into a
+ * pass.
+ */
+const unknownTables = [];
 /** Writes the app performed, so a "did the broadcast actually send?" claim has evidence. */
 const writes = [];
 /** Every rpc the app called and this stand-in answered. */
@@ -384,6 +393,41 @@ const noteUnknown = (table, column, direction) => {
   if (!unknownColumns.includes(entry)) unknownColumns.push(entry);
   console.error(`[fake] UNKNOWN COLUMN ${entry} — rejected, as PostgREST would`);
 };
+
+/**
+ * Make sure `tables[table]` exists before a read or a write touches it.
+ *
+ * Returns true when the table is servable, false when nothing in
+ * `supabase/migrations/` creates it — which in production is a 404 from
+ * PostgREST, and here fails the run.
+ *
+ * A table the MIGRATIONS create but the FIXTURES do not declare is created
+ * here, empty: the honest answer, and what a real project with that migration
+ * applied and no rows in it returns.
+ *
+ * It used to be neither. `(tables[table] || [])` served every read and
+ * `if (tables[table]) tables[table].push(row)` served every write, so a POST to
+ * such a table came back **201 Created with the row echoed back** and nothing
+ * was stored. Five tables the shipped product reads were in that state —
+ * `incident_tracks` among them, the live route a dispatcher follows for the
+ * length of an emergency. Every write to it was answered success and dropped,
+ * every read came back empty, and no assertion could tell that apart from a
+ * feature nobody had built. See E2E_AUDIT_REPORT.md T-75.
+ */
+function ensureTable(table) {
+  if (tables[table]) return true;
+  if (schema[table]) {
+    tables[table] = [];
+    console.log(
+      `[fake] ${table} is in the migrations but not in fixtures.js — serving it `
+      + 'EMPTY, and writes to it will now land',
+    );
+    return true;
+  }
+  if (!unknownTables.includes(table)) unknownTables.push(table);
+  console.error(`[fake] UNKNOWN TABLE ${table} — rejected, as PostgREST would`);
+  return false;
+}
 
 function body(req) {
   return new Promise((resolve) => {
@@ -762,6 +806,15 @@ const server = http.createServer(async (req, res) => {
     const table = url.pathname.slice('/rest/v1/'.length);
     const single = String(req.headers.accept || '').includes('vnd.pgrst.object');
 
+    // One guard for every verb below, so a read and a write cannot disagree
+    // about whether the table exists.
+    if (!ensureTable(table)) {
+      return send(404, {
+        code: 'PGRST205',
+        message: `Could not find the table 'public.${table}' in the schema cache`,
+      });
+    }
+
     if (req.method === 'GET' || req.method === 'HEAD') {
       const r = query(table, url.searchParams, noteUnknown);
       if (r.error) return send(400, r.error);
@@ -1090,6 +1143,7 @@ const control = http.createServer((req, res) => {
   if (req.url === '/reset' || req.url === '/reset-data') {
     log.length = 0;
     unknownColumns.length = 0;
+    unknownTables.length = 0;
     writes.length = 0;
     broadcasts.length = 0;
     rpcCalls.length = 0;
@@ -1121,6 +1175,7 @@ const control = http.createServer((req, res) => {
   }
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify(
-    { log, unknownColumns, writes, broadcasts, rpcCalls, rpcMisses }, null, 1));
+    { log, unknownColumns, unknownTables, writes, broadcasts, rpcCalls, rpcMisses },
+      null, 1));
 });
 control.listen(PORT + 1, '127.0.0.1');

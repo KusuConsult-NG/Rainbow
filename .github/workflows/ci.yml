@@ -794,6 +794,21 @@ jobs:
       - name: Assert nobody is placed at a coordinate nobody measured
         run: python3 scripts/check_no_invented_coordinates.py
 
+      # The stand-in resolved a table as `tables[table] || []` on read and
+      # `if (tables[table]) tables[table].push(row)` on write, so a table
+      # fixtures.js did not declare read EMPTY and wrote **201 Created with
+      # the row echoed back and nothing stored**. Five tables the shipped
+      # product reads were in that state: safe_zones, incident_tracks,
+      # sim_channel_events, incident_ai_reports and ussd_sessions.
+      # incident_tracks is the live route a dispatcher follows during an
+      # emergency — every point accepted, every read empty, and a green run
+      # throughout, because a blank screen and a screen whose table the
+      # harness has never heard of look the same. The fake already made an
+      # unknown COLUMN a 400 for exactly this reason; this is that one level
+      # up. T-75.
+      - name: Assert the local run serves every table the product reads
+        run: python3 scripts/check_the_harness_serves_every_table.py
+
       # `tier_timeout_minutes()` is the only reader of the three escalation
       # timeouts and it refuses what it cannot use — `raw::INTEGER`, then
       # `parsed <= 0` — because, in the migration's own words, a timeout of 0

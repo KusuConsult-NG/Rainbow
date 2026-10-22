@@ -160,6 +160,7 @@ WITH expected(migration, kind, obj, want) AS (VALUES
   ('20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency', 'function', 'route_non_emergency_to_lga', true),
   ('20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency', 'column', 'alerts.voice_note_url', true),
   ('20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency', 'column', 'alerts.voice_note_seconds', true),
+  ('20261026000000_safe_zones_capacity', 'column', 'safe_zones.capacity', true),
   ('phase1_foundation', 'table', 'safe_zones', true),
   ('phase1_foundation', 'table', 'uninstall_requests', true),
   ('phase1_foundation', 'table', 'app_config', true),

@@ -1237,6 +1237,16 @@ async function writeMark() {
     ctl.unknownColumns.join('; ') || 'none',
   );
 
+  // The same claim one level up. An undeclared table used to read EMPTY and
+  // write 201 with the row dropped, so a screen built on one photographed
+  // blank and this harness could not tell that from a feature nobody had
+  // written. Five tables the product reads were in that state. See T-75.
+  check(
+    'nothing any control did named a table no migration creates',
+    (ctl.unknownTables || []).length === 0,
+    (ctl.unknownTables || []).join('; ') || 'none',
+  );
+
   // AND NOTHING ANY CONTROL DID WAS REFUSED FOR WANT OF A FUNCTION.
   //
   // The sibling claim, missing for the same reason. This pass presses the
