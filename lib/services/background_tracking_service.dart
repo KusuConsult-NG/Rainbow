@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:rainbow_app/core/offline/offline_ref.dart' as offline;
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -107,13 +108,11 @@ class BackgroundTrackingService {
   /// omitted. `telemetry.alert_id` is nullable: the position still goes out,
   /// which is the half that matters while somebody is in danger. The route
   /// starts once [rebindAlertId] swaps in the real id at sync.
-  static bool isServerAlertId(String? alertId) {
-    if (alertId == null) return false;
-    return RegExp(
-      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
-      r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
-    ).hasMatch(alertId);
-  }
+  /// Delegates to the ONE definition, in `offline_ref.dart` beside the
+  /// function that mints the other kind. There were two, and the other was a
+  /// prefix test in the code that opens the dispatcher channel. See T-86.
+  static bool isServerAlertId(String? alertId) =>
+      offline.isServerAlertId(alertId);
 
   /// Point an in-flight track at the row the queued alert finally became.
   ///

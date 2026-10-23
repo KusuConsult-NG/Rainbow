@@ -10533,3 +10533,99 @@ output are data, not code, and are the operator's:
 * Staff accounts are duplicated across two email domains — `@rainbow.gov.ng`
   and `@operationrainbow.plateau.gov.ng` — with the same names and separate
   profile rows.
+
+---
+
+### T-86. The gate said "not a prefix test", and checked one file
+
+Found looking for the cause of *"live dispatch channel has error loading channel
+messages"*. It is **not** proven to be that cause — see the end of this entry —
+but what the search turned up is worth its own number.
+
+`scripts/check_a_tracked_sos_reaches_the_map.py` was written for T-7x. Its own
+docstring says what the predicate must be:
+
+> `isServerAlertId` actually matches a UUID rather than, say, rejecting a
+> prefix — a `!startsWith('OFFLINE_')` check would pass any other junk.
+
+It checks `background_tracking_service.dart`. One file away:
+
+```dart
+// emergency_provider.dart
+final isRealAlertId = !safeAlertId.startsWith('LOCAL_') &&
+    !safeAlertId.startsWith('OFFLINE_');
+```
+
+The exact check the gate's docstring names as wrong, in the code that decides
+whether the **dispatcher channel opens for a citizen in an emergency** — that
+value becomes `state.alertId`, and the chat button is disabled when it is null.
+
+Two predicates answering one question, disagreeing about what the question is.
+One asks "is this a UUID", which is what `alerts.id` is and what
+`telemetry.alert_id` and `incident_tracks.alert_id` refuse at the TYPE with
+`22P02`. The other asks "does this not look local", which is a different
+question with a different answer for everything that is neither.
+
+#### Why nothing broke, and why that is the finding
+
+`submitAlert` returns exactly two shapes: a server UUID, or an id from
+`newOfflineLocalId`. Both are classified identically by either test. So nothing
+visible depended on it, which is why it survived a gate written specifically to
+prevent it — and is a reason it went unnoticed rather than a reason to keep two.
+
+One sentinel value is all it takes. `'OFFLINE_PENDING'` is already in that
+function as a placeholder, and the next sentinel that does not start with
+`OFFLINE_` or `LOCAL_` would be waved through as a server id by one half of the
+codebase and refused by PostgreSQL in the other.
+
+#### The test that was holding it up
+
+Replacing the check with a real UUID test failed
+`sos_orchestration_test.dart`. Its "real alert id" was the literal string:
+
+```dart
+onSubmit: () async => 'server-uuid-1234'
+```
+
+Which reads like a server UUID and is not one. It satisfied the prefix check, so
+the fixture and the predicate agreed with each other and **neither agreed with
+`alerts.id UUID`**. Seven uses, now one named constant holding a real UUID, with
+the reason at its declaration.
+
+That is the quiet version of this whole report: a check and a fixture, both
+written from the same wrong assumption, confirming each other.
+
+#### What was done
+
+`isServerAlertId` has one definition, in `lib/core/offline/offline_ref.dart`
+beside `newOfflineLocalId` — the function that mints the other kind of id. The
+two are a matched pair. The tracking service delegates to it; the emergency
+provider calls it.
+
+The gate grew two checks and had one corrected:
+
+* **no negated prefix test** anywhere in `lib/` may answer "is this a server
+  id". A *positive* prefix test stays allowed and is used — `alert_service.dart`
+  asks "was this queued offline?", and the prefix is the right answer to that.
+  Only the negated form is pretending to be a type test.
+* **no second definition** of `isServerAlertId` with its own body; delegation is
+  fine.
+* the existing "the guard is a real UUID test" assertion read the tracking
+  service and so broke when the definition moved. It reads wherever the
+  definition lives now, because a check that insists on the old location is a
+  check that blocks the fix.
+
+Mutation-tested both ways: putting the prefix test back in the provider fails
+and names the line; weakening the one definition to a prefix fails with the
+original T-7x message.
+
+#### What this does not explain
+
+The reported chat error. The two reachable id shapes are handled correctly by
+both the old and the new predicate, so this cannot be what a citizen hit. The
+dispatcher channel's failure is still undiagnosed and needs the PostgREST
+response underneath the screen's own `"Error loading channel messages"` — that
+string is the error branch of the stream, not the error itself.
+
+`chat_messages` is in the realtime publication from `20260720000000` and
+`phase1_foundation`, both long applied, so the publication is not it either.

@@ -101,10 +101,25 @@ if writes and not faults:
                   f'isServerAlertId')
 
 # ── 2. the guard is a real UUID test ────────────────────────────────────────
-guard = re.search(r'static bool isServerAlertId\([^)]*\)\s*\{(.*?)\n  \}',
-                  tracking, re.S)
+#
+# The DEFINITION now lives in lib/core/offline/offline_ref.dart, beside
+# newOfflineLocalId — the function that mints the other kind of id. The two are
+# a matched pair and belong together, and the tracking service delegates to it.
+# This reads wherever it is defined rather than requiring it in the service,
+# because a check that insists on the old location is a check that blocks the
+# fix. T-86.
+OFFLINE_REF = REPO / 'lib/core/offline/offline_ref.dart'
+predicate_src = OFFLINE_REF.read_text(encoding='utf-8') if OFFLINE_REF.is_file() else ''
+guard = re.search(r'bool isServerAlertId\([^)]*\)\s*\{(.*?)\n\}',
+                  predicate_src, re.S)
 if guard is None:
-    faults.append('there is no `isServerAlertId` to guard with')
+    faults.append(
+        'there is no `isServerAlertId` to guard with in '
+        'lib/core/offline/offline_ref.dart')
+elif 'isServerAlertId' not in tracking:
+    faults.append(
+        'the tracking service no longer references `isServerAlertId` at all, '
+        'so nothing stops an OFFLINE_ id reaching a UUID column')
 else:
     body = guard.group(1)
     if '[0-9a-fA-F]{12}' not in body or '{8}' not in body:
@@ -148,6 +163,80 @@ if faults:
     print('FAIL: a tracked SOS may not reach the map.\n')
     for f in faults:
         print(f'  - {f}\n')
+    sys.exit(1)
+
+
+# ── ONE PREDICATE FOR "DID THE DATABASE ISSUE THIS ID?" ─────────────────────
+#
+# The docstring above says the predicate must match "a UUID rather than, say,
+# rejecting a prefix — a `!startsWith('OFFLINE_')` check would pass any other
+# junk". That was written for the tracking service, and it checks the tracking
+# service. The prefix version survived one file away:
+#
+#     // emergency_provider.dart
+#     final isRealAlertId = !safeAlertId.startsWith('LOCAL_') &&
+#         !safeAlertId.startsWith('OFFLINE_');
+#
+# and that one decides whether the DISPATCHER CHANNEL opens for a citizen in an
+# emergency. Both reachable values happened to be classified the same way by
+# either test, so nothing visible depended on it — which is why nobody noticed,
+# not a reason to keep two answers to one question.
+#
+# Asking "does this not look local" where the column asks "is this a uuid" is
+# one sentinel value away from losing a live route again, and `22P02 invalid
+# input syntax for type uuid` is what the column answers.
+#
+# A POSITIVE prefix test is a different question and stays allowed:
+# `alert_service.dart` asks "was this queued offline?" to tell a report sitting
+# in the local queue from one that reached the database, and the prefix is the
+# right answer to that. Only the NEGATED form is wrong, because only the
+# negated form is pretending to be a uuid test. T-86.
+NEGATED_PREFIX = re.compile(
+    r"!\s*[A-Za-z_][A-Za-z0-9_.]*\.startsWith\(\s*(?:offlineIdPrefix|'(?:OFFLINE_|LOCAL_)')")
+
+prefix_tests: list[str] = []
+for path in sorted((REPO / 'lib').rglob('*.dart')):
+    text = path.read_text(encoding='utf-8', errors='replace')
+    for m in NEGATED_PREFIX.finditer(text):
+        line = text.count('\n', 0, m.start()) + 1
+        prefix_tests.append(f'{path.relative_to(REPO)}:{line}')
+
+if prefix_tests:
+    print('"Is this a server id?" is being answered by a prefix test:\n')
+    for where in prefix_tests:
+        print(f'  {where}')
+    print()
+    print('A negated prefix test answers "does this not look local". The')
+    print('column asks "is this a uuid", and answers 22P02 when it is not.')
+    print('Use isServerAlertId from lib/core/offline/offline_ref.dart — one')
+    print('definition, beside the function that mints the other kind.')
+    print('See E2E_AUDIT_REPORT.md T-86.')
+    sys.exit(1)
+
+# And the one definition has to be the shared one, not a second copy.
+own = (REPO / 'lib/core/offline/offline_ref.dart').read_text(encoding='utf-8')
+if 'bool isServerAlertId(' not in own:
+    print('lib/core/offline/offline_ref.dart no longer defines isServerAlertId.')
+    print('That is the one definition, placed beside newOfflineLocalId because')
+    print('the two are a matched pair. See T-86.')
+    sys.exit(1)
+
+copies = []
+for path in sorted((REPO / 'lib').rglob('*.dart')):
+    if path.name == 'offline_ref.dart':
+        continue
+    text = path.read_text(encoding='utf-8', errors='replace')
+    # a second BODY, not a delegation (`=> offline.isServerAlertId(...)`)
+    for m in re.finditer(r'bool isServerAlertId\([^)]*\)\s*\{', text):
+        copies.append(f'{path.relative_to(REPO)}:'
+                      f'{text.count(chr(10), 0, m.start()) + 1}')
+if copies:
+    print('A second definition of isServerAlertId:\n')
+    for where in copies:
+        print(f'  {where}')
+    print()
+    print('Two answers to one question is how the prefix test survived. Keep')
+    print('one definition and delegate to it. See T-86.')
     sys.exit(1)
 
 print('OK: a tracked SOS writes an id the database takes, and follows it.')

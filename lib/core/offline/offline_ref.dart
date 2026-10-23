@@ -69,6 +69,36 @@ String newOfflineLocalId({DateTime? now, Random? random}) {
   return '$offlineIdPrefix${at}_${_hex(tag)}';
 }
 
+/// Whether [alertId] is an id the DATABASE issued, rather than a local one.
+///
+/// ONE answer to this question, beside the function that mints the other kind.
+/// There were two, and they did not agree about what they were testing:
+///
+///   background_tracking_service.dart  a UUID regex
+///   emergency_provider.dart           !startsWith('LOCAL_') &&
+///                                     !startsWith('OFFLINE_')
+///
+/// `scripts/check_a_tracked_sos_reaches_the_map.py` was written for T-7x and
+/// says, in its own words, that the predicate must match "a UUID rather than,
+/// say, rejecting a prefix — a `!startsWith('OFFLINE_')` check would pass any
+/// other junk". It checks the tracking service. The prefix version survived one
+/// file away, in the code that decides whether the dispatcher channel opens for
+/// a citizen in an emergency.
+///
+/// Today both reachable values — a server uuid, or an id from
+/// [newOfflineLocalId] — are classified the same way by either test, so nothing
+/// visible depended on it. That is a reason it went unnoticed, not a reason to
+/// keep two. `telemetry.alert_id` and `incident_tracks.alert_id` are UUID
+/// columns and PostgreSQL rejects anything else at the TYPE, before the foreign
+/// key: `22P02 invalid input syntax for type uuid`. A predicate that answers
+/// "not obviously local" when the column asks "is this a uuid" is one sentinel
+/// away from losing a live route again. See E2E_AUDIT_REPORT.md T-7x and T-86.
+bool isServerAlertId(String? alertId) {
+  if (alertId == null) return false;
+  return RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+                r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$').hasMatch(alertId);
+}
+
 /// Reads the six-byte tag out of a local id, or null if it has none.
 ///
 /// Null for the ids minted before this existed, and for a real database uuid.

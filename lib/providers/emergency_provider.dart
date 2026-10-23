@@ -3,6 +3,7 @@ import 'dart:developer' as dev;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:rainbow_app/core/offline/offline_ref.dart';
 import 'package:rainbow_app/core/models/emergency_state.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
@@ -52,8 +53,10 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
           );
 
       final safeAlertId = alertId ?? 'OFFLINE_PENDING';
-      final isRealAlertId = !safeAlertId.startsWith('LOCAL_') &&
-          !safeAlertId.startsWith('OFFLINE_');
+      // ONE predicate, not a second prefix test. This decides whether the
+      // dispatcher channel opens, and it asked "does this not look local"
+      // where the column asks "is this a uuid". See T-86.
+      final isRealAlertId = isServerAlertId(safeAlertId);
 
       unawaited(
         BackgroundTrackingService().startSosTracking(safeAlertId, userId),

@@ -39,6 +39,16 @@ class _FakeAuthNotifier extends AuthNotifier {
   void initAuth() {}
 }
 
+/// A server alert id, in the shape the COLUMN actually takes.
+///
+/// This was the literal `'server-uuid-1234'` — a stand-in that reads like "a
+/// server uuid" and is not one. It satisfied the old predicate, which asked
+/// `!startsWith('OFFLINE_')`, so the fixture and the check agreed with each
+/// other and neither agreed with `alerts.id UUID`. Replacing the check with a
+/// real UUID test failed this test, which is the fixture having encoded the
+/// weak assumption. See E2E_AUDIT_REPORT.md T-86.
+const String kServerAlertId = '7f3a1c94-2b6d-4e58-9a01-5c8e2d4f6b70';
+
 void main() {
   // Geolocator and the background-tracking service have no platform
   // implementation here; both catch their own failures, so the SOS proceeds
@@ -110,7 +120,7 @@ void main() {
 
   group('startEmergency — happy path', () {
     test('writes the alert BEFORE dispatching the SMS', () async {
-      final c = containerWith(onSubmit: () async => 'server-uuid-1234');
+      final c = containerWith(onSubmit: () async => kServerAlertId);
       addTearDown(c.dispose);
 
       await c.read(emergencyProvider.notifier).startEmergency();
@@ -125,7 +135,7 @@ void main() {
     });
 
     test('quotes the real alert id to dispatch', () async {
-      final c = containerWith(onSubmit: () async => 'server-uuid-1234');
+      final c = containerWith(onSubmit: () async => kServerAlertId);
       addTearDown(c.dispose);
 
       await c.read(emergencyProvider.notifier).startEmergency();
@@ -138,8 +148,8 @@ void main() {
           longitude: any(named: 'longitude'),
         ),
       ).captured.single;
-      expect(captured, 'server-uuid-1234');
-      expect(c.read(emergencyProvider).alertId, 'server-uuid-1234');
+      expect(captured, kServerAlertId);
+      expect(c.read(emergencyProvider).alertId, kServerAlertId);
       expect(c.read(emergencyProvider).isEmergencyActive, isTrue);
     });
   });
@@ -232,7 +242,7 @@ void main() {
     // getCurrentPosition throws and the SOS proceeds with no fix. That is the
     // exact scenario C-5 was about, and it is reproduced here for free.
     test('a missing GPS fix reaches both collaborators as null', () async {
-      final c = containerWith(onSubmit: () async => 'server-uuid-1234');
+      final c = containerWith(onSubmit: () async => kServerAlertId);
       addTearDown(c.dispose);
 
       await c.read(emergencyProvider.notifier).startEmergency();
@@ -264,7 +274,7 @@ void main() {
     });
 
     test('jurisdiction is still attached when the position is unknown', () async {
-      final c = containerWith(onSubmit: () async => 'server-uuid-1234');
+      final c = containerWith(onSubmit: () async => kServerAlertId);
       addTearDown(c.dispose);
 
       await c.read(emergencyProvider.notifier).startEmergency();
@@ -287,7 +297,7 @@ void main() {
     });
 
     test('the alert is marked critical', () async {
-      final c = containerWith(onSubmit: () async => 'server-uuid-1234');
+      final c = containerWith(onSubmit: () async => kServerAlertId);
       addTearDown(c.dispose);
 
       await c.read(emergencyProvider.notifier).startEmergency();
