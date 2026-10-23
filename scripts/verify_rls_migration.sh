@@ -723,6 +723,91 @@ for fn in claim_agency_handovers mark_agency_handover_sent mark_agency_handover_
 done
 echo "  PASS  and none of the three retry functions is reachable by anon or authenticated"
 
+# The command tier the deployment actually has. Both role functions were
+# exact-match lists of this repository's vocabulary, so the production
+# project's STATE_COMMANDER and LGA_COMMANDER accounts satisfied neither.
+#
+# Exercised per ROLE, because "the function was replaced" is not the claim —
+# the claim is that a commander under either spelling may command, and that
+# widening it moved nobody else up the chain.
+echo "▶ Applying 20261028000000_command_knows_both_vocabularies.sql"
+psql_run "-f $PGROOT/20261028000000_command_knows_both_vocabularies.sql" >/dev/null
+psql_run "-f $PGROOT/20261028000000_command_knows_both_vocabularies.sql" >/dev/null
+
+cat > "$PGROOT/zz_command_vocab_probe.sql" <<'PROBE'
+DO $probe$
+DECLARE
+  r            RECORD;
+  v_uid        UUID;
+  v_is_cmd     BOOLEAN;
+  v_whole      BOOLEAN;
+  -- role -> what it must be allowed. Both spellings of each rung, and the
+  -- rungs that must NOT have been moved up.
+  expected     TEXT[][] := ARRAY[
+    ['HQ_COMMAND',           'command', 'whole'],
+    ['STATE_COMMANDER',      'command', 'whole'],
+    ['ADMIN',                'command', 'whole'],
+    ['LGA_COMMAND',          'command', 'posting'],
+    ['LGA_COMMANDER',        'command', 'posting'],
+    ['WARD_COMMAND',         'none',    'posting'],
+    ['WARD_COMMANDER',       'none',    'posting'],
+    ['UNIT_COMMAND',         'none',    'posting'],
+    ['POLLING_UNIT_OFFICER', 'none',    'posting'],
+    ['CITIZEN',              'none',    'posting']
+  ];
+BEGIN
+  FOR i IN 1 .. array_length(expected, 1) LOOP
+    v_uid := gen_random_uuid();
+    INSERT INTO auth.users (id, email) VALUES (v_uid, expected[i][1] || '@probe.test');
+    -- handle_new_user() already made the profile. Set the role on it rather
+    -- than inserting a second one — and do it BEFORE the jwt claim is set,
+    -- because the role-change trigger permits a change only while auth.uid()
+    -- is null or the caller is service_role, which is exactly how the backend
+    -- assigns a role and exactly why widening is_command() grants nothing a
+    -- user can give themselves.
+    UPDATE public.profiles SET role = expected[i][1] WHERE id = v_uid;
+
+    PERFORM set_config('request.jwt.claim.sub', v_uid::text, true);
+    PERFORM set_config('request.jwt.claims',
+      json_build_object('sub', v_uid::text, 'role', 'authenticated')::text, true);
+
+    SELECT public.is_command(), public.commands_whole_state()
+      INTO v_is_cmd, v_whole;
+
+    IF expected[i][2] = 'command' AND NOT v_is_cmd THEN
+      RAISE EXCEPTION 'FAIL: % is a commander and is_command() said false', expected[i][1];
+    END IF;
+    IF expected[i][2] = 'none' AND v_is_cmd THEN
+      RAISE EXCEPTION 'FAIL: % is NOT command and is_command() said true — this migration moved somebody up the chain', expected[i][1];
+    END IF;
+    IF expected[i][3] = 'whole' AND NOT v_whole THEN
+      RAISE EXCEPTION 'FAIL: % commands the state and commands_whole_state() said false', expected[i][1];
+    END IF;
+    IF expected[i][3] = 'posting' AND v_whole THEN
+      RAISE EXCEPTION 'FAIL: % does not command the state and commands_whole_state() said true', expected[i][1];
+    END IF;
+
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+    PERFORM set_config('request.jwt.claims', '', true);
+    DELETE FROM public.profiles WHERE id = v_uid;
+    DELETE FROM auth.users WHERE id = v_uid;
+  END LOOP;
+
+  RAISE NOTICE 'PASS: both spellings of HQ and LGA command, and nobody else, under either function';
+  RAISE NOTICE 'ALL COMMAND VOCABULARY ASSERTIONS PASSED';
+END $probe$;
+PROBE
+chown postgres:postgres "$PGROOT/zz_command_vocab_probe.sql"
+CV_OUT=$(psql_run "-f $PGROOT/zz_command_vocab_probe.sql" 2>&1) && CV_RC=0 || CV_RC=$?
+printf '%s\n' "$CV_OUT" | grep -E "PASS:|FAIL:" | sed 's/^.*NOTICE:  /  /' || true
+if [ "$CV_RC" -ne 0 ] || printf '%s\n' "$CV_OUT" | grep -q "FAIL:"; then
+  printf '%s\n' "$CV_OUT"
+  echo "✗ command vocabulary assertions failed"; exit 1
+fi
+printf '%s\n' "$CV_OUT" | grep -q "ALL COMMAND VOCABULARY ASSERTIONS PASSED" || {
+  printf '%s\n' "$CV_OUT"
+  echo "✗ the command vocabulary probe did not reach its verdict"; exit 1; }
+
 echo "▶ Asserting no policy in schema public reaches anon or public, by name"
 PR_OUT=$(psql_run "-f $PGROOT/policy_roles_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?
 echo "$PR_OUT" | grep -E "PASS|FAIL|ERROR" || true

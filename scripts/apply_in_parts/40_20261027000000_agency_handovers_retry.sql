@@ -209,5 +209,3 @@ COMMENT ON FUNCTION public.claim_agency_handovers(INTEGER) IS
   'Same shape and same backoff as claim_notifications: the index from 2026-07 '
   'said "(retry jobs)" and there was no retry job. See T-89.';
 
-
-

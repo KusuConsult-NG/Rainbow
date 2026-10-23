@@ -837,6 +837,19 @@ jobs:
       - name: Assert the capture counts only the screens it rendered
         run: python3 scripts/check_the_capture_counts_only_what_it_rendered.py
 
+      # The production project's 22 staff accounts carry a vocabulary this
+      # repository never had — STATE_COMMANDER, LGA_COMMANDER,
+      # WARD_COMMANDER, POLLING_UNIT_OFFICER — and it broke in two layers.
+      # T-85: the app chose a rung by substring test, so STATE_COMMANDER
+      # matched nothing and every HQ duty officer was shown a polling unit's
+      # board. T-90: is_command() and commands_whole_state() are exact-match
+      # lists, so 2 of those 22 accounts could post an advisory, publish a
+      # shelter or use the agency portal. Both fixed by teaching each layer
+      # the second spelling — which leaves two lists, in two languages, that
+      # have to agree. This is what checks they do.
+      - name: Assert the app and the database agree about who commands
+        run: python3 scripts/check_one_command_vocabulary.py
+
       # `tier_timeout_minutes()` is the only reader of the three escalation
       # timeouts and it refuses what it cannot use — `raw::INTEGER`, then
       # `parsed <= 0` — because, in the migration's own words, a timeout of 0

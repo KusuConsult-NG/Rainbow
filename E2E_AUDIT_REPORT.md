@@ -10848,3 +10848,112 @@ queued notifications with **0 attempts**, never tried. Scheduling a drainer
 starts sending real SMS and push to real people, and some of those rows are from
 July. Both queues now HAVE a drainer; neither is scheduled, and that remains a
 decision for whoever is willing to be responsible for 412 messages going out.
+
+---
+
+### T-90. Two of twenty-two commanders could command
+
+Found while answering item 5 — *nothing creates a shelter*. The write policy
+turned out to exist all along:
+
+```sql
+CREATE POLICY "safe_zones_write_command" ON public.safe_zones
+  FOR ALL TO authenticated
+  USING (public.is_command()) WITH CHECK (public.is_command());
+```
+
+So command **can** publish a shelter. The question became who `is_command()`
+thinks command is, and the answer is the T-85 defect one layer down, where the
+app's fix cannot reach.
+
+```sql
+is_command()           IN ('HQ_COMMAND','HQ_OFFICER','ADMIN','LGA_COMMAND')
+commands_whole_state() IN ('HQ_COMMAND','HQ_OFFICER','ADMIN')
+```
+
+Exact-match lists of this repository's vocabulary. The production project's 22
+staff accounts carry `STATE_COMMANDER` (×4), `LGA_COMMANDER` (×4),
+`WARD_COMMANDER` (×4) and `POLLING_UNIT_OFFICER` (×6). **Exactly two accounts —
+one `HQ_COMMAND`, one `LGA_COMMAND` — satisfy `is_command()`.**
+
+Every other commander is refused by every policy gated on it:
+
+| what | table |
+| --- | --- |
+| **posting an advisory** — the situational feed | `system_alerts` write/update/delete |
+| publishing a shelter | `safe_zones` write |
+| the entire agency portal | `agency_personnel`, `agency_deployments`, `agency_action_reports`, `agency_notifications` |
+| acknowledging a SIM swap on a handset | `sim_channel_events` |
+| approving an uninstall | `uninstall_requests` update |
+
+The first row is a reported symptom: *"situational feed doesn't work as well."*
+An HQ duty officer on a `STATE_COMMANDER` account cannot write `system_alerts`.
+
+#### It also explains the diagnostic's own numbers
+
+`why_is_the_board_empty.sql` reported `steviekusu@gmail.com` — the one
+`HQ_COMMAND` profile — seeing **156 of 156, "commands the whole state"**, while
+hq-001 and hq-002 saw **106**. That is `commands_whole_state()` returning false
+for `STATE_COMMANDER`, so their scope falls back to their posting: one polling
+unit in Bukuru. The number was in front of me in T-85 and I read it as a
+coincidence of seeded data.
+
+#### Why `is_staff()` was fine, and why that made it look like a filter
+
+```sql
+is_staff()  NOT IN ('CITIZEN', 'USER')
+```
+
+Written as an **exclusion**, so every staff name passes it whatever it is
+called. That is why those accounts could read incidents all along — and why the
+failure presented as a filtering problem rather than a permissions one. An
+inclusion list goes stale against a new name; an exclusion list does not. Same
+two functions, same file, opposite robustness, and nothing had noticed.
+
+#### Why widening these is safe
+
+`profiles.role` cannot be chosen or changed by any authenticated user. The
+trigger in `20260813000000` section 4 raises `42501` on **any** role change
+unless the caller is `service_role` or `auth.uid()` is null. So recognising a
+name grants nothing a user can give themselves: the backend assigns roles, and a
+citizen cannot become a `STATE_COMMANDER` to obtain these rights.
+
+`WARD_COMMANDER` and `POLLING_UNIT_OFFICER` are deliberately **not** added.
+`is_command()` already excludes `WARD_COMMAND` and `UNIT_COMMAND`, so their
+synonyms stay out — this teaches the database a second spelling, it does not
+move anybody up the chain. `upper()` is applied too, so case cannot decide a
+permission either.
+
+#### Exercised per role
+
+The replay drives all ten role names through both functions against real
+PostgreSQL 16 and asserts both directions — that each spelling of HQ and LGA is
+accepted, **and that ward, polling-unit and citizen roles are still refused by
+both**. The second half is the one that matters for a migration which widens a
+permission.
+
+Writing that probe found its own small thing: `handle_new_user()` already
+creates the profile, so inserting one duplicated the key. It updates the role
+instead — before setting the JWT claim, because the role-change trigger permits
+a change only while `auth.uid()` is null, which is precisely the mechanism that
+makes this migration safe.
+
+#### The gate
+
+`check_one_command_vocabulary.py` reads `staffRoleTiers` from the Dart and the
+newest definition of each SQL function, and asserts they agree: an HQ rung
+satisfies both functions, an LGA rung satisfies `is_command()` only, and
+everything else satisfies neither. The database may carry names the app does not
+(`HQ_OFFICER`, `ADMIN`); the direction that matters is that a rung the app hands
+somebody is a rung the database honours.
+
+Three mutations caught: `STATE_COMMANDER` dropped from `is_command()`, a ward
+role promoted to `hq` in the app, and a ward role added to
+`commands_whole_state()`.
+
+#### Item 5, finally
+
+Nothing still *creates* a shelter — there is no screen or seed that writes one.
+But the reason nothing could was not only a missing UI: on the deployed project
+8 of the 10 accounts that ought to be able to publish one were refused by RLS,
+and that was invisible because no shelter had ever been published to notice.
