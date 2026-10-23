@@ -10760,3 +10760,91 @@ Worth noting why that one had not fired before: T-76 wrote the same fallback as
 `'unknown'`, lowercase, and the gate's literal pattern requires a leading
 capital. The same string, in the same screen, invisible to the check because of
 its case — and caught this time only because I happened to write it in capitals.
+
+---
+
+### T-89. The index said "(retry jobs)" since July, and `sent_at` was a lie
+
+Item 6 of the outstanding list. Recorded in T-44's "What is still open":
+
+> Nothing retries. `20260722000000` creates
+> `idx_agency_notifications_status … WHERE status = 'FAILED'` and its comment
+> says "(retry jobs)"; there is no retry job.
+
+`agency_notifications` is the record of handing an incident to the Police or the
+Army. A failed leg said FAILED and nothing tried again. The failure was visible
+to HQ on the incident replay — the difference between a silent failure and a
+known one — but an agency whose channel was briefly down stayed handed nobody
+until a person noticed.
+
+#### Nothing here is a new policy
+
+T-44 named the decisions it would take — *"how many times do you re-send an SMS
+about an emergency, and to whom does it escalate when the agency's own channel
+is down"* — and said the right move was *"to drain these the way
+`notification_outbox` is drained, with the same backoff and the same `attempts`
+column, rather than to invent a second mechanism"*.
+
+So every decision is the one `20261007000000` already made for the same
+question: claim with `FOR UPDATE SKIP LOCKED` holding the row one minute; back
+off `attempts * 2` minutes, capped at 60; **no give-up count**, because the
+thing not getting through is an emergency handed to the Police. Escalation when
+a channel stays down is still a person reading the replay — deliberately
+unchanged. This makes the machine stop giving up; it does not invent a second
+human to call.
+
+Three columns (`attempts`, `next_attempt_at`, `last_error`), three
+service-role-only functions (`claim_agency_handovers`,
+`mark_agency_handover_sent`, `mark_agency_handover_failed`), and the index the
+retry actually needs — the July one is on `status` alone, which finds the
+failures and not the DUE ones.
+
+#### And the defect underneath, found by running the loop
+
+The first claim returned **nothing**. The filter was `sent_at IS NULL`, and:
+
+```sql
+sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()   -- 20260812000000
+```
+
+**`sent_at` records when the row was created, not when the leg was sent.** A
+handover that failed, was skipped, or was never attempted carries a send time
+anyway — and HQ reads that on the incident replay as a delivery that happened.
+
+A timestamp that looks measured and is a default, in the record of whether an
+emergency reached an outside agency. The same family as C-5 and T-84, in a time
+column instead of a coordinate, and it has been there since the agency tables
+were written.
+
+The default and the `NOT NULL` are gone, so an unsent leg has no send time.
+Rows already marked FAILED are nulled, because that is the one case where the
+truth is known. SENT and SKIPPED rows are left alone: their value may be a
+default or may be real, nothing here can tell, and inventing a null would be
+the same mistake with the opposite sign.
+
+#### Exercised, not asserted to exist
+
+A queue whose claim function has never been called is a queue nobody knows the
+shape of. The replay drives one failed leg through the whole loop against real
+PostgreSQL 16:
+
+```
+PASS: a due failed leg is claimed once, counted, and held
+PASS: and a held leg is not claimed again on the next tick
+PASS: a failure backs off and records its reason
+PASS: a sent leg leaves the queue
+PASS  and none of the three retry functions is reachable by anon or authenticated
+```
+
+The second of those is the one that matters for a worker running every minute,
+and the one "the function exists" would never have told us. The whole reason the
+`sent_at` defect surfaced is that this probe ran the loop instead of checking
+the function was there.
+
+#### Still not scheduled, and that is the operator's call
+
+`drain-outbox` has no `cron.schedule` either — the production project holds 412
+queued notifications with **0 attempts**, never tried. Scheduling a drainer
+starts sending real SMS and push to real people, and some of those rows are from
+July. Both queues now HAVE a drainer; neither is scheduled, and that remains a
+decision for whoever is willing to be responsible for 412 messages going out.

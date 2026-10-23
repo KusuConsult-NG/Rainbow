@@ -35,10 +35,10 @@ Both are correct. Every statement in every migration is `IF NOT EXISTS`,
 `OR REPLACE` or guarded by an explicit existence check, and
 `scripts/verify_apply_all.sh` applies the whole bundle **twice** on every push
 to prove it. So pasting a migration a database already has is a no-op, and
-pasting all 39 is always safe. The reason to know which ones are missing is
+pasting all 40 is always safe. The reason to know which ones are missing is
 not safety — it is being able to tell, afterwards, whether anything changed.
 
-The complete table of all 39, in apply order, with what breaks until each one
+The complete table of all 40, in apply order, with what breaks until each one
 runs, is in `docs/PRODUCTION_DEPLOYMENT.md`, and
 `scripts/check_runbook_covers_migrations.py` fails CI if a migration is added
 and that table does not describe it.
@@ -80,7 +80,7 @@ Two pastes, in this order:
 1. **`scripts/rls_production_dryrun.sql`** — read-only, rolls everything back,
    prints a verdict. If it says `>>> DO NOT APPLY`, stop: the PROBLEM lines name
    a hand-made policy that would survive the migration and re-open a table.
-2. **`scripts/apply_all_migrations.sql`** — all 39, in order, finishing with a
+2. **`scripts/apply_all_migrations.sql`** — all 40, in order, finishing with a
    34-row PASS/FAIL table. Every row PASS means you are done. Both numbers are
    generated and gated, so if the table you get is a different size, you are
    not running the file this repository builds.

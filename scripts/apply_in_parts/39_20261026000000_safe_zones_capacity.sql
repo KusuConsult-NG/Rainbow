@@ -105,5 +105,3 @@ COMMENT ON COLUMN public.safe_zones.capacity IS
   'How many people this shelter holds. NULL means it has not been recorded, '
   'which is not the same as zero: the app draws the line only when it is set.';
 
-
-

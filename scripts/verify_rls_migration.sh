@@ -625,6 +625,104 @@ psql_run "-c \"insert into public.safe_zones (name, latitude, longitude, capacit
 psql_run "-c \"delete from public.safe_zones where name = 'zz probe';\"" >/dev/null
 echo "  PASS  safe_zones.capacity is a nullable integer that refuses a negative"
 
+# A failed handover to an outside agency now gets retried. The index saying
+# "(retry jobs)" has existed since July with no retry job.
+#
+# Applied twice, and then EXERCISED: a queue whose claim function has never been
+# called is a queue nobody knows the shape of. The assertions below drive one
+# failed leg through claim -> fail -> back off -> claim again, because that is
+# the loop a worker runs and "the function exists" is not the same claim.
+echo "▶ Applying 20261027000000_agency_handovers_retry.sql"
+psql_run "-f $PGROOT/20261027000000_agency_handovers_retry.sql" >/dev/null
+psql_run "-f $PGROOT/20261027000000_agency_handovers_retry.sql" >/dev/null
+
+cat > "$PGROOT/zz_agency_retry_probe.sql" <<'PROBE'
+DO $probe$
+DECLARE
+  v_alert  UUID;
+  v_leg    UUID;
+  v_claim  INTEGER;
+  v_next   TIMESTAMPTZ;
+  v_att    INTEGER;
+BEGIN
+  SELECT id INTO v_alert FROM public.alerts ORDER BY created_at LIMIT 1;
+
+  INSERT INTO public.agency_notifications (agency, alert_id, method, status)
+  VALUES ('POLICE', v_alert, 'SMS', 'FAILED')
+  RETURNING id INTO v_leg;
+
+  -- A FAILED leg that is due must be claimable, and claiming must hold it.
+  SELECT count(*) INTO v_claim
+    FROM public.claim_agency_handovers(10) c WHERE c.id = v_leg;
+  IF v_claim <> 1 THEN
+    RAISE EXCEPTION 'FAIL: a due FAILED leg was not claimed (got %)', v_claim;
+  END IF;
+  SELECT attempts, next_attempt_at INTO v_att, v_next
+    FROM public.agency_notifications WHERE id = v_leg;
+  IF v_att <> 1 THEN
+    RAISE EXCEPTION 'FAIL: claiming did not count the attempt (attempts=%)', v_att;
+  END IF;
+  IF v_next <= NOW() THEN
+    RAISE EXCEPTION 'FAIL: claiming did not hold the row (next_attempt_at=%)', v_next;
+  END IF;
+  RAISE NOTICE 'PASS: a due failed leg is claimed once, counted, and held';
+
+  -- Claiming again immediately must NOT return it: that is the whole point of
+  -- the hold, and a second worker on the next tick must not take it.
+  SELECT count(*) INTO v_claim
+    FROM public.claim_agency_handovers(10) c WHERE c.id = v_leg;
+  IF v_claim <> 0 THEN
+    RAISE EXCEPTION 'FAIL: a held leg was claimed again immediately';
+  END IF;
+  RAISE NOTICE 'PASS: and a held leg is not claimed again on the next tick';
+
+  -- Failing it backs off with the attempt count, and records why.
+  PERFORM public.mark_agency_handover_failed(v_leg, 'probe: gateway refused');
+  SELECT next_attempt_at INTO v_next
+    FROM public.agency_notifications WHERE id = v_leg;
+  IF v_next < NOW() + INTERVAL '1 minute' THEN
+    RAISE EXCEPTION 'FAIL: failure did not back off (next_attempt_at=%)', v_next;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.agency_notifications
+                  WHERE id = v_leg AND last_error LIKE 'probe:%') THEN
+    RAISE EXCEPTION 'FAIL: failure did not record why';
+  END IF;
+  RAISE NOTICE 'PASS: a failure backs off and records its reason';
+
+  -- Succeeding takes it out of the queue for good.
+  PERFORM public.mark_agency_handover_sent(v_leg);
+  SELECT count(*) INTO v_claim
+    FROM public.claim_agency_handovers(10) c WHERE c.id = v_leg;
+  IF v_claim <> 0 THEN
+    RAISE EXCEPTION 'FAIL: a SENT leg is still in the queue';
+  END IF;
+  RAISE NOTICE 'PASS: a sent leg leaves the queue';
+
+  DELETE FROM public.agency_notifications WHERE id = v_leg;
+  RAISE NOTICE 'ALL AGENCY HANDOVER RETRY ASSERTIONS PASSED';
+END $probe$;
+PROBE
+chown postgres:postgres "$PGROOT/zz_agency_retry_probe.sql"
+AGR_OUT=$(psql_run "-f $PGROOT/zz_agency_retry_probe.sql" 2>&1) && AGR_RC=0 || AGR_RC=$?
+printf '%s\n' "$AGR_OUT" | grep -E "PASS:|FAIL:" | sed 's/^.*NOTICE:  /  /' || true
+if [ "$AGR_RC" -ne 0 ] || printf '%s\n' "$AGR_OUT" | grep -q "FAIL:"; then
+  printf '%s\n' "$AGR_OUT"
+  echo "✗ agency handover retry assertions failed"; exit 1
+fi
+printf '%s\n' "$AGR_OUT" | grep -q "ALL AGENCY HANDOVER RETRY ASSERTIONS PASSED" || {
+  printf '%s\n' "$AGR_OUT"
+  echo "✗ the agency retry probe did not reach its verdict"; exit 1; }
+
+# Only the service role drains a queue.
+for fn in claim_agency_handovers mark_agency_handover_sent mark_agency_handover_failed; do
+  LEAK=$(su postgres -s /bin/bash -c "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
+    \"select count(*) from information_schema.routine_privileges \
+       where routine_schema='public' and routine_name='$fn' \
+         and grantee in ('anon','authenticated','PUBLIC');\"")
+  [ "$LEAK" = "0" ] || { echo "✗ $fn is executable by $LEAK non-service role(s)"; exit 1; }
+done
+echo "  PASS  and none of the three retry functions is reachable by anon or authenticated"
+
 echo "▶ Asserting no policy in schema public reaches anon or public, by name"
 PR_OUT=$(psql_run "-f $PGROOT/policy_roles_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?
 echo "$PR_OUT" | grep -E "PASS|FAIL|ERROR" || true
