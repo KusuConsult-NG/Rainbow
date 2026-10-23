@@ -8,27 +8,77 @@ interface Props {
 }
 
 export default function LiveFeedViewer({ alertId }: Props) {
-  const [status, setStatus] = useState<'IDLE' | 'CONNECTING' | 'LIVE' | 'DISCONNECTED'>('IDLE');
+  const [status, setStatus] = useState<'IDLE' | 'CONNECTING' | 'LIVE' | 'DISCONNECTED' | 'FAILED'>('IDLE');
   const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const channelRef = useRef<any>(null);
 
-  const startListening = () => {
+  const startListening = async () => {
     setStatus('CONNECTING');
     setError(null);
 
-    const rtcConfig: RTCConfiguration = {
+    // ICE FROM THE SERVER, NOT THREE LITERALS.
+    //
+    // This was the same three public STUN servers the handset had written into
+    // it, and neither side had a TURN relay. STUN discovers an address; it
+    // cannot relay, and a handset behind carrier-grade NAT usually needs one.
+    // The credential cannot be NEXT_PUBLIC_ (inlined into the bundle at build
+    // time, served to every visitor), so /api/rtc/config hands it over per
+    // request. T-96.
+    let rtcConfig: RTCConfiguration = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
       ],
     };
+    try {
+      const res = await fetch('/api/rtc/config', { cache: 'no-store' });
+      if (res.ok) {
+        const body = await res.json();
+        if (Array.isArray(body?.iceServers) && body.iceServers.length > 0) {
+          rtcConfig = { iceServers: body.iceServers };
+        }
+        if (body?.hasRelay === false) {
+          // Said, not swallowed. An operator watching CONNECTING for ever
+          // deserves to know the deployment has no relay, because that is the
+          // likeliest reason and it is a configuration fix, not a retry.
+          setError(
+            'No TURN relay is configured (TURN_URL). A stream from a phone on ' +
+              'mobile data will often fail to connect.',
+          );
+        }
+      }
+    } catch {
+      // Falling back to the STUN-only default rather than refusing to listen:
+      // a stream that might connect beats no attempt at all, and the status
+      // below says whether it did.
+      console.warn('[LIVE_FEED_HQ] Could not read /api/rtc/config; using STUN only.');
+    }
 
     try {
       const pc = new RTCPeerConnection(rtcConfig);
       pcRef.current = pc;
+
+      // WITHOUT THIS, A STREAM THAT NEVER CONNECTS SITS ON "CONNECTING" FOR EVER.
+      //
+      // `ontrack` below reports LIVE, which is a real signal — media arriving.
+      // Nothing reported the other outcome, so a failed ICE negotiation looked
+      // identical to one still in progress, and HQ had no way to tell "the
+      // phone is still negotiating" from "this will never connect". T-96.
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'failed') {
+          setStatus('FAILED');
+          setError((prev) =>
+            prev ??
+            'The connection could not be established. With no TURN relay this ' +
+              'is the usual outcome for a handset on mobile data.',
+          );
+        } else if (pc.connectionState === 'disconnected') {
+          setStatus('CONNECTING');
+        }
+      };
 
       pc.ontrack = (event) => {
         console.log('[LIVE_FEED_HQ] Received Remote Stream Track:', event.streams);
@@ -171,15 +221,22 @@ export default function LiveFeedViewer({ alertId }: Props) {
             fontWeight: 800,
             padding: '2px 8px',
             borderRadius: '12px',
-            background: status === 'LIVE' ? 'rgba(239,68,68,0.2)' : status === 'CONNECTING' ? 'rgba(245,158,11,0.2)' : 'rgba(100,116,139,0.2)',
-            color: status === 'LIVE' ? '#B3261E' : status === 'CONNECTING' ? '#7E6112' : '#757575',
-            border: `1px solid ${status === 'LIVE' ? '#B3261E' : status === 'CONNECTING' ? '#7E6112' : '#616161'}`
+            background: status === 'LIVE' ? 'rgba(239,68,68,0.2)' : status === 'CONNECTING' ? 'rgba(245,158,11,0.2)' : status === 'FAILED' ? 'rgba(239,68,68,0.12)' : 'rgba(100,116,139,0.2)',
+            color: status === 'LIVE' ? '#B3261E' : status === 'CONNECTING' ? '#7E6112' : status === 'FAILED' ? '#B3261E' : '#757575',
+            border: `1px solid ${status === 'LIVE' ? '#B3261E' : status === 'CONNECTING' ? '#7E6112' : status === 'FAILED' ? '#B3261E' : '#616161'}`
           }}>
-            {status === 'LIVE' ? '🔴 BROADCASTING LIVE' : status === 'CONNECTING' ? '⚡ CONNECTING P2P' : status === 'DISCONNECTED' ? 'OFFLINE' : 'STANDBY'}
+            {/* FAILED used to fall through to STANDBY — the same label as
+                "nobody has pressed the button", for a stream that tried and
+                could not connect. The whole point of this change is that the
+                two are not the same thing. T-96. */}
+            {status === 'LIVE' ? '🔴 BROADCASTING LIVE'
+              : status === 'CONNECTING' ? '⚡ CONNECTING P2P'
+              : status === 'FAILED' ? '⚠ COULD NOT CONNECT'
+              : status === 'DISCONNECTED' ? 'OFFLINE' : 'STANDBY'}
           </span>
         </div>
 
-        {status === 'IDLE' ? (
+        {status === 'IDLE' || status === 'FAILED' ? (
           <button
             onClick={startListening}
             style={{

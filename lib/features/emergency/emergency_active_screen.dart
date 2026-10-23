@@ -114,14 +114,47 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
         }
       }),
     );
+
+    // Subscribed for the screen's whole life, not around a single call: the
+    // connection can come up, drop and come back, and each of those is
+    // something the person holding the phone needs to see.
+    _streamStatusSub = LiveStreamService().statusStream.listen((status) {
+      if (!mounted) return;
+      setState(() => _streamStatus = status);
+      if (status == LiveStreamStatus.failed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_t('eme_stream_failed')),
+            backgroundColor: AppColors.surfaceContainerHighest,
+          ),
+        );
+      }
+    });
   }
 
+  /// Whether there is a stream to stop — the camera is on. NOT whether HQ is
+  /// receiving; that is [_streamStatus], and the two were the same variable.
   bool _isLiveStreaming = false;
+
+  /// WHAT HQ IS ACTUALLY DOING, WHICH IS NOT WHAT THE BUTTON USED TO SAY.
+  ///
+  /// This screen set `_isLiveStreaming = success` straight from
+  /// `startStream()`, which returns true as soon as the OFFER has been
+  /// broadcast — before any answer, any ICE candidate or any connection. So
+  /// somebody in an emergency got a red "BROADCASTING LIVE TO HQ" and the
+  /// camera light, having established nothing. With no TURN relay configured
+  /// that is the ordinary outcome on mobile data, not an edge case.
+  ///
+  /// Driven by the peer connection now, which is the only thing that knows.
+  /// T-96.
+  LiveStreamStatus _streamStatus = LiveStreamStatus.idle;
+  StreamSubscription<LiveStreamStatus>? _streamStatusSub;
 
   @override
   void dispose() {
     _tickTimer?.cancel();
     _cancelTimer?.cancel();
+    unawaited(_streamStatusSub?.cancel());
     _cancelController.dispose();
     _pulseController.dispose();
     if (_isLiveStreaming) {
@@ -144,17 +177,23 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
       await LiveStreamService().stopStream();
       if (mounted) setState(() => _isLiveStreaming = false);
     } else {
-      final success = await LiveStreamService().startStream(alertId);
+      final started = await LiveStreamService().startStream(alertId);
       if (mounted) {
-        setState(() => _isLiveStreaming = success);
+        // `started` means the camera is on and an offer has gone out. It is NOT
+        // a connection, and it must not be announced as one — the status
+        // subscription says when HQ is actually receiving, and says so again if
+        // it stops.
+        setState(() => _isLiveStreaming = started);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              success
-                  ? '🔴 ${_t('eme_broadcast_live')}'
+              started
+                  ? _t('eme_stream_connecting')
                   : _t('eme_stream_failed'),
             ),
-            backgroundColor: success ? AppColors.danger : AppColors.surfaceContainerHighest,
+            backgroundColor: started
+                ? AppColors.warning
+                : AppColors.surfaceContainerHighest,
           ),
         );
       }
@@ -384,9 +423,14 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                             color: Colors.white,
                           ),
                           label: Text(
-                            _isLiveStreaming
-                                ? _t('eme_stop_stream')
-                                : _t('eme_broadcast_live'),
+                            // Three states, not two. A stream that is on but
+                            // not connected is the one this label used to get
+                            // wrong, and it is the common one.
+                            !_isLiveStreaming
+                                ? _t('eme_broadcast_live')
+                                : _streamStatus == LiveStreamStatus.live
+                                    ? _t('eme_stop_stream')
+                                    : _t('eme_stream_connecting'),
                             style: GoogleFonts.outfit(
                               color: Colors.white,
                               fontWeight: FontWeight.w800,
@@ -395,7 +439,13 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                             ),
                           ),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: _isLiveStreaming ? AppColors.danger : AppColors.primary,
+                            // Red is a promise that HQ is watching, so it is
+                            // only used once the connection says so.
+                            backgroundColor: !_isLiveStreaming
+                                ? AppColors.primary
+                                : _streamStatus == LiveStreamStatus.live
+                                    ? AppColors.danger
+                                    : AppColors.warning,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             padding: const EdgeInsets.symmetric(vertical: 10),
                           ),

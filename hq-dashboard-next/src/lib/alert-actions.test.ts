@@ -412,9 +412,15 @@ describe('resolveAlert', () => {
 
   // Who closed an incident is the audit trail for it. Falling back to the id,
   // then to a marker, means the field is never silently empty.
+  //
+  // The last-resort marker was 'HQ_OFFICER' — a ROLE in a field that records a
+  // PERSON. 20261019000000 exists because the trail has to name who acted, and
+  // a desk name is the one answer nobody can be checked against. It is also
+  // the exact spelling that `is_command()` and the console's ten role lists
+  // compared against, so the marker read as a real account. T-97.
   it.each([
     [{ id: 'only-an-id' }, 'only-an-id'],
-    [{}, 'HQ_OFFICER'],
+    [{}, 'UNIDENTIFIED OPERATOR'],
   ])('attributes the resolution even with a partial actor (%o)', async (actor, expected) => {
     const { resolveAlert } = await actions();
     await resolveAlert('alert-1', actor);

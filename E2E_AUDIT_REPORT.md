@@ -11453,3 +11453,204 @@ match it and the only new words were upper case. The migration fell straight out
 of the inventory, which is the defect T-91 is about, one week later. `FP_UPPER`
 is tried last, after lowercase identifiers, so no existing fingerprint moved;
 `geo_key contains WARD` is the row.
+
+---
+
+### T-96. "BROADCASTING LIVE TO HQ", with nothing established
+
+`live_stream_service.dart` is how somebody in an emergency shows HQ what is
+happening to them. The note at the top of that file explains a signalling bug
+found earlier — `RealtimeChannel.send` overwrites any `type` key with the
+literal `'broadcast'`, so every offer and candidate arrived unreadable — and
+describes what it cost:
+
+> Somebody in an emergency believed they were showing HQ what was happening to
+> them, with the camera light on to confirm it, and nobody was receiving
+> anything.
+
+That collision was fixed, on both sides, symmetrically. **The thing that made it
+invisible was not.**
+
+    final success = await LiveStreamService().startStream(alertId);
+    setState(() => _isLiveStreaming = success);
+    ... success ? '🔴 ${_t('eme_broadcast_live')}' : _t('eme_stream_failed')
+
+`startStream` returns `true` as soon as it has broadcast the offer. No answer,
+no ICE candidate, no connection — and nothing anywhere registered
+`onConnectionState`, so the one authoritative answer to the question the screen
+was asking went unread. The red label, and the camera light, came from a
+function that had sent a message.
+
+#### And there is a next failure in the chain
+
+Both sides' ICE configuration was three of Google's public STUN servers,
+written in as literals, with no TURN relay.
+
+STUN tells a peer what its own public address looks like from outside. That is
+all it does; the media still has to travel directly between the two peers. A
+handset on a Nigerian mobile network is behind carrier-grade NAT, which is
+commonly **symmetric** — a different external port per destination, so the
+address STUN reports is useless to a peer trying to reach it. Hole punching
+fails. HQ, behind an office firewall, is no better placed. When neither side can
+be reached directly the media has to be relayed, and TURN is the only way WebRTC
+does that.
+
+So the stream connected when the network happened to allow it, which for a phone
+on mobile data is the exception rather than the rule — and the screen said it
+was live either way. Fixing the signalling made the first failure go away and
+left the second one wearing the same confident label.
+
+#### What it says now
+
+`LiveStreamStatus` — `idle`, `connecting`, `live`, `failed` — driven by
+`onConnectionState`, which is the only thing that knows. `startStream`'s return
+value now means what it always meant, and the doc comment says so: the camera is
+on and an offer has gone out. The screen subscribes to the status for the whole
+of its life rather than around one call, because a connection can come up, drop
+and come back and each of those is something the person holding the phone needs
+to see. `disconnected` reports as `connecting`, not `failed`: ICE may restart,
+and a brief tunnel must not tell somebody their stream is dead.
+
+Red is a promise that HQ is watching, so the button is amber until the
+connection says otherwise. `CONNECTING TO HQ — NOT LIVE YET`, in all three
+languages.
+
+The console already told the truth about its own state — it sets `LIVE` on
+`ontrack`, which is media actually arriving. What it could not say was the other
+outcome: nothing read `onconnectionstatechange`, so a failed negotiation looked
+identical to one still in progress, and `FAILED` fell through to the same
+`STANDBY` label as "nobody has pressed the button".
+
+#### No TURN server is invented here
+
+`TURN_URL` / `TURN_USERNAME` / `TURN_CREDENTIAL`, from configuration, with the
+runbook explaining why an unset relay means the stream will usually fail. There
+is no public TURN server that works, and a made-up credential fails exactly like
+no credential while looking configured. A malformed `turn:` URI is refused and
+logged rather than passed through, because the peer connection ignores one
+silently — configured, and no different from unconfigured.
+
+On the console the credential is served from `/api/rtc/config` to a signed-in
+operator, **not** from `NEXT_PUBLIC_*`. That is inlined into the browser bundle
+at build time, and `src/lib/env.ts` already carries the note explaining that
+this project once shipped its Gemini key that way.
+
+#### The gate, and three mutations it did not catch at first
+
+`check_a_live_stream_is_not_claimed_early.py`. Four caught immediately: the
+screen going back to the return value, the service no longer watching the
+connection, `live` reported from something other than `Connected`, and a STUN
+literal returning to the service.
+
+Three on the console side survived and each exposed a weaker check than I had
+written. Looking for the string `'FAILED'` anywhere in the viewer passed after
+the state, the label and the assignment were all deleted — because `'FAILED'`
+remained in the three ternaries that pick a badge **colour**. Tightening it to
+`status === 'FAILED' ? '...'` still passed, because that matched
+`'rgba(239,68,68,0.12)'` in the background. It now requires the branch to
+produce a string that is not a colour, and checks the state type, the
+assignment and the label as three separate things.
+
+A colour is not a state. That is the second time in this audit a check has been
+satisfied by something adjacent to its subject, and the third time a check has
+been satisfied by its own file.
+
+---
+
+### T-97. A ward escalation was addressed to nobody, in three languages
+
+T-85 taught the app's tier map both vocabularies. T-90 taught `is_command()` and
+`commands_whole_state()` both. `check_one_command_vocabulary.py` was written to
+hold them together, and it passed.
+
+It read two of five.
+
+#### The console had ten of them
+
+| where | what it decides |
+|---|---|
+| `supabase-server.ts` `COMMAND_ROLES` | `/api/ai/analyze`, `/api/admin/provision`, `/api/notify-agency`, `/api/push/dispatch` |
+| `console-access.ts` `HQ_ROLES`, `SECTOR_COMMAND_ROLES` | console scoping |
+| `notification-recipients.ts` `rolesForTier()` | **who gets told** |
+| `assignable-responders.ts` `commandsWholeState()` | who may be assigned |
+| `broadcast-logic.ts` `categorizeUser()` | advisory targeting |
+| `admin/provision/route.ts` `ELEVATED`, `MAY_CREATE_ELEVATED` | who may create staff |
+| `dashboard/page.tsx` `commandRoles`, `hqRoles`, `isHqUser` | what the screen shows |
+| `alert-actions.ts` `.eq('role', 'LGA_COMMAND')` | which commander an escalation names |
+| `page.tsx` scope badge | LGA/WARD/PU label |
+| `IncidentReplayPanel.tsx` | default role for an unloaded profile |
+
+`COMMAND_ROLES` was `['HQ_COMMAND','HQ_OFFICER','ADMIN','LGA_COMMAND']` — the
+exact pre-T-90 `is_command()` body — so 20 of the 22 production staff accounts
+were refused by every route gated on it. `categorizeUser` matched none of its
+twelve literals for a `STATE_COMMANDER`, who then fell through to
+`'field_agents'`, so an advisory addressed to `hq_command` missed them.
+
+#### And `escalation_push_targets()` had four more, in SQL
+
+This is the one that matters most, because it decides whose phone an automatic
+escalation reaches:
+
+| tier | the list said | the deployment carries | recipients |
+|---|---|---|---|
+| WARD | `WARD_COMMAND`, `WARD_OFFICER` | `WARD_COMMANDER` ×4 | **0** |
+| LGA | `LGA_COMMAND`, `LGA_OFFICER` | `LGA_COMMANDER` ×4 | **0** |
+| HQ | `HQ_COMMAND`, `HQ_OFFICER`, `ADMIN` | `STATE_COMMANDER` ×4 | **1** |
+| UNIT | …`POLLING_UNIT_OFFICER`… | `POLLING_UNIT_OFFICER` ×6 | 6 ✓ |
+
+`deliverTierEscalation` throws "no reachable officer at that tier" on an empty
+list — deliberately, so the notice is retried rather than recorded as delivered.
+So **every ward and LGA escalation on that project was a notification that could
+never be delivered to anybody.** The automatic escalation moved the incident and
+told nobody, which is the exact failure `20261007000000_notification_outbox` was
+written to end, reproduced in the function that addresses its output.
+
+The UNIT tier works, and the reason is the tell: somebody hit this for that one
+rung and added `POLLING_UNIT_OFFICER` to that one list.
+
+#### One map, lists derived
+
+Adding three names to fourteen lists fixes today and leaves the shape that
+produced it. So:
+
+* `public.roles_for_tier()` is the only place in SQL a role is written against a
+  rung, and `escalation_push_targets()` asks it.
+* `hq-dashboard-next/src/lib/command-roles.ts` holds `STAFF_ROLE_TIERS` and
+  **derives** `rolesForTier`, `HQ_ROLES`, `SECTOR_COMMAND_ROLES`,
+  `COMMAND_ROLES`, `isCommand` and `commandsWholeState` from it, so
+  `rolesForTier` cannot disagree with `tierForRole` and a name added for one
+  question is answered for all of them.
+* the gate now reads all three languages, asserts the two tier→role lists agree
+  per rung, and **fails on any staff-role literal anywhere else in the console**
+  — 123 files read.
+
+That last rule found four more sites immediately, and three were different bugs:
+`.eq('role', 'LGA_COMMAND')` meant an escalation aimed at an LGA resolved no
+commander at all; the scope badge showed an `LGA_COMMANDER` a polling-unit
+label; and `IncidentReplayPanel` defaulted an unloaded profile to `HQ_COMMAND`,
+which `page.tsx` carries a note about having fixed in itself and not here.
+
+The fourth was `actor.email || 'HQ_OFFICER'` written into `resolved_by` — a
+**role** in a field that records a **person**. `20261019000000` exists because
+the trail has to name who acted, and a desk name is the one answer nobody can be
+checked against. It is now `UNIDENTIFIED OPERATOR`, and the test that pinned the
+old marker says why.
+
+#### Two mistakes in the gate itself
+
+The stray-literal scan reported a colour map and a doc comment as role lists,
+because it stripped block comments with `re.sub` — which deletes their newlines
+and shifts every line number after them. The repo's own `strip_noise` blanks
+them instead, preserving newlines, and I had written that helper twice already
+in this same session.
+
+And the success output said only what the old checks proved. It says the counts
+now — 8 chain roles agreeing across three languages, per-rung list sizes, 123
+console files scanned — because a check whose subject came back empty prints a
+reassuring line, and `0 indexed IMMUTABLE function(s)` earlier in this audit is
+what that looks like.
+
+Five mutations caught: SQL dropping `WARD_COMMANDER`, the console map dropping
+`STATE_COMMANDER`, the console map putting an LGA commander at the ward rung, a
+stray literal returning to a console file, and `roles_for_tier()` being deleted
+so the escalation function keeps its own lists.

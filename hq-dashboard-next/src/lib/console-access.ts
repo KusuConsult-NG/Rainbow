@@ -59,19 +59,13 @@ export type { AgencyCode } from './agencies';
 
 import { AGENCY_CODES, AGENCY_NAMES, type AgencyCode } from './agencies';
 
-/** Roles that hold command of the whole state. */
-const HQ_ROLES = ['HQ_COMMAND', 'HQ_OFFICER', 'ADMIN'];
-
-/** Roles that command a slice of it. */
-const SECTOR_COMMAND_ROLES = [
-  'LGA_COMMAND',
-  'LGA_OFFICER',
-  'WARD_COMMAND',
-  'WARD_OFFICER',
-  'UNIT_COMMAND',
-  'POLLING_UNIT_OFFICER',
-  'POLLING_OFFICER',
-];
+// Both lists came from ./command-roles, derived from the role-to-rung map. They
+// were written out here and knew only this repository's vocabulary, so a
+// STATE_COMMANDER held neither statewide nor sector command and the console
+// scoped them to nothing. The same reasoning as the AGENCY_CODES re-export
+// above: a second declaration of the codes is the defect that file exists to
+// prevent, and a second declaration of the ROLES is the same mistake. T-97.
+import { HQ_ROLES, SECTOR_COMMAND_ROLES } from './command-roles';
 
 /** Whether a role is an agency liaison, and which agency. */
 export function agencyOf(role: string | null | undefined): AgencyCode | null {

@@ -49,6 +49,7 @@ import { categoriesPresent, categoryCounts, categoryLabel } from '@/lib/alert-ca
 import { assignableResponders, emptyRosterReason, type Posting } from '@/lib/assignable-responders';
 import * as alertActions from '@/lib/alert-actions';
 import type { AlertIds } from '@/lib/alert-actions';
+import { COMMAND_ROLES, HQ_ROLES, commandsWholeState, tierForRole } from '@/lib/command-roles';
 
 export type { Alert };
 
@@ -421,7 +422,8 @@ export default function DashboardPage() {
   // somebody. RLS restricts the table to command, so a liaison or a
   // polling-unit officer simply gets nothing here rather than an error.
   useEffect(() => {
-    const commandRoles = ['HQ_OFFICER', 'HQ_COMMAND', 'ADMIN', 'LGA_COMMAND'];
+    // Was a literal list no STATE_COMMANDER or LGA_COMMANDER matched. T-97.
+    const commandRoles = COMMAND_ROLES;
     // `null` until the profile read lands, and not a member of any list: no
     // privileged read is issued on the strength of a role we do not have yet.
     if (!userRole || !commandRoles.includes(userRole)) return;
@@ -446,7 +448,7 @@ export default function DashboardPage() {
   // Load unread agency report count for HQ notification badge
   // Note: uses userRole directly since isHqUser is declared later in the component
   useEffect(() => {
-    const hqRoles = ['HQ_OFFICER', 'HQ_COMMAND', 'ADMIN'];
+    const hqRoles = HQ_ROLES;
     if (!userRole || !hqRoles.includes(userRole)) return;
     const loadUnread = async () => {
       const { count } = await supabase
@@ -1216,7 +1218,9 @@ export default function DashboardPage() {
       <Loader2 size={32} color="var(--accent)" className="spin" />
     </div>
   );
-  const isHqUser = userRole === 'HQ_OFFICER' || userRole === 'HQ_COMMAND' || userRole === 'ADMIN';
+  // Three literal comparisons, which four of the project's HQ duty officers
+  // failed because their role is spelled STATE_COMMANDER. T-97.
+  const isHqUser = commandsWholeState(userRole);
   // One tested answer to "what may this account reach", rather than the
   // conditionals this had grown. See src/lib/console-access.ts.
   const access = consoleAccess(userRole, {
@@ -1951,8 +1955,13 @@ export default function DashboardPage() {
                       <option value="SMS_FALLBACK">📡 SMS FALLBACK REPORTS</option>
                     </select>
                     <span style={{ fontSize: 10, fontWeight: 900, background: 'var(--accent-dim)', color: 'var(--accent)', padding: '6px 12px', borderRadius: 8, textTransform: 'uppercase', fontFamily: 'monospace' }}>
-                      {userRole === 'LGA_COMMAND' || userRole === 'LGA_OFFICER' ? `LGA: ${userProfile?.geo_lga || 'NONE'}` :
-                       userRole === 'WARD_COMMAND' || userRole === 'WARD_OFFICER' ? `WARD: ${userProfile?.geo_ward || 'NONE'}` :
+                      {/* An LGA_COMMANDER matched neither branch and fell
+                          through to the PU label — T-85's defect in the
+                          console's own chrome, telling an LGA commander they
+                          are posted to a polling unit. The rung comes from the
+                          one map now. T-97. */}
+                      {tierForRole(userRole) === 'LGA' ? `LGA: ${userProfile?.geo_lga || 'NONE'}` :
+                       tierForRole(userRole) === 'WARD' ? `WARD: ${userProfile?.geo_ward || 'NONE'}` :
                        `PU: ${userProfile?.geo_pu || 'NONE'}`}
                     </span>
                   </div>

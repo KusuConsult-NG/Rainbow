@@ -1503,6 +1503,145 @@ printf '%s\n' "$GEO_OUT" | grep -q "geographies in use are real" || {
   echo "✗ the geography diagnostic produced no summary row"; exit 1; }
 echo "  PASS  the geography diagnostic runs and summarises"
 
+# ── One rung, one list ──────────────────────────────────────────────────────
+#
+# escalation_push_targets() carried four exact-match role arrays of its own,
+# which 20261028000000 did not touch. On the deployment a ward escalation was
+# addressed to 0 officers and an LGA escalation to 0.
+echo "▶ Applying 20261101000000_one_rung_one_list.sql"
+psql_run "-f $PGROOT/20261101000000_one_rung_one_list.sql" >/dev/null
+psql_run "-f $PGROOT/20261101000000_one_rung_one_list.sql" >/dev/null
+
+cat > "$PGROOT/zz_one_rung_probe.sql" <<'PROBE'
+BEGIN;
+SET client_min_messages TO NOTICE;
+
+-- ── 1. the list knows both vocabularies, and nothing else ───────────────────
+DO $probe$
+BEGIN
+  IF NOT ('WARD_COMMANDER' = ANY (public.roles_for_tier('WARD'))) THEN
+    RAISE EXCEPTION
+      'FAIL: roles_for_tier(WARD) does not include WARD_COMMANDER, which is '
+      'how the deployment spells it — a ward escalation reaches nobody';
+  END IF;
+  IF NOT ('STATE_COMMANDER' = ANY (public.roles_for_tier('HQ'))) THEN
+    RAISE EXCEPTION 'FAIL: roles_for_tier(HQ) does not include STATE_COMMANDER';
+  END IF;
+  IF NOT ('LGA_COMMANDER' = ANY (public.roles_for_tier('LGA'))) THEN
+    RAISE EXCEPTION 'FAIL: roles_for_tier(LGA) does not include LGA_COMMANDER';
+  END IF;
+  -- Both spellings, not one replacing the other: a database that still carries
+  -- the repository's own names must keep working.
+  IF NOT ('WARD_COMMAND' = ANY (public.roles_for_tier('WARD'))) THEN
+    RAISE EXCEPTION
+      'FAIL: the second spelling replaced the first instead of joining it';
+  END IF;
+  -- A tier nobody holds addresses nobody. Failing open here pages the state.
+  IF array_length(public.roles_for_tier('NONSENSE'), 1) IS NOT NULL THEN
+    RAISE EXCEPTION
+      'FAIL: an unknown tier returns a non-empty role list, so a malformed '
+      'payload would page every officer in Plateau State';
+  END IF;
+  IF 'CITIZEN' = ANY (public.roles_for_tier('HQ')) THEN
+    RAISE EXCEPTION 'FAIL: a citizen holds the HQ rung';
+  END IF;
+  RAISE NOTICE 'PASS: roles_for_tier knows both spellings of every rung, and nothing else';
+END $probe$;
+
+-- ── 2. AND THE NOTICE ACTUALLY REACHES THEM ─────────────────────────────────
+--
+-- The point is not the array, it is whose phone rings. A ward officer spelled
+-- the deployment's way, posted to the incident's ward, with a player id.
+DO $probe$
+DECLARE
+  v_citizen  UUID := gen_random_uuid();
+  v_ward     UUID := gen_random_uuid();
+  v_elsewhere UUID := gen_random_uuid();
+  v_state    UUID := gen_random_uuid();
+  v_alert    UUID := gen_random_uuid();
+  v_outbox   BIGINT;
+  n          INTEGER;
+BEGIN
+  INSERT INTO auth.users (id, email) VALUES
+    (v_citizen,   'rung-citizen@probe.test'),
+    (v_ward,      'rung-ward@probe.test'),
+    (v_elsewhere, 'rung-elsewhere@probe.test'),
+    (v_state,     'rung-state@probe.test');
+
+  UPDATE public.profiles SET role = 'WARD_COMMANDER',
+         geo_lga = 'JOS SOUTH', geo_ward = 'BUKURU',
+         onesignal_player_id = 'player-ward-0001'
+   WHERE id = v_ward;
+  UPDATE public.profiles SET role = 'WARD_COMMANDER',
+         geo_lga = 'JOS SOUTH', geo_ward = 'GIRING',
+         onesignal_player_id = 'player-elsewhere-01'
+   WHERE id = v_elsewhere;
+  UPDATE public.profiles SET role = 'STATE_COMMANDER',
+         geo_lga = 'JOS NORTH', geo_ward = 'NARAGUTA',
+         onesignal_player_id = 'player-state-0001'
+   WHERE id = v_state;
+
+  INSERT INTO public.alerts
+    (id, type, description, status, severity, reported_by,
+     geo_lga, geo_ward, assigned_tier, tier_assigned_at)
+  VALUES (v_alert, 'Kidnap - Held Hostage', 'nobody answered at the unit',
+          'OPEN', 'CRITICAL', v_citizen, 'JOS SOUTH', 'BUKURU', 'WARD', NOW());
+
+  INSERT INTO public.notification_outbox (alert_id, kind, payload)
+  VALUES (v_alert, 'TIER_ESCALATION', jsonb_build_object(
+            'alert_id', v_alert, 'to_tier', 'WARD',
+            'geo_lga', 'JOS SOUTH', 'geo_ward', 'BUKURU'))
+  RETURNING id INTO v_outbox;
+
+  SELECT count(*) INTO n
+    FROM public.escalation_push_targets(v_outbox) t WHERE t.user_id = v_ward;
+  IF n <> 1 THEN
+    RAISE EXCEPTION
+      'FAIL: a WARD_COMMANDER posted to the incident''s own ward is not a '
+      'recipient of a WARD escalation. deliverTierEscalation throws "no '
+      'reachable officer at that tier" on an empty list, so that notice can '
+      'never be delivered to anybody';
+  END IF;
+
+  -- The widening must not have reached past the geography.
+  SELECT count(*) INTO n
+    FROM public.escalation_push_targets(v_outbox) t
+   WHERE t.user_id = v_elsewhere;
+  IF n <> 0 THEN
+    RAISE EXCEPTION
+      'FAIL: a ward officer in a DIFFERENT ward was told. Teaching the list a '
+      'second spelling must not widen the geography';
+  END IF;
+
+  -- HQ is statewide and unfiltered: that is the rung whose job is everything.
+  UPDATE public.notification_outbox
+     SET payload = jsonb_set(payload, '{to_tier}', '"HQ"')
+   WHERE id = v_outbox;
+  SELECT count(*) INTO n
+    FROM public.escalation_push_targets(v_outbox) t WHERE t.user_id = v_state;
+  IF n <> 1 THEN
+    RAISE EXCEPTION
+      'FAIL: a STATE_COMMANDER is not a recipient of an HQ escalation, so the '
+      'top of the chain is addressed to nobody';
+  END IF;
+
+  RAISE NOTICE 'PASS: a WARD_COMMANDER in the right ward is told, one in the wrong ward is not, and a STATE_COMMANDER holds HQ';
+END $probe$;
+
+DO $probe$ BEGIN RAISE NOTICE 'ALL ONE RUNG ASSERTIONS PASSED'; END $probe$;
+ROLLBACK;
+PROBE
+chown postgres:postgres "$PGROOT/zz_one_rung_probe.sql"
+OR_OUT=$(psql_run "-f $PGROOT/zz_one_rung_probe.sql" 2>&1) && OR_RC=0 || OR_RC=$?
+printf '%s\n' "$OR_OUT" | grep -E "PASS:|FAIL:" | sed 's/^.*NOTICE:  /  /' || true
+if [ "$OR_RC" -ne 0 ] || printf '%s\n' "$OR_OUT" | grep -q "FAIL:"; then
+  printf '%s\n' "$OR_OUT"
+  echo "✗ one-rung assertions failed"; exit 1
+fi
+printf '%s\n' "$OR_OUT" | grep -q "ALL ONE RUNG ASSERTIONS PASSED" || {
+  printf '%s\n' "$OR_OUT"
+  echo "✗ the one-rung probe did not reach its verdict"; exit 1; }
+
 echo "▶ Asserting no policy in schema public reaches anon or public, by name"
 PR_OUT=$(psql_run "-f $PGROOT/policy_roles_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?
 echo "$PR_OUT" | grep -E "PASS|FAIL|ERROR" || true

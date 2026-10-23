@@ -269,11 +269,24 @@ def body_fingerprint(prev: str, body: str,
     report the most recent migration applied and an earlier one missing, which
     is both wrong and the kind of wrong that sends somebody to re-apply a file.
     """
-    for rx in (FP_LITERAL, FP_WORD, FP_UPPER):
+    # TWO PASSES, AND THE ORDER IS THE POINT.
+    #
+    # Additions across EVERY class before any removal, because the docstring
+    # above says a positive assertion is preferred and the first version did not
+    # do that: it tried both directions within FP_LITERAL before reaching
+    # FP_WORD, so `20261101000000_one_rung_one_list` — which moves four role
+    # arrays out of `escalation_push_targets` into `roles_for_tier` — was
+    # fingerprinted on the DISAPPEARANCE of 'POLLING_UNIT_OFFICER' when the
+    # appearance of `roles_for_tier` was right there and says the same thing
+    # more directly.
+    classes = (FP_LITERAL, FP_WORD, FP_UPPER)
+    for rx in classes:
         here, before = set(rx.findall(body)), set(rx.findall(prev))
         added = {t for t in here - before if all(t in b for b in later)}
         if added:
             return sorted(added, key=lambda t: (-len(t), t))[0], True
+    for rx in classes:
+        here, before = set(rx.findall(body)), set(rx.findall(prev))
         gone = {t for t in before - here if not any(t in b for b in later)}
         if gone:
             return sorted(gone, key=lambda t: (-len(t), t))[0], False

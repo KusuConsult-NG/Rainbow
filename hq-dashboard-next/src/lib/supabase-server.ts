@@ -47,7 +47,12 @@ export type Unauthorised = { ok: false; status: 401 | 403; error: string };
  * Every API route must call this before doing any work. Previously both routes
  * executed their full business logic for completely unauthenticated callers.
  */
-export async function requireRole(allowedRoles: string[]): Promise<Authorised | Unauthorised> {
+export async function requireRole(
+  // `readonly` so a caller can pass a derived constant. COMMAND_ROLES is
+  // computed from the role-to-rung map and exported readonly so nothing can
+  // push a role onto the list that decides API access. T-97.
+  allowedRoles: readonly string[],
+): Promise<Authorised | Unauthorised> {
   const supabase = await getSupabaseFromCookies();
   const { data: { user }, error } = await supabase.auth.getUser();
 
@@ -110,4 +115,10 @@ export async function requireUser(req: Request): Promise<Authorised | Unauthoris
 }
 
 /** Roles permitted to trigger outbound dispatch / inter-agency escalation. */
-export const COMMAND_ROLES = ['HQ_COMMAND', 'HQ_OFFICER', 'ADMIN', 'LGA_COMMAND'];
+// Re-exported, not re-declared. This was
+// `['HQ_COMMAND','HQ_OFFICER','ADMIN','LGA_COMMAND']` — the exact pre-T-90
+// `is_command()` body — so every route gated on it refused 20 of the 22
+// production staff accounts, whose roles are spelled STATE_COMMANDER and
+// LGA_COMMANDER. Derived from the role-to-rung map now, so a route and the
+// row-level security behind it refuse the same people. T-97.
+export { COMMAND_ROLES } from './command-roles';

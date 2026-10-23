@@ -34,6 +34,8 @@
  * name that leads to a dispatch nobody downstream expects is its own defect.
  */
 
+import { commandsWholeState as canonicalCommandsWholeState } from './command-roles';
+
 /** The parts of a profile this rule reads. */
 export interface Posting {
   role?: string | null;
@@ -50,8 +52,10 @@ function norm(value: string | null | undefined): string | null {
 
 /** Whether this account commands the whole state. */
 export function commandsWholeState(role: string | null | undefined): boolean {
-  const r = norm(role) ?? '';
-  return r === 'HQ_COMMAND' || r === 'HQ_OFFICER' || r === 'ADMIN';
+  // Was three literal comparisons, which a STATE_COMMANDER failed — so the
+  // console treated four of the project's HQ duty officers as having no
+  // statewide reach when deciding who they could assign. T-97.
+  return canonicalCommandsWholeState(role);
 }
 
 /**

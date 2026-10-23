@@ -280,3 +280,32 @@ Railway side after a deploy:
 * `/dashboard` redirecting to `/login` without a verified session;
 * `node scripts/verify_rls.js`, against **staging**, never production — it
   inserts a row.
+
+## TURN_URL, and the live stream that never connected
+
+`TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL` — set these, or the live stream
+from a handset will usually fail to connect.
+
+A WebRTC connection needs a path for the media. STUN only tells each peer what
+its own public address looks like from outside; the media still has to travel
+directly between them. A handset on a Nigerian mobile network is behind
+carrier-grade NAT, which is commonly SYMMETRIC — it uses a different external
+port per destination, so the address STUN reports is useless to a peer trying to
+reach it, and hole punching fails. HQ, behind an office firewall, is no better
+placed. When neither side can be reached directly the media has to be relayed,
+and TURN is the only way WebRTC does that.
+
+Until T-96 both sides carried three public STUN servers as literals and no
+relay, so the stream connected when the network happened to allow it — and the
+handset said "BROADCASTING LIVE TO HQ" either way. It now says CONNECTING until
+the peer connection reports connected, and the console shows COULD NOT CONNECT
+rather than STANDBY, so an unset relay is visible instead of silent.
+
+The handset reads these from `.env` (see `lib/core/config/live_stream.dart`).
+The console reads them server-side and serves the ICE list from
+`/api/rtc/config`: a TURN credential must NOT be `NEXT_PUBLIC_*`, because that
+is inlined into the browser bundle at build time — which is how this project
+once served its Gemini key to every dashboard visitor.
+
+No default is shipped. There is no public TURN server that works, and a
+made-up credential fails exactly like no credential while looking configured.

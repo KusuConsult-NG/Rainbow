@@ -666,6 +666,17 @@ class Translations {
           'watsawa kai tsaye.',
       AppLanguage.pidgin: 'Wait till SOS alert confirm before you go live.',
     },
+    // The honest state between pressing the button and HQ receiving anything.
+    //
+    // There was no such string, because the screen had no such state: it went
+    // straight from "off" to a red BROADCASTING LIVE TO HQ on the strength of
+    // an offer having been sent. With no TURN relay configured that offer often
+    // leads nowhere, and the person was told otherwise. T-96.
+    'eme_stream_connecting': {
+      AppLanguage.english: 'CONNECTING TO HQ — NOT LIVE YET',
+      AppLanguage.hausa: 'ANA HADA DA HQ — BAI FARA BA TUKUNA',
+      AppLanguage.pidgin: 'E DEY CONNECT TO HQ — E NO DEY LIVE YET',
+    },
     'eme_stream_failed': {
       AppLanguage.english: 'Failed to start live stream',
       AppLanguage.hausa: 'An kasa fara watsawa kai tsaye',

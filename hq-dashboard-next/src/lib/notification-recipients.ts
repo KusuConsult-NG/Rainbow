@@ -22,6 +22,8 @@
  * the row by row-level security must not be sent a push about it.
  */
 
+import { rolesForTier as canonicalRolesForTier } from './command-roles';
+
 /** The tiers an incident can be assigned to, bottom to top. */
 export const TIERS = ['UNIT', 'WARD', 'LGA', 'HQ'] as const;
 export type Tier = (typeof TIERS)[number];
@@ -81,18 +83,21 @@ function norm(v: string | null | undefined): string | null {
  * commander is not necessarily the one awake.
  */
 export function rolesForTier(tier: string | null | undefined): string[] {
-  switch (norm(tier)) {
-    case 'UNIT':
-      return ['UNIT_COMMAND', 'POLLING_UNIT_OFFICER', 'POLLING_OFFICER'];
-    case 'WARD':
-      return ['WARD_COMMAND', 'WARD_OFFICER'];
-    case 'LGA':
-      return ['LGA_COMMAND', 'LGA_OFFICER'];
-    case 'HQ':
-      return ['HQ_COMMAND', 'HQ_OFFICER', 'ADMIN'];
-    default:
-      return [];
-  }
+  // WAS FOUR LISTS WRITTEN OUT HERE, AND THIS IS WHO GETS TOLD.
+  //
+  // WARD returned ['WARD_COMMAND','WARD_OFFICER'] and the production project's
+  // ward officers are spelled WARD_COMMANDER; LGA the same; HQ returned
+  // ['HQ_COMMAND','HQ_OFFICER','ADMIN'] against four STATE_COMMANDER accounts.
+  // So a ward escalation was addressed to nobody, an LGA escalation to nobody,
+  // and an HQ escalation to the single HQ_COMMAND account —
+  // `deliverTierEscalation` throws "no reachable officer at that tier" on an
+  // empty list, so those notices could never be delivered at all. UNIT worked,
+  // because somebody hit this for that one rung and added
+  // POLLING_UNIT_OFFICER to that one list.
+  //
+  // Derived from the role-to-rung map now, so it cannot disagree with the rung
+  // the app shows that same officer. T-97.
+  return canonicalRolesForTier(tier);
 }
 
 /**

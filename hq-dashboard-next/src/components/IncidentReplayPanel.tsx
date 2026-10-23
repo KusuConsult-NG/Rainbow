@@ -132,7 +132,11 @@ export default function IncidentReplayPanel({ alertId }: { alertId: string }) {
 
     const { data: { user } } = await supabase.auth.getUser();
     let name = user?.email ?? 'HQ DISPATCH';
-    let role = 'HQ_COMMAND';
+    // NOT 'HQ_COMMAND'. page.tsx carries a note that it "used to read
+    // setUserRole(u.user_metadata?.role || 'HQ_COMMAND')" — defaulting an
+    // unknown account to statewide command — and that was fixed there and left
+    // here. An empty role grants nothing, which is the safe direction. T-97.
+    let role = '';
     if (user?.id) {
       const { data: profile } = await supabase
         .from('profiles')

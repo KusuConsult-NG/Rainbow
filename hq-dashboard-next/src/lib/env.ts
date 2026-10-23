@@ -58,5 +58,12 @@ export function serverEnv() {
     oneSignalAppId: process.env.ONESIGNAL_APP_ID ?? '',
     oneSignalRestKey: process.env.ONESIGNAL_REST_API_KEY ?? '',
     webhookSecret: process.env.RAINBOW_WEBHOOK_SECRET ?? '',
+    // NOT NEXT_PUBLIC_, for the reason two fields up: a TURN credential in the
+    // client bundle is a relay anybody who loads the console can bill, frozen
+    // at whatever the build machine had. Read only by /api/rtc/config, which
+    // hands the ICE list to a signed-in operator per request. T-96.
+    turnUrl: process.env.TURN_URL ?? '',
+    turnUsername: process.env.TURN_USERNAME ?? '',
+    turnCredential: process.env.TURN_CREDENTIAL ?? '',
   };
 }

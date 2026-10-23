@@ -4,6 +4,7 @@ import {
   requireRole,
   COMMAND_ROLES,
 } from '@/lib/supabase-server';
+import { HQ_ROLES } from '@/lib/command-roles';
 
 /**
  * Provision a staff account.
@@ -57,8 +58,13 @@ const ASSIGNABLE = [
  * commander is not theirs to do, and an account that can create HQ_COMMAND is
  * an account that can do anything.
  */
-const ELEVATED = ['HQ_COMMAND', 'HQ_OFFICER', 'ADMIN'];
-const MAY_CREATE_ELEVATED = ['HQ_COMMAND', 'ADMIN'];
+// ELEVATED is "holds statewide command", the one question ./command-roles
+// answers from the role-to-rung map; written out here it did not include
+// STATE_COMMANDER. MAY_CREATE_ELEVATED stays deliberately NARROWER than
+// ELEVATED — not every statewide account may mint another one — so it is
+// written out, with the production spelling added. T-97.
+const ELEVATED = [...HQ_ROLES];
+const MAY_CREATE_ELEVATED = ['HQ_COMMAND', 'STATE_COMMANDER', 'ADMIN'];
 
 export async function POST(req: Request) {
   const auth = await requireRole(COMMAND_ROLES);

@@ -21,6 +21,7 @@ import { standDownList } from '@/lib/dispatch-changes';
  * open and invisible, since the board no longer showed them.
  */
 import type { UssdCredibility } from './ussd-provenance';
+import { rolesForTier } from './command-roles';
 
 export type AlertIds = string | string[];
 
@@ -154,7 +155,11 @@ export async function escalateAlert(
   const lgaTarget = options.targetLga || 'ALL';
   const agencyTarget = options.targetAgency || 'ALL';
   const reason = options.reason || 'High Threat Escalation';
-  const byEmail = actor.email || 'HQ_OFFICER';
+  // 'HQ_OFFICER' was the fallback here — a ROLE written into an audit field
+  // as though it were a person. 20261019000000 exists because the trail has to
+  // name who acted; a desk name is the one answer that cannot be checked
+  // against anybody. T-97.
+  const byEmail = actor.email || actor.id || 'UNIDENTIFIED OPERATOR';
 
   try {
     // Resolve the target LGA commander UUID — do NOT use the HQ operator's own ID
@@ -164,7 +169,13 @@ export async function escalateAlert(
       const { data: commander } = await supabase
         .from('profiles')
         .select('id, full_name')
-        .eq('role', 'LGA_COMMAND')
+        // WAS `.eq('role', 'LGA_COMMAND')`, AND THE DEPLOYMENT HAS NONE.
+        //
+        // The production project's LGA officers are spelled LGA_COMMANDER, so
+        // this lookup matched nothing, `targetCommanderId` stayed null, and an
+        // escalation aimed at an LGA was handed to no named commander at all.
+        // Every spelling of the rung now, from the one role-to-rung map. T-97.
+        .in('role', rolesForTier('LGA'))
         .eq('geo_lga', lgaTarget)
         .limit(1)
         .maybeSingle();
@@ -433,7 +444,9 @@ export async function ussdCredibility(alertId: string): Promise<UssdCredibility 
 export async function resolveAlert(alertIds: AlertIds, actor: Actor): Promise<ActionResult> {
   const ids = idsOf(alertIds);
   try {
-    const resolver = actor.email || actor.id || 'HQ_OFFICER';
+    // Not 'HQ_OFFICER': resolved_by records WHO closed the incident, and a
+    // role name there asserts a desk did it. T-97.
+    const resolver = actor.email || actor.id || 'UNIDENTIFIED OPERATOR';
     const nowIso = new Date().toISOString();
     const { error } = await supabase.from('alerts').update({
       status: 'RESOLVED',

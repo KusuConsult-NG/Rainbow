@@ -227,5 +227,3 @@ BEGIN
   END IF;
 END $$;
 
-
-
