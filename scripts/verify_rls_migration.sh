@@ -83,6 +83,7 @@ cp "$REPO"/supabase/migrations/*.sql \
    "$REPO"/scripts/why_is_the_board_empty.sql \
    "$REPO"/scripts/why_did_my_insert_fail.sql \
    "$REPO"/scripts/which_migrations_are_applied.sql \
+   "$REPO"/scripts/which_geography_is_real.sql \
    "$REPO"/scripts/seed_demo_incidents.sql "$PGROOT/"
 chown -R postgres:postgres "$PGROOT"
 
@@ -1301,6 +1302,206 @@ fi
 printf '%s\n' "$SZ_OUT" | grep -q "ALL SHELTER ASSERTIONS PASSED" || {
   printf '%s\n' "$SZ_OUT"
   echo "✗ the shelter probe did not reach its verdict"; exit 1; }
+
+# ── A ward is not called "WARD" ─────────────────────────────────────────────
+#
+# The live project files incidents under JOS SOUTH / BUKURU and JOS SOUTH /
+# BUKURU WARD as different places. geo_key() compared them raw, so a ward
+# commander posted to one was refused every incident filed at the other.
+echo "▶ Applying 20261031000000_a_ward_is_not_called_ward.sql"
+psql_run "-f $PGROOT/20261031000000_a_ward_is_not_called_ward.sql" >/dev/null
+psql_run "-f $PGROOT/20261031000000_a_ward_is_not_called_ward.sql" >/dev/null
+
+cat > "$PGROOT/zz_ward_name_probe.sql" <<'PROBE'
+BEGIN;
+SET client_min_messages TO NOTICE;
+
+-- ── 1. the names resolve together, and distinct places still do not ─────────
+DO $probe$
+BEGIN
+  IF public.geo_key('BUKURU WARD') <> public.geo_key('BUKURU') THEN
+    RAISE EXCEPTION
+      'FAIL: geo_key(%) <> geo_key(%). A ward officer posted to one is refused '
+      'every incident filed at the other',
+      'BUKURU WARD', 'BUKURU';
+  END IF;
+  IF public.geo_key('JOS SOUTH LGA') <> public.geo_key('JOS SOUTH') THEN
+    RAISE EXCEPTION 'FAIL: a trailing LGA is not dropped';
+  END IF;
+  IF public.geo_key('GINDIRI I') <> public.geo_key('GINDIRI 1') THEN
+    RAISE EXCEPTION
+      'FAIL: the Roman numeral 20261009000000 was written for no longer works';
+  END IF;
+  -- And the strip has not become a blunt instrument.
+  IF public.geo_key('BUKURU') = public.geo_key('DU') THEN
+    RAISE EXCEPTION 'FAIL: two different wards now resolve to one key';
+  END IF;
+  IF public.geo_key('WARD') IS DISTINCT FROM 'WARD' THEN
+    RAISE EXCEPTION
+      'FAIL: geo_key(''WARD'') is %, so a place whose whole name is the word '
+      'matches nothing', public.geo_key('WARD');
+  END IF;
+  RAISE NOTICE 'PASS: BUKURU and BUKURU WARD resolve together; distinct wards still do not';
+END $probe$;
+
+-- ── 2. and the officer actually sees the incident ───────────────────────────
+--
+-- The point is not the function, it is the board. A ward commander posted to
+-- the spelling with the noise suffix, and an incident filed without it.
+DO $probe$
+DECLARE
+  v_officer UUID := gen_random_uuid();
+  v_mine    UUID := gen_random_uuid();
+  v_theirs  UUID := gen_random_uuid();
+  n_seen    INTEGER;
+BEGIN
+  INSERT INTO auth.users (id, email) VALUES (v_officer, 'ward-officer@probe.test');
+  UPDATE public.profiles
+     SET role = 'WARD_COMMANDER', geo_lga = 'JOS SOUTH', geo_ward = 'BUKURU WARD'
+   WHERE id = v_officer;
+
+  INSERT INTO public.alerts
+    (id, type, description, status, severity, reported_by,
+     geo_lga, geo_ward, assigned_tier, tier_assigned_at)
+  VALUES
+    (v_mine, 'Fire - Structure', 'in their own ward, spelled without the noise',
+     'OPEN', 'HIGH', v_officer, 'JOS SOUTH', 'BUKURU', 'WARD', NOW()),
+    (v_theirs, 'Fire - Structure', 'a different LGA entirely',
+     'OPEN', 'HIGH', v_officer, 'MANGU', 'KADUNU', 'WARD', NOW());
+
+  PERFORM set_config('request.jwt.claim.sub', v_officer::text, true);
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', v_officer::text, 'role', 'authenticated')::text, true);
+
+  SELECT count(*) INTO n_seen
+    FROM public.alerts a WHERE a.id = v_mine AND public.alert_in_my_area(a);
+  IF n_seen <> 1 THEN
+    RAISE EXCEPTION
+      'FAIL: a ward commander posted to "JOS SOUTH / BUKURU WARD" cannot see '
+      'an incident filed at "JOS SOUTH / BUKURU". Their board is empty and the '
+      'row is right there';
+  END IF;
+
+  SELECT count(*) INTO n_seen
+    FROM public.alerts a WHERE a.id = v_theirs AND public.alert_in_my_area(a);
+  IF n_seen <> 0 THEN
+    RAISE EXCEPTION
+      'FAIL: the suffix strip widened a ward posting to another LGA entirely';
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '', true);
+  RAISE NOTICE 'PASS: the ward officer sees their own ward and not another LGA';
+END $probe$;
+
+-- ── 3. THE INDEX CARRIES THE NEW KEYS ───────────────────────────────────────
+--
+-- geo_key() is IMMUTABLE and two indexes are built on it. PostgreSQL believes
+-- IMMUTABLE and does not rebuild an index when the function is replaced, so
+-- without the REINDEX in that migration an index scan searches new keys among
+-- old ones. The bug would then be right or wrong by query plan.
+--
+-- Demonstrated rather than asserted on trust: the old body is installed WITHOUT
+-- reindexing, and the lookup must then disagree with a sequential scan. If it
+-- agrees, this probe is not testing anything and says so.
+DO $probe$
+DECLARE
+  v_id      UUID := gen_random_uuid();
+  by_index  INTEGER;
+  by_seq    INTEGER;
+BEGIN
+  INSERT INTO auth.users (id, email) VALUES (v_id, 'ward-index@probe.test');
+  INSERT INTO public.alerts
+    (id, type, description, status, severity, reported_by,
+     geo_lga, geo_ward, assigned_tier, tier_assigned_at)
+  VALUES (v_id, 'Fire - Structure', 'indexed under the new body', 'OPEN',
+          'HIGH', v_id, 'JOS SOUTH', 'BUKURU WARD', 'WARD', NOW());
+
+  -- Under the body this migration installs, both routes agree.
+  SET LOCAL enable_seqscan = off;
+  SELECT count(*) INTO by_index FROM public.alerts a
+   WHERE public.geo_key(a.geo_lga) = 'JOS SOUTH'
+     AND public.geo_key(a.geo_ward) = 'BUKURU' AND a.id = v_id;
+  SET LOCAL enable_seqscan = on;
+  SELECT count(*) INTO by_seq FROM public.alerts a
+   WHERE public.geo_key(a.geo_lga) = 'JOS SOUTH'
+     AND public.geo_key(a.geo_ward) = 'BUKURU' AND a.id = v_id;
+  IF by_index <> by_seq OR by_seq <> 1 THEN
+    RAISE EXCEPTION
+      'FAIL: after the migration, an index lookup found % and a scan found % '
+      '(expected 1 and 1). The rebuilt index does not agree with the function',
+      by_index, by_seq;
+  END IF;
+
+  -- Now the old body, deliberately WITHOUT a rebuild. The index entry still
+  -- says BUKURU; this body computes BUKURU WARD.
+  CREATE OR REPLACE FUNCTION public.geo_key(p_name TEXT)
+  RETURNS TEXT LANGUAGE sql IMMUTABLE PARALLEL SAFE
+  SET search_path = pg_catalog, pg_temp AS $old$
+    SELECT nullif(
+      regexp_replace(
+        regexp_replace(
+          regexp_replace(
+            regexp_replace(upper(trim(coalesce(p_name, ''))), '\s+', ' ', 'g'),
+            '\s+III$', ' 111'),
+          '\s+II$', ' 11'),
+        '\s+I$', ' 1'),
+      '');
+  $old$;
+
+  SET LOCAL enable_seqscan = off;
+  SELECT count(*) INTO by_index FROM public.alerts a
+   WHERE public.geo_key(a.geo_lga) = 'JOS SOUTH'
+     AND public.geo_key(a.geo_ward) = 'BUKURU WARD' AND a.id = v_id;
+  SET LOCAL enable_seqscan = on;
+  SELECT count(*) INTO by_seq FROM public.alerts a
+   WHERE public.geo_key(a.geo_lga) = 'JOS SOUTH'
+     AND public.geo_key(a.geo_ward) = 'BUKURU WARD' AND a.id = v_id;
+
+  IF by_index = by_seq THEN
+    -- Not a failure of the migration: on a table this small the planner may
+    -- refuse the index whatever enable_seqscan says, and then there is nothing
+    -- to demonstrate. Said out loud rather than counted as proof.
+    RAISE NOTICE
+      'NOTE: index and scan agreed (% vs %) with a stale index, so the planner '
+      'did not use it here and this probe cannot demonstrate the hazard. The '
+      'REINDEX is still asserted statically by check_a_ward_name_resolves.py',
+      by_index, by_seq;
+  ELSE
+    RAISE NOTICE
+      'PASS: a stale index really does disagree with a scan (% vs %) — the '
+      'REINDEX in that migration is load-bearing', by_index, by_seq;
+  END IF;
+  RAISE NOTICE 'PASS: the rebuilt index agrees with the function it is built on';
+END $probe$;
+
+DO $probe$ BEGIN RAISE NOTICE 'ALL WARD NAME ASSERTIONS PASSED'; END $probe$;
+ROLLBACK;
+PROBE
+chown postgres:postgres "$PGROOT/zz_ward_name_probe.sql"
+WN_OUT=$(psql_run "-f $PGROOT/zz_ward_name_probe.sql" 2>&1) && WN_RC=0 || WN_RC=$?
+printf '%s\n' "$WN_OUT" | grep -E "PASS:|FAIL:|NOTE:" | sed 's/^.*NOTICE:  /  /' || true
+if [ "$WN_RC" -ne 0 ] || printf '%s\n' "$WN_OUT" | grep -q "FAIL:"; then
+  printf '%s\n' "$WN_OUT"
+  echo "✗ ward name assertions failed"; exit 1
+fi
+printf '%s\n' "$WN_OUT" | grep -q "ALL WARD NAME ASSERTIONS PASSED" || {
+  printf '%s\n' "$WN_OUT"
+  echo "✗ the ward name probe did not reach its verdict"; exit 1; }
+
+# And the geography inventory the operator reads must match the asset and run.
+echo "▶ Checking the geography inventory is current and runs"
+python3 "$REPO/scripts/sync_geography_inventory.py" --check
+GEO_OUT=$(psql_run "-f $PGROOT/which_geography_is_real.sql" 2>&1) && GEO_RC=0 || GEO_RC=$?
+if [ "$GEO_RC" -ne 0 ]; then
+  printf '%s\n' "$GEO_OUT"
+  echo "✗ scripts/which_geography_is_real.sql does not run against this schema"
+  exit 1
+fi
+printf '%s\n' "$GEO_OUT" | grep -q "geographies in use are real" || {
+  printf '%s\n' "$GEO_OUT"
+  echo "✗ the geography diagnostic produced no summary row"; exit 1; }
+echo "  PASS  the geography diagnostic runs and summarises"
 
 echo "▶ Asserting no policy in schema public reaches anon or public, by name"
 PR_OUT=$(psql_run "-f $PGROOT/policy_roles_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?

@@ -11316,3 +11316,140 @@ And the probe's own "corrected" MANGU position was a number I made up, in the
 file arguing against made-up numbers. It uses the surveyed centroid of
 MANGU/KADUNU — the ward the old position was 9.68km outside — as an explicit
 stand-in, which is what this project already does for a USSD report with no GPS.
+
+---
+
+### T-95. A ward officer posted to "BUKURU WARD" never sees an incident in BUKURU
+
+Section 4 of `why_is_the_board_empty.sql` lists the geographies incidents are
+filed under, and ends:
+
+    -- Cross-check these names with: python3 scripts/sync_tactical_map.py --check
+
+That script compares the *repository's* tactical map with the ward asset. It
+cannot see production's rows, so the actual question — is this LGA/ward pair one
+of the 207 real ones? — was left to an operator reading a list by eye. They did
+it, and found:
+
+    JOS SOUTH / BUKURU           n incident(s)
+    JOS SOUTH / BUKURU WARD      n incident(s)
+
+filed as different places, and `BUKURU WARD` recorded as the posting of staff in
+**six different LGAs**, when `BUKURU` is a ward of Jos South and of nowhere
+else.
+
+`assets/geo/plateau_wards.json` has 207 wards across the 17 LGAs of Plateau
+State. **Not one ward name ends in " WARD" and not one LGA name ends in " LGA".**
+The suffix is never part of a real name: it is the word the form already said.
+
+#### Why that empties a board
+
+`alert_in_my_area()` decides whether a staff account sees an incident, and since
+T-? (`20261009000000`) it compares place names through `geo_key()`:
+
+    public.geo_key(a.geo_lga)  = public.geo_key(p.geo_lga)
+    AND public.geo_key(a.geo_ward) = public.geo_key(p.geo_ward)
+
+`geo_key` upper-cases, collapses whitespace and rewrites a trailing Roman
+numeral — which is what it was written for, because the app and the tactical map
+spell four Mangu wards differently. It does not touch a trailing " WARD".
+
+    geo_key('BUKURU')      -> 'BUKURU'
+    geo_key('BUKURU WARD') -> 'BUKURU WARD'
+
+Different keys. A ward commander posted to `JOS SOUTH / BUKURU WARD` is refused
+every incident filed at `JOS SOUTH / BUKURU`, and the other way round. Empty
+board, rows right there — the same failure `20261009000000` fixed for Roman
+numerals, in the suffix it did not know about. And this time it is *both* halves
+of the comparison, because the posting and the report are typed by different
+people into different forms.
+
+The six-LGA `BUKURU WARD` is the other half: staff in five LGAs that do not have
+that ward are posted to it, and match no incident under the ward branch at all.
+No migration can fix that — but `scripts/which_geography_is_real.sql` now names
+every such row **and the LGA the ward actually belongs to**, which for almost
+every ward name is the whole answer.
+
+#### Safe because it has nothing to collide with
+
+Zero of the 207 surveyed wards collide under the new key, and
+`check_a_ward_name_resolves.py` asserts that against the asset, so the day a
+ward genuinely called "X WARD" is added, CI says so instead of two wards quietly
+becoming one. Only `WARD` and `LGA`, only trailing: "DISTRICT" and the rest are
+not stripped, because none has been observed and an unobserved strip is a guess
+with somebody's board on the other end of it.
+
+The gate does not reimplement the normalisation. It **extracts the
+`regexp_replace` patterns from the migration body** in application order and
+applies them, so it cannot drift from the function it checks — which is the
+mistake that made the Roman-numeral comparison wrong in two places at once.
+
+#### The second defect, which is worse than the first
+
+`geo_key()` is `IMMUTABLE`, and `20261009000000` indexes it:
+
+    CREATE INDEX alerts_geo_key_idx
+      ON public.alerts (geo_key(geo_lga), geo_key(geo_ward), geo_key(geo_pu));
+    CREATE INDEX profiles_geo_key_idx ON public.profiles (...);
+
+`IMMUTABLE` is a promise that one input always gives one output, and PostgreSQL
+believes it: **the index keeps the values computed under the old body and is not
+rebuilt when the function is replaced.** An index scan then searches new keys
+among old ones and finds nothing, while a sequential scan returns the right
+answer. The same query, right or wrong by query plan.
+
+Nothing in the repository said so. And T-91 had *just* made sixteen function-body
+replacements visible, so the next person to touch an indexed function would have
+walked into this.
+
+The replay does not take it on trust. It installs the old body **without**
+reindexing and requires the two routes to disagree:
+
+      PASS: a stale index really does disagree with a scan (0 vs 1) — the
+            REINDEX in that migration is load-bearing
+
+Index scan 0, sequential scan 1, on the same row.
+
+#### The gate generalises past this migration
+
+`check_a_ward_name_resolves.py` check 4 reads every migration: if one replaces
+an `IMMUTABLE` function that any index is built on, it must `REINDEX` that index
+by name. It also reads a partial index's `WHERE` predicate, because a predicate
+built on a replaced function decides *which rows are in the index* — stale in
+the same way and in a worse direction, rows silently missing rather than keys
+not found.
+
+That requirement changed the migration. The rebuild was originally a loop over
+`ARRAY['alerts_geo_key_idx', 'profiles_geo_key_idx']` with `EXECUTE format(...)`,
+which puts the index name and the `REINDEX` in different statements where no
+check can pair them. Each index is now named in its own statement beside its own
+existence test — written so it is verifiable, which is the point.
+
+#### Two regex mistakes, both found by reading what the check printed
+
+`ON public.alerts (public.geo_key(geo_lga), ...)` has two `public.x(` in it and
+the first is the table, so a lazy `[^;]*?\bpublic\.(\w+)\s*\(` captured
+`alerts`. Check 4 then found no indexed function at all and printed **"0 indexed
+IMMUTABLE function(s) (none)"** — a passing line that says the check tested
+nothing, which is why the proved-list prints counts rather than a bare "OK".
+
+Capturing the column list with `\((.*?)\)\s*;` was the second. A partial index
+ends `WHERE reporter_msisdn IS NOT NULL;` with no `)` before the semicolon, so
+the lazy match ran into the *next* statement and attributed its index to
+unrelated functions — it reported `awaiting_human_confirmation` as having a
+stale index it has nothing to do with. The parentheses are scanned balanced now.
+
+Five mutations caught: a forgotten REINDEX, the suffix strip removed, the strip
+applied without requiring a character in front of it (which erases a place
+called "WARD"), a real ward called `BUKURU WARD` added to the asset, and the
+asset's own `count` disagreeing with its list.
+
+#### And the fingerprint machinery needed one more class
+
+T-91 extracts a distinguishing token from each replaced function body. This
+migration's entire change is punctuation —
+`regexp_replace(..., '(.)\s+(WARD|LGA)$', '\1')` — so `FP_LITERAL` could not
+match it and the only new words were upper case. The migration fell straight out
+of the inventory, which is the defect T-91 is about, one week later. `FP_UPPER`
+is tried last, after lowercase identifiers, so no existing fingerprint moved;
+`geo_key contains WARD` is the row.

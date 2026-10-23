@@ -186,6 +186,19 @@ POLICY = re.compile(r'(?is)\bCREATE\s+POLICY\b')
 # edited again, and drifts silently in the direction of reporting success.
 FP_LITERAL = re.compile(r"'[A-Za-z0-9_ .%/-]{3,}'")
 FP_WORD = re.compile(r'\b[a-z_][a-z0-9_]{4,}\b')
+# A LAST RESORT, and it had to exist.
+#
+# `20261031000000_a_ward_is_not_called_ward` adds one regexp_replace step to
+# `geo_key`, and everything new about it is punctuation:
+#
+#     regexp_replace(..., '(.)\s+(WARD|LGA)$', '\1')
+#
+# FP_LITERAL will not match a pattern full of regex metacharacters, and the only
+# new words are upper case, so the migration fell straight out of the inventory
+# the way T-91 is about. Tried AFTER FP_WORD, because a function name is a
+# better fingerprint than a bare SQL keyword, and a body that adds a new
+# identifier will have been matched already.
+FP_UPPER = re.compile(r'\b[A-Z][A-Z0-9_]{2,}\b')
 
 DOLLAR = re.compile(r'\$(\w*)\$')
 
@@ -256,7 +269,7 @@ def body_fingerprint(prev: str, body: str,
     report the most recent migration applied and an earlier one missing, which
     is both wrong and the kind of wrong that sends somebody to re-apply a file.
     """
-    for rx in (FP_LITERAL, FP_WORD):
+    for rx in (FP_LITERAL, FP_WORD, FP_UPPER):
         here, before = set(rx.findall(body)), set(rx.findall(prev))
         added = {t for t in here - before if all(t in b for b in later)}
         if added:

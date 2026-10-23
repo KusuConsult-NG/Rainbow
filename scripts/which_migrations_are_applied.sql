@@ -203,6 +203,7 @@ WITH expected(migration, kind, obj, want) AS (VALUES
   ('20261030000000_a_shelter_says_who_stood_there', 'function', 'retire_safe_zone', true),
   ('20261030000000_a_shelter_says_who_stood_there', 'column', 'safe_zones.verified_at', true),
   ('20261030000000_a_shelter_says_who_stood_there', 'column', 'safe_zones.verified_by', true),
+  ('20261031000000_a_ward_is_not_called_ward', 'function body', 'geo_key:WARD', true),
   ('phase1_foundation', 'table', 'safe_zones', true),
   ('phase1_foundation', 'table', 'uninstall_requests', true),
   ('phase1_foundation', 'table', 'app_config', true),

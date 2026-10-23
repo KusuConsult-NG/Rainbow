@@ -885,6 +885,20 @@ jobs:
       - name: Assert a shelter is where its row says it is
         run: python3 scripts/check_a_shelter_is_where_it_says.py
 
+      # The live project files incidents under JOS SOUTH / BUKURU and JOS SOUTH
+      # / BUKURU WARD as different places, and carries BUKURU WARD as the
+      # posting of staff in six LGAs when BUKURU is a ward of Jos South alone.
+      # No surveyed ward name ends in " WARD", so the suffix is never part of a
+      # real name — and RLS compared postings with incidents through geo_key(),
+      # which did not strip it, so those officers saw nothing. geo_key is also
+      # IMMUTABLE and indexed, and PostgreSQL does not rebuild an index when the
+      # function under it is replaced. T-95.
+      - name: Assert a ward name resolves, and an indexed function is rebuilt
+        run: python3 scripts/check_a_ward_name_resolves.py
+
+      - name: Assert the geography inventory matches the ward asset
+        run: python3 scripts/sync_geography_inventory.py --check
+
       # `tier_timeout_minutes()` is the only reader of the three escalation
       # timeouts and it refuses what it cannot use — `raw::INTEGER`, then
       # `parsed <= 0` — because, in the migration's own words, a timeout of 0

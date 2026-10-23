@@ -365,5 +365,3 @@ GRANT EXECUTE ON FUNCTION public.publish_safe_zone(
 GRANT EXECUTE ON FUNCTION public.verify_safe_zone(UUID) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.retire_safe_zone(UUID, TEXT) TO authenticated, service_role;
 
-
-
