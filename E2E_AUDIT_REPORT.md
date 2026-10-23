@@ -10701,3 +10701,62 @@ tightens the secondary-doc check that has used this regex all along.
 
 Three mutations caught after that: the count spelled out again, a wrong digit
 count, and a wrong parts-file count.
+
+---
+
+### T-88. The note that said what the fix was, and stayed a note
+
+Item 7 of the outstanding list. T-76 found that the responder markers on
+`live_tracking_screen.dart` carry correct labels a screen reader cannot reach,
+and wrote down why:
+
+> The two requirements genuinely conflict. Resolving it means giving that screen
+> a responder **list** rather than relying on map pins, which is a feature and
+> not mine to invent.
+
+That was true, and it sat there. The gate added alongside it required the reason
+to be written at the control, and the reason was written — so the build stayed
+green while the function remained unavailable to anybody using a screen reader.
+A documented gap is better than a silent one and is still a gap.
+
+#### What was done
+
+The responder list exists: one ordinary `ElevatedButton` per responder on duty,
+at the top of the Stack and **outside** the excluded subtree, each opening the
+same details its marker opens. Same shape as the shelter strip T-78 added to
+`safe_zone_screen.dart`, for the same reason.
+
+It is also better for the screen's purpose than pins alone — a dispatcher
+looking for one officer reads a name faster than they find a coloured circle
+among several — and each chip states the status **in words** beside its colour,
+because a colour alone is not information everybody receives and the legend that
+decodes it is at the other end of the screen.
+
+#### The gate now demands an equivalent, not just a reason
+
+`SEMANTICS-UNREACHABLE:` was enough to acknowledge an unreachable control. It is
+not enough any more: the comment must also carry `REACHABLE EQUIVALENT:` naming
+where the same function is available. If there is no equivalent there is nothing
+to name and the build fails — which is the right outcome, because then the
+function is simply unavailable.
+
+Reproduced before fixing: with the list built but the token absent, the gate
+named the control and said what to add.
+
+#### Two findings in my own work, both from gates I had not thought about
+
+**`check_async_reads_cannot_rethrow.py`** caught `respondersAsync.value!`
+iterated a dozen lines below its `hasValue` guard. `AsyncValue.value` throws
+before the `!` is reached, so the guard is the only thing making it safe and the
+gate wants it visible beside the use. I removed the bang instead of moving the
+guard: one local, `valueOrNull ?? const []`, read once at the top.
+
+**`check_citizen_screens_speak_the_language.py`** caught `'UNKNOWN'` — the word
+a dispatcher reads when a responder's status has not been reported. It is not a
+DATA value; the strings the code compares are `PATROLLING`, `EMERGENCY`,
+`ONLINE`. It is a label, and it is now `trk_status_unknown` in three languages.
+
+Worth noting why that one had not fired before: T-76 wrote the same fallback as
+`'unknown'`, lowercase, and the gate's literal pattern requires a leading
+capital. The same string, in the same screen, invisible to the check because of
+its case — and caught this time only because I happened to write it in capitals.

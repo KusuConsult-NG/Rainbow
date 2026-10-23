@@ -301,6 +301,21 @@ def unnamed_tap_targets() -> list[tuple[str, int, str]]:
 # to type the token.
 ACKNOWLEDGED = "SEMANTICS-UNREACHABLE:"
 
+# AND SAYING WHERE THE FUNCTION IS OTHERWISE AVAILABLE.
+#
+# The first version accepted any reason. That let an unreachable control be
+# documented and left — better than silent, and a screen reader still cannot do
+# the thing. `live_tracking_screen.dart` said the resolution "means giving this
+# screen a responder LIST ... which is a feature rather than a fix": correct,
+# and it sat there as a note while the markers stayed the only way in.
+#
+# An unreachable control is acceptable only when its FUNCTION is reachable some
+# other way. So the acknowledgement must name that way, in a second token a
+# check can find. If there is no equivalent there is nothing to name and the
+# build fails — the right outcome, because then the function is simply
+# unavailable to a screen reader. T-88.
+EQUIVALENT = "REACHABLE EQUIVALENT:"
+
 
 def unreachable_tap_targets() -> tuple[list[tuple[str, int, str]], list[tuple[str, int]]]:
     """Tap targets buried under an `excludeSemantics: true` ancestor.
@@ -366,10 +381,17 @@ def unreachable_tap_targets() -> tuple[list[tuple[str, int, str]], list[tuple[st
                             back -= 1
                             continue
                         break
-                if ACKNOWLEDGED in "\n".join(block):
-                    known.append((str(path.relative_to(ROOT)), line))
+                comment = "\n".join(block)
+                if ACKNOWLEDGED not in comment:
+                    bad.append((str(path.relative_to(ROOT)), line,
+                                f"excluded by the Semantics at line {excluded_by}"))
+                elif EQUIVALENT not in comment:
+                    bad.append((str(path.relative_to(ROOT)), line,
+                                "acknowledged as unreachable (excluded by line "
+                                f"{excluded_by}) and never says where the function "
+                                f'IS reachable — add "{EQUIVALENT} <where>"'))
                 else:
-                    bad.append((str(path.relative_to(ROOT)), line, f"excluded by the Semantics at line {excluded_by}"))
+                    known.append((str(path.relative_to(ROOT)), line))
     return bad, known
 
 
@@ -588,7 +610,8 @@ def main() -> int:
     if acknowledged:
         print()
         print(f"    {len(acknowledged)} control(s) carry a correct label a screen reader")
-        print("    still cannot reach, each with its reason written at the control:")
+        print("    still cannot reach. Each names, at the control, why — and")
+        print("    where the same function IS reachable:")
         for path, line in acknowledged:
             print(f"      {path}:{line}")
     return 0

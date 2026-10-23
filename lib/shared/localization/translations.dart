@@ -1045,6 +1045,19 @@ class Translations {
       AppLanguage.hausa: "Wani jami'i",
       AppLanguage.pidgin: 'One responder',
     },
+    // A responder whose status nobody has reported. Not a DATA value — the
+    // status strings the code compares are PATROLLING / EMERGENCY / ONLINE —
+    // this is the word a dispatcher reads when there is none. T-88.
+    'trk_status_unknown': {
+      AppLanguage.english: 'STATUS UNKNOWN',
+      AppLanguage.hausa: 'BA A SAN MATSAYI BA',
+      AppLanguage.pidgin: 'STATUS NO DEY',
+    },
+    'trk_semantics_responder_list': {
+      AppLanguage.english: 'Responders on duty, as a list',
+      AppLanguage.hausa: "Jami'ai kan aiki, a jerin",
+      AppLanguage.pidgin: 'Responders wey dey work, as list',
+    },
     'trk_semantics_open_responder': {
       AppLanguage.english: 'Open the details for {who}, status {status}',
       AppLanguage.hausa: 'Bude bayanan {who}, matsayi {status}',

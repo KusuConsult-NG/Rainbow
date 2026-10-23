@@ -164,6 +164,13 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
   @override
   Widget build(BuildContext context) {
     final respondersAsync = ref.watch(respondersStreamProvider);
+    // Read once, unwrapped once. The list below iterated
+    // `respondersAsync.value!` a dozen lines below its `hasValue` guard, and
+    // `check_async_reads_cannot_rethrow.py` wants the guard beside the use —
+    // `AsyncValue.value` throws before the `!` is reached, so the guard is the
+    // only thing making it safe. A local removes the bang rather than moving
+    // the guard closer to it.
+    final onDuty = respondersAsync.valueOrNull ?? const <Map<String, dynamic>>[];
     final alertsAsync = ref.watch(alertsMapStreamProvider);
     final lang = ref.watch(languageProvider);
 
@@ -283,13 +290,23 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                               // already found once. Excluding a subtree
                               // excludes its markers with it, so the two
                               // requirements conflict and no label here can
-                              // win. Resolving it means giving this screen a
-                              // responder LIST instead of relying on map pins,
-                              // which is a feature rather than a fix.
+                              // win.
                               //
-                              // Recorded in E2E_AUDIT_REPORT.md T-76. The
-                              // label is written now so it is right the moment
-                              // that lands.
+                              // REACHABLE EQUIVALENT: the responder list at
+                              // the top of this Stack — one ordinary button
+                              // per responder, outside the exclusion, each
+                              // opening these same details. It landed in T-88:
+                              // one ordinary button per responder, outside the
+                              // exclusion, each opening the same details this
+                              // marker opens. The marker stays unreachable —
+                              // that is what the token above acknowledges —
+                              // but the FUNCTION is no longer only available
+                              // through it.
+                              //
+                              // Recorded in E2E_AUDIT_REPORT.md T-76 and T-88.
+                              // The label here is still correct and still
+                              // written, so it is right if the exclusion ever
+                              // becomes unnecessary.
                               child: Semantics(
                                 button: true,
                                 label: Translations.get(
@@ -321,6 +338,69 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                   ],
                   ),
                 ),
+                // THE RESPONDERS, AS A LIST.
+                //
+                // The markers above carry correct labels and a screen reader
+                // cannot reach any of them: the map surface is inside a
+                // `Semantics(excludeSemantics: true)` because flutter_map's
+                // pan-and-zoom recognizer otherwise presents the whole screen
+                // as one unlabelled button, and excluding a subtree excludes
+                // its markers with it. The two requirements conflict and no
+                // label on a pin can win. T-76 recorded that and said the
+                // resolution was a LIST. This is it.
+                //
+                // Same shape as the shelter strip on safe_zone_screen.dart:
+                // ordinary buttons with text, outside the exclusion, each
+                // doing exactly what its marker does — open that responder's
+                // details. It is also better for the screen's purpose. A
+                // dispatcher looking for one officer reads a name faster than
+                // they find a coloured circle among several. T-88.
+                if (onDuty.isNotEmpty)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: Semantics(
+                      container: true,
+                      label: Translations.get(
+                        'trk_semantics_responder_list',
+                        lang,
+                      ),
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        child: Row(
+                          children: [
+                            for (final r in onDuty)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: _ResponderChip(
+                                  name: (r['full_name'] ??
+                                          r['badge_number'] ??
+                                          Translations.get(
+                                            'trk_semantics_a_responder',
+                                            lang,
+                                          ))
+                                      .toString(),
+                                  status: (r['status'] as String? ??
+                                          Translations.get(
+                                            'trk_status_unknown',
+                                            lang,
+                                          ))
+                                      .toUpperCase(),
+                                  colour:
+                                      _getMarkerColor(r['status'] as String?),
+                                  onTap: () => _showResponderDetails(r),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 // Legend
                 Positioned(
                   bottom: 24,
@@ -346,6 +426,65 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+/// One responder, as a button with their name and status on it.
+///
+/// No `Semantics` wrapper and none needed: the chip has TEXT, so its accessible
+/// name is that text, and `ElevatedButton` announces itself as a button. That
+/// is the whole point of this widget — the markers on the map are icons inside
+/// an excluded subtree, and this is an ordinary control outside it. T-88.
+class _ResponderChip extends StatelessWidget {
+  const _ResponderChip({
+    required this.name,
+    required this.status,
+    required this.colour,
+    required this.onTap,
+  });
+
+  final String name;
+  final String status;
+  final Color colour;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton(
+      onPressed: onTap,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppColors.surfaceContainer.withValues(alpha: 0.92),
+        foregroundColor: AppColors.onBackground,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: AppColors.outline),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // The status colour is also stated in words beside it. A colour on
+          // its own is not information somebody with low vision receives, and
+          // the legend that explains the colours is at the other end of the
+          // screen.
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: colour, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${name.toUpperCase()} · $status',
+            style: GoogleFonts.outfit(
+              fontWeight: FontWeight.w900,
+              fontSize: 10,
+              letterSpacing: 1,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
