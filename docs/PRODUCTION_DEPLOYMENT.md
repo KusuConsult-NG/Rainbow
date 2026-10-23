@@ -32,10 +32,17 @@ emergencies. The full instructions are in `E2E_AUDIT_REPORT.md`.
 for a new project — staging, DR, or a second deployment — and as the record of what
 each file does.
 
-Thirty-one migrations, in filename order. The fastest route is one paste of
-`scripts/apply_all_migrations.sql`, which contains all thirty-one in order and
+39 migrations, in filename order. The fastest route is one paste of
+`scripts/apply_all_migrations.sql`, which contains all 39 in order and
 ends in a 34-row PASS/FAIL table; `scripts/apply_in_parts/` is the same SQL split
-into 32 numbered files for an editor that will not take 5,900 lines at once.
+into 40 numbered files for an editor that will not take 7,000 lines at once.
+
+These figures are written as DIGITS on purpose. They were "Thirty-one",
+"thirty-one" and "32" — stale by 8 of each — and
+`check_runbook_covers_migrations.py`, which exists because these very numbers
+went stale once before, read only digits and so had nothing to compare. It reads
+spelled-out numbers now, and the parts-file count. Spelling a count out loud
+puts it where a check cannot see it. See E2E_AUDIT_REPORT.md T-87.
 `docs/APPLYING_THE_MIGRATIONS.md` is the step-by-step runbook, including the
 mandatory read-only dry run; do not apply the RLS migration without it.
 
@@ -49,7 +56,7 @@ a check — it is the script's own version:
 Compare it with `python3 scripts/migration_sets.py --fingerprint`. If they
 differ, the file you pasted is from a working copy behind the repository and
 every row below it describes a different set of migrations. This exists because
-it has already happened twice — a pasted inventory three migrations stale that
+it has already happened twice — a pasted inventory 3 migrations stale that
 reported "nothing to apply" (T-21), and a pasted verdict table from before the
 anon/public check learned to name the policy it objects to, which read
 `*** FAIL *** | no policy grants anon or public anything` and named nothing.

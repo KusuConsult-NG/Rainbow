@@ -10629,3 +10629,75 @@ string is the error branch of the stream, not the error itself.
 
 `chat_messages` is in the realtime publication from `20260720000000` and
 `phase1_foundation`, both long applied, so the publication is not it either.
+
+---
+
+### T-87. The check read the secondary document and not the primary one
+
+Item 8 of the outstanding list, and bigger than the stale numbers it was about.
+
+`docs/PRODUCTION_DEPLOYMENT.md` — the runbook an operator follows to deploy —
+said:
+
+> **Thirty-one migrations**, in filename order. … contains **all thirty-one** in
+> order … split into **32 numbered files** …
+
+The paste carries **39** and `scripts/apply_in_parts/` holds **40**. Stale by 8
+of each. The stated line count, 5,900, was 7,007.
+
+`check_runbook_covers_migrations.py` exists *because these very numbers went
+stale once before*. Its docstring describes the original: a runbook claiming
+"thirty-one outstanding migrations … a 25-row PASS/FAIL table … 2,300 lines"
+against a file of 5,935 lines ending in 34 rows.
+
+#### Why it passed anyway
+
+The gate has four claim-shaped checks — `WORD_COUNT`, `COUNT_CLAIM`,
+`UNAPPLIED_CLAIM`, `ROW_CLAIM`. Every one of them is applied to `other`: the
+**secondary** documents, inside a loop. None was ever applied to the runbook
+itself.
+
+So `docs/APPLYING_THE_MIGRATIONS.md` had its figures checked rigorously, and the
+primary runbook — the one an operator actually reads while deploying — had its
+TABLE verified and its PROSE never read at all. `WORD_COUNT` would have matched
+"Thirty-one migrations" on the first try. It was simply never pointed at the
+file.
+
+The eleventh instance, and the same sentence as all of them: the check reads a
+subset of its subject. Here the subset excluded the primary document.
+
+#### What was done
+
+The runbook's prose now goes through `WORD_COUNT`, `COUNT_CLAIM` and
+`UNAPPLIED_CLAIM`, through the same `unquoted()` filter the secondary docs use,
+so a document explaining this defect can still quote it in backticks.
+
+A fourth figure nothing had ever checked, in either document: `PARTS_CLAIM`
+counts `scripts/apply_in_parts/` against "into N numbered files". An operator
+told 32 who finds 40 cannot tell whether 8 are new or 8 are missing.
+
+The figures are corrected, as digits.
+
+#### Two things this found in my own work, both by running it
+
+**The new check fired on the sentence I added to explain the fix.** "stale by
+eight migrations and eight files" is a spelled-out count in prose, which is
+exactly what the check refuses. The sibling document carries no spelled-out
+count at all — that is how it has stayed checkable — so both that sentence and a
+pre-existing historical one ("a pasted inventory three migrations stale") are
+digits now.
+
+**And a mutation passed that should have failed.** `COUNT_CLAIM` required a
+comma:
+
+```python
+r'\ball (\d+), in order\b'
+```
+
+The sentence I had just corrected reads "all 39 in order" — no comma — so
+changing 39 to 31 was invisible. I had written prose the gate could not see
+while adding a gate to read prose. The comma is optional now, which also
+tightens the secondary-doc check that has used this regex all along.
+
+Three mutations caught after that: the count spelled out again, a wrong digit
+count, and a wrong parts-file count.

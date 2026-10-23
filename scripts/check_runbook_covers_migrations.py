@@ -92,8 +92,15 @@ OTHER_DOCS = [REPO / 'docs' / 'APPLYING_THE_MIGRATIONS.md']
 
 # "…finishing with a 34-row PASS/FAIL table", in the partial docs' wording.
 ROW_CLAIM = re.compile(r'(\d+)-row PASS/FAIL table')
+# "into 40 numbered files" — the size of scripts/apply_in_parts/, which neither
+# document had checked against the directory. T-87.
+PARTS_CLAIM = re.compile(r'into (\d+) numbered files')
 # "all 37" / "**37 migrations**" — a count of the outstanding set in prose.
-COUNT_CLAIM = re.compile(r'\ball (\d+), in order\b|\*\*(\d+) migrations\*\*')
+# The comma was REQUIRED here — `all (\d+), in order` — so "all 39 in order"
+# matched nothing and a wrong digit in that form went unnoticed. Found by
+# mutation-testing the runbook check added in T-87: changing 39 to 31 passed.
+# A claim should not be invisible to a check because of its punctuation.
+COUNT_CLAIM = re.compile(r'\ball (\d+),? in order\b|\*\*(\d+) migrations\*\*')
 
 # "38 migrations … not yet applied" — a claim about a DATABASE, from a file
 # that cannot see one. The count itself is fine (it is the paste's size); what
@@ -172,6 +179,54 @@ def main() -> int:
             'the runbook lists the migrations in a different order than '
             'filename (timestamp) order, which is the order they must be '
             'applied in.')
+    # ── THE RUNBOOK'S OWN PROSE FIGURES ────────────────────────────────────
+    #
+    # Every claim-shaped check in this file — WORD_COUNT, COUNT_CLAIM,
+    # UNAPPLIED_CLAIM, ROW_CLAIM — was applied to `other`, the SECONDARY docs,
+    # inside the loop below. None of them was ever applied to the runbook
+    # itself: the one an operator actually follows.
+    #
+    # So `docs/APPLYING_THE_MIGRATIONS.md` had its figures checked rigorously
+    # while PRODUCTION_DEPLOYMENT.md said "Thirty-one migrations", "all
+    # thirty-one in order" and "into 32 numbered files" — stale by eight
+    # migrations and eight files — and this check, which exists BECAUSE those
+    # very numbers went stale once, passed. Its table was verified; its prose
+    # was not read at all.
+    #
+    # Same shape as T-75 through T-84: the check reads a subset of its subject.
+    # Here the subset excluded the primary document. T-87.
+    runbook_prose = unquoted(text)
+
+    for m in WORD_COUNT.finditer(runbook_prose):
+        problems.append(
+            f'the runbook spells a migration count out in words: '
+            f'{m.group(0)!r}. Nothing can check that against '
+            f'supabase/migrations/. Write the digit ({len(outstanding)}).')
+
+    for m in COUNT_CLAIM.finditer(runbook_prose):
+        said = int(m.group(1) or m.group(2))
+        if said != len(outstanding):
+            problems.append(
+                f'the runbook says {m.group(0)!r}, but {len(outstanding)} '
+                'migrations are in the paste.')
+
+    for m in UNAPPLIED_CLAIM.finditer(runbook_prose):
+        problems.append(
+            f'the runbook says {m.group(0)!r}. That is a claim about a '
+            'DATABASE, and no file here can see one — the figure is the size '
+            'of the PASTE. Point at scripts/which_migrations_are_applied.sql '
+            'for what a given database still needs.')
+
+    # And the figure nothing checked in either document: how many files the
+    # split actually has. An operator who is told 32 and finds 40 does not
+    # know whether eight are new or eight are missing.
+    parts = sorted((REPO / 'scripts' / 'apply_in_parts').glob('*.sql'))
+    for m in PARTS_CLAIM.finditer(runbook_prose):
+        if int(m.group(1)) != len(parts):
+            problems.append(
+                f'the runbook says {m.group(0)!r}, but '
+                f'scripts/apply_in_parts/ holds {len(parts)} files.')
+
 
     # An empty description is a row that satisfies a coverage check and tells
     # the operator nothing.
