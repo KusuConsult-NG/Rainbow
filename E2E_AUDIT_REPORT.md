@@ -10957,3 +10957,362 @@ Nothing still *creates* a shelter — there is no screen or seed that writes one
 But the reason nothing could was not only a missing UI: on the deployed project
 8 of the 10 accounts that ought to be able to publish one were refused by RLS,
 and that was invisible because no shelter had ever been published to notice.
+
+---
+
+### T-91. The migration that fixes the feed reads "not detectable"
+
+The operator ran `scripts/which_migrations_are_applied.sql` against the live
+project to find out what it was missing. Two migrations read `0 of N present —
+NEVER APPLIED`, which is what the diagnostic is for. And for the migration that
+is the whole reason eight of their ten commanders could not post an advisory, it
+said this:
+
+    not detectable | 20261028000000_command_knows_both_vocabularies |
+      every object it declares is already created by an earlier migration, so
+      it is a no-op on a database that has them
+
+True, and useless. T-90 replaces `is_command()` and `commands_whole_state()` and
+creates nothing. Both functions exist either way, so object existence had
+nothing to count and the file dropped out of the report — in the one place
+somebody looks to find out whether the fix landed.
+
+#### Sixteen of them, and one is a privilege-escalation fix
+
+It was not one migration. Every function replacement in the history was
+invisible:
+
+| migration | function | what it changes |
+|---|---|---|
+| `20260927000000_signup_cannot_choose_role` | `handle_new_user` | deletes `COALESCE(NEW.raw_user_meta_data->>'role', 'CITIZEN')`, so a new account cannot name its own role |
+| `20261019000000_the_audit_trail_names_who_acted` | `audit_trail` | a function the console calls by name |
+| `20261028000000_command_knows_both_vocabularies` | `is_command`, `commands_whole_state` | who may command |
+| …13 more | | |
+
+The first is the one that stings. Whether a signup can write its own `role` is
+not a detail, and the report whose header says "a clean report is not evidence"
+was silent about it.
+
+The same shape as every other gap this audit has found: **a check reading a
+subset of its subject.** Here the subset was "objects that exist", and the thing
+it could not see is the only thing several of these migrations change.
+
+#### A body is detectable
+
+PostgreSQL keeps it. `pg_proc.prosrc` holds the text between the dollar quotes
+verbatim, so "is the new body installed?" becomes "does prosrc contain a token
+only the new body has?".
+
+The token is **extracted, not written down**, for the same reason the object
+inventory is: a fingerprint chosen by hand drifts the moment the function is
+edited again, and drifts silently toward reporting success. For each
+replacement, `sync_migration_inventory.py` diffs the new body against the one
+before it and picks a distinguishing token — preferring a quoted literal, which
+is exact:
+
+    ('20261028000000_command_knows_both_vocabularies', 'function body',
+     'is_command:''STATE_COMMANDER''', true)
+
+Fourteen of the sixteen fingerprint in the positive direction. One needs the
+negative: `20260927000000` only *removes* something, so the assertion is that
+`handle_new_user` no longer contains the literal `'role'` — which the schema
+already supported, since it carries must-be-absent rows for the migration that
+drops the generated mirrors. The last two re-declare `set_updated_at` and
+`normalise_lga` **byte-identically**, so there is genuinely nothing to detect,
+and the diagnostic now says that instead of guessing at a reason.
+
+One subtlety decides whether this works at all: a token must also hold in every
+*later* declaration. `alert_is_ours` is rewritten three times; a fingerprint
+taken from the first would be absent after the third, and the diagnostic would
+report the newest migration applied and an older one missing — sending somebody
+to re-apply a file that is already in.
+
+#### Proved by putting the old bodies back
+
+The rows pass trivially on a database that has the migration, which is every
+database the harness builds. So the replay installs the **pre-migration** bodies
+— the exact-match list of four names the live project has — and requires the
+diagnostic to say so:
+
+    ▶ Checking a replaced function body is detected, not assumed
+      PASS  the old bodies are named, the new ones clear it
+
+`0 of 2 present — NEVER APPLIED`, with `function is_command does not contain
+'STATE_COMMANDER'` named, then `2 of 2 present` once restored. The restore comes
+from `pg_get_functiondef` rather than a copy written out in the script, because
+a hand-written restore is a second definition of the thing under test.
+
+#### The gate
+
+`check_the_inventory_sees_a_new_body.py`. Four mutations caught: fingerprinting
+giving up, the predicate branch deleted from the template, the readable
+formatter deleted, and the generated rows emitted with nothing to evaluate them.
+
+Two mutations **survived and should have**: dropping the later-body filter
+leaves today's output byte-identical, because the longest new token happens to
+survive in every case; and picking the shortest token instead chooses
+`'LGA_COMMANDER'` over `'STATE_COMMANDER'`, which is an equally valid
+fingerprint that the replay probe catches. Worth recording, because the
+distinction is between a weak check and an equivalent mutant.
+
+One real weakness did turn up. The first version of check 3 grepped the whole
+generated file for `does not contain`, and the header I had just written
+*quotes an example of that line* — so the check passed with the formatter
+deleted. It reads the query now, below `WITH expected(`, and matches the
+`format(` call, which cannot be prose. That is the second time in this audit a
+check has been satisfied by its own documentation.
+
+---
+
+### T-92. Four hundred and twelve notices, the oldest from July, all due now
+
+From the live project:
+
+    outbox_rows 412 | outbox_pending 412 | outbox_erroring 0 | max attempts 0
+
+Four hundred and twelve queued notifications, **not one ever attempted**, going
+back three months. The drain worker had never been scheduled. That part is a
+deployment step and it is the operator's to take.
+
+The part that was ours is what happens when they take it.
+
+`claim_notifications` hands out the oldest undelivered rows whose
+`next_attempt_at` has passed, twenty at a time, and there was **no upper bound
+on age anywhere** — not in the function, not in
+`supabase/functions/drain-outbox/index.ts`, not in the console's
+`/api/notify/drain`. So the first thing a newly scheduled worker does is deliver
+July. Every officer whose geography matched an incident that timed out in July
+gets
+
+    INCIDENT NOW AT LGA
+    Incident #a3f2b118 in JOS SOUTH was not acknowledged in time and has come
+    up to LGA. Open the console to take it.
+
+for incidents that are closed, at twenty a minute for twenty-one minutes,
+indistinguishable from live notices because that is what the wording is for.
+
+The user's read is that these rows are test or demo data. It does not change the
+fix, and it is not what makes the fix necessary: **any queue that can stop and
+restart needs this, and this one just proved it can stop for three months.**
+
+#### Why the queue and not the worker
+
+A notification about an emergency is not like a notification about an invoice.
+It is an instruction to go somewhere, and it decays — a tier escalation says
+"nobody answered, it is yours now", which is false ten minutes later. There is
+no arrangement of retries under which delivering it beats dropping it.
+
+So the rule belongs where work is handed out. There are **two** drainers, and a
+rule written twice drifts; this project has already had that exact bug in the
+OneSignal auth scheme, where four copies disagreed and at most one ever
+authenticated. One claim function, one shelf life, and any worker written next
+inherits it.
+
+#### An expired row is not a delivered row
+
+The shortcut is to set `delivered_at` and move on. That writes a lie into the
+one table whose honesty this mechanism exists for — the outbox was built because
+the old worker marked escalations delivered with nobody told. `expired_at` with
+a reason is the truthful record, and it keeps "did anybody get told?" answerable
+afterwards.
+
+Also retired: a notice whose incident has since been RESOLVED or CANCELLED. A
+dispatcher closing an alert ten seconds after its tier timed out leaves a queued
+notice that sends a unit to a finished incident, and that race exists at any
+drain frequency.
+
+#### The backlog must not cost a tick
+
+The obvious implementation expires inside the claim CTE, and it passes every
+other assertion. With a batch of twenty and 412 stale rows standing, the worker
+then spends one tick per batch and the first live notice waits **twenty-one
+minutes**. An emergency queue cannot have a warm-up period, so the sweep runs
+first and unbounded, before the `LIMIT`.
+
+The replay proves exactly that: fifty stale notices ahead of one live one, batch
+size 1, and the live one must come back on the first call.
+
+#### The gate
+
+`check_a_queued_notice_has_a_shelf_life.py`. Four mutations caught: the sweep
+moved after the `LIMIT`, retiring writing `delivered_at`, the claim forgetting
+to exclude retired rows, and a drainer selecting its own work.
+
+A fifth survived, and was a real weakness. Check 4 requires every query that
+counts the queue to exclude retired rows, and it read a window of 400 characters
+either side — but `why_is_the_board_empty.sql` puts five of these scalar
+subqueries one after another, so reverting any single one still passed,
+satisfied by its neighbour. It walks to the enclosing parenthesised subquery
+now, and each of the six guards fails individually when knocked out. A proximity
+check over adjacent near-identical queries is not a check — the same mistake as
+the nearest-ancestor search in `check_control_labels.py`.
+
+Writing that check found two live instances of the bug it is about:
+`worst_attempts` and `newest_error` in the board diagnostic both read
+`delivered_at IS NULL` alone, so a retired notice's stale failure would have
+been reported as the newest thing wrong with a queue nobody was draining.
+
+#### Reading the diagnostic on a database that lacks the migration
+
+`why_is_the_board_empty.sql` is what an operator runs to find out what they are
+missing, so it cannot require what they are missing. `to_jsonb(o) ->> 'expired_at'
+IS NULL` reads the same on a database that has the column and on one that does
+not, instead of failing the whole script with `42703` on exactly the databases
+that need it most.
+
+---
+
+### T-93. The coordinate check read three trees, and the coordinates were in a fourth
+
+`check_no_invented_coordinates.py` exists because `safe_zone_screen.dart` showed
+a fleeing citizen three shelters produced by a literal in a `catch` block and
+drew a route to the nearest. The fix made the screen return nothing on failure
+and read the real `safe_zones` table instead.
+
+`phase1_foundation.sql` fills that table:
+
+    ('JOS SOUTH COMMAND HQ',      …, 9.8965, 8.8583, 'COMMAND_HQ', 'JOS SOUTH'),
+    ('PLATEAU STATE HQ',          …, 9.9167, 8.8917, 'COMMAND_HQ', 'JOS NORTH'),
+    ('BARKIN LADI SAFE POINT',    …, 9.5167, 8.9167, 'SAFE_POINT', 'BARKIN LADI'),
+    …
+
+Seven positions people are told to run to, and the numbers say where they came
+from. `9.9167, 8.8917` is the centroid of Jos — the same literal T-84 deleted
+from `ai-triage/index.ts`, where it was being written into `alerts` as the
+position of a report with no fix. `9.5167` is 9°31'00", `9.7167` is 9°43'00",
+`9.0500` is 9°03'00": round to the arc-minute, which is what a gazetteer gives
+for a **town**, not what a survey gives for a building. And the fallback this
+check was written to delete had `JOS SOUTH COMMAND HQ` at 9.9285, 8.8921 while
+the seed has it at 9.8965, 8.8583 — two positions, 3.6km apart, for one place.
+Neither was measured; that is why they disagree.
+
+So the literal moved out of the catch block and into the table the catch block
+was standing in for, and the check could not see it, because it read code and
+the data is in SQL. T-84 had already widened this check from one tree to three —
+`lib/`, `supabase/functions/`, `hq-dashboard-next/src` — and the fourth is where
+it mattered most.
+
+#### A stored position has no empty state to fall back to
+
+In Dart or TypeScript the rule is "return nothing and let the screen say so".
+There is no screen in SQL and no empty state: the row *is* the answer, for every
+consumer, permanently. So the rule for SQL is that the row must carry its own
+provenance — a coordinate literal has to name `verified_at` in the same
+statement, which forces whoever writes it to decide and lets the app tell the
+citizen which it is.
+
+Two exemptions, each stated. A behaviour test's fixture coordinates are the
+point of the test, as for a `.test.ts`. And `seed_demo_incidents.sql` is named:
+invented coordinates are its purpose, it is headed STAGING OR LOCAL ONLY in a
+box, prefixes every row `[DEMO]` and deletes exactly what it added. A third
+distinction is the SQL analogue of the viewport rule — a `CHECK (latitude
+BETWEEN 8.3 AND 10.4)` is a **bound**, not a placement: no row is ever put at
+one of those numbers.
+
+265 files read now, up from 206.
+
+---
+
+### T-94. The shelter a fleeing citizen is routed to is 11km away, in another LGA
+
+T-93 makes the seeded positions *honest*. This is the one that makes them
+*wrong*, and it is checkable.
+
+`hq-dashboard-next/src/lib/ward_centroids.ts` holds 207 **surveyed** ward
+centroids with an honest radius each — half the distance to the nearest
+neighbouring ward in the same LGA, clamped to [800m, 25km] — generated from the
+app's own ward asset and kept in parity by its own CI step. Measured against the
+LGA each shelter row *claims*:
+
+| shelter | claims | distance to nearest ward of that LGA | verdict |
+|---|---|---|---|
+| `JOS SOUTH COMMAND HQ` | JOS SOUTH | 11.22 km from GIRING (r=1.7km) | **9.6 km outside** — the position is in Jos North |
+| `MANGU COMMAND POST` | MANGU | 9.68 km from KADUNU (r=4.2km) | **5.5 km outside** — the position is in Barkin Ladi |
+| `JOS EAST TACTICAL OUTPOST` | JOS EAST | 4.59 km from SHERE WEST (r=4.0km) | 635 m outside |
+| `BUKURU TACTICAL OUTPOST` | JOS SOUTH | 1.49 km from GIRING | inside |
+| `JOS NORTH POLICE DIVISION` | JOS NORTH | 0.13 km from IBRAHIM KATSINA | inside |
+| `PLATEAU STATE HQ` | JOS NORTH | 0.42 km from GARBA DAHO | inside |
+| `BARKIN LADI SAFE POINT` | BARKIN LADI | 3.23 km from BARAKIN LADI | inside |
+
+A citizen in Jos South, fleeing, was given turn directions to a point eleven
+kilometres away in a different local government area, labelled as the Jos South
+command HQ.
+
+#### What this does not do
+
+It does not invent better coordinates. Nobody here has stood at these places,
+and replacing one guess with another is how there came to be two positions for
+Jos South Command HQ in the first place.
+
+The three whose position contradicts their own LGA are **deactivated, not
+deleted**. `is_active = false` is this table's own mechanism and the citizen
+provider already filters on it, so the dangerous route stops without destroying
+a row command may want to correct. They are real places — the user's answer to
+"which shelters exist" was *police stations and security outposts*, and a police
+division and two outposts do exist. What is wrong is the number, and only
+somebody there can fix it.
+
+#### Which is why there is now a way to fix it
+
+`safe_zones_write_command` has allowed command to write this table since
+`20260813000000`, and **nothing has ever called it**. That is why nobody
+noticed that, until T-90, only 2 of the project's 22 staff accounts satisfied
+`is_command()` at all: there was no screen to be refused from.
+
+`publish_safe_zone()`, `verify_safe_zone()` and `retire_safe_zone()` are
+functions rather than a bare table write so that the position is checked and the
+actor is recorded in one place, whichever screen calls them. Publishing leaves a
+position **unverified** unless the caller claims otherwise, and then their id is
+stored against it.
+
+A database cannot know whether a coordinate is real. What it can insist on is
+that somebody's id is against it.
+
+#### One shelter, one row
+
+The old seed ended `ON CONFLICT DO NOTHING` with **no conflict target**, against
+a `gen_random_uuid()` primary key. A generated key never conflicts, so the
+clause matched nothing and re-running `phase1_foundation.sql` inserted all seven
+again — the citizen screen would list each shelter twice and route to whichever
+copy sorted first. `UNIQUE (name)` and a real conflict target make the seed
+genuinely repeatable, and the replay applies the migration twice and asserts
+seven rows for seven names.
+
+#### The app says which
+
+Two caveats on a route, and they fail independently. `fromRouter` is about the
+**path** — a straight line is not a road route, T-83. `verified` is about the
+**destination** — the shelter's own row may not know where it is. A perfectly
+routed path to an unconfirmed pin is the dangerous case, because the turn
+directions make it look surveyed, so neither caveat may replace the other.
+
+The warning is also on the detail panel, in warning colour rather than dim,
+because that panel is what somebody reads while deciding *which* shelter to run
+to. After the route is announced it is too late to pick a different one. In all
+three languages: the name of a police division is reliable and anyone can point
+you to it; the pin is not.
+
+#### The gate
+
+`check_a_shelter_is_where_it_says.py` re-derives the table above and requires
+every stored shelter to be inside a surveyed ward of the LGA it claims, or
+deactivated. Five mutations caught: un-hiding the 11km one, hiding one that is
+where it says, an LGA the surveyed data has never heard of, nudging a good one
+just outside its ward radius, and changing the INSERT's shape so the check reads
+nothing.
+
+It can only check what the repository stores, not what `publish_safe_zone()`
+accepts at runtime. That is what `verified_by` is for.
+
+#### Writing the probe found two things
+
+`auth.uid()` reads `request.jwt.claim.sub` in this harness, and the probe set
+only `request.jwt.claims` — so `is_command()` was false for everybody, the
+commander's publish failed, and *the citizen-denied assertion two statements
+above it had been passing for the wrong reason*. It now asserts `auth.uid()` is
+who it meant to sign in before testing any permission.
+
+And the probe's own "corrected" MANGU position was a number I made up, in the
+file arguing against made-up numbers. It uses the surveyed centroid of
+MANGU/KADUNU — the ward the old position was 9.68km outside — as an explicit
+stand-in, which is what this project already does for a USSD report with no GPS.

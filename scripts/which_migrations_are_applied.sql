@@ -33,6 +33,16 @@
 -- missing column is an insert the database rejects in full. The `still present`
 -- rows are the mirror image: an object a migration should have removed.
 --
+-- A `function body` row asks a different question from a `function` row.
+-- Several migrations here exist only to REPLACE a function an earlier one
+-- created, and the function is present either way — so object existence could
+-- not see them and reported them `not detectable`, including the one that stops
+-- a new signup writing its own role and the one that lets a STATE_COMMANDER
+-- post an advisory. These rows look inside the installed body for a token only
+-- the new version contains, so `function is_command does not contain
+-- 'STATE_COMMANDER'` means that migration has not been applied, whatever else
+-- is present.
+--
 -- The `not detectable` rows name migrations this diagnostic CANNOT see, with
 -- the reason. A clean report is not evidence that those were applied.
 --
@@ -86,6 +96,7 @@ WITH expected(migration, kind, obj, want) AS (VALUES
   ('20260903000002_system_alerts_broadcast', 'column', 'system_alerts.target_pu', true),
   ('20260903000004_profiles_badge_number', 'column', 'profiles.badge_number', true),
   ('20260903000005_alerts_assigned_tier', 'column', 'alerts.assigned_tier', true),
+  ('20260927000000_signup_cannot_choose_role', 'function body', 'handle_new_user:''role''', false),
   ('20260928000000_command_chain_escalation', 'function', 'next_tier', true),
   ('20260928000000_command_chain_escalation', 'function', 'tier_timeout_minutes', true),
   ('20260928000000_command_chain_escalation', 'function', 'escalate_overdue_alerts', true),
@@ -112,16 +123,22 @@ WITH expected(migration, kind, obj, want) AS (VALUES
   ('20261006000000_alerts_scoped_to_posting', 'function', 'commands_whole_state', true),
   ('20261006000000_alerts_scoped_to_posting', 'function', 'alert_in_my_area', true),
   ('20261006000000_alerts_scoped_to_posting', 'function', 'alert_delegated_to_my_lga', true),
+  ('20261006000000_alerts_scoped_to_posting', 'function body', 'alert_is_ours:alert_delegated_to_my_lga', true),
   ('20261007000000_notification_outbox', 'table', 'notification_outbox', true),
   ('20261007000000_notification_outbox', 'function', 'claim_notifications', true),
   ('20261007000000_notification_outbox', 'function', 'mark_notification_sent', true),
   ('20261007000000_notification_outbox', 'function', 'mark_notification_failed', true),
+  ('20261007000000_notification_outbox', 'function body', 'escalate_overdue_alerts:''TIER_ESCALATION''', true),
   ('20261007000000_notification_outbox', 'function', 'escalation_automation_status', true),
   ('20261008000000_escalation_push_targets', 'function', 'escalation_push_targets', true),
   ('20261009000000_ward_names_compared_by_key', 'function', 'geo_key', true),
+  ('20261009000000_ward_names_compared_by_key', 'function body', 'alert_in_my_area:geo_key', true),
+  ('20261009000000_ward_names_compared_by_key', 'function body', 'alert_delegated_to_my_lga:geo_key', true),
+  ('20261009000000_ward_names_compared_by_key', 'function body', 'escalation_push_targets:geo_key', true),
   ('20261010000000_append_alert_media_atomically', 'function', 'append_alert_media', true),
   ('20261011000000_ussd_reports_are_unconfirmed', 'table', 'ussd_sessions', true),
   ('20261011000000_ussd_reports_are_unconfirmed', 'function', 'awaiting_human_confirmation', true),
+  ('20261011000000_ussd_reports_are_unconfirmed', 'function body', 'escalate_overdue_alerts:awaiting_human_confirmation', true),
   ('20261011000000_ussd_reports_are_unconfirmed', 'function', 'confirm_ussd_report', true),
   ('20261011000000_ussd_reports_are_unconfirmed', 'function', 'mark_false_report', true),
   ('20261011000000_ussd_reports_are_unconfirmed', 'function', 'ussd_report_credibility', true),
@@ -140,13 +157,17 @@ WITH expected(migration, kind, obj, want) AS (VALUES
   ('20261014000000_ai_reports_are_kept', 'table', 'incident_ai_reports', true),
   ('20261014000000_ai_reports_are_kept', 'function', 'latest_ai_report', true),
   ('20261015000000_oversight_and_debrief', 'function', 'is_oversight_matter', true),
+  ('20261015000000_oversight_and_debrief', 'function body', 'alert_is_ours:is_oversight_matter', true),
+  ('20261015000000_oversight_and_debrief', 'function body', 'awaiting_human_confirmation:is_oversight_matter', true),
   ('20261015000000_oversight_and_debrief', 'function', 'route_oversight_to_hq', true),
   ('20261015000000_oversight_and_debrief', 'function', 'audit_trail', true),
   ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief', true),
   ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief_by', true),
   ('20261015000000_oversight_and_debrief', 'column', 'alerts.debrief_at', true),
+  ('20261019000000_the_audit_trail_names_who_acted', 'function body', 'audit_trail:''by_email''', true),
   ('20261020000000_a_handset_that_leaves_mid_emergency', 'column', 'alerts.device_signed_out_at', true),
   ('20261021000000_an_lga_can_hand_an_incident_to_a_ward', 'function', 'alert_delegated_to_my_ward', true),
+  ('20261021000000_an_lga_can_hand_an_incident_to_a_ward', 'function body', 'alert_is_ours:alert_delegated_to_my_ward', true),
   ('20261022000000_a_new_emergency_tells_the_unit', 'function', 'queue_new_incident_notice', true),
   ('20261023000000_one_table_one_shape', 'column', 'agency_notifications.detail', true),
   ('20261023000000_one_table_one_shape', 'column', 'agency_notifications.sent_by', true),
@@ -158,6 +179,7 @@ WITH expected(migration, kind, obj, want) AS (VALUES
   ('20261023000000_one_table_one_shape', 'column', 'agency_deployments.created_at', true),
   ('20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency', 'function', 'is_non_emergency', true),
   ('20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency', 'function', 'route_non_emergency_to_lga', true),
+  ('20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency', 'function body', 'escalate_overdue_alerts:is_non_emergency', true),
   ('20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency', 'column', 'alerts.voice_note_url', true),
   ('20261024000000_a_voice_note_and_a_report_that_is_not_an_emergency', 'column', 'alerts.voice_note_seconds', true),
   ('20261026000000_safe_zones_capacity', 'column', 'safe_zones.capacity', true),
@@ -167,6 +189,20 @@ WITH expected(migration, kind, obj, want) AS (VALUES
   ('20261027000000_agency_handovers_retry', 'column', 'agency_notifications.attempts', true),
   ('20261027000000_agency_handovers_retry', 'column', 'agency_notifications.next_attempt_at', true),
   ('20261027000000_agency_handovers_retry', 'column', 'agency_notifications.last_error', true),
+  ('20261028000000_command_knows_both_vocabularies', 'function body', 'is_command:''STATE_COMMANDER''', true),
+  ('20261028000000_command_knows_both_vocabularies', 'function body', 'commands_whole_state:''STATE_COMMANDER''', true),
+  ('20261029000000_a_notification_has_a_shelf_life', 'function', 'notification_shelf_life_minutes', true),
+  ('20261029000000_a_notification_has_a_shelf_life', 'function', 'notification_is_stale', true),
+  ('20261029000000_a_notification_has_a_shelf_life', 'function', 'expire_stale_notifications', true),
+  ('20261029000000_a_notification_has_a_shelf_life', 'function body', 'claim_notifications:expire_stale_notifications', true),
+  ('20261029000000_a_notification_has_a_shelf_life', 'function', 'notification_queue_status', true),
+  ('20261029000000_a_notification_has_a_shelf_life', 'column', 'notification_outbox.expired_at', true),
+  ('20261029000000_a_notification_has_a_shelf_life', 'column', 'notification_outbox.expiry_reason', true),
+  ('20261030000000_a_shelter_says_who_stood_there', 'function', 'publish_safe_zone', true),
+  ('20261030000000_a_shelter_says_who_stood_there', 'function', 'verify_safe_zone', true),
+  ('20261030000000_a_shelter_says_who_stood_there', 'function', 'retire_safe_zone', true),
+  ('20261030000000_a_shelter_says_who_stood_there', 'column', 'safe_zones.verified_at', true),
+  ('20261030000000_a_shelter_says_who_stood_there', 'column', 'safe_zones.verified_by', true),
   ('phase1_foundation', 'table', 'safe_zones', true),
   ('phase1_foundation', 'table', 'uninstall_requests', true),
   ('phase1_foundation', 'table', 'app_config', true),
@@ -206,6 +242,16 @@ resolved AS (
                         AND c.relname = split_part(e.obj, '.', 1)
                         AND a.attname = split_part(e.obj, '.', 2)
                         AND a.attnum > 0 AND NOT a.attisdropped)
+           -- `function` above asks whether the function EXISTS. This asks
+           -- whether the body installed is the one that migration writes, by
+           -- looking for a token only that version of the body contains.
+           -- prosrc holds the text between the dollar quotes verbatim.
+           WHEN 'function body' THEN
+             EXISTS (SELECT 1 FROM pg_proc p
+                       JOIN pg_namespace n ON n.oid = p.pronamespace
+                      WHERE n.nspname = 'public'
+                        AND p.proname = split_part(e.obj, ':', 1)
+                        AND position(split_part(e.obj, ':', 2) in p.prosrc) > 0)
          END AS present
     FROM expected e
 )
@@ -226,11 +272,23 @@ SELECT 1 AS ord, 'summary' AS section, migration AS name,
   FROM resolved
  GROUP BY migration
 UNION ALL
-SELECT 2, 'missing', format('%s %s', kind, obj), migration
+SELECT 2, 'missing',
+       CASE kind
+         WHEN 'function body' THEN
+           format('function %s does not contain %s',
+                  split_part(obj, ':', 1), split_part(obj, ':', 2))
+         ELSE format('%s %s', kind, obj)
+       END, migration
   FROM resolved
  WHERE want AND NOT present
 UNION ALL
-SELECT 2, 'still present', format('%s %s', kind, obj),
+SELECT 2, 'still present',
+       CASE kind
+         WHEN 'function body' THEN
+           format('function %s still contains %s',
+                  split_part(obj, ':', 1), split_part(obj, ':', 2))
+         ELSE format('%s %s', kind, obj)
+       END,
        format('%s removes this and has not been applied', migration)
   FROM resolved
  WHERE present AND NOT want
@@ -241,12 +299,9 @@ SELECT 3, 'not detectable', name, detail
          ('20260903000000_realtime_publication', 'it declares no table, column or function'),
          ('20260903000001_incident_media_storage', 'it only creates policies, which object existence cannot see — use scripts/rls_inventory.sql'),
          ('20260903000003_alert_escalation_columns', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
-         ('20260927000000_signup_cannot_choose_role', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
          ('20261016000000_telemetry_policy_is_not_public', 'it only creates policies, which object existence cannot see — use scripts/rls_inventory.sql'),
-         ('20261017000000_the_hand_applied_era_is_in_the_history', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
-         ('20261019000000_the_audit_trail_names_who_acted', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them'),
-         ('20261025000000_the_other_policy_public_could_reach', 'it declares no table, column or function'),
-         ('20261028000000_command_knows_both_vocabularies', 'every object it declares is already created by an earlier migration, so it is a no-op on a database that has them')
+         ('20261017000000_the_hand_applied_era_is_in_the_history', 'it re-declares normalise_lga and set_updated_at with the same body it already has, so there is nothing to detect either way'),
+         ('20261025000000_the_other_policy_public_could_reach', 'it declares no table, column or function')
        ) AS u(name, detail)
 UNION ALL
 SELECT 4, 'as expected', 'every object in every migration is as it should be',

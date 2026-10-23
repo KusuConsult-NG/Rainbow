@@ -1105,6 +1105,29 @@ class Translations {
           'Routing no dey work now, so this one na straight line, no road. '
           'Follow road and no go near the danger.',
     },
+    // Appended when the shelter's own row says nobody has confirmed where it
+    // is. Three of the seven seeded shelters were outside every surveyed ward
+    // of the LGA their row claimed, the worst by 9.6km, and the screen drew a
+    // confident route to the nearest one. Those three are deactivated now, but
+    // an unverified position is still a guess and the person running has to be
+    // told which it is: the NAME is reliable — a police division is a place
+    // anyone can point you to — and the pin is not. T-94.
+    'sz_position_not_confirmed': {
+      AppLanguage.english:
+          'Nobody has confirmed this exact spot, so ask for directions when '
+          'you are close.',
+      AppLanguage.hausa:
+          'Babu wanda ya tabbatar da ainihin wurin, don haka ka tambayi hanya '
+          'idan ka kusa.',
+      AppLanguage.pidgin:
+          'Nobody confam this exact place yet, so ask person for direction '
+          'when you near.',
+    },
+    'sz_not_confirmed_chip': {
+      AppLanguage.english: 'POSITION NOT CONFIRMED',
+      AppLanguage.hausa: 'WURIN BAI TABBATA BA',
+      AppLanguage.pidgin: 'PLACE NO CONFAM',
+    },
     'sz_route_calculated_clear': {
       AppLanguage.english: 'Safe route calculated to {name}. The path is clear.',
       AppLanguage.hausa:

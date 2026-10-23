@@ -347,15 +347,22 @@ DROP POLICY IF EXISTS "safe_zones_read" ON public.safe_zones;
 CREATE POLICY "safe_zones_read" ON public.safe_zones
   FOR SELECT USING (auth.uid() IS NOT NULL);
 
-INSERT INTO public.safe_zones (name, description, latitude, longitude, type, geo_lga) VALUES
-  ('JOS SOUTH COMMAND HQ',      'Primary tactical operations centre',     9.8965,  8.8583, 'COMMAND_HQ', 'JOS SOUTH'),
-  ('BUKURU TACTICAL OUTPOST',   'Forward operating base, Bukuru',          9.7952,  8.8521, 'OUTPOST',    'JOS SOUTH'),
-  ('JOS NORTH POLICE DIVISION', 'Jos North Police Headquarters',           9.9281,  8.8921, 'POLICE',     'JOS NORTH'),
-  ('PLATEAU STATE HQ',          'State Government HQ Command Centre',      9.9167,  8.8917, 'COMMAND_HQ', 'JOS NORTH'),
-  ('JOS EAST TACTICAL OUTPOST', 'Jos East forward operating base',         9.9500,  8.9600, 'OUTPOST',    'JOS EAST'),
-  ('BARKIN LADI SAFE POINT',    'Barkin Ladi civilian safe assembly',      9.5167,  8.9167, 'SAFE_POINT', 'BARKIN LADI'),
-  ('MANGU COMMAND POST',        'Mangu LGA tactical command post',         9.7167,  9.0500, 'COMMAND_HQ', 'MANGU')
-ON CONFLICT DO NOTHING;
+-- The seven shelters this file used to seed have moved to
+-- 20261030000000_a_shelter_says_who_stood_there.sql, unchanged, and are
+-- inserted there with `verified_at` named in the same statement.
+--
+-- Two reasons. First, none of those positions was measured — `PLATEAU STATE HQ`
+-- sat at the centroid of Jos to four decimal places, and three of the seven are
+-- outside every surveyed ward of the LGA their own row claims, the worst by
+-- 9.6km. `safe_zone_screen.dart` draws a citizen a ROUTE to the nearest one, so
+-- the row has to be able to say whether anybody has stood there, and the column
+-- that says so does not exist at this point in the history.
+--
+-- Second, the clause below was `ON CONFLICT DO NOTHING` with no target, against
+-- a `gen_random_uuid()` primary key. A generated key never conflicts, so it
+-- matched nothing and re-running this file inserted all seven again. The new
+-- migration adds `UNIQUE (name)` and conflicts on it, which is what makes the
+-- seed genuinely repeatable.
 
 -- ─── 5. uninstall_requests ────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.uninstall_requests (
@@ -7543,6 +7550,628 @@ BEGIN
     n_command, n_state;
 END $say$;
 
+-- ----------------------------------------------------------------------------
+-- 20261029000000_a_notification_has_a_shelf_life.sql  (outstanding)
+-- ----------------------------------------------------------------------------
+DO $b$ BEGIN RAISE NOTICE 'applying 20261029000000_a_notification_has_a_shelf_life.sql'; END $b$;
+
+-- Four hundred and twelve emergency notices, the oldest from July, all due now.
+--
+-- ## What the live project looks like
+--
+--     outbox_rows 412 | outbox_pending 412 | outbox_erroring 0 | max attempts 0
+--
+-- Four hundred and twelve queued notifications, none ever attempted, going back
+-- three months. The drain worker was never scheduled, so the queue simply
+-- filled. That part is a deployment step, and it is the operator's to take.
+--
+-- The part that is this file's is what happens when they take it.
+--
+-- `claim_notifications` takes the oldest undelivered rows whose
+-- `next_attempt_at` has passed, twenty at a time, and there is no upper bound on
+-- age anywhere — not in the function, not in either of the two drainers. So the
+-- first thing a newly scheduled worker does is deliver July. Every officer whose
+-- geography matched an incident that timed out in July gets
+--
+--     INCIDENT NOW AT LGA
+--     Incident #a3f2b118 in JOS SOUTH was not acknowledged in time and has come
+--     up to LGA. Open the console to take it.
+--
+-- for incidents that are closed, about positions people are no longer at, at
+-- twenty a minute for twenty-one minutes. The notices are indistinguishable from
+-- live ones, because that is what the text is for.
+--
+-- ## Why this is the queue's problem and not the worker's
+--
+-- A notification about an emergency is not like a notification about an invoice.
+-- It is an instruction to go somewhere, and it decays: a tier escalation says
+-- "nobody answered, it is yours now", which is false ten minutes later and
+-- dangerous three months later. There is no arrangement of retries under which
+-- delivering it is better than dropping it.
+--
+-- So the rule belongs where the work is handed out, not in each worker. There
+-- are two drainers — `supabase/functions/drain-outbox/index.ts` and the
+-- console's `/api/notify/drain` — and a rule written twice drifts; this project
+-- has already had that exact bug, in the OneSignal auth scheme, where the two
+-- halves disagreed and at most one of them ever authenticated. `escalation_push
+-- _targets()` was moved into SQL for the same reason. One claim function, one
+-- shelf life, and any worker anybody writes next inherits it.
+--
+-- ## An expired row is not a delivered row
+--
+-- The obvious shortcut is to set `delivered_at` and move on. That writes a lie
+-- into the one table whose honesty this mechanism exists for: the whole reason
+-- the outbox was built was that the old worker marked escalations delivered with
+-- nobody told. `expired_at` with a reason is the truthful record, and it keeps
+-- the "did anybody get told?" question answerable afterwards.
+
+-- ── The two terminal states ─────────────────────────────────────────────────
+
+ALTER TABLE public.notification_outbox
+  ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ;
+ALTER TABLE public.notification_outbox
+  ADD COLUMN IF NOT EXISTS expiry_reason TEXT;
+
+COMMENT ON COLUMN public.notification_outbox.expired_at IS
+  'Set when this notice was dropped undelivered because its moment had passed. '
+  'Distinct from delivered_at on purpose: nobody was told, and the table has to '
+  'say so.';
+COMMENT ON COLUMN public.notification_outbox.expiry_reason IS
+  'Why it was dropped. Not last_error, which is a delivery failure and is '
+  'retried; an expiry is final.';
+
+-- The drain query reads undelivered AND unexpired. The old partial index was
+-- `WHERE delivered_at IS NULL`, which after this change covers every retired row
+-- for ever — the backlog this migration exists to retire would stay in the hot
+-- path of the one query that runs every minute.
+DROP INDEX IF EXISTS public.notification_outbox_pending_idx;
+CREATE INDEX IF NOT EXISTS notification_outbox_pending_idx
+  ON public.notification_outbox (next_attempt_at)
+  WHERE delivered_at IS NULL AND expired_at IS NULL;
+
+-- ── How long a notice is worth sending ──────────────────────────────────────
+--
+-- Same shape as `tier_timeout_minutes()`, and for the same reason: a missing or
+-- malformed setting must not mean something dangerous. Here the dangerous
+-- readings are a shelf life of 0 (drop everything, the queue silently delivers
+-- nothing) and NULL read as infinite (the behaviour this file is fixing). Both
+-- fall back to the default.
+--
+-- 60 minutes, because the shortest escalation timeout in `app_config` is
+-- measured in minutes and the longest is well under an hour: a notice still
+-- undelivered an hour after it was queued has been overtaken by the incident it
+-- describes.
+
+INSERT INTO public.app_config (key, value)
+VALUES ('notification_shelf_life_minutes', '60')
+ON CONFLICT (key) DO NOTHING;
+
+CREATE OR REPLACE FUNCTION public.notification_shelf_life_minutes()
+RETURNS INTEGER
+LANGUAGE plpgsql STABLE
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  raw    TEXT;
+  parsed INTEGER;
+BEGIN
+  SELECT value INTO raw FROM public.app_config
+   WHERE key = 'notification_shelf_life_minutes';
+
+  BEGIN
+    parsed := raw::INTEGER;
+  EXCEPTION WHEN others THEN
+    RETURN 60;
+  END;
+
+  IF parsed IS NULL OR parsed <= 0 THEN
+    RETURN 60;
+  END IF;
+  RETURN parsed;
+END;
+$$;
+
+COMMENT ON FUNCTION public.notification_shelf_life_minutes() IS
+  'Minutes a queued notification is still worth delivering. Refuses 0, NULL '
+  'and anything unparseable, because each of those readings silently empties '
+  'or never empties the queue.';
+
+-- ── Which rows have had their moment ────────────────────────────────────────
+--
+-- Two conditions, and the second is the one that matters even with the worker
+-- running every minute:
+--
+--   age   queued longer ago than the shelf life.
+--   over  the incident it is about is closed. A dispatcher resolving an alert
+--         ten seconds after the tier timed out leaves a queued notice that
+--         sends a unit to a finished incident. That race exists at any drain
+--         frequency, and no retry policy fixes it.
+--
+-- Rows with no `alert_id` (a plain SMS, PUSH or WEBHOOK) are judged on age
+-- alone; there is no incident to ask about.
+
+CREATE OR REPLACE FUNCTION public.notification_is_stale(
+  p_row public.notification_outbox)
+RETURNS TEXT
+LANGUAGE sql STABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT CASE
+    WHEN p_row.created_at <
+           NOW() - make_interval(mins => public.notification_shelf_life_minutes())
+      THEN format('queued %s ago, past the %s minute shelf life',
+                  justify_interval(date_trunc('minute', NOW() - p_row.created_at)),
+                  public.notification_shelf_life_minutes())
+    WHEN p_row.alert_id IS NOT NULL AND EXISTS (
+           SELECT 1 FROM public.alerts a
+            WHERE a.id = p_row.alert_id
+              AND a.status IN ('RESOLVED', 'CANCELLED'))
+      THEN 'the incident it is about is closed'
+    ELSE NULL
+  END;
+$$;
+
+COMMENT ON FUNCTION public.notification_is_stale(public.notification_outbox) IS
+  'Why this notice is no longer worth sending, or NULL if it still is. One '
+  'definition, so the claim path and the operator sweep cannot disagree.';
+
+-- ── Retiring them ───────────────────────────────────────────────────────────
+--
+-- Callable on its own, because an operator about to schedule the drainer for the
+-- first time should be able to see what the queue is holding and retire it
+-- deliberately, with a count in front of them, rather than discover it as
+-- traffic. It returns what it retired and why.
+
+CREATE OR REPLACE FUNCTION public.expire_stale_notifications()
+RETURNS TABLE (kind TEXT, reason TEXT, retired BIGINT)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  WITH stale AS (
+    SELECT o.id, public.notification_is_stale(o) AS why
+      FROM public.notification_outbox o
+     WHERE o.delivered_at IS NULL
+       AND o.expired_at IS NULL
+  ),
+  retired AS (
+    UPDATE public.notification_outbox o
+       SET expired_at    = NOW(),
+           expiry_reason = s.why
+      FROM stale s
+     WHERE o.id = s.id AND s.why IS NOT NULL
+    RETURNING o.kind, o.expiry_reason
+  )
+  SELECT r.kind, r.expiry_reason, count(*)
+    FROM retired r
+   GROUP BY r.kind, r.expiry_reason
+   ORDER BY count(*) DESC;
+$$;
+
+COMMENT ON FUNCTION public.expire_stale_notifications() IS
+  'Retires every queued notice whose moment has passed, and reports what it '
+  'retired. Run this before scheduling the drainer on a queue that has been '
+  'standing: the alternative is delivering the backlog as live traffic.';
+
+REVOKE ALL ON FUNCTION public.expire_stale_notifications() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.expire_stale_notifications() FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.expire_stale_notifications() TO service_role;
+
+-- ── And the claim path enforces it, so no worker has to ─────────────────────
+--
+-- Expiry runs FIRST and UNBOUNDED, before the LIMIT. Doing it inside the claim
+-- CTE instead would mean the worker spends a tick per twenty stale rows: with
+-- 412 standing, the first live notice would wait twenty-one minutes. An
+-- emergency queue cannot have a warm-up period.
+--
+-- Same body as 20261007000000_notification_outbox.sql otherwise: the claim
+-- increments `attempts` and holds the row off for a minute so a worker that
+-- dies mid-send does not have it taken again immediately.
+
+CREATE OR REPLACE FUNCTION public.claim_notifications(p_limit INTEGER DEFAULT 20)
+RETURNS SETOF public.notification_outbox
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  -- Not conditional on a backlog existing, and not something the caller can
+  -- skip. A notice whose moment has passed must not be handed to a worker, and
+  -- the worker is the wrong place to decide that: there are two of them.
+  PERFORM public.expire_stale_notifications();
+
+  RETURN QUERY
+  WITH due AS (
+    SELECT o.id
+      FROM public.notification_outbox o
+     WHERE o.delivered_at IS NULL
+       AND o.expired_at IS NULL
+       AND o.next_attempt_at <= NOW()
+     ORDER BY o.next_attempt_at
+     LIMIT GREATEST(COALESCE(p_limit, 20), 1)
+     FOR UPDATE SKIP LOCKED
+  )
+  UPDATE public.notification_outbox o
+     SET attempts = o.attempts + 1,
+         next_attempt_at = NOW() + INTERVAL '1 minute'
+    FROM due
+   WHERE o.id = due.id
+  RETURNING o.*;
+END;
+$$;
+
+COMMENT ON FUNCTION public.claim_notifications(INTEGER) IS
+  'Hands out notices still worth sending, oldest first, retiring the rest. The '
+  'shelf life is enforced here rather than in each worker, because there are '
+  'two workers and a rule written twice drifts.';
+
+REVOKE ALL ON FUNCTION public.claim_notifications(INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.claim_notifications(INTEGER) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_notifications(INTEGER) TO service_role;
+
+-- ── What the queue is holding, before anybody schedules anything ────────────
+
+CREATE OR REPLACE FUNCTION public.notification_queue_status()
+RETURNS TABLE (state TEXT, notices BIGINT, oldest TIMESTAMPTZ, newest TIMESTAMPTZ)
+LANGUAGE sql STABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT state, count(*), min(created_at), max(created_at)
+    FROM (
+      SELECT o.created_at,
+             CASE
+               WHEN o.delivered_at IS NOT NULL THEN 'delivered'
+               WHEN o.expired_at   IS NOT NULL THEN 'retired undelivered'
+               WHEN public.notification_is_stale(o) IS NOT NULL
+                 THEN 'would be retired on the next claim'
+               ELSE 'still worth sending'
+             END AS state
+        FROM public.notification_outbox o
+    ) s
+   GROUP BY state
+   ORDER BY count(*) DESC;
+$$;
+
+COMMENT ON FUNCTION public.notification_queue_status() IS
+  'The queue in four states, with the age range of each. Read this before '
+  'scheduling the drainer on a queue that has been standing.';
+
+GRANT EXECUTE ON FUNCTION public.notification_queue_status() TO service_role;
+
+-- ----------------------------------------------------------------------------
+-- 20261030000000_a_shelter_says_who_stood_there.sql  (outstanding)
+-- ----------------------------------------------------------------------------
+DO $b$ BEGIN RAISE NOTICE 'applying 20261030000000_a_shelter_says_who_stood_there.sql'; END $b$;
+
+-- The shelter a fleeing citizen is routed to is 11km away, in another LGA.
+--
+-- ## What `safe_zones` actually contains
+--
+-- `safe_zone_screen.dart` shows a citizen where to run and draws a route to the
+-- nearest one. It used to invent three shelters in a `catch` block; that was
+-- fixed, and the screen now reads this table. `phase1_foundation.sql` fills it
+-- with seven rows, and the numbers say where they came from:
+--
+--   PLATEAU STATE HQ          9.9167, 8.8917   the centroid of Jos, to 4dp —
+--                                              the same literal this project
+--                                              deleted from ai-triage, where it
+--                                              was being written into `alerts`
+--                                              as the position of a report with
+--                                              no fix
+--   BARKIN LADI SAFE POINT    9.5167, 8.9167   9°31'00", 8°55'00"
+--   MANGU COMMAND POST        9.7167, 9.0500   9°43'00", 9°03'00"
+--
+-- Round to the arc-minute is what a gazetteer gives for a TOWN. And the
+-- fallback that was deleted had `JOS SOUTH COMMAND HQ` at 9.9285, 8.8921 while
+-- this seed has it at 9.8965, 8.8583 — two positions, 3.6km apart, for one
+-- place. Neither was measured; that is why they disagree.
+--
+-- ## Three of them are in the wrong LGA, and that is checkable
+--
+-- `hq-dashboard-next/src/lib/ward_centroids.ts` holds 207 surveyed ward
+-- centroids with an honest radius each, generated from the app's own ward
+-- asset. Measured against the LGA each shelter row CLAIMS:
+--
+--   JOS SOUTH COMMAND HQ       11.24 km from the nearest JOS SOUTH ward
+--                              centroid (GIRING, r=1.7km) — 9.6km outside it.
+--                              The position is in Jos North.
+--   MANGU COMMAND POST          9.69 km from the nearest MANGU ward centroid
+--                              (KADUNU, r=4.2km) — 5.5km outside it. The
+--                              position is in Barkin Ladi.
+--   JOS EAST TACTICAL OUTPOST   4.59 km from SHERE WEST (r=4.0km) — 635m
+--                              outside it. Marginal, and still not inside.
+--
+-- So a citizen in Jos South, fleeing, is given turn directions to a point
+-- eleven kilometres away in a different local government area, labelled as the
+-- Jos South command HQ. The other four are at least internally consistent.
+--
+-- ## What this migration does about it
+--
+-- It does NOT invent better coordinates. Nobody here has stood at these places,
+-- and replacing one guess with another is how there came to be two positions
+-- for Jos South Command HQ in the first place.
+--
+-- Instead:
+--
+--   * `verified_at` / `verified_by` — the row records whether a person put
+--     their name to the position. All seven start unverified, because none was
+--     measured. The app can then tell the citizen which it is, the way USSD
+--     reports carry `is_confirmed`.
+--   * the three whose position contradicts their own LGA are DEACTIVATED, not
+--     deleted. `is_active = false` is this table's own mechanism and the
+--     citizen screen already filters on it, so the dangerous route stops
+--     without destroying a row command may want to correct. They are real
+--     places — a police division and two outposts exist — and what is wrong is
+--     the number, which only somebody there can fix.
+--   * `publish_safe_zone()` / `verify_safe_zone()` / `retire_safe_zone()`, so
+--     command can enter a real one and say who confirmed it. There was no way
+--     to add or correct a shelter at all before this: the policy to write one
+--     has existed since 20260813000000 and nothing has ever called it.
+--
+-- A database cannot know whether a coordinate is real. What it can insist on is
+-- that somebody's id is against it.
+
+-- ── One shelter, one row ────────────────────────────────────────────────────
+--
+-- The seed ends `ON CONFLICT DO NOTHING` with no conflict target, and the
+-- primary key is `gen_random_uuid()`. A generated key never conflicts, so the
+-- clause matches nothing and re-running phase1_foundation.sql inserts all seven
+-- AGAIN — the citizen screen would list each shelter twice, and route to
+-- whichever copy sorted first. Deduplicate before the constraint, oldest kept.
+
+DELETE FROM public.safe_zones z
+ WHERE EXISTS (
+   SELECT 1 FROM public.safe_zones keep
+    WHERE keep.name = z.name
+      AND (keep.created_at, keep.id) < (z.created_at, z.id));
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'safe_zones_name_unique'
+       AND conrelid = 'public.safe_zones'::regclass
+  ) THEN
+    ALTER TABLE public.safe_zones
+      ADD CONSTRAINT safe_zones_name_unique UNIQUE (name);
+  END IF;
+END $$;
+
+-- ── Did anybody stand here? ─────────────────────────────────────────────────
+
+ALTER TABLE public.safe_zones
+  ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+ALTER TABLE public.safe_zones
+  ADD COLUMN IF NOT EXISTS verified_by UUID REFERENCES public.profiles(id);
+
+COMMENT ON COLUMN public.safe_zones.verified_at IS
+  'When somebody confirmed this position on the ground. NULL means the '
+  'coordinates are a guess and the app must say so before routing anybody.';
+COMMENT ON COLUMN public.safe_zones.verified_by IS
+  'Who confirmed it. A position with nobody against it is not confirmed.';
+
+-- A position outside Plateau State is a typo or a 0,0, and 0,0 is the Gulf of
+-- Guinea — a point this project has already drawn on a map as a shelter. The
+-- bounds are the extent of the 207 surveyed ward centroids in
+-- hq-dashboard-next/src/lib/ward_centroids.ts (lat 8.4501-10.2802,
+-- lon 8.5861-10.4651), rounded outward by a tenth of a degree. They are a
+-- BOUND, not a position: no row is ever placed at one.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'safe_zones_within_plateau'
+       AND conrelid = 'public.safe_zones'::regclass
+  ) THEN
+    ALTER TABLE public.safe_zones
+      ADD CONSTRAINT safe_zones_within_plateau CHECK (
+        latitude  BETWEEN 8.3 AND 10.4
+        AND longitude BETWEEN 8.4 AND 10.6
+      ) NOT VALID;
+  END IF;
+END $$;
+-- NOT VALID, then validated separately: on a database whose existing rows
+-- somehow fall outside, the ALTER would fail and take the whole migration with
+-- it. This way the constraint applies to every new row immediately and the
+-- validation of the old ones reports rather than aborts.
+DO $$
+BEGIN
+  ALTER TABLE public.safe_zones VALIDATE CONSTRAINT safe_zones_within_plateau;
+EXCEPTION WHEN check_violation THEN
+  RAISE WARNING
+    'safe_zones holds row(s) outside Plateau State. New rows are now refused; '
+    'the existing ones need looking at: select id, name, latitude, longitude '
+    'from public.safe_zones where latitude not between 8.3 and 10.4 or '
+    'longitude not between 8.4 and 10.6;';
+END $$;
+
+-- ── The seven, where they came from, and what is wrong with three ───────────
+--
+-- Moved here from phase1_foundation.sql so that `verified_at` is named in the
+-- same statement as the coordinates. That is what
+-- scripts/check_no_invented_coordinates.py now requires of any stored
+-- position: in SQL there is no empty state to fall back to and no screen that
+-- can tell, so the row itself has to carry its provenance.
+--
+-- ON CONFLICT (name) now has a target that exists, so this is genuinely
+-- idempotent and a production database that already has these seven is
+-- untouched by it.
+
+INSERT INTO public.safe_zones
+  (name, description, latitude, longitude, type, geo_lga, verified_at)
+VALUES
+  ('JOS SOUTH COMMAND HQ',      'Primary tactical operations centre',  9.8965, 8.8583, 'COMMAND_HQ', 'JOS SOUTH',   NULL),
+  ('BUKURU TACTICAL OUTPOST',   'Forward operating base, Bukuru',      9.7952, 8.8521, 'OUTPOST',    'JOS SOUTH',   NULL),
+  ('JOS NORTH POLICE DIVISION', 'Jos North Police Headquarters',       9.9281, 8.8921, 'POLICE',     'JOS NORTH',   NULL),
+  ('PLATEAU STATE HQ',          'State Government HQ Command Centre',  9.9167, 8.8917, 'COMMAND_HQ', 'JOS NORTH',   NULL),
+  ('JOS EAST TACTICAL OUTPOST', 'Jos East forward operating base',     9.9500, 8.9600, 'OUTPOST',    'JOS EAST',    NULL),
+  ('BARKIN LADI SAFE POINT',    'Barkin Ladi civilian safe assembly',  9.5167, 8.9167, 'SAFE_POINT', 'BARKIN LADI', NULL),
+  ('MANGU COMMAND POST',        'Mangu LGA tactical command post',     9.7167, 9.0500, 'COMMAND_HQ', 'MANGU',       NULL)
+ON CONFLICT (name) DO NOTHING;
+
+-- The three whose position is outside every ward of the LGA they claim. Matched
+-- on the exact coordinates as well as the name, so a row command has since
+-- corrected is left alone — this must not reach in and switch off a shelter
+-- somebody has fixed and verified.
+UPDATE public.safe_zones
+   SET is_active = false,
+       description = description || ' [POSITION NOT CONFIRMED: this point is '
+                     || 'outside every surveyed ward of ' || geo_lga
+                     || '. Hidden from the citizen app until somebody confirms '
+                     || 'where it is. Use publish_safe_zone() to correct it.]'
+ WHERE is_active IS NOT false
+   AND verified_at IS NULL
+   AND (name, latitude, longitude) IN (
+     ('JOS SOUTH COMMAND HQ',      9.8965, 8.8583),
+     ('JOS EAST TACTICAL OUTPOST', 9.9500, 8.9600),
+     ('MANGU COMMAND POST',        9.7167, 9.0500)
+   );
+
+-- ── Command can enter a real one ────────────────────────────────────────────
+--
+-- `safe_zones_write_command` has allowed this since 20260813000000 and nothing
+-- has ever written a row — which is why nobody noticed that, until
+-- 20261028000000, only 2 of the project's 22 staff accounts satisfied
+-- `is_command()` at all.
+--
+-- These are functions rather than a bare table write so that the position is
+-- checked and the actor is recorded in one place, whichever screen calls them.
+
+CREATE OR REPLACE FUNCTION public.publish_safe_zone(
+  p_name      TEXT,
+  p_latitude  DOUBLE PRECISION,
+  p_longitude DOUBLE PRECISION,
+  p_type      TEXT DEFAULT 'SAFE_POINT',
+  p_geo_lga   TEXT DEFAULT NULL,
+  p_geo_ward  TEXT DEFAULT NULL,
+  p_capacity  INTEGER DEFAULT NULL,
+  p_description TEXT DEFAULT NULL,
+  p_verified  BOOLEAN DEFAULT false)
+RETURNS public.safe_zones
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE row_out public.safe_zones;
+BEGIN
+  IF NOT public.is_command() THEN
+    RAISE EXCEPTION 'only command may publish a shelter'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF coalesce(btrim(p_name), '') = '' THEN
+    RAISE EXCEPTION 'a shelter needs a name somebody can ask directions to';
+  END IF;
+  IF p_latitude IS NULL OR p_longitude IS NULL THEN
+    RAISE EXCEPTION
+      'a shelter with no position cannot be routed to. Leave it out rather '
+      'than storing a guess';
+  END IF;
+
+  INSERT INTO public.safe_zones
+    (name, description, latitude, longitude, type, geo_lga, geo_ward,
+     capacity, is_active, verified_at, verified_by)
+  VALUES
+    (btrim(p_name), p_description, p_latitude, p_longitude,
+     coalesce(p_type, 'SAFE_POINT'),
+     public.normalise_lga(p_geo_lga), p_geo_ward, p_capacity, true,
+     -- Verified means a person is saying they know where this is. The caller
+     -- has to claim it explicitly; the default is a position nobody has
+     -- confirmed, which is what every row in this table was.
+     CASE WHEN p_verified THEN NOW() END,
+     CASE WHEN p_verified THEN auth.uid() END)
+  ON CONFLICT (name) DO UPDATE
+     SET description = COALESCE(EXCLUDED.description, public.safe_zones.description),
+         latitude    = EXCLUDED.latitude,
+         longitude   = EXCLUDED.longitude,
+         type        = EXCLUDED.type,
+         geo_lga     = EXCLUDED.geo_lga,
+         geo_ward    = EXCLUDED.geo_ward,
+         capacity    = EXCLUDED.capacity,
+         is_active   = true,
+         verified_at = EXCLUDED.verified_at,
+         verified_by = EXCLUDED.verified_by
+  RETURNING * INTO row_out;
+
+  RETURN row_out;
+END;
+$$;
+
+COMMENT ON FUNCTION public.publish_safe_zone(
+  TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT, TEXT, TEXT, INTEGER, TEXT,
+  BOOLEAN) IS
+  'Adds or corrects a shelter. Command only. A position is unverified unless '
+  'the caller claims otherwise, and then their id is stored against it.';
+
+CREATE OR REPLACE FUNCTION public.verify_safe_zone(p_id UUID)
+RETURNS public.safe_zones
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE row_out public.safe_zones;
+BEGIN
+  IF NOT public.is_command() THEN
+    RAISE EXCEPTION 'only command may confirm a shelter position'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  UPDATE public.safe_zones
+     SET verified_at = NOW(), verified_by = auth.uid(), is_active = true
+   WHERE id = p_id
+  RETURNING * INTO row_out;
+  IF row_out.id IS NULL THEN
+    RAISE EXCEPTION 'no shelter with id %', p_id;
+  END IF;
+  RETURN row_out;
+END;
+$$;
+
+COMMENT ON FUNCTION public.verify_safe_zone(UUID) IS
+  'Records that this position has been confirmed on the ground, and by whom. '
+  'Reactivates a shelter that was hidden for an unconfirmed position.';
+
+CREATE OR REPLACE FUNCTION public.retire_safe_zone(p_id UUID, p_why TEXT DEFAULT NULL)
+RETURNS public.safe_zones
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE row_out public.safe_zones;
+BEGIN
+  IF NOT public.is_command() THEN
+    RAISE EXCEPTION 'only command may retire a shelter'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  -- Deactivated, never deleted. A shelter that was real last month is part of
+  -- the record of where people were sent.
+  UPDATE public.safe_zones
+     SET is_active = false,
+         description = CASE
+           WHEN coalesce(btrim(p_why), '') = '' THEN description
+           ELSE coalesce(description || ' ', '') || '[RETIRED: ' || btrim(p_why) || ']'
+         END
+   WHERE id = p_id
+  RETURNING * INTO row_out;
+  IF row_out.id IS NULL THEN
+    RAISE EXCEPTION 'no shelter with id %', p_id;
+  END IF;
+  RETURN row_out;
+END;
+$$;
+
+COMMENT ON FUNCTION public.retire_safe_zone(UUID, TEXT) IS
+  'Hides a shelter from the citizen app without deleting it.';
+
+REVOKE ALL ON FUNCTION public.publish_safe_zone(
+  TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT, TEXT, TEXT, INTEGER, TEXT,
+  BOOLEAN) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.verify_safe_zone(UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.retire_safe_zone(UUID, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.publish_safe_zone(
+  TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT, TEXT, TEXT, INTEGER, TEXT,
+  BOOLEAN) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.verify_safe_zone(UUID) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.retire_safe_zone(UUID, TEXT) TO authenticated, service_role;
+
 
 COMMIT;
 
@@ -7559,8 +8188,8 @@ WITH checks(ord, name, ok) AS (
     -- the output below. A pasted result used to carry nothing identifying its
     -- version, so a run from a stale working copy read exactly like a current
     -- one. Compare with: python3 scripts/migration_sets.py --fingerprint
-    (0, 'script version: 45 migrations, '
-        'fingerprint 930b93bb41ca', true),
+    (0, 'script version: 47 migrations, '
+        'fingerprint 8ba9ddd23bdc', true),
     (1, 'core tables exist (9)',
         (SELECT count(*) = 9 FROM information_schema.tables
           WHERE table_schema = 'public'

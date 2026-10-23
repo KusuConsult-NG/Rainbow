@@ -61,6 +61,11 @@ final _safeZonesProvider = FutureProvider<List<_SafeZone>>((ref) async {
           lat: lat,
           lng: lng,
           capacity: (e['capacity'] as num?)?.toInt() ?? 0,
+          // Absent column, absent value and empty string all mean the same
+          // thing: nobody has said they know where this is. A database that
+          // has not had 20261030000000 yet returns no such key, and the
+          // honest reading of that is "not confirmed", not "confirmed".
+          verified: (e['verified_at'] as String?)?.isNotEmpty ?? false,
         );
       })
       .whereType<_SafeZone>()
@@ -102,6 +107,7 @@ class _SafeZone {
     required this.lat,
     required this.lng,
     required this.capacity,
+    required this.verified,
   });
   final String id;
   final String name;
@@ -109,6 +115,18 @@ class _SafeZone {
   final double lat;
   final double lng;
   final int capacity;
+
+  /// Whether anybody has confirmed this position on the ground.
+  ///
+  /// `safe_zones.verified_at` is NULL for every row this project shipped,
+  /// because none of the seeded coordinates was measured: `PLATEAU STATE HQ`
+  /// sat at the centroid of Jos to four decimal places, and three of the seven
+  /// were outside every surveyed ward of the LGA their own row named — the
+  /// worst by 9.6km. Those three are deactivated now and never reach this
+  /// screen. The rest are still guesses, and a person running from something
+  /// is owed the difference between "this is where it is" and "this is where
+  /// we think it is". T-94.
+  final bool verified;
 }
 
 /// Documentation for this public member.
@@ -271,10 +289,20 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
     // the path is clear" over it is inventing an answer — the same move as the
     // shelters T-74 removed, one layer up. So the caveat is appended to the
     // sentence that is both spoken and written. T-83.
+    // TWO SEPARATE CAVEATS, AND A ROUTE CAN NEED BOTH.
+    //
+    // `fromRouter` is about the PATH: a straight line is not a road route.
+    // `verified` is about the DESTINATION: the shelter's own row may not know
+    // where it is. They fail independently — a perfectly routed path to an
+    // unconfirmed pin is the dangerous case, because the turn directions make
+    // it look surveyed — so neither caveat may replace the other. T-94.
     final message = tmpl.replaceAll('{name}', zone.name)
         + (result.fromRouter
             ? ''
-            : ' ${Translations.get('sz_route_is_a_direct_line', lang)}');
+            : ' ${Translations.get('sz_route_is_a_direct_line', lang)}')
+        + (zone.verified
+            ? ''
+            : ' ${Translations.get('sz_position_not_confirmed', lang)}');
     // Spoken AND kept. The screen shows it on request; a muted phone, an
     // unavailable TtsService or a deaf user must not be the difference between
     // knowing the way is clear and not knowing.
@@ -710,6 +738,42 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
                                   ),
+                                ),
+                              ],
+                              // ON SCREEN AS WELL AS SPOKEN.
+                              //
+                              // The caveat is appended to the route message,
+                              // which is spoken and shown on request. This
+                              // panel is what somebody looks at while deciding
+                              // WHICH shelter to run to, and that is the
+                              // decision the warning belongs to — after the
+                              // route is announced it is too late to pick a
+                              // different one. Warning-coloured rather than
+                              // dim: it is not a footnote. T-94.
+                              if (!_selected!.verified) ...[
+                                const SizedBox(height: 6),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Icon(
+                                      Icons.help_outline,
+                                      size: 13,
+                                      color: AppColors.warning,
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Expanded(
+                                      child: Text(
+                                        '${Translations.get('sz_not_confirmed_chip', lang)} — '
+                                        '${Translations.get('sz_position_not_confirmed', lang)}',
+                                        style: GoogleFonts.outfit(
+                                          color: AppColors.warning,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                               if (_isCalculatingRoute) ...[

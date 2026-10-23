@@ -108,15 +108,22 @@ DROP POLICY IF EXISTS "safe_zones_read" ON public.safe_zones;
 CREATE POLICY "safe_zones_read" ON public.safe_zones
   FOR SELECT USING (auth.uid() IS NOT NULL);
 
-INSERT INTO public.safe_zones (name, description, latitude, longitude, type, geo_lga) VALUES
-  ('JOS SOUTH COMMAND HQ',      'Primary tactical operations centre',     9.8965,  8.8583, 'COMMAND_HQ', 'JOS SOUTH'),
-  ('BUKURU TACTICAL OUTPOST',   'Forward operating base, Bukuru',          9.7952,  8.8521, 'OUTPOST',    'JOS SOUTH'),
-  ('JOS NORTH POLICE DIVISION', 'Jos North Police Headquarters',           9.9281,  8.8921, 'POLICE',     'JOS NORTH'),
-  ('PLATEAU STATE HQ',          'State Government HQ Command Centre',      9.9167,  8.8917, 'COMMAND_HQ', 'JOS NORTH'),
-  ('JOS EAST TACTICAL OUTPOST', 'Jos East forward operating base',         9.9500,  8.9600, 'OUTPOST',    'JOS EAST'),
-  ('BARKIN LADI SAFE POINT',    'Barkin Ladi civilian safe assembly',      9.5167,  8.9167, 'SAFE_POINT', 'BARKIN LADI'),
-  ('MANGU COMMAND POST',        'Mangu LGA tactical command post',         9.7167,  9.0500, 'COMMAND_HQ', 'MANGU')
-ON CONFLICT DO NOTHING;
+-- The seven shelters this file used to seed have moved to
+-- 20261030000000_a_shelter_says_who_stood_there.sql, unchanged, and are
+-- inserted there with `verified_at` named in the same statement.
+--
+-- Two reasons. First, none of those positions was measured — `PLATEAU STATE HQ`
+-- sat at the centroid of Jos to four decimal places, and three of the seven are
+-- outside every surveyed ward of the LGA their own row claims, the worst by
+-- 9.6km. `safe_zone_screen.dart` draws a citizen a ROUTE to the nearest one, so
+-- the row has to be able to say whether anybody has stood there, and the column
+-- that says so does not exist at this point in the history.
+--
+-- Second, the clause below was `ON CONFLICT DO NOTHING` with no target, against
+-- a `gen_random_uuid()` primary key. A generated key never conflicts, so it
+-- matched nothing and re-running this file inserted all seven again. The new
+-- migration adds `UNIQUE (name)` and conflicts on it, which is what makes the
+-- seed genuinely repeatable.
 
 -- ─── 5. uninstall_requests ────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.uninstall_requests (

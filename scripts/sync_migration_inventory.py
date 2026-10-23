@@ -158,6 +158,115 @@ ADD_COLUMN = re.compile(
 POLICY = re.compile(r'(?is)\bCREATE\s+POLICY\b')
 
 
+# ── A MIGRATION WHOSE WHOLE PURPOSE IS A NEW FUNCTION BODY ──────────────────
+#
+# Sixteen times in this history a migration has replaced a function an earlier
+# one created, and object existence could see none of them: the function is
+# there either way, so the migration contributed no row and was reported `not
+# detectable — every object it declares is already created by an earlier
+# migration`. For some of those files the replacement IS the migration:
+#
+#   20260927000000_signup_cannot_choose_role        handle_new_user
+#   20261019000000_the_audit_trail_names_who_acted  audit_trail
+#   20261028000000_command_knows_both_vocabularies  is_command, commands_whole_state
+#
+# The first stops a new signup writing its own `role` from client-supplied
+# metadata. The last is what lets a STATE_COMMANDER post an advisory at all.
+# An operator reading `not detectable` for either has no way to find out, and
+# the honest reading of that row — "a clean report is not evidence" — means the
+# diagnostic was silent about a privilege-escalation fix and about the reason
+# eight of ten commanders could not use the console.
+#
+# A body is detectable, because PostgreSQL keeps it: `pg_proc.prosrc` holds the
+# text between the dollar quotes verbatim. So the question "is the NEW body
+# installed?" becomes "does prosrc contain a token only the new body has?".
+#
+# The token is extracted, not written down, for the same reason the object
+# inventory is: a fingerprint chosen by hand drifts the moment the function is
+# edited again, and drifts silently in the direction of reporting success.
+FP_LITERAL = re.compile(r"'[A-Za-z0-9_ .%/-]{3,}'")
+FP_WORD = re.compile(r'\b[a-z_][a-z0-9_]{4,}\b')
+
+DOLLAR = re.compile(r'\$(\w*)\$')
+
+
+def strip_comments(sql: str) -> str:
+    """Blank comments, KEEPING string literals.
+
+    `strip_noise` blanks literals too, which is right for finding statements
+    and wrong here: `'STATE_COMMANDER'` is the fingerprint, and prosrc contains
+    it. Comments go because a fingerprint found in one would report a reworded
+    comment as a migration applied.
+    """
+    out, i, n = [], 0, len(sql)
+    while i < n:
+        two = sql[i:i + 2]
+        if two == '--':
+            j = sql.find('\n', i)
+            j = n if j < 0 else j
+            out.append(' ' * (j - i)); i = j
+        elif two == '/*':
+            j = sql.find('*/', i + 2)
+            j = n if j < 0 else j + 2
+            out.append(''.join(c if c == '\n' else ' ' for c in sql[i:j])); i = j
+        else:
+            out.append(sql[i]); i += 1
+    return ''.join(out)
+
+
+def function_bodies(sql: str) -> dict[str, str]:
+    """{function name: the text between its dollar quotes}, as prosrc holds it.
+
+    Takes the FIRST declaration of a name in one file. Two overloads in one
+    migration would differ, and no migration here has that shape; the
+    consequence of guessing wrong is a fingerprint that is not found and a
+    false alarm, so `_body_row` refuses a pair from the same migration.
+    """
+    out: dict[str, str] = {}
+    for m in FUNCTION.finditer(sql):
+        opened = DOLLAR.search(sql, m.end(), m.end() + 4000)
+        if not opened:
+            continue   # not dollar-quoted, or built inside an EXECUTE format()
+        closed = sql.find(opened.group(0), opened.end())
+        if closed < 0:
+            continue
+        out.setdefault(m.group(1).lower(), sql[opened.end():closed])
+    return out
+
+
+def body_fingerprint(prev: str, body: str,
+                     later: list[str]) -> tuple[str, bool] | None:
+    """A token that says whether THIS body is the one installed.
+
+    Returns (token, must_be_present) or None when the two bodies cannot be told
+    apart — 20261017000000 re-declares `set_updated_at` and `normalise_lga`
+    byte-identically, so for that file there is genuinely nothing to see and
+    saying so is the whole answer.
+
+    Two directions, because a migration can be a removal:
+
+      present  a token this body has and the previous did not. Preferred: a
+               positive assertion cannot be satisfied by an unrelated edit.
+      absent   a token the previous body had and this one dropped. This is the
+               only way to see 20260927000000, whose entire change is deleting
+               `COALESCE(NEW.raw_user_meta_data->>'role', ...)`.
+
+    Either way the token must also hold in every LATER declaration, or the
+    assertion would fail on a database that has them all — the diagnostic would
+    report the most recent migration applied and an earlier one missing, which
+    is both wrong and the kind of wrong that sends somebody to re-apply a file.
+    """
+    for rx in (FP_LITERAL, FP_WORD):
+        here, before = set(rx.findall(body)), set(rx.findall(prev))
+        added = {t for t in here - before if all(t in b for b in later)}
+        if added:
+            return sorted(added, key=lambda t: (-len(t), t))[0], True
+        gone = {t for t in before - here if not any(t in b for b in later)}
+        if gone:
+            return sorted(gone, key=lambda t: (-len(t), t))[0], False
+    return None
+
+
 def extract(sql: str) -> list[tuple[str, str]]:
     """[(kind, object), ...] created by one migration's text."""
     found: list[tuple[str, str]] = []
@@ -209,6 +318,14 @@ def inventory() -> tuple[list[tuple[str, str, str, bool]], list[tuple[str, str]]
     undetectable: list[tuple[str, str]] = []
     dropped_were_created: set[str] = set()
 
+    # Every declaration of every function, in migration order, so a replacement
+    # can be compared with the body it replaces and with the ones after it.
+    declarations: dict[str, list[tuple[str, str]]] = {}
+    for path in sorted(MIGRATIONS.glob('*.sql')):
+        text = strip_comments(path.read_text(encoding='utf-8'))
+        for name, body in function_bodies(text).items():
+            declarations.setdefault(name, []).append((path.stem, body))
+
     for path in sorted(MIGRATIONS.glob('*.sql')):
         stem = path.stem
         sql = strip_noise(path.read_text(encoding='utf-8'))
@@ -217,8 +334,15 @@ def inventory() -> tuple[list[tuple[str, str, str, bool]], list[tuple[str, str]]
         for kind, obj in found:
             # An object created in one migration and replaced in a later one is
             # listed against the FIRST, which is the migration whose absence
-            # explains it being missing.
+            # explains it being missing. The REPLACEMENT is not nothing, though
+            # — for several files it is the entire migration — so it gets a row
+            # asserting the body rather than the object.
             if (kind, obj) in seen:
+                if kind == 'function':
+                    body_row = _body_row(stem, obj, declarations)
+                    if body_row:
+                        rows.append(body_row)
+                        contributed += 1
                 continue
             seen.add((kind, obj))
             key = f'{kind}:{obj}'
@@ -233,7 +357,8 @@ def inventory() -> tuple[list[tuple[str, str, str, bool]], list[tuple[str, str]]
             continue
         if stem in drops.values():
             continue   # it gets its must-be-absent rows below
-        undetectable.append((stem, _why_invisible(path, sql, found)))
+        undetectable.append(
+            (stem, _why_invisible(path, sql, found, declarations)))
 
     missing_creator = sorted(set(drops) - dropped_were_created)
     if missing_creator:
@@ -249,9 +374,55 @@ def inventory() -> tuple[list[tuple[str, str, str, bool]], list[tuple[str, str]]
     return rows, undetectable
 
 
-def _why_invisible(path: Path, sql: str, found: list[tuple[str, str]]) -> str:
+def _declared_identically(stem: str, fn: str,
+                          declarations: dict[str, list[tuple[str, str]]],
+                          ) -> bool:
+    """Is this migration's body for `fn` the same text as the previous one?"""
+    seq = declarations.get(fn, [])
+    at = next((i for i, (s, _) in enumerate(seq) if s == stem), None)
+    if at is None or at == 0:
+        return False
+    return seq[at][1].strip() == seq[at - 1][1].strip()
+
+
+def _body_row(stem: str, fn: str,
+              declarations: dict[str, list[tuple[str, str]]],
+              ) -> tuple[str, str, str, bool] | None:
+    """A `function body` assertion for a replacement, or None if undetectable."""
+    seq = declarations.get(fn, [])
+    at = next((i for i, (s, _) in enumerate(seq) if s == stem), None)
+    # at == 0 would compare a body with itself: the name reached `seen` from a
+    # second declaration inside ONE migration, which is an overload, not a
+    # replacement.
+    if at is None or at == 0 or seq[at - 1][0] == stem:
+        return None
+    found = body_fingerprint(seq[at - 1][1], seq[at][1],
+                             [b for _, b in seq[at + 1:]])
+    if found is None:
+        return None
+    token, want = found
+    # Interpolated into a single-quoted SQL literal and split out of `obj` on a
+    # colon at runtime, so neither may appear. Quotes are doubled by render().
+    if ':' in token or '\\' in token:
+        return None
+    return (stem, 'function body', f'{fn}:{token}', want)
+
+
+def _why_invisible(path: Path, sql: str, found: list[tuple[str, str]],
+                   declarations: dict[str, list[tuple[str, str]]]) -> str:
     """Why a migration contributes no row, in the operator's terms."""
     if found:
+        # A replacement that got this far has a body identical to the one it
+        # replaces, and then there is nothing for any check to see — which is
+        # worth saying as itself rather than as 'already created'.
+        replaced = [f for k, f in found if k == 'function'
+                    and len(declarations.get(f, [])) > 1]
+        same = [f for f in replaced
+                if _declared_identically(path.stem, f, declarations)]
+        if same and len(same) == len(replaced):
+            return ('it re-declares %s with the same body it already has, so '
+                    'there is nothing to detect either way'
+                    % ' and '.join(sorted(same)))
         return ('every object it declares is already created by an earlier '
                 'migration, so it is a no-op on a database that has them')
     if POLICY.search(sql):
@@ -296,6 +467,16 @@ HEADER = """\
 -- missing column is an insert the database rejects in full. The `still present`
 -- rows are the mirror image: an object a migration should have removed.
 --
+-- A `function body` row asks a different question from a `function` row.
+-- Several migrations here exist only to REPLACE a function an earlier one
+-- created, and the function is present either way — so object existence could
+-- not see them and reported them `not detectable`, including the one that stops
+-- a new signup writing its own role and the one that lets a STATE_COMMANDER
+-- post an advisory. These rows look inside the installed body for a token only
+-- the new version contains, so `function is_command does not contain
+-- 'STATE_COMMANDER'` means that migration has not been applied, whatever else
+-- is present.
+--
 -- The `not detectable` rows name migrations this diagnostic CANNOT see, with
 -- the reason. A clean report is not evidence that those were applied.
 --
@@ -325,6 +506,16 @@ resolved AS (
                         AND c.relname = split_part(e.obj, '.', 1)
                         AND a.attname = split_part(e.obj, '.', 2)
                         AND a.attnum > 0 AND NOT a.attisdropped)
+           -- `function` above asks whether the function EXISTS. This asks
+           -- whether the body installed is the one that migration writes, by
+           -- looking for a token only that version of the body contains.
+           -- prosrc holds the text between the dollar quotes verbatim.
+           WHEN 'function body' THEN
+             EXISTS (SELECT 1 FROM pg_proc p
+                       JOIN pg_namespace n ON n.oid = p.pronamespace
+                      WHERE n.nspname = 'public'
+                        AND p.proname = split_part(e.obj, ':', 1)
+                        AND position(split_part(e.obj, ':', 2) in p.prosrc) > 0)
          END AS present
     FROM expected e
 )
@@ -345,11 +536,23 @@ SELECT 1 AS ord, 'summary' AS section, migration AS name,
   FROM resolved
  GROUP BY migration
 UNION ALL
-SELECT 2, 'missing', format('%s %s', kind, obj), migration
+SELECT 2, 'missing',
+       CASE kind
+         WHEN 'function body' THEN
+           format('function %s does not contain %s',
+                  split_part(obj, ':', 1), split_part(obj, ':', 2))
+         ELSE format('%s %s', kind, obj)
+       END, migration
   FROM resolved
  WHERE want AND NOT present
 UNION ALL
-SELECT 2, 'still present', format('%s %s', kind, obj),
+SELECT 2, 'still present',
+       CASE kind
+         WHEN 'function body' THEN
+           format('function %s still contains %s',
+                  split_part(obj, ':', 1), split_part(obj, ':', 2))
+         ELSE format('%s %s', kind, obj)
+       END,
        format('%s removes this and has not been applied', migration)
   FROM resolved
  WHERE present AND NOT want
@@ -374,8 +577,12 @@ SELECT 3, 'not detectable', name, detail
 
 def render(rows: list[tuple[str, str, str, bool]],
            undetectable: list[tuple[str, str]]) -> str:
+    # A body token is a SQL literal lifted from the migration, quotes and all
+    # ('STATE_COMMANDER'), so its quotes are doubled to survive the literal it
+    # is interpolated into. split_part finds it on the colon at runtime, which
+    # is why _body_row refuses a token containing one.
     values = ',\n'.join(
-        f"  ('{m}', '{k}', '{o}', {'true' if w else 'false'})"
+        f'''  ('{m}', '{k}', '{o.replace("'", "''")}', {'true' if w else 'false'})'''
         for m, k, o, w in rows)
     hand = ', '.join(f"'{h}'" for h in sorted(HAND_MADE))
     block = ''
@@ -412,7 +619,8 @@ def main() -> int:
     # today, and this is here so that stops being a thing anyone has to
     # remember: a quote would close the literal early and the diagnostic would
     # fail to parse against a live database, which is where it is read.
-    for literal in ([r[0] for r in rows] + [r[2] for r in rows]
+    for literal in ([r[0] for r in rows]
+                    + [r[2] for r in rows if r[1] != 'function body']
                     + [u for pair in undetectable for u in pair]):
         if "'" in literal or '\\' in literal:
             print(f'✗ {literal!r} would break the generated SQL literal.',
@@ -420,9 +628,11 @@ def main() -> int:
             return 2
 
     want = render(rows, undetectable)
+    bodies = sum(1 for r in rows if r[1] == 'function body')
     counts = (f'{sum(1 for r in rows if r[3])} objects that must exist, '
               f'{sum(1 for r in rows if not r[3])} that must be gone, across '
               f'{len({r[0] for r in rows})} migrations; '
+              f'{bodies} replaced function bodies; '
               f'{len(undetectable)} not detectable')
     if '--check' in sys.argv:
         have = OUT.read_text(encoding='utf-8') if OUT.exists() else ''

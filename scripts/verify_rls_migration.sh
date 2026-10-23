@@ -808,6 +808,500 @@ printf '%s\n' "$CV_OUT" | grep -q "ALL COMMAND VOCABULARY ASSERTIONS PASSED" || 
   printf '%s\n' "$CV_OUT"
   echo "✗ the command vocabulary probe did not reach its verdict"; exit 1; }
 
+# ── A queued notification has a shelf life ──────────────────────────────────
+#
+# The live project is holding 412 undelivered notices, none ever attempted, the
+# oldest from July: the drain worker was never scheduled. Scheduling it was the
+# obvious next step and would have delivered July — `claim_notifications` took
+# the oldest rows due and nothing anywhere bounded their age, so every officer
+# whose geography matched a July timeout would have been told an incident was
+# now theirs, twenty a minute.
+#
+# The assertions below are about the queue, not the worker, because there are
+# two workers.
+echo "▶ Applying 20261029000000_a_notification_has_a_shelf_life.sql"
+psql_run "-f $PGROOT/20261029000000_a_notification_has_a_shelf_life.sql" >/dev/null
+psql_run "-f $PGROOT/20261029000000_a_notification_has_a_shelf_life.sql" >/dev/null
+
+cat > "$PGROOT/zz_shelf_life_probe.sql" <<'PROBE'
+BEGIN;
+SET client_min_messages TO NOTICE;
+
+-- Hex only. The first version of this probe used `...0000000000s1`, and
+-- PostgreSQL answered `22P02 invalid input syntax for type uuid` — the same
+-- error T-86 is about, from the same habit of writing a readable suffix into a
+-- UUID.
+INSERT INTO auth.users (id, email)
+VALUES ('eeee5555-0000-4000-8000-00000000005e', 'shelf-life@probe.test')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.alerts
+  (id, type, description, status, severity, reported_by,
+   geo_lga, geo_ward, geo_pu, assigned_tier, tier_assigned_at)
+VALUES
+  ('ffff6666-0000-4000-8000-00000000005e', 'Kidnap - Held Hostage',
+   'still open', 'OPEN', 'CRITICAL', 'eeee5555-0000-4000-8000-00000000005e',
+   'JOS NORTH', 'NARAGUTA', 'PU-01', 'UNIT', NOW()),
+  ('ffff6666-0000-4000-8000-00000000005f', 'Fire - Structure',
+   'dispatcher closed it', 'RESOLVED', 'HIGH',
+   'eeee5555-0000-4000-8000-00000000005e',
+   'JOS NORTH', 'NARAGUTA', 'PU-01', 'UNIT', NOW());
+
+-- Those two inserts fired `queue_new_incident_notice`, so the queue already
+-- holds two live NEW_INCIDENT rows. Assertion 5 is about WHICH row a claim
+-- hands back, so the queue has to start empty or it proves nothing. Safe: this
+-- whole file is one transaction and ends in ROLLBACK.
+DELETE FROM public.notification_outbox;
+
+-- ── 1. the setting refuses the readings that empty or never empty the queue ──
+DO $probe$
+BEGIN
+  IF public.notification_shelf_life_minutes() <> 60 THEN
+    RAISE EXCEPTION 'FAIL: the seeded shelf life is not 60, it is %',
+      public.notification_shelf_life_minutes();
+  END IF;
+
+  UPDATE public.app_config SET value = '0'
+   WHERE key = 'notification_shelf_life_minutes';
+  IF public.notification_shelf_life_minutes() <> 60 THEN
+    RAISE EXCEPTION
+      'FAIL: a shelf life of 0 was accepted — every notice would be retired unsent';
+  END IF;
+
+  UPDATE public.app_config SET value = 'soon'
+   WHERE key = 'notification_shelf_life_minutes';
+  IF public.notification_shelf_life_minutes() <> 60 THEN
+    RAISE EXCEPTION 'FAIL: an unparseable shelf life was not refused';
+  END IF;
+
+  UPDATE public.app_config SET value = '60'
+   WHERE key = 'notification_shelf_life_minutes';
+  RAISE NOTICE 'PASS: 0 and junk are refused, and the default is an hour';
+END $probe$;
+
+-- ── 2. July is not delivered, and is not recorded as delivered ───────────────
+DO $probe$
+DECLARE
+  v_id      BIGINT;
+  n_handed  INTEGER;
+  v_expired TIMESTAMPTZ;
+  v_delivd  TIMESTAMPTZ;
+  v_reason  TEXT;
+BEGIN
+  INSERT INTO public.notification_outbox (alert_id, kind, payload, created_at)
+  VALUES ('ffff6666-0000-4000-8000-00000000005e', 'TIER_ESCALATION',
+          '{"to_tier":"WARD"}'::jsonb, NOW() - INTERVAL '97 days')
+  RETURNING id INTO v_id;
+
+  SELECT count(*) INTO n_handed
+    FROM public.claim_notifications(20) c WHERE c.id = v_id;
+  IF n_handed <> 0 THEN
+    RAISE EXCEPTION
+      'FAIL: a notice queued 97 days ago was handed to a worker to send';
+  END IF;
+
+  SELECT expired_at, delivered_at, expiry_reason
+    INTO v_expired, v_delivd, v_reason
+    FROM public.notification_outbox WHERE id = v_id;
+  IF v_expired IS NULL THEN
+    RAISE EXCEPTION
+      'FAIL: it was withheld and not retired, so it sits in the queue for ever';
+  END IF;
+  IF v_delivd IS NOT NULL THEN
+    RAISE EXCEPTION
+      'FAIL: a retired notice was recorded as DELIVERED. Nobody was told, and '
+      'writing that into this table is the defect the outbox exists to end';
+  END IF;
+  IF v_reason IS NULL OR v_reason NOT LIKE '%shelf life%' THEN
+    RAISE EXCEPTION 'FAIL: no reason recorded for the expiry, got %', v_reason;
+  END IF;
+  RAISE NOTICE 'PASS: a July notice is retired undelivered, with a reason, and not marked sent';
+END $probe$;
+
+-- ── 3. a fresh notice is still handed out ────────────────────────────────────
+DO $probe$
+DECLARE v_id BIGINT; n_handed INTEGER;
+BEGIN
+  INSERT INTO public.notification_outbox (alert_id, kind, payload)
+  VALUES ('ffff6666-0000-4000-8000-00000000005e', 'TIER_ESCALATION',
+          '{"to_tier":"WARD"}'::jsonb)
+  RETURNING id INTO v_id;
+  SELECT count(*) INTO n_handed
+    FROM public.claim_notifications(20) c WHERE c.id = v_id;
+  IF n_handed <> 1 THEN
+    RAISE EXCEPTION 'FAIL: a notice queued just now was not handed out';
+  END IF;
+  RAISE NOTICE 'PASS: a live notice is still delivered';
+END $probe$;
+
+-- ── 4. the incident closed while the notice sat in the queue ─────────────────
+--
+-- Fresh, well inside the shelf life, and about an incident a dispatcher has
+-- already resolved. Sending it puts a unit on a finished incident. This race
+-- exists at any drain frequency, so no retry policy fixes it.
+DO $probe$
+DECLARE v_id BIGINT; n_handed INTEGER; v_reason TEXT;
+BEGIN
+  INSERT INTO public.notification_outbox (alert_id, kind, payload)
+  VALUES ('ffff6666-0000-4000-8000-00000000005f', 'TIER_ESCALATION',
+          '{"to_tier":"WARD"}'::jsonb)
+  RETURNING id INTO v_id;
+  SELECT count(*) INTO n_handed
+    FROM public.claim_notifications(20) c WHERE c.id = v_id;
+  IF n_handed <> 0 THEN
+    RAISE EXCEPTION
+      'FAIL: a notice about a RESOLVED incident was handed to a worker';
+  END IF;
+  SELECT expiry_reason INTO v_reason
+    FROM public.notification_outbox WHERE id = v_id;
+  IF v_reason IS NULL OR v_reason NOT LIKE '%closed%' THEN
+    RAISE EXCEPTION 'FAIL: expected a closed-incident reason, got %', v_reason;
+  END IF;
+  RAISE NOTICE 'PASS: a notice about a closed incident is retired, not sent';
+END $probe$;
+
+-- ── 5. THE BACKLOG DOES NOT COST A TICK ──────────────────────────────────────
+--
+-- The property that decides whether this is usable. With 50 stale notices ahead
+-- of one live one and a batch size of 1, the live notice must come back on the
+-- FIRST call. Expiring inside the claim CTE — the obvious implementation —
+-- passes every assertion above and fails this one: the worker would spend a
+-- tick per batch of stale rows, so with the 412 standing on the live project
+-- the first real notice would wait twenty-one minutes. An emergency queue
+-- cannot have a warm-up period.
+DO $probe$
+DECLARE v_id BIGINT; n_handed INTEGER; n_retired INTEGER;
+BEGIN
+  INSERT INTO public.notification_outbox (alert_id, kind, payload, created_at)
+  SELECT 'ffff6666-0000-4000-8000-00000000005e', 'TIER_ESCALATION',
+         '{"to_tier":"WARD"}'::jsonb, NOW() - INTERVAL '90 days'
+    FROM generate_series(1, 50);
+  INSERT INTO public.notification_outbox (alert_id, kind, payload)
+  VALUES ('ffff6666-0000-4000-8000-00000000005e', 'TIER_ESCALATION',
+          '{"to_tier":"LGA"}'::jsonb)
+  RETURNING id INTO v_id;
+
+  SELECT count(*) INTO n_handed
+    FROM public.claim_notifications(1) c WHERE c.id = v_id;
+  IF n_handed <> 1 THEN
+    RAISE EXCEPTION
+      'FAIL: 50 stale notices ahead of a live one and the live one was not '
+      'handed out on the first claim — the queue has a warm-up period';
+  END IF;
+
+  SELECT count(*) INTO n_retired
+    FROM public.notification_outbox
+   WHERE expired_at IS NOT NULL
+     AND created_at < NOW() - INTERVAL '89 days';
+  IF n_retired < 50 THEN
+    RAISE EXCEPTION
+      'FAIL: only % of the 50 stale notices were retired by one claim', n_retired;
+  END IF;
+  RAISE NOTICE 'PASS: 50 stale notices are retired and the live one is handed out in one claim';
+END $probe$;
+
+-- ── 6. and an operator can see the queue before scheduling anything ──────────
+DO $probe$
+DECLARE n_states INTEGER;
+BEGIN
+  SELECT count(*) INTO n_states FROM public.notification_queue_status();
+  IF n_states = 0 THEN
+    RAISE EXCEPTION 'FAIL: the queue cannot be inspected at all';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.notification_queue_status()
+                  WHERE state = 'retired undelivered') THEN
+    RAISE EXCEPTION 'FAIL: the status does not report what was retired undelivered';
+  END IF;
+  RAISE NOTICE 'PASS: the queue reports its state in % groups', n_states;
+END $probe$;
+
+-- ── 7. nobody signed in may drain or suppress ────────────────────────────────
+DO $probe$
+DECLARE denied_claim BOOLEAN := false; denied_sweep BOOLEAN := false;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub',
+                     'eeee5555-0000-4000-8000-00000000005e', true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN PERFORM public.claim_notifications(5);
+  EXCEPTION WHEN insufficient_privilege THEN denied_claim := true; END;
+  BEGIN PERFORM public.expire_stale_notifications();
+  EXCEPTION WHEN insufficient_privilege THEN denied_sweep := true; END;
+  RESET ROLE;
+  IF NOT denied_claim THEN
+    RAISE EXCEPTION 'FAIL: a signed-in account can claim notifications';
+  END IF;
+  IF NOT denied_sweep THEN
+    RAISE EXCEPTION
+      'FAIL: a signed-in account can retire every queued notice — a one-call '
+      'way to silence the whole escalation chain';
+  END IF;
+  RAISE NOTICE 'PASS: only the service role may drain or retire';
+END $probe$;
+
+DO $probe$ BEGIN RAISE NOTICE 'ALL SHELF LIFE ASSERTIONS PASSED'; END $probe$;
+ROLLBACK;
+PROBE
+chown postgres:postgres "$PGROOT/zz_shelf_life_probe.sql"
+SL_OUT=$(psql_run "-f $PGROOT/zz_shelf_life_probe.sql" 2>&1) && SL_RC=0 || SL_RC=$?
+printf '%s\n' "$SL_OUT" | grep -E "PASS:|FAIL:" | sed 's/^.*NOTICE:  /  /' || true
+if [ "$SL_RC" -ne 0 ] || printf '%s\n' "$SL_OUT" | grep -q "FAIL:"; then
+  printf '%s\n' "$SL_OUT"
+  echo "✗ notification shelf life assertions failed"; exit 1
+fi
+printf '%s\n' "$SL_OUT" | grep -q "ALL SHELF LIFE ASSERTIONS PASSED" || {
+  printf '%s\n' "$SL_OUT"
+  echo "✗ the shelf life probe did not reach its verdict"; exit 1; }
+
+# ── A shelter says who stood there ──────────────────────────────────────────
+#
+# Three of the seven seeded shelters were outside every surveyed ward of the LGA
+# their own row claimed — JOS SOUTH COMMAND HQ by 9.6km, and its position is in
+# Jos North. The citizen screen draws a route to the nearest one.
+echo "▶ Applying 20261030000000_a_shelter_says_who_stood_there.sql"
+psql_run "-f $PGROOT/20261030000000_a_shelter_says_who_stood_there.sql" >/dev/null
+psql_run "-f $PGROOT/20261030000000_a_shelter_says_who_stood_there.sql" >/dev/null
+
+cat > "$PGROOT/zz_shelter_probe.sql" <<'PROBE'
+BEGIN;
+SET client_min_messages TO NOTICE;
+
+-- ── 1. applied twice, still seven ───────────────────────────────────────────
+--
+-- The old seed ended `ON CONFLICT DO NOTHING` with no target against a
+-- gen_random_uuid() key, so it matched nothing and a second run inserted all
+-- seven again. The replay above applied this file TWICE, which is what makes
+-- this assertion mean something.
+DO $probe$
+DECLARE n INTEGER; n_names INTEGER;
+BEGIN
+  SELECT count(*), count(DISTINCT name) INTO n, n_names FROM public.safe_zones;
+  IF n <> n_names THEN
+    RAISE EXCEPTION
+      'FAIL: % shelter rows for % distinct names — the seed duplicates, and '
+      'the citizen screen would list each shelter twice', n, n_names;
+  END IF;
+  IF n < 7 THEN
+    RAISE EXCEPTION 'FAIL: expected the seven seeded shelters, found %', n;
+  END IF;
+  RAISE NOTICE 'PASS: % shelters, one row each, after two applications', n;
+END $probe$;
+
+-- ── 2. none of them claims to have been measured ────────────────────────────
+DO $probe$
+DECLARE n_claimed INTEGER;
+BEGIN
+  SELECT count(*) INTO n_claimed
+    FROM public.safe_zones WHERE verified_at IS NOT NULL;
+  IF n_claimed > 0 THEN
+    RAISE EXCEPTION
+      'FAIL: % seeded shelter(s) report a confirmed position. Nobody stood at '
+      'any of them; one sat at the centroid of Jos to 4dp', n_claimed;
+  END IF;
+  RAISE NOTICE 'PASS: every seeded shelter reports its position unconfirmed';
+END $probe$;
+
+-- ── 3. the three in the wrong LGA do not reach the citizen app ──────────────
+--
+-- The screen's provider filters `is_active = true`, so this is what stops a
+-- route being drawn to them.
+DO $probe$
+DECLARE r RECORD; n_hidden INTEGER := 0;
+BEGIN
+  FOR r IN SELECT name, is_active, description FROM public.safe_zones
+            WHERE name IN ('JOS SOUTH COMMAND HQ', 'JOS EAST TACTICAL OUTPOST',
+                           'MANGU COMMAND POST')
+  LOOP
+    IF r.is_active IS NOT false THEN
+      RAISE EXCEPTION
+        'FAIL: % is still active, and its position is outside every surveyed '
+        'ward of the LGA it claims', r.name;
+    END IF;
+    IF r.description NOT LIKE '%POSITION NOT CONFIRMED%' THEN
+      RAISE EXCEPTION
+        'FAIL: % was hidden with no reason recorded, so nobody can tell it '
+        'from a shelter that closed', r.name;
+    END IF;
+    n_hidden := n_hidden + 1;
+  END LOOP;
+  IF n_hidden <> 3 THEN
+    RAISE EXCEPTION 'FAIL: expected 3 hidden shelters, found %', n_hidden;
+  END IF;
+  -- And appended ONCE, not once per application.
+  IF EXISTS (SELECT 1 FROM public.safe_zones
+              WHERE description LIKE '%POSITION NOT CONFIRMED%POSITION NOT CONFIRMED%') THEN
+    RAISE EXCEPTION
+      'FAIL: the reason was appended twice, so this migration is not idempotent';
+  END IF;
+  RAISE NOTICE 'PASS: the 3 whose position contradicts their LGA are hidden, with the reason, once';
+END $probe$;
+
+-- ── 4. the four that are where they say they are are still shown ────────────
+DO $probe$
+DECLARE n INTEGER;
+BEGIN
+  SELECT count(*) INTO n FROM public.safe_zones WHERE is_active = true;
+  IF n < 4 THEN
+    RAISE EXCEPTION
+      'FAIL: only % shelter(s) left for a citizen to run to. Hiding a wrong '
+      'position must not empty the list', n;
+  END IF;
+  RAISE NOTICE 'PASS: % shelters remain available to a citizen', n;
+END $probe$;
+
+-- ── 5. a position outside Plateau State is refused ──────────────────────────
+DO $probe$
+DECLARE refused BOOLEAN := false;
+BEGIN
+  BEGIN
+    INSERT INTO public.safe_zones (name, latitude, longitude)
+    VALUES ('GULF OF GUINEA', 0, 0);
+  EXCEPTION WHEN check_violation THEN refused := true;
+  END;
+  IF NOT refused THEN
+    RAISE EXCEPTION
+      'FAIL: 0,0 was accepted as a shelter. That is a point 700km off the '
+      'coast, and this project has already drawn it on a map as somewhere to go';
+  END IF;
+  RAISE NOTICE 'PASS: a position outside Plateau State is refused by the table';
+END $probe$;
+
+-- ── 6. only command may publish, and a position needs an author ─────────────
+DO $probe$
+DECLARE
+  v_citizen UUID := gen_random_uuid();
+  v_cmd     UUID := gen_random_uuid();
+  denied    BOOLEAN := false;
+  no_pos    BOOLEAN := false;
+  z         public.safe_zones;
+BEGIN
+  INSERT INTO auth.users (id, email) VALUES (v_citizen, 'zone-citizen@probe.test');
+  INSERT INTO auth.users (id, email) VALUES (v_cmd, 'zone-command@probe.test');
+  UPDATE public.profiles SET role = 'CITIZEN'    WHERE id = v_citizen;
+  -- STATE_COMMANDER, the deployment's own spelling: this is the account type
+  -- that could not publish a shelter at all before 20261028000000.
+  UPDATE public.profiles SET role = 'STATE_COMMANDER' WHERE id = v_cmd;
+
+  -- BOTH keys. `auth.uid()` in this harness reads `request.jwt.claim.sub`,
+  -- so setting only `request.jwt.claims` leaves it NULL — and then
+  -- `is_command()` is false for everybody and the denial below passes without
+  -- testing anything. The first version of this probe did exactly that, and
+  -- the commander two statements down is what caught it.
+  PERFORM set_config('request.jwt.claim.sub', v_citizen::text, true);
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', v_citizen::text, 'role', 'authenticated')::text, true);
+  IF auth.uid() <> v_citizen THEN
+    RAISE EXCEPTION
+      'FAIL: the probe could not sign anybody in (auth.uid() = %), so every '
+      'permission assertion below would pass vacuously', auth.uid();
+  END IF;
+  BEGIN
+    PERFORM public.publish_safe_zone('CITIZEN SHELTER', 9.9, 8.9);
+  EXCEPTION WHEN insufficient_privilege THEN denied := true;
+  END;
+  IF NOT denied THEN
+    RAISE EXCEPTION
+      'FAIL: a citizen published a shelter. Anybody could then put a pin '
+      'wherever they wanted and the app would route people to it';
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', v_cmd::text, true);
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', v_cmd::text, 'role', 'authenticated')::text, true);
+
+  BEGIN
+    PERFORM public.publish_safe_zone('NO POSITION OUTPOST', NULL, NULL);
+  EXCEPTION WHEN others THEN no_pos := true;
+  END;
+  IF NOT no_pos THEN
+    RAISE EXCEPTION 'FAIL: a shelter with no position was stored';
+  END IF;
+
+  -- Unverified by default: publishing is not the same as having stood there.
+  z := public.publish_safe_zone('BUKURU DIVISIONAL POLICE', 9.7952, 8.8530,
+                                'POLICE', 'JOS SOUTH');
+  IF z.verified_at IS NOT NULL THEN
+    RAISE EXCEPTION
+      'FAIL: a newly published shelter reports a confirmed position without '
+      'anybody claiming it';
+  END IF;
+  IF z.is_active IS NOT true THEN
+    RAISE EXCEPTION 'FAIL: a published shelter is not active';
+  END IF;
+
+  -- And claiming it records WHO. A database cannot know whether a coordinate
+  -- is real; what it can insist on is an id against it.
+  z := public.verify_safe_zone(z.id);
+  IF z.verified_at IS NULL OR z.verified_by <> v_cmd THEN
+    RAISE EXCEPTION
+      'FAIL: confirming a position did not record who confirmed it (by=%)',
+      z.verified_by;
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '', true);
+  RAISE NOTICE 'PASS: only command publishes, a position needs coordinates, and confirming it names somebody';
+END $probe$;
+
+-- ── 7. a corrected shelter comes back ───────────────────────────────────────
+--
+-- The three hidden rows are real places with wrong numbers. Correcting one has
+-- to un-hide it, or the deactivation is a one-way door and command's only
+-- option is a duplicate under a different name.
+DO $probe$
+DECLARE
+  v_cmd UUID := gen_random_uuid();
+  z     public.safe_zones;
+BEGIN
+  INSERT INTO auth.users (id, email) VALUES (v_cmd, 'zone-fixer@probe.test');
+  UPDATE public.profiles SET role = 'HQ_COMMAND' WHERE id = v_cmd;
+  PERFORM set_config('request.jwt.claim.sub', v_cmd::text, true);
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', v_cmd::text, 'role', 'authenticated')::text, true);
+
+  -- The surveyed centroid of MANGU/KADUNU, which is the ward the old position
+  -- was 9.68km outside. Used as a stand-in rather than a number invented here:
+  -- this is what the project already does for a USSD report with no GPS, and
+  -- the point of the probe is that correcting a row un-hides it, not that this
+  -- is where the command post is.
+  z := public.publish_safe_zone('MANGU COMMAND POST', 9.692824, 9.134952,
+                                'COMMAND_HQ', 'MANGU', NULL, NULL, NULL, true);
+  IF z.is_active IS NOT true THEN
+    RAISE EXCEPTION
+      'FAIL: correcting a hidden shelter left it hidden, so the only way to '
+      'fix one is to invent a second name for it';
+  END IF;
+  IF z.verified_at IS NULL OR z.verified_by <> v_cmd THEN
+    RAISE EXCEPTION 'FAIL: the correction did not record who made it';
+  END IF;
+  IF (SELECT count(*) FROM public.safe_zones WHERE name = 'MANGU COMMAND POST') <> 1 THEN
+    RAISE EXCEPTION 'FAIL: correcting a shelter created a second row for it';
+  END IF;
+
+  z := public.retire_safe_zone(z.id, 'probe');
+  IF z.is_active IS NOT false THEN
+    RAISE EXCEPTION 'FAIL: a retired shelter is still shown to citizens';
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '', true);
+  RAISE NOTICE 'PASS: a hidden shelter can be corrected in place, and retired again';
+END $probe$;
+
+DO $probe$ BEGIN RAISE NOTICE 'ALL SHELTER ASSERTIONS PASSED'; END $probe$;
+ROLLBACK;
+PROBE
+chown postgres:postgres "$PGROOT/zz_shelter_probe.sql"
+SZ_OUT=$(psql_run "-f $PGROOT/zz_shelter_probe.sql" 2>&1) && SZ_RC=0 || SZ_RC=$?
+printf '%s\n' "$SZ_OUT" | grep -E "PASS:|FAIL:" | sed 's/^.*NOTICE:  /  /' || true
+if [ "$SZ_RC" -ne 0 ] || printf '%s\n' "$SZ_OUT" | grep -q "FAIL:"; then
+  printf '%s\n' "$SZ_OUT"
+  echo "✗ shelter assertions failed"; exit 1
+fi
+printf '%s\n' "$SZ_OUT" | grep -q "ALL SHELTER ASSERTIONS PASSED" || {
+  printf '%s\n' "$SZ_OUT"
+  echo "✗ the shelter probe did not reach its verdict"; exit 1; }
+
 echo "▶ Asserting no policy in schema public reaches anon or public, by name"
 PR_OUT=$(psql_run "-f $PGROOT/policy_roles_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?
 echo "$PR_OUT" | grep -E "PASS|FAIL|ERROR" || true
@@ -1115,6 +1609,101 @@ psql_run "-f $PGROOT/zz_unplant_mirrors.sql" >/dev/null || {
 RESTORED=$(psql_run "-f $PGROOT/which_migrations_are_applied.sql" 2>&1)
 check_drops_reported_gone "$RESTORED" "after removing the planted mirrors" || exit 1
 echo "  PASS  and it names all $DROP_N when they are planted back, so it checks something"
+
+# ── And a migration that only REWRITES a function body is visible ────────────
+#
+# `20261028000000_command_knows_both_vocabularies` replaces two functions and
+# creates nothing. Object existence cannot see it: `is_command` is present
+# either way. So the diagnostic reported it `not detectable — every object it
+# declares is already created by an earlier migration`, and the operator who
+# ran it against the live project got that line for the one migration that
+# decides whether a STATE_COMMANDER can post an advisory at all.
+#
+# Sixteen replacements in this history had the same blind spot, among them
+# `20260927000000_signup_cannot_choose_role` — whose entire change is deleting
+# `COALESCE(NEW.raw_user_meta_data->>'role', 'CITIZEN')` from `handle_new_user`,
+# so that a new account cannot name its own role. Unverifiable, in a report
+# whose own header says a clean result is not evidence.
+#
+# The `function body` rows close that. This probe puts the pre-migration bodies
+# back and requires the diagnostic to say so — because the rows pass trivially
+# on a database where the migration HAS been applied, which is every database
+# this harness builds. The failing direction is the one worth proving, and it is
+# the state the live project was actually in.
+echo "▶ Checking a replaced function body is detected, not assumed"
+su postgres -s /bin/bash -c \
+  "psql -h $PGROOT/sock -p $PORT -U postgres -d rainbow -tAc \
+   \"SELECT pg_get_functiondef(p.oid) || ';' FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+        AND p.proname IN ('is_command', 'commands_whole_state')\"" \
+  > "$PGROOT/zz_command_restore.sql"
+# Restored from pg_get_functiondef rather than from a copy of the new body
+# written out here: a hand-written restore is a second definition of the thing
+# under test, and would keep passing after the migration changed.
+grep -qc 'STATE_COMMANDER' "$PGROOT/zz_command_restore.sql" || {
+  echo "✗ could not read back is_command/commands_whole_state to restore them"
+  exit 1; }
+
+# The bodies as they stood before 20261028000000 — an exact-match list of four
+# deployment-era names, which is what the live project has.
+cat > "$PGROOT/zz_command_old.sql" <<'OLDBODY'
+CREATE OR REPLACE FUNCTION public.is_command()
+RETURNS BOOLEAN LANGUAGE sql SECURITY DEFINER STABLE
+SET search_path = public AS $fn$
+  SELECT COALESCE(
+    (SELECT role FROM public.profiles WHERE id = auth.uid())
+      IN ('HQ_COMMAND', 'HQ_OFFICER', 'ADMIN', 'LGA_COMMAND'),
+    false
+  );
+$fn$;
+CREATE OR REPLACE FUNCTION public.commands_whole_state()
+RETURNS BOOLEAN LANGUAGE sql SECURITY DEFINER STABLE
+SET search_path = public, pg_temp AS $fn$
+  SELECT COALESCE(
+    (SELECT upper(coalesce(role, '')) FROM public.profiles WHERE id = auth.uid())
+      IN ('HQ_COMMAND', 'HQ_OFFICER', 'ADMIN'),
+    false
+  );
+$fn$;
+OLDBODY
+chown postgres:postgres "$PGROOT/zz_command_restore.sql" "$PGROOT/zz_command_old.sql"
+
+psql_run "-f $PGROOT/zz_command_old.sql" >/dev/null || {
+  echo "✗ could not install the pre-migration bodies — the probe cannot run"
+  exit 1; }
+OLD_OUT=$(psql_run "-f $PGROOT/which_migrations_are_applied.sql" 2>&1)
+restore_command_bodies() {
+  psql_run "-f $PGROOT/zz_command_restore.sql" >/dev/null || {
+    echo "✗ could not restore is_command/commands_whole_state; the rest of this"
+    echo "  run would be against a schema where eight of ten commanders are"
+    echo "  refused by every policy gated on is_command()."
+    exit 1; }
+}
+for fn in is_command commands_whole_state; do
+  printf '%s\n' "$OLD_OUT" | grep -q "function $fn does not contain" || {
+    printf '%s\n' "$OLD_OUT" | grep -F 20261028000000 | sed 's/^/    /'
+    echo "✗ the old $fn body was installed and the inventory did not say so"
+    restore_command_bodies
+    exit 1; }
+done
+printf '%s\n' "$OLD_OUT" | grep -q "20261028000000_command_knows_both_vocabularies .*0 of 2 present — NEVER APPLIED" || {
+  printf '%s\n' "$OLD_OUT" | grep -F 20261028000000 | sed 's/^/    /'
+  echo "✗ expected \"0 of 2 present — NEVER APPLIED\" for the vocabulary migration"
+  restore_command_bodies
+  exit 1; }
+restore_command_bodies
+BACK_OUT=$(psql_run "-f $PGROOT/which_migrations_are_applied.sql" 2>&1)
+printf '%s\n' "$BACK_OUT" | grep -q "20261028000000_command_knows_both_vocabularies .*2 of 2 present" || {
+  printf '%s\n' "$BACK_OUT" | grep -F 20261028000000 | sed 's/^/    /'
+  echo "✗ the bodies were restored and the inventory still reports them missing"
+  exit 1; }
+printf '%s\n' "$BACK_OUT" | awk -F'|' '
+  { for (i = 1; i <= NF; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i) }
+  $2 == "missing" && $4 !~ /^2026072[1-4]000000_v[2-5]/ { bad = 1 }
+  END { exit bad ? 1 : 0 }' || {
+  echo "✗ restoring the bodies left other objects reported missing"; exit 1; }
+echo "  PASS  the old bodies are named, the new ones clear it"
 
 # ── No policy reaches anon or public — asked at the END this time ─────────────
 #

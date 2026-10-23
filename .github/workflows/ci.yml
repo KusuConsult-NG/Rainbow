@@ -850,6 +850,41 @@ jobs:
       - name: Assert the app and the database agree about who commands
         run: python3 scripts/check_one_command_vocabulary.py
 
+      # And the operator could not find out whether that fix was applied.
+      # `which_migrations_are_applied.sql` answers "was this migration run?"
+      # by looking for the objects it creates, and
+      # 20261028000000_command_knows_both_vocabularies creates nothing — it
+      # replaces two function bodies. So it reported `not detectable` for the
+      # one migration that decides whether a STATE_COMMANDER can post an
+      # advisory, and for fifteen other replacements including
+      # 20260927000000_signup_cannot_choose_role, whose entire change is
+      # stopping a new account naming its own role. pg_proc.prosrc holds the
+      # body, so the question is answerable; this checks it still is. T-91.
+      - name: Assert a replaced function body is detectable
+        run: python3 scripts/check_the_inventory_sees_a_new_body.py
+
+      # The live queue held 412 notifications, none ever attempted, the oldest
+      # from July: the drain worker was never scheduled. Scheduling it was the
+      # obvious next step, and `claim_notifications` had no upper bound on a
+      # notice's age — so the first thing a new worker would do is tell every
+      # officer in the matching geography that a July incident was now theirs,
+      # twenty a minute. A notice about an emergency is an instruction to go
+      # somewhere and it decays. The shelf life is enforced in the claim rather
+      # than in each worker because there are two workers. T-92.
+      - name: Assert a queued notice cannot outlive its moment
+        run: python3 scripts/check_a_queued_notice_has_a_shelf_life.py
+
+      # `safe_zone_screen.dart` routes a fleeing citizen to the nearest
+      # shelter. The shelters were seeded by phase1_foundation.sql at
+      # coordinates nobody measured — PLATEAU STATE HQ at the centroid of Jos
+      # to 4dp, BARKIN LADI SAFE POINT at 9°31'00" 8°55'00" — and the gate that
+      # exists BECAUSE of that screen read Dart and TypeScript, not the SQL
+      # that fills the table it draws. Measured against the 207 surveyed ward
+      # centroids the repo already holds, three of the seven were outside every
+      # ward of the LGA their own row claimed, the worst by 9.6km. T-93, T-94.
+      - name: Assert a shelter is where its row says it is
+        run: python3 scripts/check_a_shelter_is_where_it_says.py
+
       # `tier_timeout_minutes()` is the only reader of the three escalation
       # timeouts and it refuses what it cannot use — `raw::INTEGER`, then
       # `parsed <= 0` — because, in the migration's own words, a timeout of 0

@@ -166,5 +166,3 @@ BEGIN
     n_command, n_state;
 END $say$;
 
-
-

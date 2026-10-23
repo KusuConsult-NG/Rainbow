@@ -132,15 +132,40 @@ pipeline AS (
        WHERE status NOT IN ('RESOLVED', 'CLOSED')
          AND acknowledged_at IS NULL)                                   AS unacknowledged,
     (SELECT count(*) FROM public.notification_outbox)                   AS outbox_rows,
-    (SELECT count(*) FROM public.notification_outbox
-       WHERE delivered_at IS NULL)                                      AS outbox_pending,
-    (SELECT count(*) FROM public.notification_outbox
-       WHERE delivered_at IS NULL AND attempts > 0)                     AS outbox_erroring,
-    (SELECT max(attempts) FROM public.notification_outbox
-       WHERE delivered_at IS NULL)                                      AS worst_attempts,
-    (SELECT last_error FROM public.notification_outbox
-       WHERE delivered_at IS NULL AND last_error IS NOT NULL
-       ORDER BY id DESC LIMIT 1)                                        AS newest_error
+    -- `to_jsonb(o) ->> 'expired_at' IS NULL` rather than `o.expired_at IS
+    -- NULL`: it reads the same on a database that has the column and on one
+    -- that does not, and this script is what somebody runs to find out which
+    -- they have. A direct reference would make the whole diagnostic fail with
+    -- 42703 on every database that has not applied 20261029000000 — the ones
+    -- that most need it.
+    (SELECT count(*) FROM public.notification_outbox o
+       WHERE o.delivered_at IS NULL
+         AND to_jsonb(o) ->> 'expired_at' IS NULL)                      AS outbox_pending,
+    (SELECT count(*) FROM public.notification_outbox o
+       WHERE o.delivered_at IS NULL AND o.attempts > 0
+         AND to_jsonb(o) ->> 'expired_at' IS NULL)                      AS outbox_erroring,
+    (SELECT count(*) FROM public.notification_outbox o
+       WHERE to_jsonb(o) ->> 'expired_at' IS NOT NULL)                  AS outbox_retired,
+    -- Pending, never attempted, and queued longer ago than any escalation
+    -- timeout: notices the drainer has never reached. On the live project this
+    -- was 412, the oldest from July.
+    (SELECT count(*) FROM public.notification_outbox o
+       WHERE o.delivered_at IS NULL AND o.attempts = 0
+         AND to_jsonb(o) ->> 'expired_at' IS NULL
+         AND o.created_at < NOW() - INTERVAL '1 hour')                  AS outbox_stale,
+    (SELECT min(o.created_at) FROM public.notification_outbox o
+       WHERE o.delivered_at IS NULL
+         AND to_jsonb(o) ->> 'expired_at' IS NULL)                      AS oldest_pending,
+    -- Both of these also skip retired rows. A notice retired undelivered keeps
+    -- whatever `attempts` and `last_error` it had, and counting those reads as
+    -- "the worker is struggling" about work nobody is doing any more.
+    (SELECT max(o.attempts) FROM public.notification_outbox o
+       WHERE o.delivered_at IS NULL
+         AND to_jsonb(o) ->> 'expired_at' IS NULL)                      AS worst_attempts,
+    (SELECT o.last_error FROM public.notification_outbox o
+       WHERE o.delivered_at IS NULL AND o.last_error IS NOT NULL
+         AND to_jsonb(o) ->> 'expired_at' IS NULL
+       ORDER BY o.id DESC LIMIT 1)                                      AS newest_error
 )
 
 -- ─── 1. The counts that usually settle it ───────────────────────────────────
@@ -227,9 +252,16 @@ SELECT 5, 'pipeline', 'incidents',
   FROM pipeline p
 UNION ALL
 SELECT 5, 'pipeline', 'outbox',
-       format('%s rows / %s pending / %s erroring / worst attempts %s',
+       format('%s rows / %s pending / %s erroring / %s retired undelivered / worst attempts %s',
               p.outbox_rows, p.outbox_pending, p.outbox_erroring,
-              coalesce(p.worst_attempts::text, '0'))
+              p.outbox_retired, coalesce(p.worst_attempts::text, '0'))
+  FROM pipeline p
+UNION ALL
+SELECT 5, 'pipeline', 'oldest notice still queued',
+       coalesce(to_char(p.oldest_pending, 'YYYY-MM-DD HH24:MI') ||
+                format(' (%s ago)',
+                       justify_interval(date_trunc('hour', NOW() - p.oldest_pending))),
+                '(the queue is empty)')
   FROM pipeline p
 UNION ALL
 SELECT 5, 'pipeline', 'newest outbox error',
@@ -292,5 +324,20 @@ SELECT 6, 'verdict', format('cause %s', rank), cause
            'The outbox has undelivered rows that have been attempted: the drain '
            || 'worker is not running, or is failing. See the newest outbox error.'
       FROM pipeline p WHERE p.outbox_erroring > 0
+    UNION ALL
+    -- Never attempted, not merely failing. A notice with attempts = 0 and an
+    -- hour behind it was never handed to anybody: the drainer has never run.
+    -- Starting it is the fix, and starting it WITHOUT retiring the backlog
+    -- first sends the whole standing queue as live traffic — twenty notices a
+    -- minute telling officers that incidents from months ago are now theirs.
+    SELECT 7,
+           format('%s notices have been queued over an hour and never '
+                  || 'attempted: the drain worker has never run. Retire the '
+                  || 'backlog BEFORE scheduling it — select * from '
+                  || 'notification_queue_status(), then select * from '
+                  || 'expire_stale_notifications(). Scheduling it first '
+                  || 'delivers all %s as live alerts.',
+                  p.outbox_stale, p.outbox_stale)
+      FROM pipeline p WHERE p.outbox_stale > 0
   ) AS verdicts
  ORDER BY ord, name;
