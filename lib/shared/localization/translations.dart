@@ -1079,6 +1079,19 @@ class Translations {
       AppLanguage.hausa: 'AN KASA SAMUN SIGINAR GPS',
       AppLanguage.pidgin: 'NO FIT GET GPS SIGNAL',
     },
+    // Appended when the routing service could not be reached or refused, so
+    // the path drawn is a straight line rather than roads. T-83.
+    'sz_route_is_a_direct_line': {
+      AppLanguage.english:
+          'Routing is unavailable, so this is a direct line and not a road '
+          'route. Follow the roads and keep away from the danger.',
+      AppLanguage.hausa:
+          'Ba a samu hanyar kewayawa ba, don haka wannan layi mikakke ne ba '
+          'hanyar mota ba. Bi titi kuma ka nisanci hatsarin.',
+      AppLanguage.pidgin:
+          'Routing no dey work now, so this one na straight line, no road. '
+          'Follow road and no go near the danger.',
+    },
     'sz_route_calculated_clear': {
       AppLanguage.english: 'Safe route calculated to {name}. The path is clear.',
       AppLanguage.hausa:

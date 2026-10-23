@@ -129,6 +129,13 @@ FEATURES: dict[str, tuple[int, str, str]] = {
     'USSD_REPLY_FORMAT': (
         3, 'nothing — AT_TEXT is the default and is correct',
         'set it to JSON only if your gateway requires it'),
+    'ROUTING_URL': (
+        2, 'evacuation routing runs on somebody else\'s demo server',
+        'unset means OSRM\'s PUBLIC demonstration instance, which rate-limits '
+        'and refuses — in the field it answered 403 and the shelter screen '
+        'drew nothing. The screen now falls back to a direct line and SAYS it '
+        'is not a road route, so the failure is visible rather than silent, '
+        'but a statewide service needs its own routing. See T-83'),
     'ONESIGNAL_AUTH_SCHEME': (
         3, 'nothing — both schemes are tried',
         'the first is retried if refused, and the log says which to pin'),

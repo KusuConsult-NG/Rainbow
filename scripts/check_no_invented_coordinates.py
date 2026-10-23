@@ -45,6 +45,32 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 LIB = REPO / 'lib'
 
+# THE APP WAS NOT THE ONLY PLACE THAT COULD INVENT A POSITION.
+#
+# This gate read `lib/` and nothing else, because the app is where C-5 and T-74
+# were found. Two other trees write and draw positions:
+#
+#   supabase/functions/   Deno edge functions, which INSERT into alerts
+#   hq-dashboard-next/src the console, which draws them
+#
+# `ai-triage/index.ts` had `latitude: latitude || 9.9167` in the INSERT. Not a
+# display fallback — it wrote the centre of Jos into `alerts` as the position of
+# a report that had no fix, permanently, for every consumer downstream. Strictly
+# worse than C-5, in the one tree this check could not see. T-84.
+EXTRA_TREES = [
+    (REPO / 'supabase/functions', ('*.ts',)),
+    (REPO / 'hq-dashboard-next/src', ('*.ts', '*.tsx')),
+]
+
+# A test's own fixture coordinates are the point of the test.
+SKIP_FILE = re.compile(r'\.(test|spec)\.(ts|tsx|dart)$|/__tests__/')
+
+# Reference geography, not an invented position: the ward centroids are real
+# surveyed points, generated as data, and `check_ward_centroids`-style parity
+# against the app's copy is asserted by its own step in CI. A coordinate that
+# IS the data cannot be a coordinate standing in for missing data.
+EXEMPT_DATA = ('ward_centroids.ts', 'plateau_wards.ts', 'plateau_lgas.ts')
+
 # Plateau sits near 9°N, 9°E, so a decimal in these ranges with three or more
 # places is a coordinate rather than a size, an opacity or a version.
 COORD = re.compile(r'(?<![\w.])(?:[4-9]|1[0-4])\.\d{3,}(?![\w])')
@@ -63,10 +89,27 @@ def live(path: Path) -> str:
         for line in src.split('\n'))
 
 
+def files_to_read():
+    """Every file that could place somebody somewhere, in every tree."""
+    for path in sorted(LIB.rglob('*.dart')):
+        yield path
+    for root, patterns in EXTRA_TREES:
+        if not root.is_dir():
+            continue
+        for pattern in patterns:
+            for path in sorted(root.rglob(pattern)):
+                rel = str(path.relative_to(REPO))
+                if SKIP_FILE.search(rel) or '/node_modules/' in rel:
+                    continue
+                if '/.next/' in rel or path.name in EXEMPT_DATA:
+                    continue
+                yield path
+
+
 findings: list[str] = []
 checked = 0
 
-for path in sorted(LIB.rglob('*.dart')):
+for path in files_to_read():
     code = live(path)
     checked += 1
     for match in COORD.finditer(code):
@@ -112,5 +155,8 @@ if findings:
     sys.exit(1)
 
 print('OK: no screen places anybody at a coordinate nobody measured.')
-print(f'  * {checked} Dart files read, comments excluded')
+print(f'  * {checked} file(s) read across lib/, supabase/functions/ and the '
+      'console, comments excluded')
 print('  * a map viewport centre is exempt and must say so on its own line')
+print(f'  * {len(EXEMPT_DATA)} reference-geography file(s) exempt by name, '
+      'because there the coordinates ARE the data')

@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:rainbow_app/core/config/map_tiles.dart';
+import 'package:rainbow_app/core/config/routing.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -153,14 +154,38 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
     return score;
   }
 
-  Future<List<List<LatLng>>> _fetchRoutes(LatLng start, LatLng end) async {
+  /// Ask the routing service for ways from [start] to [end].
+  ///
+  /// Returns the paths AND whether they came from the router. A straight line
+  /// between two points is not a route — it crosses buildings, rivers and the
+  /// thing the person is running from — so the caller has to be able to tell
+  /// the two apart. It could not before: the direct-line fallback was returned
+  /// as though it were a road route, and the screen then announced "safe route
+  /// calculated, the path is clear".
+  ///
+  /// A NON-200 USED TO RETURN `[]`, which the caller treated as "nothing to
+  /// draw" and silently stopped. A refusing server is the likeliest failure of
+  /// the two — the public OSRM demo answered **403** in the field — so the one
+  /// that gave the person nothing at all was the one that happened. It falls
+  /// back like the exception does now, and says which it was.
+  /// See E2E_AUDIT_REPORT.md T-83.
+  Future<({List<List<LatLng>> paths, bool fromRouter})> _fetchRoutes(
+      LatLng start, LatLng end) async {
     try {
       final url = Uri.parse(
-          'https://router.project-osrm.org/route/v1/driving/'
+          '$routingBaseUrl/route/v1/driving/'
           '${start.longitude},${start.latitude};${end.longitude},${end.latitude}'
           '?overview=full&geometries=geojson&alternatives=true');
       final res = await http.get(url).timeout(const Duration(seconds: 5));
-      if (res.statusCode != 200) return [];
+      if (res.statusCode != 200) {
+        debugPrint(
+          '[ROUTING_ERR] ${res.statusCode} from $routingBaseUrl'
+          '${routingIsDemoServer ? " — this build is pointed at OSRM's public "
+              "demonstration server, which rate-limits and refuses. Set "
+              "ROUTING_URL." : ""}',
+        );
+        return (paths: [[start, end]], fromRouter: false);
+      }
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final routes = data['routes'] as List<dynamic>? ?? [];
       final paths = <List<LatLng>>[];
@@ -177,10 +202,11 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
         }).toList();
         paths.add(path);
       }
-      return paths;
+      if (paths.isEmpty) return (paths: [[start, end]], fromRouter: false);
+      return (paths: paths, fromRouter: true);
     } catch (e) {
-      debugPrint('[ROUTING_ERR] Failed to fetch OSRM route: $e');
-      return [[start, end]]; // Direct path fallback
+      debugPrint('[ROUTING_ERR] Failed to reach $routingBaseUrl: $e');
+      return (paths: [[start, end]], fromRouter: false);
     }
   }
 
@@ -192,7 +218,8 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
     });
 
     final end = LatLng(zone.lat, zone.lng);
-    final paths = await _fetchRoutes(userPos, end);
+    final result = await _fetchRoutes(userPos, end);
+    final paths = result.paths;
 
     if (paths.isEmpty) {
       setState(() => _isCalculatingRoute = false);
@@ -235,7 +262,19 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
     final tmpl = warning
         ? Translations.get('sz_route_calculated_warning', lang)
         : Translations.get('sz_route_calculated_clear', lang);
-    final message = tmpl.replaceAll('{name}', zone.name);
+    // A STRAIGHT LINE IS NOT A ROUTE, AND MUST NOT BE ANNOUNCED AS ONE.
+    //
+    // When the routing service cannot be reached or refuses, the fallback is a
+    // direct line from here to the shelter. It crosses buildings, rivers and
+    // whatever the person is running from, and the threat check above has
+    // tested that line rather than any road. Saying "safe route calculated,
+    // the path is clear" over it is inventing an answer — the same move as the
+    // shelters T-74 removed, one layer up. So the caveat is appended to the
+    // sentence that is both spoken and written. T-83.
+    final message = tmpl.replaceAll('{name}', zone.name)
+        + (result.fromRouter
+            ? ''
+            : ' ${Translations.get('sz_route_is_a_direct_line', lang)}');
     // Spoken AND kept. The screen shows it on request; a muted phone, an
     // unavailable TtsService or a deaf user must not be the difference between
     // knowing the way is clear and not knowing.

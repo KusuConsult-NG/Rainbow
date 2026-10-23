@@ -69,8 +69,21 @@ Output ONLY valid JSON with keys:
         description: text,
         ai_summary: triageResult.summary,
         severity: triageResult.severity,
-        latitude: latitude || 9.9167,
-        longitude: longitude || 8.8917,
+        // DO NOT INVENT A POSITION — and this one was WRITTEN, not drawn.
+        //
+        // This was `latitude || 9.9167, longitude || 8.8917`: the centre of
+        // Jos, inserted into `alerts` as the position of a report that had no
+        // fix. Not a display fallback that a later read could second-guess —
+        // a row in the incident table, permanently, that every consumer
+        // downstream reads as a measured position. The HQ map drew a confident
+        // pin and a responder could be sent to it.
+        //
+        // `??` rather than `||` so a legitimate 0 survives. The app's
+        // AlertService and the console both already do exactly this and say so;
+        // this function was in the one tree the coordinate gate did not read.
+        // See E2E_AUDIT_REPORT.md C-5, T-74 and T-84.
+        latitude: latitude ?? null,
+        longitude: longitude ?? null,
         reported_by: reported_by || null,
         status: "PENDING",
       })

@@ -10306,3 +10306,128 @@ nobody has tested.
 
 Then run normally: 28/28, exit 0, hq signs in, and the new check reads
 `none needed it`.
+
+---
+
+### T-83. A 403 from somebody else's demo server, and a straight line called a safe route
+
+Reported from the field: *"safezone routing has 403 error."*
+
+```dart
+final url = Uri.parse(
+    'https://router.project-osrm.org/route/v1/driving/' …
+```
+
+`router.project-osrm.org` is the OSRM project's **public demonstration server**,
+written into the screen. It is explicitly not for production use: it
+rate-limits, and it answers what it refuses with a 4xx. In the field, 403.
+
+`map_tiles.dart` — one directory over, in the same feature — exists because
+CARTO's basemap started answering unauthenticated requests with a tile reading
+"API key required", and it carries forty lines explaining that a production
+service belongs on a keyed provider set by configuration. That lesson was
+learned for **tiles** and not for **routing**, on the same screen. The tenth
+instance of the pattern in this report.
+
+#### The worse half, which the 403 only revealed
+
+```dart
+if (res.statusCode != 200) return [];       // ← and the caller:
+if (paths.isEmpty) { setState(() => _isCalculatingRoute = false); return; }
+```
+
+A non-200 returned an empty list, and the caller treated empty as "nothing to
+draw" and stopped. **The spinner stops and nothing else happens at all** — no
+route, no message, nothing spoken. On the screen whose only job is telling a
+frightened person where to run.
+
+Meanwhile the `catch` branch — a network error — fell back to
+`[[start, end]]`: a **straight line** from where they are to the shelter. The
+screen drew that as a route, scored it against the threats, and then said, out
+loud:
+
+> Safe route calculated to NARAGUTA WARD COMMAND POST. The path is clear.
+
+A straight line is not a route. It crosses buildings, rivers and whatever the
+person is running from, and "the path is clear" was asserted about a line no
+road follows. That is the invented shelters of T-74 one layer up: a fabricated
+answer presented in the same voice as a real one.
+
+So the two failure modes were handled inconsistently, and **the likelier of the
+two — a server that refuses — was the one that gave the person nothing**, while
+the other gave them something false.
+
+#### What was done
+
+* `lib/core/config/routing.dart` holds the endpoint, read from `ROUTING_URL`,
+  https-validated, defaulting to the demo server with `routingIsDemoServer`
+  exposed so the log says so at the point of failure rather than relying on
+  anybody reading the file. Mirrors `map_tiles.dart` exactly.
+* A non-200 falls back the way an exception does, and logs the status code and
+  — when it applies — that this build is pointed at a demonstration server.
+* `_fetchRoutes` returns `({paths, fromRouter})`. The caller can tell a road
+  route from a straight line, which it could not before.
+* When it is a straight line, the sentence that is both spoken and written
+  gains: *"Routing is unavailable, so this is a direct line and not a road
+  route. Follow the roads and keep away from the danger."* In all three
+  languages.
+* `.env.example` documents `ROUTING_URL`, and `what_is_not_configured.py`
+  carries it at tier 2 with what a person sees — the gate refused the key until
+  it did, which is the gate working.
+
+The screen no longer has a silent failure, and no longer claims a route it did
+not compute.
+
+---
+
+### T-84. The coordinate gate read one of three trees, and the one it missed WROTE
+
+Reported from the field: *"Lat and Lon still hardcoded."* They were right, and
+not where T-74 looked.
+
+```ts
+// supabase/functions/ai-triage/index.ts
+.from("alerts").insert({
+  …
+  latitude: latitude || 9.9167,
+  longitude: longitude || 8.8917,
+```
+
+That is C-5 again — the centre of Jos substituted for a missing position — in
+the **INSERT**. Not a display fallback that a later read might second-guess: a
+row written into the incident table, permanently, which every consumer
+downstream reads as a measured position. The HQ map draws a confident pin and a
+responder can be sent to it. `||` rather than `??`, so a legitimate 0 would go
+the same way.
+
+#### Why the gate could not see it
+
+`check_no_invented_coordinates.py` read `lib/`. Only `lib/`. Because C-5 and
+T-74 were both found in the app, and the gate was written from where the
+defects were rather than from where a position can be invented.
+
+There are three trees that place people somewhere:
+
+| tree | what it does with a position |
+| --- | --- |
+| `lib/` | draws it, and writes it — **was checked** |
+| `supabase/functions/` | **writes it into `alerts`** — was not checked |
+| `hq-dashboard-next/src/` | draws it on the command map — was not checked |
+
+The console was already correct, and says so in a comment citing C-5 —
+`d.latitude ?? d.lat ?? null`, with a note that `??` preserves a legitimate 0.
+Somebody fixed it there, by hand, and nothing propagated that to the gate or to
+the third tree.
+
+#### What was done
+
+`latitude ?? null`, `longitude ?? null`, with the reasoning written at the
+insert. The gate now reads all three trees — 206 files, up from the Dart alone
+— with two narrow, named exemptions: a test's own fixture coordinates, and
+reference geography (`ward_centroids.ts` and friends), where the coordinates
+**are** the data rather than standing in for missing data. A map viewport centre
+stays exempt as before and still has to say so on its own line.
+
+Reproduced before fixing: the widened gate named both lines. Mutation-tested
+after: a fresh `const fallbackPos = { lat: 9.9285, lng: 8.8921 }` planted in the
+console's `LiveMap.tsx` is caught too.
