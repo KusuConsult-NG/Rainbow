@@ -45,6 +45,88 @@ enum ResponderTier {
   unknown,
 }
 
+/// Every staff role name this product has been deployed with, and its rung.
+///
+/// THERE ARE TWO VOCABULARIES, AND BOTH ARE LIVE.
+///
+/// The code was written against `*_COMMAND`. The production project's accounts
+/// were created with `STATE_COMMANDER` / `LGA_COMMANDER` / `WARD_COMMANDER` /
+/// `POLLING_UNIT_OFFICER` — 21 of its 22 staff accounts, none of which appears
+/// anywhere in this repository.
+///
+/// The tier was decided by a chain of substring tests:
+///
+///     if (roleStr.contains('HQ'))        tier = hq;
+///     else if (roleStr.contains('LGA'))  tier = lga;
+///     else if (roleStr.contains('WARD')) tier = ward;
+///     else if (roleStr.contains('UNIT') || roleStr.contains('POLLING')) …
+///
+/// Three of those four production names survive that by accident of spelling.
+/// `STATE_COMMANDER` contains none of the four tokens, so it fell through to
+/// `unknown` — and `assignedTierLabel(unknown)` is `'UNIT'`. Every HQ duty
+/// officer was silently demoted to a polling unit, scoped to one ward, and
+/// shown a board that was correct about the wrong jurisdiction. A citizen's
+/// SOS and a building fire were on that project, in another ward, invisible,
+/// with no error anywhere. See E2E_AUDIT_REPORT.md T-85.
+///
+/// Explicit names, so a rung is never decided by whether one string happens to
+/// contain another. Adding a deployment's vocabulary here is the fix for that
+/// deployment; the substring chain is kept below it only as a last resort, and
+/// says so loudly when it fires.
+const Map<String, ResponderTier> staffRoleTiers = <String, ResponderTier>{
+  // The vocabulary this repository is written against.
+  'HQ_COMMAND': ResponderTier.hq,
+  'LGA_COMMAND': ResponderTier.lga,
+  'WARD_COMMAND': ResponderTier.ward,
+  'UNIT_COMMAND': ResponderTier.pu,
+
+  // The vocabulary the production project's accounts actually carry.
+  'STATE_COMMANDER': ResponderTier.hq,
+  'LGA_COMMANDER': ResponderTier.lga,
+  'WARD_COMMANDER': ResponderTier.ward,
+  'POLLING_UNIT_OFFICER': ResponderTier.pu,
+
+  // Staff who are deliberately outside the PU/WARD/LGA/HQ chain. `unknown`
+  // means "no rung", which is what these are — not "unrecognised".
+  'RESPONDER': ResponderTier.unknown,
+  'POLICE_LIAISON': ResponderTier.unknown,
+  'ARMY_LIAISON': ResponderTier.unknown,
+};
+
+/// The rung [roleStr] acts at, or null when nothing in this product knows it.
+///
+/// Null is the case worth caring about: it is a deployment carrying a role name
+/// no release has heard of, which is exactly how an HQ commander came to be
+/// shown a polling unit's board. The caller logs it; it must never be quietly
+/// turned into the bottom of the chain.
+ResponderTier? tierForStaffRole(String roleStr) {
+  final key = roleStr.trim().toUpperCase();
+  final mapped = staffRoleTiers[key];
+  if (mapped != null) return mapped;
+
+  // LAST RESORT, and loud. Kept so that a vocabulary nobody has added here
+  // still gets a best-effort rung rather than being demoted to UNIT — but it
+  // is a defect in this map, not a working feature, and the log says so.
+  ResponderTier? guessed;
+  if (key.contains('HQ') || key.contains('STATE')) {
+    guessed = ResponderTier.hq;
+  } else if (key.contains('LGA')) {
+    guessed = ResponderTier.lga;
+  } else if (key.contains('WARD')) {
+    guessed = ResponderTier.ward;
+  } else if (key.contains('UNIT') || key.contains('POLLING')) {
+    guessed = ResponderTier.pu;
+  }
+  if (guessed != null) {
+    debugPrint(
+      '⚠️ [AUTH] role "$roleStr" is not in staffRoleTiers — guessed '
+      '${guessed.name} from its spelling. Add it to the map: a rung decided '
+      'by substring is how STATE_COMMANDER became a polling unit (T-85).',
+    );
+  }
+  return guessed;
+}
+
 /// Documentation for this public member.
 
 class AuthState {
@@ -244,14 +326,21 @@ class AuthNotifier extends StateNotifier<AuthState> {
           role = UserRole.citizen;
         } else {
           role = UserRole.responder;
-          if (roleStr.contains('HQ')) {
-            tier = ResponderTier.hq;
-          } else if (roleStr.contains('LGA')) {
-            tier = ResponderTier.lga;
-          } else if (roleStr.contains('WARD')) {
-            tier = ResponderTier.ward;
-          } else if (roleStr.contains('UNIT') || roleStr.contains('POLLING')) {
-            tier = ResponderTier.pu;
+          // One explicit map, not four substring tests. See staffRoleTiers:
+          // STATE_COMMANDER contains none of HQ/LGA/WARD/UNIT/POLLING, so
+          // every HQ duty officer on the production project fell through to
+          // `unknown` — which assignedTierLabel renders as 'UNIT' — and was
+          // shown a polling unit's board for one ward while a CRITICAL SOS
+          // sat in another. T-85.
+          final mapped = tierForStaffRole(roleStr);
+          if (mapped != null) {
+            tier = mapped;
+          } else {
+            debugPrint(
+              '⚠️ [AUTH] role "$roleStr" is not a rung this release knows. '
+              'Acting with NO tier rather than the bottom of the chain — a '
+              'silent demotion to UNIT is what T-85 was.',
+            );
           }
         }
         jurisdiction = profile['geo_lga'] as String?;

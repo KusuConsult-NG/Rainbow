@@ -10431,3 +10431,105 @@ stays exempt as before and still has to say so on its own line.
 Reproduced before fixing: the widened gate named both lines. Mutation-tested
 after: a fresh `const fallbackPos = { lat: 9.9285, lng: 8.8921 }` planted in the
 console's `LiveMap.tsx` is caught too.
+
+---
+
+### T-85. Every HQ commander was shown a polling unit's board
+
+Reported from the field: *"i sent 1 sos and a fire alert and nothing was seen on
+the HQ's dashboard."* Diagnosed against the live project with
+`scripts/why_is_the_board_empty.sql`, and it is not RLS and not the write path.
+
+**The incidents arrived.** Seven on the day, with real coordinates, `CRITICAL`,
+`ESCALATED` — including `Fire - Building Fire` at 11:50:17 and a Silent SOS and
+PANIC SOS at 13:29:54, all in `JOS SOUTH / GIRING`.
+
+The tier an officer acts at was decided by four substring tests:
+
+```dart
+if (roleStr.contains('HQ'))        tier = ResponderTier.hq;
+else if (roleStr.contains('LGA'))  tier = ResponderTier.lga;
+else if (roleStr.contains('WARD')) tier = ResponderTier.ward;
+else if (roleStr.contains('UNIT') || roleStr.contains('POLLING')) tier = pu;
+```
+
+The production project's accounts carry a **different vocabulary** from this
+repository's. Run it through that chain:
+
+| production role | contains a token? | rung it got |
+| --- | --- | --- |
+| `LGA_COMMANDER` | "LGA" | lga — correct, by accident |
+| `WARD_COMMANDER` | "WARD" | ward — correct, by accident |
+| `POLLING_UNIT_OFFICER` | "UNIT" | pu — correct, by accident |
+| **`STATE_COMMANDER`** | **none of the five** | **`unknown`** |
+
+And `assignedTierLabel(unknown)` returns `'UNIT'`.
+
+Three of the four survive by coincidence of spelling. The one that does not is
+the HQ rung. The project has **four `STATE_COMMANDER` accounts** — hq-001 and
+hq-002, each duplicated across two email domains — and every one of them signed
+in and was silently given a polling unit's board, posted to
+`JOS SOUTH / BUKURU / PU-001-BUKURU`.
+
+The incidents were in `JOS SOUTH / GIRING`. A polling unit in Bukuru cannot see
+Giring. **No error, no empty state, nothing** — the board was correct about the
+wrong jurisdiction.
+
+`STATE_COMMANDER` appears **zero** times in `lib/` and **zero** times in the
+console. Nothing in this product has ever heard of the role that 21 of the
+project's 22 staff accounts were created with. The one account that works is the
+single `HQ_COMMAND` profile, which the diagnostic confirms sees
+**156 of 156, commands the whole state**.
+
+#### Why no gate could have caught this, and what that means
+
+A check over this repository's own vocabulary would have passed. Every role name
+the repo contains mapped correctly. The defect lived entirely in the gap between
+the names the code knows and the names a deployment was built with — and no file
+here can enumerate the second set.
+
+That is a different shape from T-75 to T-84, which were all "the set this check
+reads is smaller than its subject" and fixable by widening the set. This one
+cannot be fixed by widening anything, because the subject is a database the
+repository cannot see. The only protection is at **runtime**, where the real
+role string arrives.
+
+#### What was done
+
+`staffRoleTiers` is an explicit map, covering both vocabularies, and
+`tierForStaffRole` returns `null` for a name no release knows — never the bottom
+of the chain. The caller logs that and acts with **no** tier rather than a wrong
+one, because `unknown` already means "a responder legitimately outside the
+chain" and conflating the two is how the top of the ladder became the bottom.
+
+The substring chain survives below the map as an explicit last resort, so a
+vocabulary nobody has added still gets a best-effort rung instead of nothing —
+and it prints a warning naming the role and this finding when it fires. It also
+now recognises `STATE` as an HQ token, which it never did.
+
+`test/staff_role_tiers_test.dart`, 8 tests: the four production names, the four
+repository names, the three chain-less staff roles, case and whitespace, that
+every rung in the map renders a label the escalation ladder accepts, and the
+regression guard — a role no release knows is `null`, not `pu`.
+
+Mutation-tested by reverting to the substring-only behaviour: `STATE_COMMANDER
+is HQ` fails with `Expected: hq, Actual: null`.
+
+#### What this does not fix, on that project
+
+The mapping makes an HQ account read as HQ. Four things in the same diagnostic
+output are data, not code, and are the operator's:
+
+* `notification_outbox` holds **412 rows, 412 pending, worst attempts 0** — not
+  failing, never attempted. Five migrations call `cron.schedule`; none schedules
+  the drainer. Nobody has been notified of anything, which is consistent with
+  140 open and 140 unacknowledged.
+* `BUKURU WARD` appears under Barkin Ladi, Bokkos, Jos North, Mangu, Pankshin
+  and Riyom. Bukuru is in Jos South. `JOS SOUTH / BUKURU` (22 incidents) and
+  `JOS SOUTH / BUKURU WARD` (58) are two spellings of one ward, so ward-scoped
+  reads are unreliable until they are reconciled.
+* 19 incidents carry no geography and 3 carry `ALL`, so they are invisible to
+  every scoped account regardless of rung.
+* Staff accounts are duplicated across two email domains — `@rainbow.gov.ng`
+  and `@operationrainbow.plateau.gov.ng` — with the same names and separate
+  profile rows.
