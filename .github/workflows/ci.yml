@@ -919,6 +919,17 @@ jobs:
       - name: Assert a badge becomes one email
         run: python3 scripts/check_one_staff_identity.py
 
+      # The app did not start without a network. A signed-in handset restores
+      # its session locally, then resolveRole() issued an unbounded profile
+      # fetch — and computeRedirect holds the router on the splash while
+      # isLoading is true. The only guard was a one-shot timer already fired by
+      # then, so the handset sat on the splash for the OS TCP timeout and
+      # finished at a login screen that offline cannot succeed. Every offline
+      # mechanism this product has sat behind a screen nobody could reach.
+      # T-100.
+      - name: Assert the app opens without a network
+        run: python3 scripts/check_the_app_opens_without_a_network.py
+
       # `tier_timeout_minutes()` is the only reader of the three escalation
       # timeouts and it refuses what it cannot use — `raw::INTEGER`, then
       # `parsed <= 0` — because, in the migration's own words, a timeout of 0

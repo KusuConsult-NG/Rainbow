@@ -1123,6 +1123,24 @@ class Translations {
     // an unverified position is still a guess and the person running has to be
     // told which it is: the NAME is reliable — a police division is a place
     // anyone can point you to — and the pin is not. T-94.
+    // Shown when the app opened without being able to ask the server who this
+    // account is, and is working from what this handset recorded last time.
+    //
+    // Said rather than hidden because a responder whose rung changed this
+    // morning is looking at a board that may be the wrong one — and because
+    // the alternative, which is what this replaced, was the app not opening at
+    // all. T-100.
+    'auth_working_from_record': {
+      AppLanguage.english:
+          'No connection. Showing what this phone recorded on {when} — your '
+          'role may have changed since.',
+      AppLanguage.hausa:
+          'Babu haɗi. Ana nuna abin da wannan wayar ta ajiye a {when} — '
+          'matsayinka na iya canzawa tun lokacin.',
+      AppLanguage.pidgin:
+          'No network. We dey show wetin this phone save on {when} — your role '
+          'fit don change since then.',
+    },
     'sz_position_not_confirmed': {
       AppLanguage.english:
           'Nobody has confirmed this exact spot, so ask for directions when '

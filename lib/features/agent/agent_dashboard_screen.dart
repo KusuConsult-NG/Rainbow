@@ -25,6 +25,7 @@ import 'package:rainbow_app/services/auth_service.dart';
 import 'package:rainbow_app/services/tts_service.dart';
 import 'package:rainbow_app/shared/widgets/broadcast_hud.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
+import 'package:rainbow_app/shared/widgets/unconfirmed_identity_banner.dart';
 
 /// The responder's mission feed, with its own liveness attached.
 ///
@@ -357,6 +358,10 @@ class _AgentDashboardScreenState extends ConsumerState<AgentDashboardScreen> {
           children: [
             Column(
               children: [
+                // A responder's rung decides which incidents this board shows.
+                // If it came from this handset's own record rather than the
+                // server, the board may be the wrong one and says so. T-100.
+                const UnconfirmedIdentityBanner(),
                 const BroadcastHud(),
                 Expanded(child: _buildMissionFeed()),
               ],

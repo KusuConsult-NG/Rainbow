@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:rainbow_app/core/auth/last_known_role.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/services/mesh_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -140,6 +141,8 @@ class AuthState {
     this.hasOnboarded = false,
     this.isLoading = true,
     this.resolutionError,
+    this.roleFromCache = false,
+    this.roleConfirmedAt,
     this.sessionEpoch = 0,
   });
 
@@ -163,6 +166,17 @@ class AuthState {
 
   /// Documentation for this public member.
   final bool isLoading;
+
+  /// Whether [role] came from this handset's own record rather than the server.
+  ///
+  /// True means the app opened without being able to ask. The screens say so,
+  /// because opening as who you were yesterday is only honest if it admits it —
+  /// and a responder whose rung changed this morning needs to know this board
+  /// may be the wrong one. T-100.
+  final bool roleFromCache;
+
+  /// When the server last confirmed this identity, when known.
+  final DateTime? roleConfirmedAt;
 
   /// Non-null when role resolution failed. The router treats this as
   /// "authenticated but role unknown" rather than silently downgrading the user.
@@ -193,6 +207,8 @@ class AuthState {
     bool? hasOnboarded,
     bool? isLoading,
     String? resolutionError,
+    bool? roleFromCache,
+    DateTime? roleConfirmedAt,
     int? sessionEpoch,
   }) {
     return AuthState(
@@ -205,6 +221,8 @@ class AuthState {
       hasOnboarded: hasOnboarded ?? this.hasOnboarded,
       isLoading: isLoading ?? this.isLoading,
       resolutionError: resolutionError ?? this.resolutionError,
+      roleFromCache: roleFromCache ?? this.roleFromCache,
+      roleConfirmedAt: roleConfirmedAt ?? this.roleConfirmedAt,
     );
   }
 
@@ -240,13 +258,44 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   StreamSubscription<AuthState>? _authSubscription;
 
-  void initAuth() {
-    Future.delayed(const Duration(seconds: 5), () {
+  /// How long any one network step in resolution may take.
+  ///
+  /// The profile fetch had NO bound. `computeRedirect` holds the router on the
+  /// splash while `isLoading` is true, so with no network the app sat there for
+  /// as long as the operating system takes to give up on a TCP connection to an
+  /// unreachable host — minutes on Android — in an app whose whole purpose is
+  /// to work when the network does not. T-100.
+  static const Duration resolveTimeout = Duration(seconds: 6);
+
+  Timer? _loadingWatchdog;
+
+  /// Re-armed every time the state enters loading.
+  ///
+  /// It used to be a single `Future.delayed` in the constructor. That cannot
+  /// cover a SECOND entry into loading, and `resolveRole` is a second entry:
+  /// by the time it set `isLoading = true` the one-shot had already fired, so
+  /// nothing was watching the step that actually hung. A guard that runs once
+  /// protects only the first case.
+  void _armLoadingWatchdog() {
+    _loadingWatchdog?.cancel();
+    // Longer than `resolveTimeout` on purpose: this is the net under the
+    // bounded steps, not a second bound on them. If it is what clears the
+    // state, something awaited is unbounded and that is a defect, so it says
+    // so rather than quietly recovering.
+    _loadingWatchdog = Timer(resolveTimeout + const Duration(seconds: 4), () {
       if (mounted && state.isLoading) {
-        debugPrint('[AUTH] Safety timeout — forcing isLoading=false');
+        debugPrint(
+          '[AUTH] Loading watchdog fired. Every await in resolution is '
+          'supposed to be bounded, so reaching this is a bug — but the app '
+          'opens rather than sitting on the splash.',
+        );
         state = state.copyWith(isLoading: false);
       }
     });
+  }
+
+  void initAuth() {
+    _armLoadingWatchdog();
 
     // The subscription below is set up SYNCHRONOUSLY, inside this notifier's
     // constructor, which runs inside the `appRouter` provider, which is
@@ -298,6 +347,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   @override
   void dispose() {
+    _loadingWatchdog?.cancel();
     unawaited(_authSubscription?.cancel());
     super.dispose();
   }
@@ -306,18 +356,25 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> resolveRole(User user) async {
     state = state.copyWith(isLoading: true, user: user);
+    // Armed here as well as in initAuth: this is a SECOND entry into loading,
+    // and the constructor's timer has long since fired by now. T-100.
+    _armLoadingWatchdog();
 
     try {
       var role = UserRole.citizen;
       var tier = ResponderTier.unknown;
       String? jurisdiction;
 
-      // Fetch profile from Supabase PostgreSQL profiles table
+      // BOUNDED. This had no timeout, and `computeRedirect` holds the router
+      // on the splash while `isLoading` is true — so with no network the app
+      // did not start at all, it waited out the OS TCP timeout on the splash
+      // screen. In an app built for a place where the network fails. T-100.
       final profileDoc = await SupabaseConfig.client
           .from('profiles')
           .select()
           .eq('id', user.id)
-          .maybeSingle();
+          .maybeSingle()
+          .timeout(resolveTimeout);
 
       final profile = profileDoc;
       if (profile != null) {
@@ -355,6 +412,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
             (profile?['profile_complete'] as bool? ?? false);
       }
 
+      final confirmedAt = DateTime.now();
       state = AuthState(
         user: user,
         role: role,
@@ -363,6 +421,22 @@ class AuthNotifier extends StateNotifier<AuthState> {
         profile: profile,
         hasOnboarded: hasOnboarded,
         isLoading: false,
+        roleConfirmedAt: confirmedAt,
+      );
+      // Recorded so the NEXT start can open without asking. Not awaited into
+      // the state: a storage failure must not turn a successful resolution
+      // into a failed one.
+      unawaited(
+        saveLastKnownRole(
+          LastKnownRole(
+            userId: user.id,
+            role: role,
+            tier: tier,
+            jurisdiction: jurisdiction,
+            hasOnboarded: hasOnboarded,
+            savedAt: confirmedAt,
+          ),
+        ),
       );
       // The mesh needs the role: responders relay by default, citizens opt
       // in. Runs on every resolution, including token refreshes; starting an
@@ -377,6 +451,48 @@ class AuthNotifier extends StateNotifier<AuthState> {
       // can offer a retry and the operator knows their role is unresolved.
       debugPrint('[AUTH] Profile resolution FAILED for uid=${user.id}: $e');
       debugPrint('[AUTH] stack: $st');
+
+      // ── OPEN AS WHO WE WERE, IF WE EVER KNEW ──
+      //
+      // This used to end here, with `resolutionError` set — and
+      // `computeRedirect` reads a resolution error as terminal and sends the
+      // user to the LOGIN SCREEN. Offline, that cannot succeed: the app
+      // offered the one action that needs a network as the way out of having
+      // no network.
+      //
+      // A handset that has resolved this account before knows what it was.
+      // Using that is not a security decision — `is_command()` and the
+      // row-level security built on it still refuse this handset everything it
+      // is not entitled to, exactly as before. It decides which SCREEN opens,
+      // and the cost of being wrong is a screen whose data will not load,
+      // which is visible and recoverable. The cost of the old behaviour was
+      // the panic button. T-100.
+      final remembered = await readLastKnownRole(user.id);
+      if (remembered != null) {
+        debugPrint(
+          "[AUTH] Opening from this handset's own record: "
+          '${remembered.role.name}/${remembered.tier.name}, last confirmed '
+          '${remembered.savedAt.toIso8601String()}',
+        );
+        state = AuthState(
+          user: user,
+          role: remembered.role,
+          tier: remembered.tier,
+          jurisdiction: remembered.jurisdiction,
+          hasOnboarded: remembered.hasOnboarded,
+          isLoading: false,
+          roleFromCache: true,
+          roleConfirmedAt: remembered.savedAt,
+          // Kept, so a screen can say why it is working from a record. NOT
+          // read by the router as terminal any more: a cached role IS a
+          // resolved role for the purpose of choosing a screen.
+          resolutionError: e.toString(),
+        );
+        return;
+      }
+
+      // Never resolved on this handset, so there is nothing to open as. Login
+      // is the right destination: we do not know who this is.
       state = state.copyWith(
         isLoading: false,
         role: UserRole.unknown,
@@ -403,7 +519,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Documentation for this public member.
   Future<void> signOut() async {
+    // Forgotten BEFORE the sign-out call, not after, and not only on success.
+    //
+    // `signOut()` reaches the network to revoke the token and throws when it
+    // cannot. If the record were cleared after, signing out on a bad link
+    // would leave the next person to pick up this handset able to open it as
+    // the previous one — and in a command post this is a shared phone.
+    // Clearing first costs a re-resolve for somebody who stays signed in
+    // after a failed sign-out, which is the safe direction. T-100.
+    await clearLastKnownRole();
     await SupabaseConfig.client.auth.signOut();
   }
 }

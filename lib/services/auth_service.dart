@@ -14,6 +14,7 @@ import 'package:rainbow_app/services/secure_storage_service.dart';
 import 'package:rainbow_app/services/sim_watch_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:rainbow_app/core/config/staff_identity.dart' as identity;
+import 'package:rainbow_app/core/auth/last_known_role.dart';
 
 /// Provider for AuthService
 final authServiceProvider = Provider<AuthService>((ref) {
@@ -578,6 +579,15 @@ class AuthService {
       await (stopMeshOverride ?? MeshService.instance.onSignedOut)();
     } catch (e) {
       debugPrint('[SIGNOUT_MESH_ERR] could not stop the mesh: $e');
+    }
+    // And forget what rung this handset last opened as, so the next person to
+    // pick it up gets the login screen rather than the previous holder's
+    // board. BEFORE the sign-out call, which reaches the network to revoke the
+    // token and throws when it cannot. T-100.
+    try {
+      await clearLastKnownRole();
+    } catch (e) {
+      debugPrint('[SIGNOUT_ROLE_ERR] could not clear the stored role: $e');
     }
     await SupabaseConfig.client.auth.signOut();
     await _secureStorage.deleteAll();

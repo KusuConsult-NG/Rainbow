@@ -11820,3 +11820,125 @@ creating the account to type an email on a domain nobody can sign in under.
 Five mutations caught: the two defaults drifting apart, either sign-in path going
 back to an inline concatenation, the placeholder hardcoding it again, and the
 config module no longer declaring its default.
+
+---
+
+### T-100. The app did not start without a network
+
+Not "worked in a reduced way". Did not get past the splash screen.
+
+#### The chain
+
+1. A signed-in handset restores its session from local storage. No network
+   needed, and this part worked.
+2. `AuthNotifier.resolveRole()` sets `isLoading = true` and fetches `profiles`
+   over PostgREST — **with no timeout**.
+3. `computeRedirect()` opens with `if (isLoading) return null;`, so the router
+   is pinned to the splash for as long as that fetch is in flight.
+4. The only guard was a single `Future.delayed(Duration(seconds: 5))` armed in
+   the notifier's **constructor**. `resolveRole` is a *second* entry into
+   loading, and by the time it runs that timer has fired and is gone.
+5. With no network the fetch does not fail fast. It waits out whatever the
+   operating system allows for a TCP connection to an unreachable host — on
+   Android, minutes. **The app sits on the splash.**
+6. When it finally fails, the handler sets `resolutionError`, and
+   `computeRedirect` reads a resolution error as terminal:
+   `return loggingIn ? null : AppRoutes.login`. The app offers **the one action
+   that requires a network** as the way out of having none.
+
+A fresh install offline is fine — no session, so step 2 never happens and the
+router goes to login, correctly. It is every *subsequent* start, by a
+signed-in user, that hangs. Which is the only kind of start that matters in the
+field.
+
+And everything else in this product exists for exactly that case: the offline
+alert queue, the Bluetooth mesh, the encrypted SMS fallback, the USSD path. All
+of it sat behind a screen the user could not reach.
+
+#### The guard that could never have worked
+
+The comment above that redirect branch already describes a near-miss of this:
+
+> This used to `return AppRoutes.login`, which logged real users out
+> mid-session: the 5s safety timeout in AuthNotifier clears `isLoading` while
+> `role` is still unknown, so any profile fetch slower than 5s (routine on a
+> rural network) bounced an authenticated commander to the login screen…
+>
+> Distinguish transient from terminal:
+>   - still resolving   -> hold on splash; the router re-runs on settle.
+>   - resolution failed -> send to login so the user can retry / re-auth.
+
+Correct for a *flaky* network. Offline is the case where "resolution failed →
+send to login" is precisely wrong, because there is nothing at the login screen
+either. The distinction the fix drew was transient-versus-terminal; the one it
+needed was *can the user do anything about it*.
+
+And the timer: a one-shot `Future.delayed` in a constructor cannot cover a
+second entry into the state it guards. That is the same shape as the one-shot
+guards this audit has already found — a check that protects the first case and
+is spent by the time the real one arrives.
+
+#### Nothing cached the role, so no bound would have been enough
+
+This is the part that makes it a design gap rather than a missing timeout.
+Nothing persisted the resolved identity. So even with the fetch bounded to six
+seconds, the failure path would have reached `role: UserRole.unknown` plus
+`resolutionError` — and landed on the login screen six seconds faster.
+
+`lib/core/auth/last_known_role.dart` records the rung, the tier, the
+jurisdiction and whether onboarding is done, **scoped to the user id it was
+resolved for**, and `resolveRole`'s failure path opens from it.
+
+Caching a role is sound here and it is worth being explicit about why. It is
+not access control and must never be read as any: `profiles.role` on the
+server, through `is_command()` and the row-level security built on it, still
+refuses this handset everything the account is not entitled to. What the record
+decides is **which screen opens**, which is the same class of decision
+`console-access.ts` makes — "hiding a control is not access control — the
+database decides — but OFFERING one that will be refused is its own defect".
+Being wrong offline costs a screen whose data will not load, which is visible
+and recoverable. Being wrong the old way cost the panic button.
+
+What is deliberately *not* stored: the profile row. It carries a full name, a
+phone number and a badge, and this app is used in a conflict zone where a seized
+handset is a real threat — the uninstall-request flow and the duress PIN exist
+because of it. Nothing is kept that was not already needed to choose a screen.
+
+#### It says so
+
+A cached start is not the same as a confirmed one, and a responder whose rung
+changed this morning is being shown a board chosen from yesterday's answer. So
+`UnconfirmedIdentityBanner` sits above everything on both the citizen home and
+the responder dashboard, with the date the server last confirmed it, in all
+three languages. It renders nothing when the session was confirmed, because a
+banner that is always there is wallpaper.
+
+A date and not "2 days ago": somebody deciding whether to trust a rung can
+reason about "21/10/2026" against when they were last reassigned.
+
+#### Two things found while fixing it
+
+There are **two** sign-out paths — `AuthNotifier.signOut()` and
+`AuthService.signOut()` — and both had to forget the record, or signing out
+through one of them leaves the next person to pick up the handset able to open
+as the previous holder. In a command post that phone is shared.
+
+Both clear it **before** calling `auth.signOut()`, not after: that call reaches
+the network to revoke the token and throws when it cannot, so clearing
+afterwards would skip exactly on the bad link where it matters. The cost is a
+re-resolve for somebody who stays signed in after a failed sign-out, which is
+the safe direction.
+
+#### The gate checks its own premise
+
+`check_the_app_opens_without_a_network.py` begins by asserting that
+`computeRedirect` still holds on `isLoading` — because every other check in it
+exists only because of that one fact. If the router stops working that way,
+this gate is measuring something that no longer matters, and it should be
+rewritten rather than left quietly passing. That is the "0 indexed IMMUTABLE
+function(s)" lesson applied up front rather than after the fact.
+
+Six mutations caught: the fetch losing its bound, the watchdog armed only in
+the constructor, the failure path no longer consulting the record, either
+sign-out path forgetting to forget, the record no longer scoped to an account,
+and the router no longer holding on `isLoading`.

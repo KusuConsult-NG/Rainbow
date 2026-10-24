@@ -21,6 +21,7 @@ import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/broadcast_hud.dart';
+import 'package:rainbow_app/shared/widgets/unconfirmed_identity_banner.dart';
 
 /// Documentation for this public member.
 
@@ -343,6 +344,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             SafeArea(
               child: Column(
                 children: [
+                  // Above everything, because it changes how to read
+                  // everything below it. Renders nothing when the server
+                  // confirmed this session, which is the ordinary case. T-100.
+                  const UnconfirmedIdentityBanner(),
                   const BroadcastHud(),
                   const SizedBox(height: 12),
                   // TOP: Safety Status / Patrol Status
