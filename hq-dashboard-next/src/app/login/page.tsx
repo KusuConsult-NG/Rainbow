@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { usePersistedTheme } from '@/hooks/usePersistedTheme';
 import { Shield, ShieldAlert, Loader2, Eye, EyeOff, Lock, User as UserIcon, Radio, KeyRound, CheckCircle2, ArrowRight } from 'lucide-react';
+import { emailForBadge } from '@/lib/staff-identity';
 
 // Quick-fill presets are a development convenience only. They are compiled out of
 // production builds so operational badge IDs and the shared demo password are never
@@ -130,10 +131,11 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const emailDomain = badgeId.toLowerCase().includes('@')
-        ? ''
-        : '@operationrainbow.plateau.gov.ng';
-      const email = `${badgeId.toLowerCase()}${emailDomain}`;
+      // The domain was a literal here and another one in the handset's
+      // auth_service.dart. It is the second half of the primary key of a
+      // person: two copies that must agree is how one officer came to have two
+      // accounts on two domains, with the posting on one of them. T-99.
+      const email = emailForBadge(badgeId);
       
       const { error: authErr } = await supabase.auth.signInWithPassword({
         email,

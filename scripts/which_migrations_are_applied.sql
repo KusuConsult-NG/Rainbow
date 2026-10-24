@@ -206,6 +206,7 @@ WITH expected(migration, kind, obj, want) AS (VALUES
   ('20261031000000_a_ward_is_not_called_ward', 'function body', 'geo_key:WARD', true),
   ('20261101000000_one_rung_one_list', 'function', 'roles_for_tier', true),
   ('20261101000000_one_rung_one_list', 'function body', 'escalation_push_targets:roles_for_tier', true),
+  ('20261102000000_one_officer_one_account', 'function', 'merge_staff_account', true),
   ('phase1_foundation', 'table', 'safe_zones', true),
   ('phase1_foundation', 'table', 'uninstall_requests', true),
   ('phase1_foundation', 'table', 'app_config', true),

@@ -11654,3 +11654,169 @@ Five mutations caught: SQL dropping `WARD_COMMANDER`, the console map dropping
 `STATE_COMMANDER`, the console map putting an LGA commander at the ward rung, a
 stray literal returning to a console file, and `roles_for_tier()` being deleted
 so the escalation function keeps its own lists.
+
+---
+
+### T-98. The shelters screen, and the check that now runs where the data is entered
+
+T-94 gave command `publish_safe_zone()`, `verify_safe_zone()` and
+`retire_safe_zone()`. Nothing called them, which is the state the write policy
+had been in since August — and that is exactly why nobody noticed that, until
+T-90, only 2 of the project's 22 staff accounts satisfied `is_command()` at all.
+There was no screen to be refused from.
+
+#### What the screen is for
+
+Not "manage shelters". Three of the seven rows in that table are hidden because
+their position is outside every surveyed ward of the LGA they claim, and the
+other four are unconfirmed. The job is to let the people who know where the
+police stations and outposts are say so. So:
+
+* **hidden rows are listed, and first.** A screen filtered to `is_active` could
+  not be used to fix the rows that are hidden — the citizen app filters,
+  command does not.
+* **the form starts empty.** No default coordinate, ever. "Use this device"
+  reads the browser's own fix, which is a measurement rather than a literal.
+* **confirming is a separate act**, behind a confirmation that says what it
+  means: it records *your* account against the position, and a position read
+  from a desk is not a confirmation.
+* **a read failure is not an empty list.** `loadSafeZones` returns the error,
+  because blanking the board would tell command there are no shelters when we
+  simply could not ask — the same reasoning as the provider in
+  `safe_zone_screen.dart`, which used to throw on an empty result and hand back
+  three invented ones.
+
+#### The interesting part is the validation
+
+`wardDisagreement()` measures a position against the LGA it claims **as it is
+typed**, using the same 207 surveyed ward centroids and the same per-ward radius
+that `check_a_shelter_is_where_it_says.py` uses on the seed. The check that
+found the three bad rows now runs where the data is created.
+
+It is a warning and not a refusal: a building can sit just over a ward boundary,
+the centroids are points rather than polygons, and an operator standing at the
+door knows more than this does. What it must not do is let somebody store a
+position eleven kilometres into the next LGA without being told — and the
+message names where the position actually falls, because "it looks like JOS
+NORTH" is what tells somebody they picked the wrong LGA rather than mistyped a
+digit.
+
+`safe-zones.test.ts` runs the real coordinates of all seven seeded shelters
+through it and agrees with the Python gate on every one: the same three rejected,
+the same four accepted. That agreement is the point — two implementations of one
+rule, in two languages, and the one that runs at entry time is the one an
+operator will believe.
+
+#### Three things it did not get to invent
+
+A third haversine: `metresBetween` was already in `incident-locate.ts` and is now
+exported rather than copied.
+
+A twelfth role flag: the nav tab comes from `console-access.ts` like every other
+one, because `is_command()` decides who may write `safe_zones` and that module is
+the one tested place that mirrors it. My first attempt declared
+`isCommandUser` in `page.tsx`, which is precisely what T-97 had just removed ten
+times over. And the access rule had to be narrowed: `SECTOR_COMMAND_ROLES` spans
+LGA, ward and unit, while `is_command()` covers HQ and LGA only — so the tab is
+offered on `tierForRole(role) === 'LGA'`, asked of the one map. Offering a screen
+that can only end in a refusal is the defect that module exists to prevent.
+
+A colour: `#2E7D32` is not the brand's green. `check_brand_colours.py` caught it,
+and the component now uses `var(--success)`, `var(--warning)` and `var(--duress)`
+— which is better anyway, because all three carry a dark-mode override that a hex
+literal would ignore.
+
+---
+
+### T-99. One officer, two accounts, and the posting is on the other one
+
+The deployment has duplicate staff accounts across two email domains. The reason
+is in the sign-in path, twice:
+
+    // lib/services/auth_service.dart
+    '$trimmed@operationrainbow.plateau.gov.ng'
+
+    // hq-dashboard-next/src/app/login/page.tsx
+    ? '' : '@operationrainbow.plateau.gov.ng'
+
+Staff do not sign in with an email. They type a badge — `HQ-001`, `NP/JOS/001` —
+and the app turns it into one. **The domain is the second half of the primary key
+of a person.** Provision an account under a different one, or change it in one
+place, and the same badge resolves to a different `auth.users` row.
+
+#### Why that empties a board
+
+The posting — `geo_lga`, `geo_ward` — is set on one of the two accounts. The
+officer signs in and lands on the other, where it is blank, so
+`alert_in_my_area()` matches nothing and their board is empty with the incidents
+right there.
+
+**That symptom has now had three separate causes:** T-90's role spelling, T-95's
+ward suffix, and this. Which is why it kept coming back after each one was fixed,
+and why "nothing was seen on the HQ dashboard" was never one bug.
+
+It costs more than the board. `onesignal_player_id` sits on one of the two, so
+an escalation either misses that officer or — when both carry a posting — tells
+them twice. `alerts.assigned_to_uid` points at whichever account was open when
+the dispatch was made, so an incident can be assigned to the account its owner is
+not signed into.
+
+`profiles.badge_number` would have caught it and does not. `20260903000004` gives
+it a plain index and no uniqueness, so two accounts may hold one badge — and the
+badge is what officers are called on the radio, what every board labels them
+with, and what `formatOfficerBadge()` falls back to **scanning every profile
+for**, taking whichever row comes first. The one identity column that *had* a
+constraint, `phone`, is the one that was never the problem.
+
+#### What a migration can and cannot do
+
+It cannot decide which of two accounts is the real one. One has the posting, one
+has the password the officer actually knows, and only a person knows which. So:
+
+* `staff_account_duplicates` — a view matching on badge **and** on the email
+  local-part across domains, showing which side holds the posting, the push id
+  and the incidents, because that is what decides which to keep. Citizens are
+  excluded: an email that looks like somebody else's is not a duplicate desk,
+  and merging one would move another person's reports onto somebody else's id.
+* `merge_staff_account(keep, retire)` — command only. Reassigns incidents, fills
+  any **blank** on the kept account from the retired one and overwrites nothing
+  (the survivor is the row somebody signs into; what it knows about itself
+  wins), then stands the retired one down: inactive, unbadged, no posting, no
+  push id, name marked `[MERGED INTO …]`. **Never deleted** — a delete cascades
+  to `auth.users` and takes its record of who reported what with it.
+* a unique index on `upper(btrim(badge_number))` over **active** rows,
+  *attempted*. On a database that still has duplicates it cannot be built, and
+  failing the migration there would block every later one on exactly the database
+  that needs them — so the failure is caught and reported with the two commands
+  to run, and re-running the file after the merges takes the constraint.
+
+#### The probe caught the migration refusing its own function
+
+Assertion 3 failed with `23505 duplicate key value violates unique constraint
+"profiles_badge_number_unique"`. The merge set the badge on the kept account
+while the retired one still held it and was still active — the constraint added
+in that migration refusing the function added in that migration. The retired
+account is stood down **first** now, and the values moved across are read from a
+snapshot taken before either update.
+
+That is the second time in this audit that writing the verification found the
+defect rather than confirming the fix.
+
+#### And the domain is configuration
+
+`lib/core/config/staff_identity.dart` and
+`hq-dashboard-next/src/lib/staff-identity.ts`, one `emailForBadge` each, with
+`STAFF_EMAIL_DOMAIN` / `NEXT_PUBLIC_STAFF_EMAIL_DOMAIN` to override. A malformed
+domain is refused in favour of the default and logged, because a sign-in that can
+never succeed is indistinguishable from a wrong password.
+
+`check_one_staff_identity.py` asserts the two defaults are the same string, that
+neither sign-in path builds an address itself, and that **no other file names the
+domain** — 258 read. That last rule found the account-creation form's
+placeholder, `officer@operationrainbow.plateau.gov.ng`, which is the *other* way
+an officer ends up with two accounts: a placeholder that drifts tells whoever is
+creating the account to type an email on a domain nobody can sign in under.
+
+Five mutations caught: the two defaults drifting apart, either sign-in path going
+back to an inline concatenation, the placeholder hardcoding it again, and the
+config module no longer declaring its default.

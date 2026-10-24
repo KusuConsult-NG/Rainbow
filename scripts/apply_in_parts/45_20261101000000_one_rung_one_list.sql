@@ -196,5 +196,3 @@ BEGIN
     'scripts/why_is_the_board_empty.sql for the role table.';
 END $$;
 
-
-

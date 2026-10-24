@@ -147,3 +147,37 @@ describe('a role that has not resolved yet', () => {
     expect(consoleAccess('').subtitle).toBe('RESOLVING ACCESS');
   });
 });
+
+/**
+ * The shelters tab has to mirror `is_command()` and nothing else.
+ *
+ * `safe_zones` INSERT requires `is_command()`, which covers HQ and LGA and NOT
+ * ward or polling unit. Offering the screen to anyone else could only end in a
+ * refusal, which is the defect this whole module exists to prevent — and
+ * withholding it from the LGA rung would hide it from the people who actually
+ * know where their own divisional police station is. T-98.
+ */
+describe('who may reach the shelters screen', () => {
+  it.each([
+    'HQ_COMMAND', 'STATE_COMMANDER', 'HQ_OFFICER', 'ADMIN',
+    'LGA_COMMAND', 'LGA_COMMANDER', 'LGA_OFFICER',
+  ])('offers it to %s, who is_command() accepts', (role) => {
+    expect(consoleAccess(role).tabs).toContain('shelters');
+  });
+
+  it.each([
+    'WARD_COMMAND', 'WARD_COMMANDER', 'WARD_OFFICER',
+    'UNIT_COMMAND', 'POLLING_UNIT_OFFICER', 'POLLING_OFFICER',
+    'RESPONDER', 'POLICE_LIAISON', 'CITIZEN', '',
+  ])('withholds it from %s, who is_command() refuses', (role) => {
+    expect(consoleAccess(role).tabs).not.toContain('shelters');
+  });
+
+  // Both spellings of the LGA rung, because that is the whole point of T-97:
+  // the production project's accounts say LGA_COMMANDER.
+  it('treats the two spellings of the LGA rung alike', () => {
+    expect(consoleAccess('LGA_COMMAND').tabs).toEqual(
+      consoleAccess('LGA_COMMANDER').tabs,
+    );
+  });
+});

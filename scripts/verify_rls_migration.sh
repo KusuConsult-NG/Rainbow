@@ -1642,6 +1642,263 @@ printf '%s\n' "$OR_OUT" | grep -q "ALL ONE RUNG ASSERTIONS PASSED" || {
   printf '%s\n' "$OR_OUT"
   echo "✗ the one-rung probe did not reach its verdict"; exit 1; }
 
+# ── One officer, one account ────────────────────────────────────────────────
+#
+# The deployment has duplicate staff accounts across two email domains, because
+# the badge-to-email derivation carried the domain as a literal in two places.
+# The posting is on one account and the officer signs into the other.
+echo "▶ Applying 20261102000000_one_officer_one_account.sql"
+psql_run "-f $PGROOT/20261102000000_one_officer_one_account.sql" >/dev/null
+psql_run "-f $PGROOT/20261102000000_one_officer_one_account.sql" >/dev/null
+
+cat > "$PGROOT/zz_one_account_probe.sql" <<'PROBE'
+BEGIN;
+SET client_min_messages TO NOTICE;
+
+-- ── 1. a badge is an identity now ───────────────────────────────────────────
+DO $probe$
+DECLARE
+  a UUID := gen_random_uuid();
+  b UUID := gen_random_uuid();
+  refused BOOLEAN := false;
+BEGIN
+  INSERT INTO auth.users (id, email) VALUES
+    (a, 'hq-700@operationrainbow.plateau.gov.ng'),
+    (b, 'hq-700@plateaueye.example.ng');
+  UPDATE public.profiles SET role = 'STATE_COMMANDER', badge_number = 'HQ-700',
+         geo_lga = 'JOS NORTH', is_active = true WHERE id = a;
+  BEGIN
+    UPDATE public.profiles SET role = 'STATE_COMMANDER',
+           badge_number = 'hq-700', is_active = true WHERE id = b;
+  EXCEPTION WHEN unique_violation THEN refused := true;
+  END;
+  IF NOT refused THEN
+    RAISE EXCEPTION
+      'FAIL: two ACTIVE accounts carry badge HQ-700. The badge is what an '
+      'officer is called on the radio and what every board labels them with, '
+      'and formatOfficerBadge() takes whichever row comes first';
+  END IF;
+  RAISE NOTICE 'PASS: a second active account cannot take a badge already held';
+END $probe$;
+ROLLBACK;
+
+BEGIN;
+SET client_min_messages TO NOTICE;
+
+-- ── 2. the view names the duplicates, on both keys ──────────────────────────
+DO $probe$
+DECLARE
+  a UUID := gen_random_uuid();
+  b UUID := gen_random_uuid();
+  c UUID := gen_random_uuid();
+  d UUID := gen_random_uuid();
+  n INTEGER;
+BEGIN
+  -- Same local-part, two domains: what "duplicates across two email domains"
+  -- is. Different badges so the badge key does not also fire.
+  INSERT INTO auth.users (id, email) VALUES
+    (a, 'lga-401@operationrainbow.plateau.gov.ng'),
+    (b, 'lga-401@plateaueye.example.ng');
+  UPDATE public.profiles SET role = 'LGA_COMMANDER', badge_number = 'LGA-401A',
+         geo_lga = 'MANGU', onesignal_player_id = 'player-lga-401-aaa'
+   WHERE id = a;
+  UPDATE public.profiles SET role = 'LGA_COMMANDER', badge_number = 'LGA-401B'
+   WHERE id = b;
+
+  SELECT count(*) INTO n FROM public.staff_account_duplicates
+   WHERE id IN (a, b);
+  IF n <> 2 THEN
+    RAISE EXCEPTION
+      'FAIL: the view named % of the 2 accounts sharing a local-part across '
+      'two domains', n;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.staff_account_duplicates
+                  WHERE id = a AND matched_on = 'same name, two domains') THEN
+    RAISE EXCEPTION 'FAIL: the view did not say WHY those two matched';
+  END IF;
+  -- And it has to show which side holds what, because that is what decides
+  -- which account to keep.
+  IF NOT EXISTS (SELECT 1 FROM public.staff_account_duplicates
+                  WHERE id = a AND can_be_pushed AND geo_lga = 'MANGU') THEN
+    RAISE EXCEPTION
+      'FAIL: the view does not report the posting and the push id, so an '
+      'operator cannot tell which account is the live one';
+  END IF;
+
+  -- A citizen is not a duplicate desk, whatever their email looks like.
+  INSERT INTO auth.users (id, email) VALUES
+    (c, 'ada@operationrainbow.plateau.gov.ng'),
+    (d, 'ada@plateaueye.example.ng');
+  UPDATE public.profiles SET role = 'CITIZEN' WHERE id IN (c, d);
+  SELECT count(*) INTO n FROM public.staff_account_duplicates
+   WHERE id IN (c, d);
+  IF n <> 0 THEN
+    RAISE EXCEPTION
+      'FAIL: the view named % citizen account(s). Merging one would move '
+      'another person''s reports onto somebody else''s id', n;
+  END IF;
+  RAISE NOTICE 'PASS: the view names staff duplicates on both keys, with what each side holds, and no citizens';
+END $probe$;
+
+-- ── 3. the merge moves the work and deletes nothing ─────────────────────────
+DO $probe$
+DECLARE
+  keep    UUID := gen_random_uuid();
+  retire  UUID := gen_random_uuid();
+  citizen UUID := gen_random_uuid();
+  cmd     UUID := gen_random_uuid();
+  v_alert UUID := gen_random_uuid();
+  k       public.profiles;
+  r       public.profiles;
+  n       INTEGER;
+BEGIN
+  INSERT INTO auth.users (id, email) VALUES
+    (keep,    'ward-props@operationrainbow.plateau.gov.ng'),
+    (retire,  'ward-props@plateaueye.example.ng'),
+    (citizen, 'merge-citizen@probe.test'),
+    (cmd,     'merge-command@probe.test');
+  -- The account the officer signs into: no posting, no badge, no push id.
+  UPDATE public.profiles SET role = 'WARD_COMMANDER', full_name = NULL
+   WHERE id = keep;
+  -- The one that has everything, and which they never sign into.
+  UPDATE public.profiles
+     SET role = 'WARD_COMMANDER', badge_number = 'WD-900',
+         geo_lga = 'JOS SOUTH', geo_ward = 'BUKURU',
+         onesignal_player_id = 'player-ward-900-xx',
+         full_name = 'A. Dalyop'
+   WHERE id = retire;
+  UPDATE public.profiles SET role = 'CITIZEN' WHERE id = citizen;
+  UPDATE public.profiles SET role = 'HQ_COMMAND' WHERE id = cmd;
+
+  INSERT INTO public.alerts
+    (id, type, description, status, severity, reported_by,
+     geo_lga, geo_ward, assigned_tier, tier_assigned_at, assigned_to_uid)
+  VALUES (v_alert, 'Fire - Structure', 'dispatched to the wrong account',
+          'OPEN', 'HIGH', citizen, 'JOS SOUTH', 'BUKURU', 'WARD', NOW(),
+          retire);
+
+  -- A signed-in non-command account may not merge anybody.
+  PERFORM set_config('request.jwt.claim.sub', citizen::text, true);
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', citizen::text, 'role', 'authenticated')::text, true);
+  IF auth.uid() <> citizen THEN
+    RAISE EXCEPTION 'FAIL: the probe could not sign anybody in, so the '
+      'permission assertions below would pass vacuously';
+  END IF;
+  BEGIN
+    PERFORM public.merge_staff_account(keep, retire);
+    RAISE EXCEPTION
+      'FAIL: a citizen merged two staff accounts. That reassigns incidents '
+      'and stands an officer down';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+
+  PERFORM set_config('request.jwt.claim.sub', cmd::text, true);
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', cmd::text, 'role', 'authenticated')::text, true);
+
+  -- A citizen account is never a merge target.
+  BEGIN
+    PERFORM public.merge_staff_account(keep, citizen);
+    RAISE EXCEPTION 'FAIL: a citizen account was merged into a staff one';
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE EXCEPTION 'FAIL: command was refused its own merge';
+  WHEN others THEN NULL;
+  END;
+
+  PERFORM public.merge_staff_account(keep, retire);
+
+  SELECT * INTO k FROM public.profiles WHERE id = keep;
+  SELECT * INTO r FROM public.profiles WHERE id = retire;
+
+  IF k.geo_ward IS DISTINCT FROM 'BUKURU' OR k.badge_number IS DISTINCT FROM 'WD-900'
+     OR k.onesignal_player_id IS DISTINCT FROM 'player-ward-900-xx'
+     OR k.full_name IS DISTINCT FROM 'A. Dalyop' THEN
+    RAISE EXCEPTION
+      'FAIL: the kept account did not inherit the posting, badge, push id and '
+      'name (ward=%, badge=%, push=%, name=%)',
+      k.geo_ward, k.badge_number, k.onesignal_player_id, k.full_name;
+  END IF;
+
+  SELECT count(*) INTO n FROM public.alerts
+   WHERE id = v_alert AND assigned_to_uid = keep;
+  IF n <> 1 THEN
+    RAISE EXCEPTION
+      'FAIL: the incident is still assigned to the retired account, so it is '
+      'on a board nobody opens';
+  END IF;
+
+  IF r.id IS NULL THEN
+    RAISE EXCEPTION
+      'FAIL: the retired account was DELETED. That cascades to auth.users and '
+      'takes its record of who reported what with it';
+  END IF;
+  IF r.is_active IS NOT false OR r.badge_number IS NOT NULL
+     OR r.geo_ward IS NOT NULL OR r.onesignal_player_id IS NOT NULL THEN
+    RAISE EXCEPTION
+      'FAIL: the retired account is still live-looking (active=%, badge=%, '
+      'ward=%, push=%)',
+      r.is_active, r.badge_number, r.geo_ward, r.onesignal_player_id;
+  END IF;
+  IF r.full_name NOT LIKE '%MERGED INTO%' THEN
+    RAISE EXCEPTION 'FAIL: the retired account does not say where it went';
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '', true);
+  RAISE NOTICE 'PASS: the merge moves the incidents and the posting, stands the other down, and deletes nothing';
+END $probe$;
+
+-- ── 4. and it never overwrites what the kept account already knows ──────────
+DO $probe$
+DECLARE
+  keep   UUID := gen_random_uuid();
+  retire UUID := gen_random_uuid();
+  cmd    UUID := gen_random_uuid();
+  k      public.profiles;
+BEGIN
+  INSERT INTO auth.users (id, email) VALUES
+    (keep,   'lga-keep@operationrainbow.plateau.gov.ng'),
+    (retire, 'lga-keep@plateaueye.example.ng'),
+    (cmd,    'merge-command-2@probe.test');
+  UPDATE public.profiles SET role = 'LGA_COMMANDER', geo_lga = 'MANGU',
+         badge_number = 'LGA-901' WHERE id = keep;
+  UPDATE public.profiles SET role = 'LGA_COMMANDER', geo_lga = 'WASE',
+         badge_number = 'LGA-902' WHERE id = retire;
+  UPDATE public.profiles SET role = 'HQ_COMMAND' WHERE id = cmd;
+
+  PERFORM set_config('request.jwt.claim.sub', cmd::text, true);
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', cmd::text, 'role', 'authenticated')::text, true);
+  PERFORM public.merge_staff_account(keep, retire);
+  SELECT * INTO k FROM public.profiles WHERE id = keep;
+
+  IF k.geo_lga <> 'MANGU' OR k.badge_number <> 'LGA-901' THEN
+    RAISE EXCEPTION
+      'FAIL: the merge overwrote the kept account''s own posting or badge with '
+      'the abandoned one''s (lga=%, badge=%). The surviving account is the one '
+      'somebody signs into; what it knows about itself wins',
+      k.geo_lga, k.badge_number;
+  END IF;
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '', true);
+  RAISE NOTICE 'PASS: a merge fills blanks and overwrites nothing';
+END $probe$;
+
+DO $probe$ BEGIN RAISE NOTICE 'ALL ONE ACCOUNT ASSERTIONS PASSED'; END $probe$;
+ROLLBACK;
+PROBE
+chown postgres:postgres "$PGROOT/zz_one_account_probe.sql"
+OA_OUT=$(psql_run "-f $PGROOT/zz_one_account_probe.sql" 2>&1) && OA_RC=0 || OA_RC=$?
+printf '%s\n' "$OA_OUT" | grep -E "PASS:|FAIL:" | sed 's/^.*NOTICE:  /  /' || true
+if [ "$OA_RC" -ne 0 ] || printf '%s\n' "$OA_OUT" | grep -q "FAIL:"; then
+  printf '%s\n' "$OA_OUT"
+  echo "✗ one-account assertions failed"; exit 1
+fi
+printf '%s\n' "$OA_OUT" | grep -q "ALL ONE ACCOUNT ASSERTIONS PASSED" || {
+  printf '%s\n' "$OA_OUT"
+  echo "✗ the one-account probe did not reach its verdict"; exit 1; }
+
 echo "▶ Asserting no policy in schema public reaches anon or public, by name"
 PR_OUT=$(psql_run "-f $PGROOT/policy_roles_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?
 echo "$PR_OUT" | grep -E "PASS|FAIL|ERROR" || true

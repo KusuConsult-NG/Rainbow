@@ -65,8 +65,17 @@ export interface LocatableAlert {
   geo_ward?: string | null;
 }
 
-/** Metres between two points. Haversine — Plateau spans about two degrees. */
-function metresBetween(
+/**
+ * Metres between two points. Haversine — Plateau spans about two degrees.
+ *
+ * Exported because `safe-zones.ts` needs the same measurement to tell an
+ * operator whether a shelter position they are entering falls inside a
+ * surveyed ward of the LGA they have chosen. A third copy of a haversine in
+ * this repository would be one more place for a mistake to live; there are
+ * already two (`incident-track.ts` keeps its own because it works in a hot
+ * loop over a track and uses a different earth radius).
+ */
+export function metresBetween(
   a: { lat: number; lng: number },
   b: { lat: number; lng: number },
 ): number {

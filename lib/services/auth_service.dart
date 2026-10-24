@@ -13,6 +13,7 @@ import 'package:rainbow_app/services/mesh_service.dart';
 import 'package:rainbow_app/services/secure_storage_service.dart';
 import 'package:rainbow_app/services/sim_watch_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:rainbow_app/core/config/staff_identity.dart' as identity;
 
 /// Provider for AuthService
 final authServiceProvider = Provider<AuthService>((ref) {
@@ -52,10 +53,12 @@ class AuthService {
   /// Authenticate agent with Badge ID / Email and Password
   Future<bool> signInWithBadge(String badgeOrEmail, String password) async {
     _lastAuthError = null;
-    final trimmed = badgeOrEmail.trim().toLowerCase();
-    final email = trimmed.contains('@')
-        ? trimmed
-        : '$trimmed@operationrainbow.plateau.gov.ng';
+    // The domain was a literal here and another one in the console's
+    // login/page.tsx. It is the second half of the primary key of a person:
+    // two copies that must agree is how one officer came to have two accounts
+    // on two domains, with their posting on one of them and an empty board on
+    // the other. See lib/core/config/staff_identity.dart. T-99.
+    final email = identity.emailForBadge(badgeOrEmail);
 
     try {
       final res = await SupabaseConfig.client.auth.signInWithPassword(

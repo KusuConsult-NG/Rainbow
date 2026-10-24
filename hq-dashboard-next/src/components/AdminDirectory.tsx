@@ -5,6 +5,7 @@ import { Users, UserPlus, Trash2, Loader2, RefreshCw, Shield } from 'lucide-reac
 import { plateauTacticalMap, TacticalJurisdiction, TacticalWard, STATE_SECURITY_AGENCIES } from '@/lib/tactical_mapping';
 import AgencyAccessManager from '@/components/AgencyAccessManager';
 import { placeField } from '@/lib/place-label';
+import { staffEmailDomain } from '@/lib/staff-identity';
 
 
 interface StaffRecord {
@@ -174,6 +175,10 @@ export default function AdminDirectory() {
 
           <div>
             <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Email / Badge ID</label>
+            {/* The placeholder's domain comes from the one place sign-in
+                reads it. One that drifts tells whoever is creating the account
+                to type an email on a domain nobody can sign in under, which is
+                one of the two ways an officer ends up with two accounts. T-99. */}
             <input
               type="email"
               required
@@ -181,7 +186,7 @@ export default function AdminDirectory() {
               style={{ width: '100%' }}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="officer@operationrainbow.plateau.gov.ng"
+              placeholder={`officer@${staffEmailDomain()}`}
             />
           </div>
 

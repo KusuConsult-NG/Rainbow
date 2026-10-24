@@ -47,7 +47,8 @@ export type ConsoleTab =
   | 'audit'
   | 'uninstall'
   | 'agency'
-  | 'sim';
+  | 'sim'
+  | 'shelters';
 
 // The agency vocabulary itself lives in `agencies.ts`, which owns it for the
 // whole console — the escalation menu, the portal, the liaison form and the
@@ -65,7 +66,7 @@ import { AGENCY_CODES, AGENCY_NAMES, type AgencyCode } from './agencies';
 // scoped them to nothing. The same reasoning as the AGENCY_CODES re-export
 // above: a second declaration of the codes is the defect that file exists to
 // prevent, and a second declaration of the ROLES is the same mistake. T-97.
-import { HQ_ROLES, SECTOR_COMMAND_ROLES } from './command-roles';
+import { HQ_ROLES, SECTOR_COMMAND_ROLES, tierForRole } from './command-roles';
 
 /** Whether a role is an agency liaison, and which agency. */
 export function agencyOf(role: string | null | undefined): AgencyCode | null {
@@ -135,6 +136,7 @@ export function consoleAccess(
         'settings',
         'uninstall',
         'sim',
+        'shelters',
       ],
       landing: 'map',
       agency: null,
@@ -165,7 +167,15 @@ export function consoleAccess(
 
   if (SECTOR_COMMAND_ROLES.includes(normalised)) {
     return {
-      tabs: ['map', 'alerts', 'history', 'broadcast', 'agency'],
+      // Shelters for the LGA rung only. `safe_zones` INSERT requires
+      // `is_command()`, which covers HQ and LGA and NOT ward or polling unit —
+      // so offering the screen to a ward officer could only end in a refusal,
+      // which is the defect this file exists to prevent. SECTOR_COMMAND_ROLES
+      // spans all three rungs, so the rung is asked for from the one map
+      // rather than assumed from membership of that list.
+      tabs: tierForRole(normalised) === 'LGA'
+        ? ['map', 'alerts', 'history', 'broadcast', 'agency', 'shelters']
+        : ['map', 'alerts', 'history', 'broadcast', 'agency'],
       landing: 'map',
       agency: null,
       title: sectorTitle(normalised),

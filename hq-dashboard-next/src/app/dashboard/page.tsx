@@ -13,6 +13,7 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import Analytics from '@/components/Analytics';
 import UninstallRequests from '@/components/UninstallRequests';
 import SimChannelEvents from '@/components/SimChannelEvents';
+import SafeZonesPanel from '@/components/SafeZonesPanel';
 import AgencyPortal from '@/components/AgencyPortal';
 import IncidentReplayPanel from '@/components/IncidentReplayPanel';
 import LiveFeedViewer from '@/components/LiveFeedViewer';
@@ -90,7 +91,7 @@ const fSel: React.CSSProperties = {
   fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-inter),sans-serif',
 };
 
-type Tab = 'map' | 'alerts' | 'history' | 'analytics' | 'broadcast' | 'admin' | 'settings' | 'audit' | 'uninstall' | 'agency' | 'sim';
+type Tab = 'map' | 'alerts' | 'history' | 'analytics' | 'broadcast' | 'admin' | 'settings' | 'audit' | 'uninstall' | 'agency' | 'sim' | 'shelters';
 
 const formatAlertTimestamp = (alert: Alert | null | undefined, type: 'reported' | 'resolved' = 'reported'): string => {
   if (!alert) return '—';
@@ -415,6 +416,7 @@ export default function DashboardPage() {
   const agentPathsRef = useRef<Map<string, {lat: number; lng: number; timestamp: string}[]>>(new Map());
   const [unreadAgencyReports, setUnreadAgencyReports] = useState(0);
   const [openSimEvents, setOpenSimEvents] = useState(0);
+  const [unconfirmedShelters, setUnconfirmedShelters] = useState(0);
 
   // Handsets whose SMS channel has gone. Badged because the consequence is
   // invisible otherwise: the alert queue keeps queueing, the sign-in code has
@@ -443,6 +445,28 @@ export default function DashboardPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sim_channel_events' }, loadOpen)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
+  }, [userRole]);
+
+  // Shelters whose position nobody has stood at.
+  //
+  // Badged because the consequence is invisible from the console and visible
+  // only to the person running: the citizen app draws a route to the nearest
+  // shelter, and all seven that came with the system are at coordinates nobody
+  // measured — three of them outside every surveyed ward of the LGA their own
+  // row claimed. Hidden rows are counted too, because correcting one is the
+  // work. `safe_zones` is readable by any signed-in account, so this needs no
+  // role guard; the WRITE is what is restricted. T-98.
+  useEffect(() => {
+    const loadShelters = async () => {
+      const { count, error } = await supabase
+        .from('safe_zones')
+        .select('id', { count: 'exact', head: true })
+        .is('verified_at', null);
+      // A failed count must not read as zero, for the same reason as above.
+      if (error) return;
+      setUnconfirmedShelters(count || 0);
+    };
+    loadShelters();
   }, [userRole]);
 
   // Load unread agency report count for HQ notification badge
@@ -1415,6 +1439,20 @@ export default function DashboardPage() {
             {access.tabs.includes('history') && (
               <NavItem icon={<Clock size={18} />} label="Mission History" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
             )}
+            {/* From the access model like every other tab, not from a role
+                flag declared here. `is_command()` decides who may write
+                `safe_zones`, console-access.ts is the one tested place that
+                mirrors it, and a twelfth ad-hoc role check in this file is
+                precisely what T-97 removed. */}
+            {access.tabs.includes('shelters') && (
+              <NavItem
+                icon={<Shield size={18} />}
+                label="Shelters"
+                active={activeTab === 'shelters'}
+                onClick={() => setActiveTab('shelters')}
+                badge={unconfirmedShelters > 0 ? unconfirmedShelters : undefined}
+              />
+            )}
             {access.tabs.includes('broadcast') && (
               <NavItem icon={<Radio size={18} />} label="Communications & Broadcast" active={activeTab === 'broadcast'} onClick={() => setActiveTab('broadcast')} />
             )}
@@ -2066,6 +2104,7 @@ export default function DashboardPage() {
           {activeTab === 'audit' && <AuditLogs />}
           {activeTab === 'uninstall' && <UninstallRequests />}
           {activeTab === 'sim' && <SimChannelEvents />}
+          {activeTab === 'shelters' && <SafeZonesPanel />}
           {activeTab === 'agency' && (
             <AgencyPortal
               userRole={userRole ?? ''}

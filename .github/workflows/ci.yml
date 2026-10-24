@@ -910,6 +910,15 @@ jobs:
       - name: Assert a live stream is not claimed before it connects
         run: python3 scripts/check_a_live_stream_is_not_claimed_early.py
 
+      # Staff sign in with a BADGE, and the app turns it into
+      # <badge>@operationrainbow.plateau.gov.ng — with the console carrying its
+      # own copy of that domain. The domain is the second half of the primary
+      # key of a person, so two copies that must agree is how the deployment
+      # came to have duplicate accounts across two email domains, with the
+      # posting on one of them and an empty board on the other. T-99.
+      - name: Assert a badge becomes one email
+        run: python3 scripts/check_one_staff_identity.py
+
       # `tier_timeout_minutes()` is the only reader of the three escalation
       # timeouts and it refuses what it cannot use — `raw::INTEGER`, then
       # `parsed <= 0` — because, in the migration's own words, a timeout of 0
