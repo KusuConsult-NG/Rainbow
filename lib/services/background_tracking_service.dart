@@ -450,7 +450,12 @@ Future<void> onStart(ServiceInstance service) async {
                 service.setForegroundNotificationInfo(
                   title: 'PLATEAU EYE',
                   content: modeStr == 'sos'
-                      ? 'SOS: ACTIVE TRANSMISSION'
+                      // Neutral on purpose. Android requires this
+                      // notification while location is shared in the
+                      // background, so it cannot be hidden — but it must not
+                      // announce an emergency to whoever picks up the phone,
+                      // which is the point of a silent SOS.
+                      ? 'Location sharing is on'
                       : "UNIT: ${currentStatus ?? 'ONLINE'}",
                 ),
               );

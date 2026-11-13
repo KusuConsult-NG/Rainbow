@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
+import 'package:rainbow_app/core/sos/volume_sos.dart';
 import 'package:rainbow_app/core/theme/app_theme.dart';
 import 'package:rainbow_app/services/push_notification_service.dart';
 import 'package:rainbow_app/services/sync_service.dart';
@@ -43,8 +44,10 @@ class _RainbowAppState extends ConsumerState<RainbowApp> {
       theme: AppTheme.light,
       routerConfig: ref.watch(appRouter),
       builder: (context, child) {
-        return UpdateCheckListener(
-          child: SystemAlertListener(child: child!),
+        return VolumeSosListener(
+          child: UpdateCheckListener(
+            child: SystemAlertListener(child: child!),
+          ),
         );
       },
     );

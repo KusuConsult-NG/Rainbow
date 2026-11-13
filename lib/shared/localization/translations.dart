@@ -1183,16 +1183,20 @@ class Translations {
       AppLanguage.pidgin: 'PLACE NO CONFAM',
     },
     'sz_route_calculated_clear': {
-      AppLanguage.english: 'Safe route calculated to {name}. The path is clear.',
+      AppLanguage.english:
+          'Route to {name}. No incident has been reported near this route, '
+          'but that does not mean it is safe. Stay alert.',
       AppLanguage.hausa:
-          'An gano amintacciyar hanya zuwa {name}. Hanyar a bude take.',
+          'Hanya zuwa {name}. Ba a kai rahoton wani lamari kusa da hanyar ba, '
+          'amma hakan ba yana nufin babu hatsari ba. Ka kula.',
       AppLanguage.pidgin:
-          'Safe road to {name} dey ready. The road clear well.',
+          'Road to {name}. Nobody report wahala near this road, '
+          'but e no mean say e safe. Shine your eye.',
     },
     'sz_route_calculated_warning': {
       AppLanguage.english:
-          'Safe route calculated to {name}. Warning: The route passes near '
-          'an active threat. Proceed with extreme caution.',
+          'Route to {name}. Warning: this route passes near an active '
+          'incident. Proceed with extreme caution.',
       AppLanguage.hausa:
           'An gano hanya zuwa {name}. Gargadi: Hanyar ta kusa da hatsari. '
           'Yi tafiya da matukar kula.',
