@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/navigation_provider.dart';
+import 'package:rainbow_app/shared/widgets/build_stamp.dart';
 
 /// Documentation for this public member.
 
@@ -231,15 +232,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                             ),
                           ],
                         ),
-                        Text(
-                          'COMMAND v4.5.0',
-                          style: GoogleFonts.inter(
-                            color: AppColors.primary.withValues(alpha: 0.5),
-                            fontWeight: FontWeight.w800,
-                            fontSize: 8,
-                            letterSpacing: 1.5,
-                          ),
-                        ),
+                        // The build's own version, not a made-up one.
+                        const BuildStamp(),
                       ],
                     ),
                   ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:rainbow_app/core/constants/tactical_mapping.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
@@ -15,6 +16,7 @@ class _AdminBroadcastScreenState extends State<AdminBroadcastScreen> {
   final _messageCtrl = TextEditingController();
   String _severity = 'MEDIUM';
   String _audience = 'ALL';
+  String _lga = 'ALL';
   int _expiryHours = 24;
 
   Future<void> _sendBroadcast() async {
@@ -34,6 +36,10 @@ class _AdminBroadcastScreenState extends State<AdminBroadcastScreen> {
         // `target_type` — so console advisories arrived addressed to nobody in
         // particular and went to everyone. One name now, everywhere.
         'target_audience': _audience,
+        // Place goes in its own column. The audience menu offered
+        // LGA_JOS_NORTH and LGA_JOS_SOUTH as audiences, which no reader
+        // recognises, so those advisories went to every phone in the state.
+        'target_lga': _lga,
         'is_active': true,
         'expires_at': expiresAt,
       });
@@ -115,11 +121,35 @@ class _AdminBroadcastScreenState extends State<AdminBroadcastScreen> {
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
             ),
             style: const TextStyle(color: AppColors.onBackground),
-            items: ['ALL', 'CITIZENS', 'AGENTS', 'LGA_JOS_NORTH', 'LGA_JOS_SOUTH']
+            items: ['ALL', 'CITIZENS', 'AGENTS']
                 .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                 .toList(),
             onChanged: (val) {
               if (val != null) setState(() => _audience = val);
+            },
+          ),
+          const SizedBox(height: 24),
+
+          Text('Area', style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            key: const ValueKey('broadcast_lga'),
+            initialValue: _lga,
+            isExpanded: true,
+            dropdownColor: AppColors.surfaceContainer,
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: AppColors.surfaceContainer,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+            ),
+            style: const TextStyle(color: AppColors.onBackground),
+            items: [
+              const DropdownMenuItem(value: 'ALL', child: Text('WHOLE STATE')),
+              for (final lga in plateauTacticalMap)
+                DropdownMenuItem(value: lga.name, child: Text(lga.name.toUpperCase())),
+            ],
+            onChanged: (val) {
+              if (val != null) setState(() => _lga = val);
             },
           ),
           const SizedBox(height: 24),

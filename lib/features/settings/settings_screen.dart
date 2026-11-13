@@ -13,6 +13,23 @@ import 'package:rainbow_app/providers/reentry_lock_provider.dart';
 import 'package:rainbow_app/services/mesh_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
+/// One emergency contact as text.
+///
+/// Settings stores contacts as strings and the side menu's form stored them as
+/// `{name, phone}` maps — in the same column — so a contact saved there showed
+/// here as "{name: Ada, phone: 0803…}". Both now store text; this reads the
+/// older maps the same way.
+String emergencyContactLabel(Object? entry) {
+  if (entry is Map) {
+    final name = (entry['name'] ?? '').toString().trim();
+    final phone = (entry['phone'] ?? '').toString().trim();
+    if (name.isEmpty) return phone;
+    if (phone.isEmpty) return name;
+    return '$name · $phone';
+  }
+  return entry?.toString() ?? '';
+}
+
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
@@ -81,7 +98,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (user == null) return;
     final profile = ref.read(authProvider).profile ?? {};
     final contacts = ((profile['emergency_contacts'] as List<dynamic>?) ?? [])
-        .map((e) => e.toString())
+        .map(emergencyContactLabel)
         .toList();
     if (!contacts.contains(contact)) {
       contacts.add(contact);
@@ -97,7 +114,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (user == null) return;
     final profile = ref.read(authProvider).profile ?? {};
     final contacts = ((profile['emergency_contacts'] as List<dynamic>?) ?? [])
-        .map((e) => e.toString())
+        .map(emergencyContactLabel)
         .toList();
     if (contacts.contains(contact)) {
       contacts.remove(contact);
@@ -186,7 +203,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final fullName = profile['full_name'] as String? ?? 'Citizen User';
     final pushEnabled = profile['push_enabled'] as bool? ?? true;
     final contacts = ((profile['emergency_contacts'] as List<dynamic>?) ?? [])
-        .map((e) => e.toString())
+        .map(emergencyContactLabel)
         .toList();
 
     return Scaffold(

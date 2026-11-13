@@ -53,11 +53,14 @@ class _UninstallRequestScreenState
     } catch (e) {
       if (!mounted) return;
       setState(() => _isSubmitting = false);
-      // Graceful fallback when table is disabled or offline
+      // It said "recorded locally ... HQ will review upon connectivity".
+      // Nothing is stored on the phone and nothing retries, so the request
+      // was simply lost while the officer believed it was pending.
+      debugPrint('[UNINSTALL_REQ] not sent: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Uninstall request recorded locally. HQ Command will review upon connectivity.'),
-          backgroundColor: AppColors.warning,
+          content: Text('Request NOT sent. Check your connection and submit again.'),
+          backgroundColor: AppColors.danger,
         ),
       );
     }
