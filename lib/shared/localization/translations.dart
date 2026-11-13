@@ -115,6 +115,11 @@ class Translations {
       AppLanguage.hausa: 'TAIMAKO A DINGE',
       AppLanguage.pidgin: 'SILENT HELP',
     },
+    'sos_tap_three': {
+      AppLanguage.english: 'TAP 3 TIMES',
+      AppLanguage.hausa: 'DANNA SAU 3',
+      AppLanguage.pidgin: 'TAP AM 3 TIMES',
+    },
     'safe_zone': {
       AppLanguage.english: 'SAFE ZONES',
       AppLanguage.hausa: 'SASHEN TSIRA',
@@ -1266,9 +1271,14 @@ class Translations {
       AppLanguage.pidgin: 'WELCOME BACK',
     },
     'lock_sos_emergency': {
-      AppLanguage.english: 'EMERGENCY — SEND SOS NOW',
-      AppLanguage.hausa: 'GAGGAWA — NEMI TAIMAKON SOS YANZU',
-      AppLanguage.pidgin: 'EMERGENCY — SEND SOS NOW',
+      AppLanguage.english: 'EMERGENCY — TAP 3 TIMES FOR SOS',
+      AppLanguage.hausa: 'GAGGAWA — DANNA SAU 3 DON SOS',
+      AppLanguage.pidgin: 'EMERGENCY — TAP AM 3 TIMES FOR SOS',
+    },
+    'lock_sos_open_active': {
+      AppLanguage.english: 'SOS ACTIVE — OPEN IT',
+      AppLanguage.hausa: 'SOS NA GUDANA — BUDE SHI',
+      AppLanguage.pidgin: 'SOS DEY RUN — OPEN AM',
     },
     'lock_sos_works_always': {
       AppLanguage.english: 'Works whether or not you unlock.',

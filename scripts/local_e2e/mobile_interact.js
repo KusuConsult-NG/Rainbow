@@ -10,7 +10,7 @@
  *
  * Flows asserted:
  *   panic SOS (long press)      -> alerts insert
- *   silent SOS (tap)            -> alerts insert
+ *   silent SOS (3 taps)         -> ONE alerts insert
  *   all ten reporting categories-> ten alerts inserts, each carrying its type
  *   AI / voice report           -> opens, and says so when it cannot listen
  *   emergency PIN               -> reaches the server-side PIN function
@@ -285,42 +285,69 @@ async function logMark() {
   }
 
   // ---- SOS ------------------------------------------------------------------
-  // Tap is the SILENT SOS; long press is the full panic alarm. Both must reach
-  // the database — the fallback that enqueues offline makes a refused insert
-  // look identical to a successful one from inside the app.
+  // THREE taps inside three seconds are the Silent SOS; one or two send nothing.
+  // It must reach the database — the fallback that enqueues offline makes a
+  // refused insert look identical to a successful one from inside the app —
+  // and it must reach it ONCE: the old single tap filed two incidents.
+  const SOS = 'TAP 3 TIMES';
   state.screen = 'mobile:silent-sos';
   let mark = await writeMark();
-  const tapped = await tap('SILENT SOS', { role: 'button', settle: 5000 });
-  await shot('90-mobile-sos-01-silent-tapped');
+  const tappedOnce = await tap(SOS, { role: 'button', settle: 300 });
+  await tap(SOS, { role: 'button', settle: 1500 });
   let w = await writesSince(mark, 'alerts');
   check(
-    'SILENT SOS reaches the database',
-    tapped && w.some((x) => x.method === 'POST'),
+    'one or two taps on SOS send nothing',
+    tappedOnce && !w.some((x) => x.method === 'POST'),
+    tappedOnce ? `${w.length} write(s) after two taps` : 'SOS control not found',
+  );
+
+  // The first two taps above are still inside the window, so one more fires.
+  const tapped = await tap(SOS, { role: 'button', settle: 5000 });
+  await shot('90-mobile-sos-01-silent-tapped');
+  w = await writesSince(mark, 'alerts');
+  const silentPosts = w.filter((x) => x.method === 'POST');
+  check(
+    'the third tap sends a SILENT SOS to the database',
+    tapped && silentPosts.length >= 1,
     w.length ? JSON.stringify(w[0].rows[0]).slice(0, 180) : (tapped ? 'tapped, nothing inserted' : 'SOS control not found'),
   );
-  if (w.length) {
-    const row = w[0].rows[0];
+  check(
+    'a silent SOS is ONE incident, not two',
+    silentPosts.length === 1 && silentPosts[0].rows.length === 1,
+    `${silentPosts.length} insert(s): ${silentPosts.map((x) => x.rows.map((r) => r.type).join('+')).join(', ')}`,
+  );
+  if (silentPosts.length) {
+    const row = silentPosts[0].rows[0];
     check(
       'the silent SOS carries the reporter and a real position',
       !!row.reported_by && row.latitude != null && row.longitude != null,
       `reported_by=${row.reported_by ? 'set' : 'MISSING'} lat=${row.latitude} lng=${row.longitude}`,
     );
   }
+  const stayed = await page.evaluate(() => window.location.hash);
+  check(
+    'a silent SOS leaves the citizen on the screen they were on',
+    /home/.test(stayed),
+    `on ${stayed}`,
+  );
 
+  // Holding the button is the visible SOS. With one already running it opens
+  // THAT emergency — the route to HOLD TO CANCEL and the PIN pad, which a
+  // silent SOS had no way back to — and files nothing new.
   state.screen = 'mobile:panic-sos';
   await go('/home');
   mark = await writeMark();
-  const pressed = await longPress('SILENT SOS');
+  const pressed = await longPress(SOS);
   await shot('90-mobile-sos-02-panic-longpress');
   w = await writesSince(mark, 'alerts');
   check(
-    'PANIC SOS (long press) reaches the database',
-    pressed && w.some((x) => x.method === 'POST'),
-    w.length ? `type=${w[0].rows[0].type} severity=${w[0].rows[0].severity}` : (pressed ? 'pressed, nothing inserted' : 'SOS control not found'),
+    'holding SOS while one is active files no second incident',
+    pressed && !w.some((x) => x.method === 'POST'),
+    pressed ? `${w.filter((x) => x.method === 'POST').length} new insert(s)` : 'SOS control not found',
   );
   const onEmergency = await page.evaluate(() => window.location.hash);
   check(
-    'the panic SOS opens the emergency screen',
+    'holding SOS opens the running emergency, where it can be cancelled',
     /emergency/.test(onEmergency),
     `on ${onEmergency}`,
   );
@@ -604,8 +631,8 @@ async function logMark() {
     );
     check(
       'the emergency button is on the lock screen',
-      /EMERGENCY|SEND SOS/i.test(lockText),
-      /EMERGENCY|SEND SOS/i.test(lockText) ? '' : 'the panic button is behind the lock',
+      /EMERGENCY|SOS/i.test(lockText),
+      /EMERGENCY|SOS/i.test(lockText) ? '' : 'the panic button is behind the lock',
     );
     check(
       'the lock screen says it will send a code, and to which number',

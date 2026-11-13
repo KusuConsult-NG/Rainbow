@@ -6,6 +6,7 @@ class EmergencyState {
     this.startTime,
     this.alertId,
     this.errorMessage,
+    this.isSilent = false,
   });
 
   /// Documentation for this public member.
@@ -20,6 +21,10 @@ class EmergencyState {
   /// Documentation for this public member.
   final String? errorMessage;
 
+  /// Raised by the triple tap, which leaves the user on the screen they were
+  /// on. The UI shows a discreet marker instead of the emergency screen.
+  final bool isSilent;
+
   /// Documentation for this public member.
 
   EmergencyState copyWith({
@@ -27,12 +32,14 @@ class EmergencyState {
     DateTime? startTime,
     String? alertId,
     String? errorMessage,
+    bool? isSilent,
   }) {
     return EmergencyState(
       isEmergencyActive: isEmergencyActive ?? this.isEmergencyActive,
       startTime: startTime ?? this.startTime,
       alertId: alertId ?? this.alertId,
       errorMessage: errorMessage ?? this.errorMessage,
+      isSilent: isSilent ?? this.isSilent,
     );
   }
 

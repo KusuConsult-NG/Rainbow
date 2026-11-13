@@ -197,14 +197,14 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
   // The stream button lives on the Emergency Active screen, which needs a live
   // SOS: it refuses to stream before the alert is confirmed, on purpose.
   //
-  // A TAP on this control is the silent SOS; a HOLD is the full panic alarm,
+  // THREE TAPS on this control are the silent SOS; a HOLD is the full panic alarm,
   // and only the panic path opens the Emergency Active screen. A long press has
   // no semantics equivalent — the node exposes a tap and nothing else — so it
   // has to be pointer events on the element, held.
   const sosMark = (await rest('alerts?select=id')).length;
   const sosNode = await page.evaluate(() => {
     const n = [...document.querySelectorAll('flt-semantics[role="button"]')]
-      .find((b) => /SILENT SOS|SOS|PANIC/i.test(
+      .find((b) => /TAP 3 TIMES/i.test(
         `${b.textContent || ''} ${b.getAttribute('aria-label') || ''}`));
     if (!n) return null;
     const r = n.getBoundingClientRect();

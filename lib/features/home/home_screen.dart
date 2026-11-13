@@ -13,7 +13,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/features/home/widgets/voice_report_dialog.dart';
-import 'package:rainbow_app/models/alert_model.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
 import 'package:rainbow_app/services/alert_service.dart';
@@ -85,7 +84,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     super.dispose();
   }
 
-  Future<void> _triggerPanic({required bool silent}) async {
+  /// A tap on the big SOS button. Same rule as the bottom bar: three taps
+  /// inside three seconds raise a Silent SOS and nothing on this screen
+  /// announces it; one or two do nothing.
+  ///
+  /// No location gate here. A missing permission used to put up a dialog and
+  /// send NOTHING — but an alert with no coordinates still reaches HQ, where it
+  /// is listed as unlocated, and that is better than no alert.
+  void _onSosTap() {
+    switch (registerSosTap(ref.read)) {
+      case SosTapOutcome.counting:
+        break;
+      case SosTapOutcome.sent:
+        unawaited(HapticFeedback.selectionClick());
+      case SosTapOutcome.alreadyActive:
+        context.go(AppRoutes.emergencyActive);
+    }
+  }
+
+  /// Press and hold: the visible SOS, which opens the emergency screen. It
+  /// raises the same single incident — holding after a silent SOS opens the
+  /// one already running rather than filing another.
+  Future<void> _holdForFullSos() async {
+    if (ref.read(emergencyProvider).isEmergencyActive) {
+      context.go(AppRoutes.emergencyActive);
+      return;
+    }
     await HapticFeedback.heavyImpact();
 
     final hasPermission = await LocationService().requestPermission(force: true);
@@ -140,49 +164,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
 
     unawaited(ref.read(emergencyProvider.notifier).startEmergency());
-    if (silent) {
-      // Silent SOS: submit a real background alert without leaving the home screen
-      unawaited(() async {
-        try {
-          final pos = await LocationService().getCurrentPosition(force: true);
-          await ref.read(alertServiceProvider).submitAlert(
-                type: 'EMERGENCY - Silent SOS',
-                description: 'Silent distress signal activated by user.',
-                reportedBy:
-                    ref.read(authProvider).user?.id ?? 'anonymous',
-                latitude: pos?.latitude,
-                longitude: pos?.longitude,
-                priority: AlertPriority.critical,
-              );
-          // ignore: avoid_catches_without_on_clauses, Stylistic override to match system design
-        } catch (e) {
-          debugPrint('[SILENT_SOS] Alert creation failed: $e');
-        }
-      }());
-
-      if (!context.mounted) return;
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'SILENT SOS ACTIVATED · SURVEILLANCE ACTIVE',
-            style: GoogleFonts.outfit(
-              fontWeight: FontWeight.w900,
-              fontSize: 11,
-              letterSpacing: 1,
-            ),
-          ),
-          backgroundColor: AppColors.surfaceContainerHighest,
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      );
-    } else {
-      if (!context.mounted) return;
-      // ignore: use_build_context_synchronously
-      context.go(AppRoutes.emergencyActive);
-    }
+    if (!mounted) return;
+    context.go(AppRoutes.emergencyActive);
   }
 
   String _getGreetingContext(AppLanguage lang) {
@@ -522,9 +505,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 final scale =
                                     1.0 + (_breathingController.value * 0.04);
                                 return GestureDetector(
-                                  onTapDown: (_) => HapticFeedback.mediumImpact(),
-                                  onTap: () => _triggerPanic(silent: true),
-                                  onLongPress: () => _triggerPanic(silent: false),
+                                  onTap: _onSosTap,
+                                  onLongPress: _holdForFullSos,
                                   child: Stack(
                                     alignment: Alignment.center,
                                     children: [
@@ -602,7 +584,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                               ),
                                               const SizedBox(height: 2),
                                               Text(
-                                                Translations.get('silent_sos', lang),
+                                                Translations.get('sos_tap_three', lang),
                                                 style: GoogleFonts.outfit(
                                                   color: Colors.white60,
                                                   fontSize: 8,

@@ -206,7 +206,7 @@ void main() {
     expect(find.text('SAFE ZONES'), findsOneWidget);
   });
 
-  testWidgets('E2E: Citizen tapping SOS activates silent emergency alert', (tester) async {
+  testWidgets('E2E: Citizen triple-tapping SOS activates silent emergency alert', (tester) async {
     final authState = AuthState(
       user: fakeUser,
       role: UserRole.citizen,
@@ -234,10 +234,32 @@ void main() {
 
     final sosFinder = find.text('SOS');
     expect(sosFinder, findsOneWidget);
+    expect(find.byKey(const ValueKey('nav_sos')), findsOneWidget,
+        reason: 'the SOS control is in the bottom bar, not only on Home');
+    expect(find.byKey(const ValueKey('nav_sos_active')), findsNothing);
+
+    // One tap is not an emergency.
     await tester.tap(sosFinder);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byKey(const ValueKey('nav_sos_active')), findsNothing);
+
+    // Three are. Split across the two controls on purpose: they share a count.
+    await tester.tap(sosFinder);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.byKey(const ValueKey('nav_sos')));
     await pumpSettleWithMax(tester);
 
+    // Silent: still on Home, nothing announced, only the discreet marker.
     expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.textContaining('SILENT SOS ACTIVATED'), findsNothing);
+    expect(find.byKey(const ValueKey('nav_sos_active')), findsOneWidget);
+
+    // The SOS is now really running, which it never was in this test before:
+    // the old single tap stopped at the location-permission dialog. Its GPS
+    // read has a 30s timeout with no platform behind it here, so let that
+    // expire rather than leave a timer pending at teardown.
+    await tester.pump(const Duration(seconds: 31));
+    await tester.pump(const Duration(seconds: 31));
   });
 
   testWidgets('E2E: Citizen tapping SAFE ZONES opens SafeZoneScreen', (tester) async {

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:rainbow_app/core/offline/offline_ref.dart';
+import 'package:rainbow_app/core/sos/triple_tap.dart';
 import 'package:rainbow_app/core/models/emergency_state.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
@@ -12,6 +13,42 @@ import 'package:rainbow_app/services/background_tracking_service.dart';
 import 'package:rainbow_app/services/location_service.dart';
 import 'package:rainbow_app/services/sos_dispatch_service.dart';
 
+/// The tap counter behind every SOS control. Shared, so three taps count the
+/// same wherever they land.
+final sosTapDetectorProvider =
+    Provider<TripleTapDetector>((ref) => TripleTapDetector());
+
+/// What one tap on an SOS control did.
+enum SosTapOutcome {
+  /// One or two taps so far. Nothing was sent.
+  counting,
+
+  /// The third tap: a Silent SOS has been raised.
+  sent,
+
+  /// An emergency is already running. Nothing new was sent; the caller opens
+  /// the emergency screen, which is where it is cancelled with a PIN.
+  alreadyActive,
+}
+
+/// Feeds one tap on an SOS control through the triple-tap rule.
+///
+/// Takes a reader rather than a `WidgetRef` so the rule is testable from a
+/// plain `ProviderContainer`.
+SosTapOutcome registerSosTap(
+  T Function<T>(ProviderListenable<T> provider) read, {
+  DateTime? at,
+}) {
+  if (read(emergencyProvider).isEmergencyActive) {
+    read(sosTapDetectorProvider).reset();
+    return SosTapOutcome.alreadyActive;
+  }
+  final fired = read(sosTapDetectorProvider).tap(at ?? DateTime.now());
+  if (!fired) return SosTapOutcome.counting;
+  unawaited(read(emergencyProvider.notifier).startEmergency(silent: true));
+  return SosTapOutcome.sent;
+}
+
 final emergencyProvider =
     NotifierProvider<EmergencyNotifier, EmergencyState>(EmergencyNotifier.new);
 
@@ -19,8 +56,23 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
   @override
   EmergencyState build() => const EmergencyState();
 
-  Future<void> startEmergency() async {
-    state = state.copyWith(isEmergencyActive: true, startTime: DateTime.now());
+  /// Raises the SOS. ONE incident per activation.
+  ///
+  /// Every surface calls this — the bottom bar, the home screen, the lock
+  /// screen — and a second call while an emergency is already active returns
+  /// without filing anything. The Silent SOS used to call this AND file its own
+  /// 'EMERGENCY - Silent SOS' alert, so one tap put two incidents on the HQ
+  /// board and every further tap added more.
+  ///
+  /// [silent] changes what HQ is told about how it was raised and nothing else:
+  /// the same critical alert, the same tracking, the same escalation SMS.
+  Future<void> startEmergency({bool silent = false}) async {
+    if (state.isEmergencyActive) return;
+    state = EmergencyState(
+      isEmergencyActive: true,
+      startTime: DateTime.now(),
+      isSilent: silent,
+    );
 
     final auth = ref.read(authProvider);
     final userId = auth.user?.id ?? 'unknown';
@@ -43,7 +95,9 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
     try {
       final alertId = await ref.read(alertServiceProvider).submitAlert(
             type: 'PANIC SOS',
-            description: 'Public Panic Button Activated',
+            description: silent
+                ? 'Silent SOS activated (triple tap)'
+                : 'Public Panic Button Activated',
             reportedBy: userId,
             latitude: latVal,
             longitude: lngVal,

@@ -318,4 +318,98 @@ void main() {
       expect(captured, isTrue);
     });
   });
+  // ONE INCIDENT PER ACTIVATION.
+  //
+  // A Silent SOS tap used to call startEmergency() AND file its own
+  // 'EMERGENCY - Silent SOS' alert, so one tap put two incidents on the HQ
+  // board and each further tap added more. The gesture is three taps now, and
+  // however many follow, exactly one alert is filed.
+  group('triple tap — one incident per activation', () {
+    final t0 = DateTime(2026, 11, 13, 12);
+    DateTime at(int ms) => t0.add(Duration(milliseconds: ms));
+
+    int alertsFiled() => callOrder.where((c) => c == 'alert').length;
+
+    test('one or two taps file nothing', () async {
+      final c = containerWith(onSubmit: () async => kServerAlertId);
+      addTearDown(c.dispose);
+
+      expect(registerSosTap(c.read, at: at(0)), SosTapOutcome.counting);
+      expect(registerSosTap(c.read, at: at(300)), SosTapOutcome.counting);
+      await settle();
+
+      expect(alertsFiled(), 0);
+      expect(c.read(emergencyProvider).isEmergencyActive, isFalse);
+    });
+
+    test('the third tap files exactly one silent alert', () async {
+      final c = containerWith(onSubmit: () async => kServerAlertId);
+      addTearDown(c.dispose);
+
+      registerSosTap(c.read, at: at(0));
+      registerSosTap(c.read, at: at(300));
+      expect(registerSosTap(c.read, at: at(600)), SosTapOutcome.sent);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(alertsFiled(), 1);
+      expect(c.read(emergencyProvider).isSilent, isTrue);
+      final description = verify(
+        () => alerts.submitAlert(
+          type: any(named: 'type'),
+          description: captureAny(named: 'description'),
+          reportedBy: any(named: 'reportedBy'),
+          latitude: any(named: 'latitude'),
+          longitude: any(named: 'longitude'),
+          isCritical: any(named: 'isCritical'),
+          geoLga: any(named: 'geoLga'),
+          geoWard: any(named: 'geoWard'),
+        ),
+      ).captured.single;
+      expect(description, contains('Silent'));
+    });
+
+    test('taps after it is active file nothing more', () async {
+      final c = containerWith(onSubmit: () async => kServerAlertId);
+      addTearDown(c.dispose);
+
+      for (final ms in [0, 200, 400]) {
+        registerSosTap(c.read, at: at(ms));
+      }
+      for (final ms in [600, 800, 1000, 1200, 1400, 1600]) {
+        expect(
+          registerSosTap(c.read, at: at(ms)),
+          SosTapOutcome.alreadyActive,
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(alertsFiled(), 1);
+    });
+
+    test('three slow taps do not fire', () async {
+      final c = containerWith(onSubmit: () async => kServerAlertId);
+      addTearDown(c.dispose);
+
+      registerSosTap(c.read, at: at(0));
+      registerSosTap(c.read, at: at(2000));
+      expect(registerSosTap(c.read, at: at(4500)), SosTapOutcome.counting);
+      await settle();
+
+      expect(alertsFiled(), 0);
+    });
+
+    test('a second startEmergency while active is a no-op', () async {
+      final c = containerWith(onSubmit: () async => kServerAlertId);
+      addTearDown(c.dispose);
+
+      await c.read(emergencyProvider.notifier).startEmergency(silent: true);
+      await c.read(emergencyProvider.notifier).startEmergency();
+      await settle();
+
+      expect(alertsFiled(), 1,
+          reason: 'holding the button after a silent SOS opens the one '
+              'already running; it must not file another.',);
+      expect(c.read(emergencyProvider).alertId, kServerAlertId);
+    });
+  });
 }
