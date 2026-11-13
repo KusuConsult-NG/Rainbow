@@ -15,6 +15,8 @@
 //     channel that only works when the primary succeeded is not redundancy;
 //   * a local/offline id is never quoted to a dispatcher as a real reference;
 //   * a missing GPS fix propagates as null and is never substituted (C-5).
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -410,6 +412,53 @@ void main() {
           reason: 'holding the button after a silent SOS opens the one '
               'already running; it must not file another.',);
       expect(c.read(emergencyProvider).alertId, kServerAlertId);
+    });
+  });
+  // THE SCREEN MUST NOT CLAIM HQ HAS THE ALERT BEFORE IT DOES.
+  //
+  // The emergency screen read "Command HQ notified" two seconds after opening,
+  // whether the alert had been sent, queued on the phone or refused. It now
+  // reads `sendFinished` and `alertId`, so these are the facts it depends on.
+  group('delivery state the emergency screen reports', () {
+    test('while the write is in flight: not finished, no id', () async {
+      final gate = Completer<String?>();
+      final c = containerWith(onSubmit: () => gate.future);
+      addTearDown(c.dispose);
+
+      unawaited(c.read(emergencyProvider.notifier).startEmergency());
+      await settle();
+      expect(c.read(emergencyProvider).sendFinished, isFalse);
+      expect(c.read(emergencyProvider).alertId, isNull);
+
+      gate.complete(kServerAlertId);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(c.read(emergencyProvider).sendFinished, isTrue);
+      expect(c.read(emergencyProvider).alertId, kServerAlertId);
+    });
+
+    test('queued on the phone: finished, and still no server id', () async {
+      final c = containerWith(
+        onSubmit: () async => 'OFFLINE_1794545995835_04a64e3989d8',
+      );
+      addTearDown(c.dispose);
+
+      await c.read(emergencyProvider.notifier).startEmergency();
+      await settle();
+
+      expect(c.read(emergencyProvider).sendFinished, isTrue);
+      expect(c.read(emergencyProvider).alertId, isNull,
+          reason: 'a local id is not HQ having the alert');
+    });
+
+    test('a refused write: finished, no id', () async {
+      final c = containerWith(onSubmit: () async => throw Exception('refused'));
+      addTearDown(c.dispose);
+
+      await c.read(emergencyProvider.notifier).startEmergency();
+      await settle();
+
+      expect(c.read(emergencyProvider).sendFinished, isTrue);
+      expect(c.read(emergencyProvider).alertId, isNull);
     });
   });
 }

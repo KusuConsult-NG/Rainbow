@@ -124,6 +124,11 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
         errorMessage: 'Alert delayed — stay on screen, tracking active.',
       );
     }
+    // A cancel that landed while the write was in flight has already reset
+    // the state; do not resurrect it.
+    if (state.isEmergencyActive) {
+      state = state.copyWith(sendFinished: true);
+    }
 
     // Redundant out-of-band nudge to the HQ dispatch line, for the case where
     // nobody is watching the dashboard.

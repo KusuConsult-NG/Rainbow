@@ -564,10 +564,30 @@ class Translations {
       AppLanguage.hausa: 'An tura kiran dauki · Cibiyar umarni na duba shi...',
       AppLanguage.pidgin: 'Alert done go · Command HQ dey check am...',
     },
-    'eme_broadcasting_notified': {
-      AppLanguage.english: 'Emergency alert active · Command HQ notified',
-      AppLanguage.hausa: 'Kiran dauki na gudana · An sanar da cibiyar umarni',
-      AppLanguage.pidgin: 'Emergency dey on · Command HQ know',
+    'eme_sending': {
+      AppLanguage.english: 'SENDING ALERT',
+      AppLanguage.hausa: 'ANA TURA KIRAN DAUKI',
+      AppLanguage.pidgin: 'WE DEY SEND ALERT',
+    },
+    'eme_sending_desc': {
+      AppLanguage.english: 'Sending your alert and location to HQ...',
+      AppLanguage.hausa: 'Ana tura kiran dauki da wurinka zuwa cibiyar umarni...',
+      AppLanguage.pidgin: 'We dey send your alert and where you dey go HQ...',
+    },
+    'eme_received': {
+      AppLanguage.english: 'ALERT RECEIVED',
+      AppLanguage.hausa: 'AN KARBI KIRAN DAUKI',
+      AppLanguage.pidgin: 'HQ DON GET THE ALERT',
+    },
+    'eme_not_confirmed': {
+      AppLanguage.english: 'NOT CONFIRMED BY HQ YET',
+      AppLanguage.hausa: 'CIBIYAR UMARNI BA TA TABBATAR BA TUKUNA',
+      AppLanguage.pidgin: 'HQ NEVER CONFIRM AM YET',
+    },
+    'eme_not_confirmed_desc': {
+      AppLanguage.english: 'Saved on this phone and retrying when there is a connection. Your location is still being recorded.',
+      AppLanguage.hausa: 'An ajiye a wayar nan, za a sake turawa idan an samu sadarwa. Ana ci gaba da daukar wurinka.',
+      AppLanguage.pidgin: 'E dey save for this phone and e go send again when network come. We still dey record where you dey.',
     },
     'eme_scanning': {
       AppLanguage.english: 'SCANNING FOR SIGNAL...',

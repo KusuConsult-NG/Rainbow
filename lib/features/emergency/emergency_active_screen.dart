@@ -540,7 +540,8 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
   }
 
   Widget _buildStatusCard() {
-    final alertId = ref.watch(emergencyProvider).alertId;
+    final emergency = ref.watch(emergencyProvider);
+    final alertId = emergency.alertId;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -553,9 +554,22 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                 .eq('id', alertId)
             : const Stream.empty(),
         builder: (context, snapshot) {
-          var statusText = _t('eme_link_establishing');
-          var statusTitle = _t('eme_signal_established');
+          // Until the server has the alert, say what is actually true.
+          // It used to read "SIGNAL ESTABLISHED", and after two seconds
+          // "Command HQ notified", whether or not anything had been sent —
+          // including when the alert had only been queued on the phone.
+          var statusTitle = _t('eme_sending');
+          var statusText = _t('eme_sending_desc');
           var titleColor = AppColors.onBackground;
+          if (alertId == null && emergency.sendFinished) {
+            statusTitle = _t('eme_not_confirmed');
+            statusText = _t('eme_not_confirmed_desc');
+            titleColor = AppColors.warning;
+          } else if (alertId != null) {
+            statusTitle = _t('eme_received');
+            statusText = _t('eme_broadcasting_triaging');
+            titleColor = AppColors.primary;
+          }
 
           if (snapshot.hasData && snapshot.data!.isNotEmpty) {
             final alert = snapshot.data!.first;
@@ -581,10 +595,6 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
               statusText = _t('eme_broadcasting_triaging');
               titleColor = AppColors.primary;
             }
-          } else if (_showMap) {
-            statusTitle = _t('eme_broadcasting');
-            statusText = _t('eme_broadcasting_notified');
-            titleColor = AppColors.primary;
           }
 
           return Column(
