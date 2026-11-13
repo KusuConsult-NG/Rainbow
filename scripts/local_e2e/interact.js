@@ -446,6 +446,23 @@ async function writeMark() {
       && set(pass, 'a-long-enough-temp-password');
   }, newEmail);
 
+  // The default role is a unit commander, who is posted to an LGA and a ward.
+  // The form now refuses to provision one without a posting: it used to save
+  // every officer as posted to "STATEWIDE HQ", where no incident ever is.
+  // The ward list only exists once an LGA is chosen, so two steps.
+  const pick = (id) => page.evaluate((selId) => {
+    const sel = document.getElementById(selId);
+    if (!sel || sel.options.length < 2) return null;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')
+      .set.call(sel, sel.options[1].value);
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return sel.options[1].textContent;
+  }, id);
+  const postedLga = await pick('posting-lga');
+  await sleep(300);
+  const postedWard = await pick('posting-ward');
+  await sleep(300);
+
   let provisionStatus = 'form not filled';
   if (filled) {
     const responses = [];
@@ -459,13 +476,18 @@ async function writeMark() {
     provisionStatus = responses.length ? `HTTP ${responses.join(',')}` : 'no request to the route';
 
     const { rows } = await (await fetch(
-      `http://127.0.0.1:54321/rest/v1/profiles?select=email,role&email=eq.${newEmail}`,
+      `http://127.0.0.1:54321/rest/v1/profiles?select=email,role,geo_lga,geo_ward&email=eq.${newEmail}`,
     ).then((r) => r.json()).then((rows) => ({ rows })));
     const made = rows?.[0];
     check(
       'provisioning goes through /api/admin/provision and sets the role server-side',
       responses.includes(201) && made && made.role && made.role !== 'CITIZEN',
       made ? `${provisionStatus}; profile role = ${made.role}` : `${provisionStatus}; no profile created`,
+    );
+    check(
+      'a provisioned officer is posted where the administrator chose',
+      !!made && !!postedLga && made.geo_lga === postedLga && made.geo_ward === postedWard,
+      made ? `chose ${postedLga} / ${postedWard}; saved ${made.geo_lga} / ${made.geo_ward}` : 'no profile created',
     );
   } else {
     check('the Agent Directory provisioning form can be filled', false, 'fields not found');
