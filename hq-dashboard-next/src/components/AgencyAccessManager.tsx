@@ -102,31 +102,27 @@ export default function AgencyAccessManager() {
     try {
       // Create Supabase auth user via admin API (requires service role)
       // Since we're on client side, we use a workaround: sign up then update profile
-      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
-        email: form.email,
-        password: form.password,
-        options: {
-          data: {
-            full_name: form.full_name,
-            role: `${form.agency}_LIAISON`,
-          },
-        },
+      // Through the server, like every other staff account. This called
+      // `supabase.auth.signUp` with the role in the user's metadata and then
+      // upserted the profile from the browser. Sign-up no longer honours a
+      // role a browser states (migration 20260927000000), and a browser that
+      // could write one would be the privilege escalation that migration
+      // closed — so the account was created as a CITIZEN, if at all.
+      const res = await fetch('/api/admin/provision', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: form.email,
+          password: form.password,
+          fullName: form.full_name,
+          role: `${form.agency}_LIAISON`,
+          agency: form.agency,
+        }),
       });
-
-      if (signUpErr) throw signUpErr;
-
-      const newUserId = signUpData.user?.id;
-      if (!newUserId) throw new Error('User creation failed — no ID returned');
-
-      // Upsert profile with agency and role
-      await supabase.from('profiles').upsert({
-        id: newUserId,
-        full_name: form.full_name,
-        role: `${form.agency}_LIAISON`,
-        agency: form.agency,
-        created_at: new Date().toISOString(),
-      }, { onConflict: 'id' });
-
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload.error || `Could not create the liaison account (${res.status})`);
+      }
       setSuccess(`✓ ${form.full_name} created as ${form.agency} Liaison. They can now log in with their credentials.`);
       setForm({ email: '', password: '', full_name: '', agency: 'POLICE' });
       setShowForm(false);
@@ -208,7 +204,7 @@ export default function AgencyAccessManager() {
             </div>
             <div style={{ position: 'relative' }}>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>TEMPORARY PASSWORD *</label>
-              <input type={showPassword ? 'text' : 'password'} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Min. 8 characters"
+              <input type={showPassword ? 'text' : 'password'} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Min. 12 characters"
                 style={{ width: '100%', padding: '9px 40px 9px 12px', background: 'var(--input-bg)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 12, boxSizing: 'border-box' }} />
               <button type="button" onClick={() => setShowPassword(!showPassword)}
                 style={{ position: 'absolute', right: 10, top: 28, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>

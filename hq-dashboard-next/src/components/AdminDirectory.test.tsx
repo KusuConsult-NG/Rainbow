@@ -63,6 +63,15 @@ async function fillForm() {
     'b.yakubu@operationrainbow.plateau.gov.ng',
   );
   await userEvent.type(screen.getByPlaceholderText('••••••••'), 'temp-pass-123');
+  await fillPosting();
+}
+
+/** The default role is UNIT_COMMAND, which is posted to an LGA and a ward. */
+async function fillPosting() {
+  const lga = screen.getByLabelText('Posted to LGA') as HTMLSelectElement;
+  await userEvent.selectOptions(lga, lga.options[1].value);
+  const ward = screen.getByLabelText('Posted to ward') as HTMLSelectElement;
+  await userEvent.selectOptions(ward, ward.options[1].value);
 }
 
 describe('AdminDirectory', () => {
@@ -150,5 +159,34 @@ describe('AdminDirectory', () => {
 
     expect(await screen.findByText(/Email already registered/i)).toBeInTheDocument();
     expect(screen.queryByText(/registered successfully/i)).not.toBeInTheDocument();
+  });
+
+  // Every officer used to be saved posted to "STATEWIDE HQ" / "N/A": the form
+  // had no posting fields, so a ward commander commanded no one.
+  it('sends the posting the administrator chose, and refuses a missing one', async () => {
+    db.setRows('profiles', []);
+    const provision = stubProvision({ ok: true, body: { id: 'n', role: 'UNIT_COMMAND' } });
+    const AdminDirectory = await load();
+
+    render(<AdminDirectory />);
+    await waitFor(() => expect(db.selectCount('profiles')).toBeGreaterThan(0));
+
+    await userEvent.type(screen.getByPlaceholderText('Officer Name'), 'Sgt Bala Yakubu');
+    await userEvent.type(screen.getByPlaceholderText(/officer@operationrainbow/), 'b@x.ng');
+    await userEvent.type(screen.getByPlaceholderText('••••••••'), 'temp-pass-123');
+    await userEvent.click(screen.getByRole('button', { name: /Register|Provision|Create/i }));
+    expect(await screen.findByText(/Choose the LGA/i)).toBeInTheDocument();
+    expect(provision).not.toHaveBeenCalled();
+
+    await fillPosting();
+    await userEvent.click(screen.getByRole('button', { name: /Register|Provision|Create/i }));
+    await screen.findByText(/registered successfully/i);
+
+    const body = JSON.parse((provision.mock.calls[0] as unknown as [string, { body: string }])[1].body);
+    expect(body.geoLga).toBeTruthy();
+    expect(body.geoLga).not.toBe('STATEWIDE HQ');
+    expect(body.geoWard).toBeTruthy();
+    expect(body.geoWard).not.toBe('N/A');
+    expect(body.geoPu).toBeNull();
   });
 });
