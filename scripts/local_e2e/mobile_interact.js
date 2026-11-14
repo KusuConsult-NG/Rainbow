@@ -604,6 +604,42 @@ async function logMark() {
   await go('/settings', 3000);
   await shot('93-mobile-settings');
 
+  // ---- AI Emergency Guardian ------------------------------------------------
+  //
+  // A browser has no speech recognizer Guardian may use, so the honest answer
+  // here is "this needs the phone app" — and, above all, NO SOS. The speech
+  // service's simulated dictation ("Help! Urgent response team needed…")
+  // would have read as a call for help; this is the run that would show it.
+  const guardianTile = await bringIntoView('emergency guardian', { role: 'button' });
+  check('Settings offers AI Emergency Guardian', guardianTile);
+
+  state.screen = 'mobile:guardian';
+  await go('/guardian', 3000);
+  await shot('93c-mobile-guardian-notice');
+  const noticeText = await screenText();
+  check(
+    'Guardian shows its notice before anything can be switched on',
+    /without asking you first/i.test(noticeText) && !/START GUARDIAN/i.test(noticeText),
+    noticeText.slice(0, 120).replace(/\n/g, ' / '),
+  );
+  await tap('I UNDERSTAND', { role: 'button', settle: 1500 });
+  const gMark = await writeMark();
+  await tap('START GUARDIAN', { role: 'button', settle: 3000 });
+  await shot('93c-mobile-guardian-web');
+  const gText = await screenText();
+  check(
+    'Guardian in a browser says it needs the phone app',
+    /needs the Android or iPhone app/i.test(gText),
+    gText.slice(0, 160).replace(/\n/g, ' / '),
+  );
+  const gWrites = await writesSince(gMark, 'alerts');
+  check(
+    'starting Guardian where it cannot listen sends no SOS',
+    gWrites.length === 0,
+    `${gWrites.length} alert write(s)`,
+  );
+  await go('/settings', 3000);
+
   // ---- the re-entry lock ---------------------------------------------------
   //
   // The lock engages by itself once the app has been away from the foreground
