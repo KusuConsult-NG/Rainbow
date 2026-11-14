@@ -136,8 +136,16 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
     }, which);
     if (!focused) return false;
     await sleep(600);
+    // The field Flutter focused, else the newest text-like input. Flutter web
+    // leaves earlier screens' inputs in the DOM, the login form's among them,
+    // so the FIRST input was a stale one: the name and the PINs were typed
+    // into nothing and the saves reported no change.
     const box = await page.evaluate(() => {
-      const el = document.querySelector('input, textarea');
+      const textLike = (e) => e && (e.tagName === 'TEXTAREA'
+        || (e.tagName === 'INPUT' && !['submit', 'hidden', 'button', 'checkbox'].includes(e.type)));
+      const active = document.activeElement;
+      const all = [...document.querySelectorAll('input, textarea')].filter(textLike);
+      const el = textLike(active) ? active : all[all.length - 1];
       if (!el) return null;
       el.focus();
       const r = el.getBoundingClientRect();

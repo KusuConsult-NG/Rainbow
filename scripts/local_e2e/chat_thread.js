@@ -182,8 +182,14 @@ const HQ_SAYS = 'Acknowledged. Holding the ward team until you confirm.';
     });
     if (!focused) return false;
     await sleep(700);
+    // The focused field, else the newest text-like input: Flutter web leaves
+    // earlier screens' inputs in the DOM, so the FIRST one is usually stale.
     const box = await page.evaluate(() => {
-      const el = document.querySelector('input, textarea');
+      const textLike = (e) => e && (e.tagName === 'TEXTAREA'
+        || (e.tagName === 'INPUT' && !['submit', 'hidden', 'button', 'checkbox'].includes(e.type)));
+      const active = document.activeElement;
+      const all = [...document.querySelectorAll('input, textarea')].filter(textLike);
+      const el = textLike(active) ? active : all[all.length - 1];
       if (!el) return null;
       el.focus();
       const r = el.getBoundingClientRect();
