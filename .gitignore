@@ -59,6 +59,9 @@ ios/Runner/GoogleService-Info.plist
 brain/
 scratch/
 *.txt
+# Except Guardian's speech-model vocabulary, which the app cannot run without.
+# The *.txt rule above kept it out of the first commit of the models.
+!assets/guardian/tokens.txt
 .firebase/
 
 # ── Added during the E2E audit ────────────────────────────────────────────────
