@@ -135,13 +135,23 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
       setState(() => _isListening = false);
     } else {
       setState(() => _isListening = true);
-      unawaited(speechService.startListening(onResult: (text) {
-        setState(() {
-          _controller.text = text;
-          _isListening = false;
-        });
-      },),);
+      unawaited(_startDictation(speechService));
     }
+  }
+
+  // The service must be initialized before it listens. This screen used to
+  // rely on a voice report having done that earlier in the session; opened
+  // first, its dictate button did nothing.
+  Future<void> _startDictation(SpeechService speechService) async {
+    await speechService.initialize();
+    if (!mounted || !_isListening) return;
+    await speechService.startListening(onResult: (text) {
+      if (!mounted) return;
+      setState(() {
+        _controller.text = text;
+        _isListening = false;
+      });
+    },);
   }
 
   @override
