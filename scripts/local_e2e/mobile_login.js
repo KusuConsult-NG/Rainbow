@@ -186,8 +186,17 @@ async function signInMobile(page, role) {
     }
   }
 
-  await sleep(8500);
-  const hash = await page.evaluate(() => window.location.hash);
+  // At least the 8.5 s every caller was written against, and then on until
+  // the app leaves the login screen, up to 25 s. The fixed wait alone was
+  // enough on a quiet machine but not under the full suite's load: one run
+  // lost a whole pass to a sign-in that landed a moment later.
+  let hash = '';
+  for (let waited = 0; waited < 25000; waited += 500) {
+    await sleep(500);
+    hash = await page.evaluate(() => window.location.hash);
+    const left = hash && hash !== '#/' && !/login/i.test(hash);
+    if (left && waited >= 8000) break;
+  }
   if (!hash || hash === '#/' || /login/i.test(hash)) {
     throw new Error(
       `signInMobile(${role}): still on the login screen (hash `
