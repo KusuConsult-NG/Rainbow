@@ -209,7 +209,8 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
   // and only the panic path opens the Emergency Active screen. A long press has
   // no semantics equivalent — the node exposes a tap and nothing else — so it
   // has to be pointer events on the element, held.
-  const sosMark = (await rest('alerts?select=id')).length;
+  const idsBefore = new Set((await rest('alerts?select=id')).map((a) => a.id));
+  const sosMark = idsBefore.size;
   const sosNode = await page.evaluate(() => {
     const n = [...document.querySelectorAll('flt-semantics[role="button"]')]
       .find((b) => /TAP 3 TIMES/i.test(
@@ -244,25 +245,99 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
   );
   await shot('emergency-active');
 
+  // HQ, PLAYED FOR REAL.
+  //
+  // The button reads STOP STREAM, in red, only once the peer connection says
+  // CONNECTED — red is a promise that HQ is watching. With nobody answering it
+  // reads "CONNECTING TO HQ — NOT LIVE YET" for as long as the stream is on,
+  // which is the honest state, and this check used to fail on it for want of
+  // an HQ. So a second page joins the alert's signalling channel and does what
+  // the console's LiveFeedViewer does: answers the offer with a real
+  // RTCPeerConnection and swaps ICE candidates. It has to be listening before
+  // the button is pressed: the app sends its offer once.
+  const newIds = (await rest('alerts?select=id')).map((a) => a.id).filter((id) => !idsBefore.has(id));
+  const alertId = newIds[newIds.length - 1];
+  let hq = null;
+  if (alertId) {
+    hq = await browser.newPage();
+    const joined = await hq.evaluate((topic) => new Promise((resolve) => {
+      const st = window.__hq = { state: 'new', tracks: 0, log: [] };
+      const ws = new WebSocket('ws://127.0.0.1:54321/realtime/v1/websocket?apikey=local&vsn=1.0.0');
+      let ref = 0;
+      const send = (event, payload) => ws.send(JSON.stringify(['1', String(++ref), topic, event, payload]));
+      const signal = (payload) => send('broadcast', {
+        type: 'broadcast', event: 'signalling', payload: { ...payload, sender: 'hq' },
+      });
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      pc.ontrack = () => { st.tracks += 1; };
+      pc.onconnectionstatechange = () => { st.state = pc.connectionState; };
+      pc.onicecandidate = (e) => {
+        if (e.candidate) signal({ signal: 'candidate', candidate: e.candidate.toJSON() });
+      };
+      ws.onopen = () => send('phx_join', { config: { broadcast: { self: false } } });
+      ws.onmessage = async (m) => {
+        const msg = JSON.parse(m.data);
+        const [, , , event, payload] = Array.isArray(msg)
+          ? msg : [null, null, msg.topic, msg.event, msg.payload];
+        if (event === 'phx_reply' && st.log.length === 0) { st.log.push('joined'); resolve(true); return; }
+        if (event !== 'broadcast' || payload?.event !== 'signalling') return;
+        const body = payload.payload && typeof payload.payload === 'object' ? payload.payload : payload;
+        if (body.sender === 'hq') return;
+        st.log.push(body.signal);
+        try {
+          if (body.signal === 'offer') {
+            await pc.setRemoteDescription({ type: 'offer', sdp: body.sdp });
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            signal({ signal: 'answer', sdp: answer.sdp });
+          } else if (body.signal === 'candidate' && body.candidate) {
+            await pc.addIceCandidate(body.candidate);
+          }
+        } catch (e) { st.log.push(`error: ${e.message}`); }
+      };
+      setTimeout(() => resolve(false), 8000);
+    }), `realtime:live-stream-${alertId}`);
+    if (!joined) console.log('      note  the HQ stand-in could not join the signalling channel');
+    // A new page takes the front, and a background tab is not painted: the
+    // app's screenshots would hang. HQ needs no paint.
+    await page.bringToFront();
+  }
+
   const before = (await control()).broadcasts.length;
-  const streamed = await tap('live|stream|broadcast|camera', { settle: 6000 });
+  const streamed = await tap('live|stream|broadcast|camera', { settle: 1000 });
   check('the live stream control is reachable', streamed,
     streamed ? '' : 'no stream control on the emergency screen');
-  await shot('live-stream-pressed');
 
-  // Assert the PERSISTENT indication, not the snackbar.
-  //
-  // The confirmation toast — "🔴 LIVE STREAM BROADCASTING TO HQ" — is gone in
-  // four seconds, so reading the screen after the stream has settled finds
-  // nothing and reports that the user was left guessing. They are not: the
-  // button itself flips to a red STOP STREAM and stays there, which is the
-  // indication that actually matters for somebody who needs to know their
-  // camera is on.
-  const said = await screenText();
+  // Assert the PERSISTENT indication, not the snackbar: the confirmation toast
+  // is gone in four seconds, the button stays. Read the screen until it says
+  // live, noting whether it said "not live yet" first, as it must while the
+  // connection is still being made.
+  let said = '';
+  let sawConnecting = false;
+  for (let i = 0; i < 40; i += 1) {
+    said = await screenText();
+    if (/NOT LIVE YET/i.test(said)) sawConnecting = true;
+    if (/STOP STREAM/i.test(said)) break;
+    await sleep(500);
+  }
+  // "Keeps showing": a second read, a few seconds on.
+  if (/STOP STREAM/i.test(said)) {
+    await sleep(4000);
+    said = await screenText();
+  }
+  const hqState = hq ? await hq.evaluate(() => window.__hq).catch(() => null) : null;
+  await shot('live-stream-pressed');
   check(
     'the control shows, and keeps showing, that the camera is live',
     /STOP STREAM/i.test(said),
-    /STOP STREAM/i.test(said) ? 'button reads STOP STREAM' : 'no lasting indication',
+    /STOP STREAM/i.test(said)
+      ? `button reads STOP STREAM once HQ is connected${sawConnecting ? ', NOT LIVE YET before that' : ''}`
+      : `no lasting indication — HQ stand-in: ${hqState ? `${hqState.state}, saw ${hqState.log.join(' ')}` : 'not started'}`,
+  );
+  check(
+    'and HQ actually receives the camera and the microphone',
+    !!(hqState && hqState.state === 'connected' && hqState.tracks >= 2),
+    hqState ? `${hqState.state}, ${hqState.tracks} track(s)` : 'no HQ stand-in',
   );
 
   // The claim that matters: the offer left the device.
@@ -307,6 +382,7 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
     /BROADCAST LIVE/i.test(afterStop) ? 'button reads BROADCAST LIVE' : 'control missing after stop',
   );
   await shot('live-stream-stopped');
+  if (hq) await hq.close().catch(() => {});
 
   // =========================================================================
   // 2. THE SETTINGS CONTROLS
