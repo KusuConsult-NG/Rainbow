@@ -135,10 +135,13 @@ async function signInMobile(page, role) {
   if (role === 'citizen') {
     const person = byKey('citizen');
     if (!person) throw new Error('signInMobile: no citizen in fixtures');
-    await page.evaluate(() => {
-      const el = document.querySelector('input');
-      if (el) { el.focus(); el.value = ''; }
-    });
+    // The field on screen, not the first <input> in the document. A second
+    // sign-in (after a lock, say) finds the previous login's inputs still in
+    // the DOM, and the first of them is a stale one: the number went there,
+    // the real field stayed empty, and AUTHORIZE ACCESS sent nothing.
+    if (!await typeIntoLastField(page, '')) {
+      throw new Error(`signInMobile(${role}): no identifier field on the login screen`);
+    }
     await typeText(page, person.phone.replace('+234', '0'));
     await sleep(400);
     if (!await clickButton(page, 'authorize access')) {
@@ -152,10 +155,13 @@ async function signInMobile(page, role) {
       throw new Error('signInMobile(citizen): no VERIFY OTP control');
     }
   } else {
-    await page.evaluate(() => {
-      const el = document.querySelector('input');
-      if (el) { el.focus(); el.value = ''; }
-    });
+    // The field on screen, not the first <input> in the document. A second
+    // sign-in (after a lock, say) finds the previous login's inputs still in
+    // the DOM, and the first of them is a stale one: the number went there,
+    // the real field stayed empty, and AUTHORIZE ACCESS sent nothing.
+    if (!await typeIntoLastField(page, '')) {
+      throw new Error(`signInMobile(${role}): no identifier field on the login screen`);
+    }
     await typeText(page, `${role}@${DOMAIN}`);
     await sleep(400);
     if (!await clickButton(page, 'authorize access')) {

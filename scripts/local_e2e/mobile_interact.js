@@ -237,8 +237,16 @@ async function logMark() {
   }
 
   async function typeInto(text) {
+    // The field Flutter has focused, else the newest text-like input. Flutter
+    // web leaves earlier screens' inputs in the DOM — the login form's among
+    // them — so the FIRST input was usually a stale one, often a zero-size
+    // submit button: the emergency PIN was typed into nothing.
     const box = await page.evaluate(() => {
-      const el = document.querySelector('input, textarea');
+      const textLike = (e) => e && (e.tagName === 'TEXTAREA'
+        || (e.tagName === 'INPUT' && !['submit', 'hidden', 'button', 'checkbox'].includes(e.type)));
+      const active = document.activeElement;
+      const all = [...document.querySelectorAll('input, textarea')].filter(textLike);
+      const el = textLike(active) ? active : all[all.length - 1];
       if (!el) return null;
       el.focus();
       const r = el.getBoundingClientRect();
