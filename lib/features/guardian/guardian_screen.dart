@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/guardian/distress_detector.dart';
 import 'package:rainbow_app/core/guardian/guardian_provider.dart';
+import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
@@ -126,6 +128,16 @@ class _GuardianScreenState extends ConsumerState<GuardianScreen> {
       if (!g.active) ..._phraseSection(hasPhrase),
       const SizedBox(height: 24),
       Text(_t('guardian_consent_limits'), style: _body.copyWith(color: AppColors.textDim, fontSize: 13)),
+      const SizedBox(height: 16),
+      // Phase 3 groundwork: Hausa speakers can record phrases for a Hausa
+      // model. Not while a session runs: both want the microphone.
+      if (!g.active)
+        TextButton.icon(
+          key: const ValueKey('guardian_rec_entry'),
+          onPressed: () => context.push(AppRoutes.guardianRecordings),
+          icon: const Icon(Icons.record_voice_over_outlined),
+          label: Text(_t('guardian_rec_entry')),
+        ),
     ];
   }
 

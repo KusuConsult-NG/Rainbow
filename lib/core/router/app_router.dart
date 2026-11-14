@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rainbow_app/core/constants/alert_categories.dart';
+import 'package:rainbow_app/features/guardian/guardian_recordings_screen.dart';
 import 'package:rainbow_app/features/guardian/guardian_screen.dart';
 import 'package:rainbow_app/features/agent/admin_broadcast_screen.dart';
 import 'package:rainbow_app/features/agent/agent_dashboard_screen.dart';
@@ -244,6 +245,7 @@ class AppRoutes {
 
   /// AI Emergency Guardian: the opt-in listening session.
   static const String guardian = '/guardian';
+  static const String guardianRecordings = '/guardian-recordings';
 
   /// Documentation for this public member.
   static const String uninstallRequest = '/uninstall-request';
@@ -456,6 +458,10 @@ final appRouter = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.guardian,
             pageBuilder: (c, s) => _slide(s, const GuardianScreen()),
+          ),
+          GoRoute(
+            path: AppRoutes.guardianRecordings,
+            pageBuilder: (c, s) => _slide(s, const GuardianRecordingsScreen()),
           ),
           GoRoute(
             path: AppRoutes.uninstallRequest,
