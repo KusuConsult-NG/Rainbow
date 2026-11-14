@@ -1469,6 +1469,9 @@ export default function DashboardPage() {
                 badge={alerts.length > 0 ? alerts.length : undefined}
               />
             )}
+            {access.tabs.includes('analytics') && (
+              <NavItem icon={<Target size={18} />} label="Analytics" active={activeTab === 'analytics'} onClick={() => setActiveTab('analytics')} />
+            )}
             {access.tabs.includes('history') && (
               <NavItem icon={<Clock size={18} />} label="Mission History" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
             )}
@@ -1592,6 +1595,7 @@ export default function DashboardPage() {
                 {activeTab === 'settings' && 'Platform Core'}
                 {activeTab === 'agency' && 'Inter-Agency Command'}
                 {activeTab === 'sim' && 'Handset SMS Channel'}
+                {activeTab === 'analytics' && 'Statewide Figures'}
               </h2>
             </div>
             {!isNarrow && <div style={{ height: 20, width: 1, background: 'var(--border)', flexShrink: 0 }}></div>}
@@ -2998,6 +3002,23 @@ Respond ONLY with a JSON object with this exact shape:
     }
   };
 
+  // HQ TAKES COMMAND. The action existed — passed to every card — with no
+  // button. HQ only, and only while the incident sits below HQ: it reassigns
+  // the incident to the operator at HQ tier and marks it CRITICAL, which also
+  // stops the escalation timer, so it asks first.
+  const canTakeCommand = commandsWholeState(dispatcher?.role)
+    && alert.status !== 'RESOLVED'
+    && a.assigned_tier !== 'HQ';
+  const handleTakeCommand = async () => {
+    if (!window.confirm('Take command of this incident at HQ? It becomes CRITICAL and is assigned to you.')) return;
+    setLoading(true);
+    try {
+      await onHqOverride(targetIds);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleResolve = async () => {
     setLoading(true);
     try {
@@ -3763,6 +3784,9 @@ Respond ONLY with a JSON object with this exact shape:
           <button onClick={() => setShowEscalate(false)} className="btn-tactical btn-secondary" style={{ width: '100%' }}>CANCEL ESCALATION</button>
         ) : (
           <>
+            {canTakeCommand && (
+              <button onClick={handleTakeCommand} className="btn-tactical" style={{ flex: 1, background: 'var(--duress-dim)', color: 'var(--duress)', border: '1px solid rgba(239,68,68,0.2)' }}>HQ TAKE COMMAND</button>
+            )}
             <button onClick={() => { setShowEscalate(true); setShowDispatch(false); }} className="btn-tactical" style={{ flex: 1, background: 'var(--warning-dim)', color: 'var(--warning)', border: '1px solid rgba(245,158,11,0.2)' }}>ESCALATE</button>
             <button onClick={() => { setShowDispatch(true); setShowEscalate(false); }} className="btn-tactical" style={{ flex: 1, background: 'var(--primary-dim)', color: 'var(--primary)', border: '1px solid rgba(59,130,246,0.2)' }}>DISPATCH</button>
             <button onClick={handleResolve} className="btn-tactical" style={{ flex: 1, background: 'var(--success-dim)', color: 'var(--success)', border: '1px solid rgba(16,185,129,0.2)' }}>RESOLVE</button>

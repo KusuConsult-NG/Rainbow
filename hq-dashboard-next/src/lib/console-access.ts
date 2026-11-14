@@ -129,6 +129,8 @@ export function consoleAccess(
         'map',
         'alerts',
         'history',
+        // Statewide figures. The panel existed with no way to reach it.
+        'analytics',
         'broadcast',
         'agency',
         'admin',

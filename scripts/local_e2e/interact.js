@@ -1028,7 +1028,7 @@ async function writeMark() {
   // `<button>`, and the sweep only ever looked at buttons.
   // -----------------------------------------------------------------------
   const HQ_TABS = [
-    'Intelligence Map', 'Incident Feed', 'Mission History',
+    'Intelligence Map', 'Incident Feed', 'Analytics', 'Mission History',
     'Communications & Broadcast', 'Inter-Agency Command',
     'Agent Directory', 'Forensic Audit', 'System Logic', 'Uninstall Requests',
     'Handset SMS Channel',
@@ -1223,7 +1223,7 @@ async function writeMark() {
   const liaisonNav = await page.evaluate(() =>
     [...document.querySelectorAll('nav *')].map((e) => e.textContent.trim()).join(' | '),
   );
-  for (const forbidden of ['Intelligence Map', 'Mission History',
+  for (const forbidden of ['Intelligence Map', 'Mission History', 'Analytics',
                            'Communications & Broadcast', 'Agent Directory',
                            'Forensic Audit', 'Uninstall Requests']) {
     check(
