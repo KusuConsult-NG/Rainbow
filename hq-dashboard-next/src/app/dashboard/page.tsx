@@ -33,7 +33,7 @@ import {
   Sun, Moon, X, Sparkles, MapPin, Menu, SignalZero,
 } from 'lucide-react';
 import type { Alert } from './types';
-import { clusterAlerts, filterAlerts, isLiveIncident } from '@/lib/alert-display';
+import { clusterAlerts, filterAlerts, isGuardianAlert, isLiveIncident } from '@/lib/alert-display';
 import { emptyBoardMeaning, emptyBoardWording } from '@/lib/empty-board';
 import { geoKey, geoMatchesKeyed } from '@/lib/geo-key';
 import UssdProvenancePanel from '@/components/UssdProvenancePanel';
@@ -3051,6 +3051,23 @@ Respond ONLY with a JSON object with this exact shape:
           is where a named officer stands behind it — see
           components/UssdProvenancePanel.tsx and migration 20261011000000. */}
       <UssdProvenancePanel alert={alert as never} />
+
+      {/* Raised by the app's AI Emergency Guardian from something it heard.
+          The person may not know it went and may not be able to talk; how to
+          respond to that is the dispatch protocol's call, not this label's. */}
+      {isGuardianAlert(alert) && (
+        <div data-testid="guardian-badge" style={{
+          background: 'rgba(11, 35, 75, 0.08)',
+          border: '1px solid rgba(11, 35, 75, 0.35)',
+          padding: '8px 12px',
+          borderRadius: 10,
+          marginBottom: 14,
+        }}>
+          <span style={{ fontSize: 10, fontWeight: 900, color: '#0B234B', letterSpacing: 0.8 }}>
+            AI GUARDIAN: SENT BY THE APP FROM WHAT IT HEARD. THE PERSON MAY NOT KNOW IT WENT, OR BE ABLE TO TALK.
+          </span>
+        </div>
+      )}
 
       {((alert as any).via === 'SMS_GATEWAY' || (alert as any).source === 'SMS' || (alert.description || '').includes('[OFFLINE_SMS]') || (alert.description || '').includes('[SMS]')) && (
         <div style={{

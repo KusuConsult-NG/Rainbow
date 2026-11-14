@@ -66,7 +66,10 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
   ///
   /// [silent] changes what HQ is told about how it was raised and nothing else:
   /// the same critical alert, the same tracking, the same escalation SMS.
-  Future<void> startEmergency({bool silent = false}) async {
+  ///
+  /// [description] replaces the default line HQ reads, for a surface that
+  /// knows more about why — Guardian says which rule heard distress.
+  Future<void> startEmergency({bool silent = false, String? description}) async {
     if (state.isEmergencyActive) return;
     state = EmergencyState(
       isEmergencyActive: true,
@@ -95,9 +98,10 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
     try {
       final alertId = await ref.read(alertServiceProvider).submitAlert(
             type: 'PANIC SOS',
-            description: silent
-                ? 'Silent SOS activated (triple tap)'
-                : 'Public Panic Button Activated',
+            description: description ??
+                (silent
+                    ? 'Silent SOS activated (triple tap)'
+                    : 'Public Panic Button Activated'),
             reportedBy: userId,
             latitude: latVal,
             longitude: lngVal,

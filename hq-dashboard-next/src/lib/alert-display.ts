@@ -206,6 +206,19 @@ export function isLiveIncident(a: Alert): boolean {
   return a.status !== 'RESOLVED' && a.status !== 'CANCELLED';
 }
 
+/**
+ * Whether the app's AI Emergency Guardian raised this SOS by itself, from
+ * something it heard, rather than the person pressing a button.
+ *
+ * The app writes `Guardian: ...` as the description (lib/core/guardian/
+ * distress_detector.dart, `GuardianMatch.description`) and names the rule
+ * that matched, never the words heard. A dispatcher reads it differently: the
+ * person may not know an SOS went, and may not be able to talk.
+ */
+export function isGuardianAlert(a: Pick<Alert, 'description'>): boolean {
+  return (a.description || '').startsWith('Guardian:');
+}
+
 export function filterAlerts(alerts: Alert[], filters: AlertFilters): Alert[] {
   return alerts.filter(a => {
     if (filters.status === 'CRITICAL') {

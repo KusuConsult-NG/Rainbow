@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:rainbow_app/features/guardian/guardian_banner.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/features/home/widgets/voice_report_dialog.dart';
@@ -332,6 +333,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   // confirmed this session, which is the ordinary case. T-100.
                   const UnconfirmedIdentityBanner(),
                   const BroadcastHud(),
+                  const GuardianBanner(),
                   const SizedBox(height: 12),
                   // TOP: Safety Status / Patrol Status
                   Padding(

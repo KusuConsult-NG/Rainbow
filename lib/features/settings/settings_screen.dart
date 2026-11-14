@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:rainbow_app/core/guardian/guardian_provider.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/sos/volume_sos.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
@@ -328,6 +329,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           // = 'ha'. So this control changed nothing, and it offered two of the
           // three languages the app actually has. One widget, one provider.
           const LanguagePicker(),
+          const SizedBox(height: 16),
+
+          // AI Emergency Guardian.
+          ListTile(
+            key: const ValueKey('guardian_settings_tile'),
+            tileColor: AppColors.surfaceContainer,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            leading: Icon(
+              ref.watch(guardianProvider).active ? Icons.hearing : Icons.hearing_disabled,
+              color: AppColors.primary,
+            ),
+            title: Text(
+              Translations.get('guardian_title', ref.watch(languageProvider)),
+              style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: AppColors.onBackground),
+            ),
+            subtitle: Text(
+              Translations.get('guardian_settings_desc', ref.watch(languageProvider)),
+              style: GoogleFonts.inter(fontSize: 12, color: AppColors.textDim),
+            ),
+            onTap: () => context.push(AppRoutes.guardian),
+          ),
           const SizedBox(height: 16),
 
           // Emergency PINs — per-user, verified on the server.

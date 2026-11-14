@@ -23,7 +23,7 @@ class _RecordingEmergency extends EmergencyNotifier {
   static bool? lastSilent;
 
   @override
-  Future<void> startEmergency({bool silent = false}) async {
+  Future<void> startEmergency({bool silent = false, String? description}) async {
     if (state.isEmergencyActive) return;
     raised++;
     lastSilent = silent;

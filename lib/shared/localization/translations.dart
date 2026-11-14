@@ -1423,6 +1423,168 @@ class Translations {
           'You dey offline, so code no fit enter. Your emergency button '
           'still dey work — everything else don lock till network show.',
     },
+    // AI Emergency Guardian (phase 1). The Hausa and Pidgin need review by
+    // a native speaker before release.
+    'guardian_title': {
+      AppLanguage.english: 'AI Emergency Guardian',
+      AppLanguage.hausa: 'Mai Tsaro na AI don Gaggawa',
+      AppLanguage.pidgin: 'AI Emergency Guardian',
+    },
+    'guardian_settings_desc': {
+      AppLanguage.english: 'Listens for your secret phrase or a clear call for help, and sends a silent SOS by itself.',
+      AppLanguage.hausa: 'Yana sauraron kalmarka ta sirri ko kiran neman taimako bayyananne, sannan ya aika SOS a boye da kansa.',
+      AppLanguage.pidgin: 'E dey listen for your secret phrase or clear cry for help, then e go send silent SOS by itself.',
+    },
+    'guardian_consent_heading': {
+      AppLanguage.english: 'Before you switch it on',
+      AppLanguage.hausa: 'Kafin ka kunna shi',
+      AppLanguage.pidgin: 'Before you on am',
+    },
+    'guardian_consent_listens': {
+      AppLanguage.english: 'While a session is on, Plateau Eye listens through the microphone for your secret phrase and for clear calls for help in English, such as "they are trying to kill me".',
+      AppLanguage.hausa: 'Lokacin da yake kunne, Plateau Eye yana sauraro ta makirufo don kalmarka ta sirri da kiran neman taimako bayyananne a Turanci, kamar "they are trying to kill me".',
+      AppLanguage.pidgin: 'When e dey on, Plateau Eye go dey listen with the microphone for your secret phrase and clear cry for help for English, like "they are trying to kill me".',
+    },
+    'guardian_consent_sends': {
+      AppLanguage.english: 'When it hears one, it sends a silent SOS with your location straight away, without asking you first. Cancel a false alarm with your Safe PIN.',
+      AppLanguage.hausa: 'Idan ya ji daya, zai aika SOS a boye tare da wurin da kake nan take, ba tare da ya tambaye ka ba. Soke kuskure da Safe PIN dinka.',
+      AppLanguage.pidgin: 'If e hear one, e go send silent SOS with your location sharp sharp, e no go ask you first. Cancel false alarm with your Safe PIN.',
+    },
+    'guardian_consent_private': {
+      AppLanguage.english: 'What it hears is not recorded or saved. HQ is told only which rule matched, never your words. On iPhone, speech is recognized on the phone itself. On Android the app asks the phone to recognize speech offline, but some phones may still use Google\'s speech service.',
+      AppLanguage.hausa: 'Ba a nadar ko ajiye abin da ya ji ba. HQ tana samun sanin wace doka ce kawai ta yi daidai, ba kalmominka ba. A iPhone, ana gane magana a cikin wayar. A Android manhajar tana rokon wayar ta gane magana ba tare da intanet ba, amma wasu wayoyi na iya amfani da sabis na Google.',
+      AppLanguage.pidgin: 'Wetin e hear, dem no dey record am or keep am. HQ go only know which rule match, dem no go see your words. For iPhone, na the phone itself dey understand the talk. For Android the app dey ask the phone make e understand am offline, but some phones fit still use Google speech service.',
+    },
+    'guardian_consent_limits': {
+      AppLanguage.english: 'It works only while Plateau Eye is open on screen. It pauses when the app is in the background or the screen is off, and while you dictate a voice report.',
+      AppLanguage.hausa: 'Yana aiki ne kawai lokacin da Plateau Eye ke bude a kan allo. Yana tsayawa idan manhajar tana baya ko allo a kashe, da kuma lokacin da kake fadin rahoto da murya.',
+      AppLanguage.pidgin: 'E dey work only when Plateau Eye open for screen. E go pause if the app dey background or screen off, and when you dey talk voice report.',
+    },
+    'guardian_consent_accept': {
+      AppLanguage.english: 'I UNDERSTAND',
+      AppLanguage.hausa: 'NA FAHIMTA',
+      AppLanguage.pidgin: 'I UNDERSTAND',
+    },
+    'guardian_phrase_heading': {
+      AppLanguage.english: 'Your secret phrase',
+      AppLanguage.hausa: 'Kalmarka ta sirri',
+      AppLanguage.pidgin: 'Your secret phrase',
+    },
+    'guardian_phrase_desc': {
+      AppLanguage.english: 'A sentence only you would say, at least three words, that sounds ordinary to anyone nearby. It is stored only on this phone, and only in English for now.',
+      AppLanguage.hausa: 'Jimla da kai kadai za ka fada, akalla kalmomi uku, wadda za ta yi kama da magana ta yau da kullum ga wanda ke kusa. Ana ajiye ta a wannan wayar kawai, kuma a Turanci kawai a yanzu.',
+      AppLanguage.pidgin: 'Sentence wey only you go talk, at least three words, wey go sound normal to anybody wey dey near. Na only this phone e dey, and only for English for now.',
+    },
+    'guardian_phrase_set': {
+      AppLanguage.english: 'A secret phrase is set.',
+      AppLanguage.hausa: 'An saita kalmar sirri.',
+      AppLanguage.pidgin: 'Secret phrase don set.',
+    },
+    'guardian_phrase_not_set': {
+      AppLanguage.english: 'No secret phrase yet. Guardian will listen only for clear calls for help.',
+      AppLanguage.hausa: 'Babu kalmar sirri tukuna. Mai Tsaro zai saurari kiran neman taimako bayyananne kawai.',
+      AppLanguage.pidgin: 'No secret phrase yet. Guardian go only listen for clear cry for help.',
+    },
+    'guardian_phrase_hint': {
+      AppLanguage.english: 'For example: The mangoes are ripe',
+      AppLanguage.hausa: 'Misali: The mangoes are ripe',
+      AppLanguage.pidgin: 'Like: The mangoes are ripe',
+    },
+    'guardian_phrase_save': {
+      AppLanguage.english: 'SAVE PHRASE',
+      AppLanguage.hausa: 'AJIYE KALMA',
+      AppLanguage.pidgin: 'SAVE PHRASE',
+    },
+    'guardian_phrase_remove': {
+      AppLanguage.english: 'REMOVE PHRASE',
+      AppLanguage.hausa: 'CIRE KALMA',
+      AppLanguage.pidgin: 'REMOVE PHRASE',
+    },
+    'guardian_phrase_saved': {
+      AppLanguage.english: 'Secret phrase saved on this phone.',
+      AppLanguage.hausa: 'An ajiye kalmar sirri a wannan wayar.',
+      AppLanguage.pidgin: 'Secret phrase don save for this phone.',
+    },
+    'guardian_phrase_too_short': {
+      AppLanguage.english: 'Use at least three words.',
+      AppLanguage.hausa: 'Yi amfani da akalla kalmomi uku.',
+      AppLanguage.pidgin: 'Use at least three words.',
+    },
+    'guardian_phrase_too_common': {
+      AppLanguage.english: 'That is too close to something people say every day, or to a call for help. Choose something more unusual.',
+      AppLanguage.hausa: 'Wannan ya yi kama da abin da mutane ke fada kullum, ko kiran neman taimako. Zabi wani abu da ba a saba ji ba.',
+      AppLanguage.pidgin: 'That one too resemble wetin people dey talk every day, or cry for help. Choose something wey no common.',
+    },
+    'guardian_length': {
+      AppLanguage.english: 'Listen for',
+      AppLanguage.hausa: 'Saurara na tsawon',
+      AppLanguage.pidgin: 'Listen for',
+    },
+    'guardian_hours': {
+      AppLanguage.english: '{n} h',
+      AppLanguage.hausa: 'awa {n}',
+      AppLanguage.pidgin: '{n} h',
+    },
+    'guardian_start': {
+      AppLanguage.english: 'START GUARDIAN',
+      AppLanguage.hausa: 'FARA MAI TSARO',
+      AppLanguage.pidgin: 'START GUARDIAN',
+    },
+    'guardian_stop': {
+      AppLanguage.english: 'STOP GUARDIAN',
+      AppLanguage.hausa: 'DAKATAR DA MAI TSARO',
+      AppLanguage.pidgin: 'STOP GUARDIAN',
+    },
+    'guardian_listening_until': {
+      AppLanguage.english: 'Listening until {time}',
+      AppLanguage.hausa: 'Yana saurare har zuwa {time}',
+      AppLanguage.pidgin: 'E dey listen till {time}',
+    },
+    'guardian_paused_dictation': {
+      AppLanguage.english: 'Paused while you dictate',
+      AppLanguage.hausa: 'An dakata yayin da kake magana',
+      AppLanguage.pidgin: 'E pause while you dey talk',
+    },
+    'guardian_paused_background': {
+      AppLanguage.english: 'Paused: Plateau Eye is not on screen',
+      AppLanguage.hausa: 'An dakata: Plateau Eye ba ya kan allo',
+      AppLanguage.pidgin: 'E pause: Plateau Eye no dey for screen',
+    },
+    'guardian_off': {
+      AppLanguage.english: 'Guardian is off',
+      AppLanguage.hausa: 'Mai Tsaro a kashe yake',
+      AppLanguage.pidgin: 'Guardian dey off',
+    },
+    'guardian_problem_unsupported': {
+      AppLanguage.english: 'Guardian needs the Android or iPhone app.',
+      AppLanguage.hausa: 'Mai Tsaro yana bukatar manhajar Android ko iPhone.',
+      AppLanguage.pidgin: 'Guardian need the Android or iPhone app.',
+    },
+    'guardian_problem_mic': {
+      AppLanguage.english: 'Guardian needs the microphone. Allow it in your phone settings.',
+      AppLanguage.hausa: 'Mai Tsaro yana bukatar makirufo. Ba da izini a saitunan wayarka.',
+      AppLanguage.pidgin: 'Guardian need microphone. Allow am for your phone settings.',
+    },
+    'guardian_problem_recognizer': {
+      AppLanguage.english: 'This phone cannot recognize speech offline, so Guardian cannot run on it yet.',
+      AppLanguage.hausa: 'Wannan wayar ba za ta iya gane magana ba tare da intanet ba, don haka Mai Tsaro ba zai yi aiki a kanta ba tukuna.',
+      AppLanguage.pidgin: 'This phone no fit understand talk offline, so Guardian no fit run for am yet.',
+    },
+    'guardian_problem_failing': {
+      AppLanguage.english: 'The phone\'s speech recognizer kept stopping, so Guardian has stopped. Try again.',
+      AppLanguage.hausa: 'Mai gane maganar wayar ya ci gaba da tsayawa, don haka Mai Tsaro ya tsaya. Sake gwadawa.',
+      AppLanguage.pidgin: 'The phone speech recognizer dey stop again and again, so Guardian don stop. Try again.',
+    },
+    'guardian_sent': {
+      AppLanguage.english: 'Guardian heard distress and sent a silent SOS.',
+      AppLanguage.hausa: 'Mai Tsaro ya ji alamar hatsari kuma ya aika SOS a boye.',
+      AppLanguage.pidgin: 'Guardian hear say wahala dey and e don send silent SOS.',
+    },
+    'guardian_home_banner': {
+      AppLanguage.english: 'Guardian is listening',
+      AppLanguage.hausa: 'Mai Tsaro yana saurare',
+      AppLanguage.pidgin: 'Guardian dey listen',
+    },
   };
 
   /// The string for [key] in [lang].
