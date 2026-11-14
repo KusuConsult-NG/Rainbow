@@ -1009,7 +1009,11 @@ async function logMark() {
       // which is exactly what happened once the sweep started reaching enough
       // controls to find it. The lock is asserted in full in its own section
       // above, including that a locked phone cannot be walked into any screen.
-      if (/sign ?out|log ?out|terminate|send sos|silent sos|\bsos\b|panic|lock this phone/i.test(label)) {
+      // The bottom-bar SOS reads "Emergency. Tap three times quickly to send a
+      // silent SOS." — and the label is cut to 40 characters before it gets
+      // here, which loses the word SOS. One press of it doing nothing is the
+      // design; three would file an alert. It is asserted on its own above.
+      if (/sign ?out|log ?out|terminate|send sos|silent sos|\bsos\b|panic|lock this phone|tap three times|emergency is active/i.test(label)) {
         skipped += 1;
         continue;
       }
