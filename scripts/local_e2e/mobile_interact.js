@@ -822,7 +822,7 @@ async function logMark() {
   const SCREENS = [
     '/home', '/report-initial', '/incident-history', '/safe-zone',
     '/settings', '/emergency-pins', '/live-tracking', '/secure-chat',
-    '/dispatcher-chat', '/uninstall-request', '/onboarding-profile',
+    '/dispatcher-chat', '/uninstall-request',
     '/onboarding-permissions', '/onboarding-contacts',
   ];
 

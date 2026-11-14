@@ -115,6 +115,46 @@ class Translations {
       AppLanguage.hausa: 'TAIMAKO A DINGE',
       AppLanguage.pidgin: 'SILENT HELP',
     },
+    'perm_allowed': {
+      AppLanguage.english: 'ALLOWED',
+      AppLanguage.hausa: 'AN BARI',
+      AppLanguage.pidgin: 'E DON ALLOW',
+    },
+    'perm_not_yet_required': {
+      AppLanguage.english: 'NOT YET \u00b7 REQUIRED',
+      AppLanguage.hausa: 'BA TUKUNA \u00b7 DOLE NE',
+      AppLanguage.pidgin: 'NEVER YET \u00b7 E MUST DEY',
+    },
+    'perm_not_yet_optional': {
+      AppLanguage.english: 'NOT YET \u00b7 OPTIONAL',
+      AppLanguage.hausa: 'BA TUKUNA \u00b7 ZABI NE',
+      AppLanguage.pidgin: 'NEVER YET \u00b7 NA YOUR CHOICE',
+    },
+    'volume_sos_title': {
+      AppLanguage.english: 'Volume Down \u00d73 sends a silent SOS',
+      AppLanguage.hausa: 'Danna rage sauti sau 3 don SOS a boye',
+      AppLanguage.pidgin: 'Press volume down 3 times to send silent SOS',
+    },
+    'volume_sos_desc': {
+      AppLanguage.english:
+          'Press Volume Down three times within 3 seconds to send a silent SOS '
+          'without touching the screen. Works only while Plateau Eye is open on '
+          'screen, not when the phone is locked or the app is in the background. '
+          'Off by default, because turning the volume down quickly can send one '
+          'by accident.',
+      AppLanguage.hausa:
+          'Danna maballin rage sauti sau uku cikin dakika 3 don tura SOS a boye '
+          'ba tare da taba allo ba. Yana aiki ne kawai idan Plateau Eye na bude '
+          'a kan allo, ba idan wayar a kulle take ba ko manhajar na baya. A '
+          'kashe yake da farko, domin rage sauti da sauri na iya tura shi bisa '
+          'kuskure.',
+      AppLanguage.pidgin:
+          'Press volume down three times inside 3 seconds to send silent SOS '
+          'without touching the screen. E dey work only when Plateau Eye dey '
+          'open for screen, no be when phone lock or the app dey background. '
+          'E dey off first, because if you press volume down quick-quick e fit '
+          'send one by mistake.',
+    },
     'sos_tap_three': {
       AppLanguage.english: 'TAP 3 TIMES',
       AppLanguage.hausa: 'DANNA SAU 3',
@@ -423,6 +463,16 @@ class Translations {
       AppLanguage.english: 'Environmental or infrastructure risk',
       AppLanguage.hausa: 'Hatsarin muhalli ko na gine-gine',
       AppLanguage.pidgin: 'Danger from environment or bad structure',
+    },
+    'rpt_showing_some': {
+      AppLanguage.english: 'Showing {n} of {total} categories for this situation.',
+      AppLanguage.hausa: 'Ana nuna nau\'i {n} cikin {total} na wannan yanayi.',
+      AppLanguage.pidgin: 'Na {n} for the {total} type wey match dis matter.',
+    },
+    'rpt_show_all_categories': {
+      AppLanguage.english: 'SHOW ALL',
+      AppLanguage.hausa: 'NUNA DUKA',
+      AppLanguage.pidgin: 'SHOW AM ALL',
     },
     'rpt_protocol': {
       AppLanguage.english: 'REPORT PROTOCOL',

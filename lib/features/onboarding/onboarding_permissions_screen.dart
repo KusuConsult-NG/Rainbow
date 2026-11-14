@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/permissions_provider.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/language_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -83,7 +84,32 @@ class _OnboardingPermissionsScreenState
     await _finishSetup(locationGranted: true);
   }
 
+  /// What the phone already allows, before anything is asked.
+  Future<void> _readCurrentStatus() async {
+    Future<bool> allowed(Permission p) async {
+      try {
+        return (await p.status).isGranted;
+      } on Object catch (_) {
+        // No answer (a platform without this permission): not allowed.
+        return false;
+      }
+    }
+
+    final location = await allowed(Permission.location);
+    final sms = await allowed(Permission.sms);
+    final audio = await allowed(Permission.microphone);
+    final persistence = await allowed(Permission.ignoreBatteryOptimizations);
+    if (!mounted) return;
+    ref.read(permissionsProvider.notifier).record(
+          location: location,
+          sms: sms,
+          audio: audio,
+          persistence: persistence,
+        );
+  }
+
   Future<void> _skipIfAlreadyGranted() async {
+    unawaited(_readCurrentStatus());
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     if (prefs.getBool(_grantedKey) ?? false) {
@@ -145,18 +171,14 @@ class _OnboardingPermissionsScreenState
 
       if (!mounted) return;
 
-      // Keep the in-app toggles honest about what the OS actually said, so
-      // Settings does not show a switch on for a permission that is off.
-      final perms = ref.read(permissionsProvider);
-      if (location.isGranted != perms.location) {
-        ref.read(permissionsProvider.notifier).toggle('location');
-      }
-      if (smsGranted != perms.sms) {
-        ref.read(permissionsProvider.notifier).toggle('sms');
-      }
-      if (micGranted != perms.audio) {
-        ref.read(permissionsProvider.notifier).toggle('audio');
-      }
+      // What the phone actually said, shown on the four cards.
+      ref.read(permissionsProvider.notifier).record(
+        location: location.isGranted,
+        sms: smsGranted,
+        audio: micGranted,
+        persistence:
+            results[Permission.ignoreBatteryOptimizations]?.isGranted ?? false,
+      );
 
       // LOCATION IS REQUIRED. The rest are not.
       //
@@ -289,37 +311,26 @@ class _OnboardingPermissionsScreenState
                         icon: Icons.location_on_rounded,
                         title: 'GEOSPATIAL',
                         desc: 'Real-time location beacon',
-                        value: perms.location,
-                        onChanged: (_) => ref
-                            .read(permissionsProvider.notifier)
-                            .toggle('location'),
+                        granted: perms.location,
+                        required: true,
                       ),
                       _TacticalPermCard(
                         icon: Icons.sms_rounded,
                         title: 'COMMS LINK',
                         desc: 'Offline SMS redundancy',
-                        value: perms.sms,
-                        onChanged: (_) => ref
-                            .read(permissionsProvider.notifier)
-                            .toggle('sms'),
+                        granted: perms.sms,
                       ),
                       _TacticalPermCard(
                         icon: Icons.mic_rounded,
                         title: 'FIELD AUDIO',
                         desc: 'Active evidence recording',
-                        value: perms.audio,
-                        onChanged: (_) => ref
-                            .read(permissionsProvider.notifier)
-                            .toggle('audio'),
+                        granted: perms.audio,
                       ),
                       _TacticalPermCard(
                         icon: Icons.battery_saver_rounded,
                         title: 'PERSISTENCE',
                         desc: 'Background session lock',
-                        value: perms.persistence,
-                        onChanged: (_) => ref
-                            .read(permissionsProvider.notifier)
-                            .toggle('persistence'),
+                        granted: perms.persistence,
                       ),
                     ],
                   ),
@@ -454,22 +465,27 @@ class _OnboardingPermissionsScreenState
   }
 }
 
-class _TacticalPermCard extends StatelessWidget {
+/// One permission and what the phone has said about it. Not a control: the
+/// phone decides, and GRANT CLEARANCE is what asks it.
+class _TacticalPermCard extends ConsumerWidget {
   const _TacticalPermCard({
     required this.icon,
     required this.title,
     required this.desc,
-    required this.value,
-    required this.onChanged,
+    required this.granted,
+    this.required = false,
   });
   final IconData icon;
   final String title;
   final String desc;
-  final bool value;
-  final ValueChanged<bool> onChanged;
+  final bool granted;
+  final bool required;
+
+  bool get value => granted;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lang = ref.watch(languageProvider);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       padding: const EdgeInsets.all(20),
@@ -495,12 +511,21 @@ class _TacticalPermCard extends StatelessWidget {
                 color: value ? AppColors.primary : AppColors.textDim,
                 size: 28,
               ),
-              Transform.scale(
-                scale: 0.8,
-                child: Switch(
-                  value: value,
-                  onChanged: onChanged,
-                  activeThumbColor: AppColors.primary,
+              Semantics(
+                label: '$title: ${granted ? 'allowed' : 'not allowed yet'}'
+                    '${required ? ', required' : ', optional'}',
+                excludeSemantics: true,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      granted
+                          ? Icons.check_circle_rounded
+                          : Icons.radio_button_unchecked_rounded,
+                      color: granted ? AppColors.success : AppColors.textDim,
+                      size: 18,
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -522,6 +547,27 @@ class _TacticalPermCard extends StatelessWidget {
               fontSize: 10,
               color: AppColors.textDim,
               height: 1.3,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            Translations.get(
+              granted
+                  ? 'perm_allowed'
+                  : required
+                      ? 'perm_not_yet_required'
+                      : 'perm_not_yet_optional',
+              lang,
+            ),
+            style: GoogleFonts.outfit(
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.8,
+              color: granted
+                  ? AppColors.success
+                  : required
+                      ? AppColors.emergency
+                      : AppColors.textDim,
             ),
           ),
         ],

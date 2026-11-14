@@ -7,6 +7,7 @@ import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/sos/volume_sos.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/language_picker.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/reentry_lock_provider.dart';
@@ -267,11 +268,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           // 2c. Volume Down x3 silent SOS
           SwitchListTile(
             key: const ValueKey('volume_sos_toggle'),
-            title: Text('Volume Down \u00d73 sends a silent SOS', style: GoogleFonts.outfit(color: AppColors.onBackground)),
+            title: Text(Translations.get('volume_sos_title', ref.watch(languageProvider)), style: GoogleFonts.outfit(color: AppColors.onBackground)),
             subtitle: Text(
-              'Press Volume Down three times within 3 seconds to send a silent SOS without touching the screen. '
-              'Works only while Plateau Eye is open on screen, not when the phone is locked or the app is in '
-              'the background. Off by default, because turning the volume down quickly can send one by accident.',
+              Translations.get('volume_sos_desc', ref.watch(languageProvider)),
               style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12),
             ),
             value: ref.watch(volumeSosEnabledProvider),

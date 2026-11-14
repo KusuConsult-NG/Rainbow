@@ -81,7 +81,6 @@ CITIZEN = [
     'lib/features/splash/splash_screen.dart',
     'lib/features/auth/login_screen.dart',
     'lib/features/auth/lock_screen.dart',
-    'lib/features/onboarding/onboarding_profile_screen.dart',
     'lib/features/onboarding/onboarding_permissions_screen.dart',
     'lib/features/onboarding/onboarding_contacts_screen.dart',
     'lib/features/home/home_screen.dart',
@@ -108,12 +107,11 @@ CITIZEN = [
 # fails, asking for the number to be lowered. So the debt is visible, cannot
 # grow, and each screen converted is one line deleted from here.
 NOT_YET: dict[str, int] = {
-    'lib/features/splash/splash_screen.dart': 6,
+    'lib/features/splash/splash_screen.dart': 5,
     'lib/features/auth/login_screen.dart': 13,
-    'lib/features/onboarding/onboarding_profile_screen.dart': 11,
     'lib/features/onboarding/onboarding_permissions_screen.dart': 22,
     'lib/features/onboarding/onboarding_contacts_screen.dart': 7,
-    'lib/features/home/home_screen.dart': 6,
+    'lib/features/home/home_screen.dart': 3,
     'lib/features/home/widgets/voice_report_dialog.dart': 12,
     'lib/features/history/incident_history_screen.dart': 12,
     'lib/features/settings/emergency_pin_screen.dart': 16,

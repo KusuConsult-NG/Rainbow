@@ -24,6 +24,7 @@ import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/auth_service.dart';
 import 'package:rainbow_app/services/tts_service.dart';
 import 'package:rainbow_app/shared/widgets/broadcast_hud.dart';
+import 'package:rainbow_app/shared/widgets/evidence_viewer.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
 import 'package:rainbow_app/shared/widgets/unconfirmed_identity_banner.dart';
 
@@ -995,23 +996,9 @@ class _MissionCard extends ConsumerWidget {
                                         ? 'Play the voice note the reporter sent'
                                         : 'Open the photo the reporter sent',
                                 excludeSemantics: true,
-                                onTap: () => showDialog<void>(context: ctx, builder: (_) => Dialog(
-                                  backgroundColor: Colors.black,
-                                  child: isVideo
-                                      ? const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 64))
-                                      : isAudio
-                                          ? const Center(child: Icon(Icons.audiotrack, color: Colors.white, size: 64))
-                                          : InteractiveViewer(child: Image.network(url)),
-                                ),),
+                                onTap: () => openEvidenceUnawaited(ctx, url),
                                 child: GestureDetector(
-                                onTap: () => showDialog<void>(context: ctx, builder: (_) => Dialog(
-                                  backgroundColor: Colors.black,
-                                  child: isVideo
-                                      ? const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 64))
-                                      : isAudio
-                                          ? const Center(child: Icon(Icons.audiotrack, color: Colors.white, size: 64))
-                                          : InteractiveViewer(child: Image.network(url)),
-                                ),),
+                                onTap: () => openEvidenceUnawaited(ctx, url),
                                 child: Container(
                                   width: 80,
                                   margin: const EdgeInsets.only(right: 6),

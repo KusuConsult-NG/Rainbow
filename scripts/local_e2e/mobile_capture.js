@@ -456,7 +456,6 @@ async function semanticsText(page) {
   const ROUTES = [
     ['/splash', 'splash', 'splash_screen.dart'],
     ['/login', 'login', 'login_screen.dart'],
-    ['/onboarding-profile', 'onboarding-profile', 'onboarding_profile_screen.dart'],
     ['/onboarding-permissions', 'onboarding-permissions', 'onboarding_permissions_screen.dart'],
     ['/onboarding-contacts', 'onboarding-contacts', 'onboarding_contacts_screen.dart'],
     ['/home', 'home', 'home_screen.dart'],

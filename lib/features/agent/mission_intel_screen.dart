@@ -12,6 +12,7 @@ import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/services/alert_media.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/shared/widgets/evidence_viewer.dart';
 import 'package:rainbow_app/shared/widgets/voice_note_player.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
@@ -212,35 +213,10 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
                     final isImage = !isVideo && !isAudio;
                     
                     return GestureDetector(
-                      onTap: () {
-                        if (isAudio) {
-                          // Plays in a sheet rather than in whatever app the
-                          // phone hands an .m4a url to. A Cloudinary `/raw/`
-                          // link is often DOWNLOADED rather than played, so
-                          // TAP TO PLAY could leave the app and then not play.
-                          unawaited(showModalBottomSheet<void>(
-                            context: context,
-                            backgroundColor: AppColors.background,
-                            builder: (context) => Padding(
-                              padding: const EdgeInsets.all(20),
-                              child: VoiceNotePlayer(
-                                url: url,
-                                label: 'RECORDING ATTACHED TO THIS INCIDENT',
-                              ),
-                            ),
-                          ),);
-                        } else {
-                          unawaited(showDialog<void>(
-                            context: context,
-                            builder: (context) => Dialog(
-                              backgroundColor: Colors.black,
-                              child: isVideo
-                                ? const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 64))
-                                : InteractiveViewer(child: Image.network(url)),
-                            ),
-                          ),);
-                        }
-                      },
+                      // Photo, voice note in a sheet, or video in the
+                      // phone's own player: see evidence_viewer.dart. A video
+                      // used to open a play icon that did nothing.
+                      onTap: () => openEvidenceUnawaited(context, url),
                       child: Container(
                         width: 120,
                         margin: const EdgeInsets.only(right: 8),

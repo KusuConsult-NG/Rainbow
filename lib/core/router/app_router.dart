@@ -17,7 +17,6 @@ import 'package:rainbow_app/features/history/incident_history_screen.dart';
 import 'package:rainbow_app/features/home/home_screen.dart';
 import 'package:rainbow_app/features/onboarding/onboarding_contacts_screen.dart';
 import 'package:rainbow_app/features/onboarding/onboarding_permissions_screen.dart';
-import 'package:rainbow_app/features/onboarding/onboarding_profile_screen.dart';
 import 'package:rainbow_app/features/settings/emergency_pin_screen.dart';
 import 'package:rainbow_app/features/report/report_category_screen.dart';
 import 'package:rainbow_app/features/report/report_details_screen.dart';
@@ -212,7 +211,6 @@ class AppRoutes {
   static const String home = '/home';
 
   /// Documentation for this public member.
-  static const String onboardingProfile = '/onboarding-profile';
 
   /// Documentation for this public member.
   static const String onboardingPermissions = '/onboarding-permissions';
@@ -317,10 +315,6 @@ final appRouter = Provider<GoRouter>((ref) {
       ),
       // ── Onboarding flow (top-level so redirect can reach them before /home loads) ──
       GoRoute(
-        path: AppRoutes.onboardingProfile,
-        pageBuilder: (c, s) => _slide(s, const OnboardingProfileScreen()),
-      ),
-      GoRoute(
         path: AppRoutes.onboardingPermissions,
         pageBuilder: (c, s) => _slide(s, const OnboardingPermissionsScreen()),
       ),
@@ -416,7 +410,10 @@ final appRouter = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: AppRoutes.reportCategory,
-            pageBuilder: (c, s) => _slide(s, const ReportCategoryScreen()),
+            pageBuilder: (c, s) => _slide(
+              s,
+              ReportCategoryScreen(situation: s.extra is String ? s.extra! as String : null),
+            ),
           ),
           GoRoute(
             path: AppRoutes.reportSubtype,
