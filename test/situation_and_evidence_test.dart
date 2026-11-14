@@ -56,13 +56,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('KIDNAP'), findsOneWidget);
       expect(find.byKey(const ValueKey('show_all_categories')), findsNothing);
-
-      // Google Fonts schedules a relayout when its fonts land; let it run
-      // before the tree goes, or the test fails on a pending frame callback.
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 500)),
-      );
-      await tester.pump();
     });
   });
 
