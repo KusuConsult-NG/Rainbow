@@ -143,4 +143,69 @@ void main() {
     const weapon = GuardianMatch(GuardianTrigger.distressPhrase, 'weapon_plea');
     expect(weapon.description, 'Guardian: distress phrase heard (weapon and a plea)');
   });
+
+  group('phase 2: Nigerian Pidgin, as the English recognizer writes it', () {
+    for (final s in [
+      'dem wan kill me',
+      'THEM WANT KILL ME',
+      'they one kill me o',
+      'dem dey kill us',
+      'dem don stab me',
+      'abeg no kill me',
+      'make una no shoot me',
+      'dem don kidnap me',
+      'THEY DONE KIDNAP US',
+      'kidnappers wan kidnap me',
+      'him get gun abeg no shoot',
+    ]) {
+      test('"$s" sends', () => expect(once(s), isNotNull));
+    }
+
+    for (final s in [
+      'dem no wan kill me',
+      'this work go kill me',
+      'my oga go kill me if i late',
+      'e go kill me with laugh',
+      'dem talk say dem wan kidnap am',
+      'abeg pass the knife',
+      'abeg help me carry this load',
+    ]) {
+      test('"$s" does not send', () => expect(once(s), isNull));
+    }
+
+    test('two Pidgin pleas a minute apart send', () {
+      final d = DistressDetector();
+      expect(d.hear('abeg leave me', t0, isFinal: true), isNull);
+      expect(d.hear('comot for my body', t0.add(const Duration(minutes: 1)), isFinal: true)?.rule,
+          'repeated_plea');
+    });
+  });
+
+  group('phase 2: what the offline recognizer actually produced', () {
+    test('two different pleas in one breath send at once', () {
+      expect(once('SOMEBODY HELP LEAVE ME ALONE GET OFF ME SOME ONE HELP')?.rule, 'repeated_plea');
+    });
+
+    test('one plea said twice in one breath does not', () {
+      expect(once('leave me alone leave me alone'), isNull);
+    });
+
+    test('"some one help", as it writes "someone", counts as a plea', () {
+      final d = DistressDetector();
+      expect(d.hear('some one help', t0, isFinal: true), isNull);
+      expect(d.hear('let me go', t0.add(const Duration(seconds: 30)), isFinal: true), isNotNull);
+    });
+
+    test('a misheard "kidnapped" still sends: "I AM BEING KIDNACKED HELP"', () {
+      expect(once('I AM BEING KIDNACKED HELP')?.rule, 'abduction');
+    });
+
+    test('"KID NAPPING ME" is read as "kidnapping me"', () {
+      expect(once('THEY ARE KID NAPPING ME')?.rule, 'abduction');
+    });
+
+    test('a misheard film about a kidnapping still sends nothing', () {
+      expect(once('THE MOVY LAST NIGHT WAS ABOUT ACHE HID NAPPING'), isNull);
+    });
+  });
 }

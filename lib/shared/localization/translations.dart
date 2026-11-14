@@ -1441,9 +1441,9 @@ class Translations {
       AppLanguage.pidgin: 'Before you on am',
     },
     'guardian_consent_listens': {
-      AppLanguage.english: 'While a session is on, Plateau Eye listens through the microphone for your secret phrase and for clear calls for help in English, such as "they are trying to kill me".',
-      AppLanguage.hausa: 'Lokacin da yake kunne, Plateau Eye yana sauraro ta makirufo don kalmarka ta sirri da kiran neman taimako bayyananne a Turanci, kamar "they are trying to kill me".',
-      AppLanguage.pidgin: 'When e dey on, Plateau Eye go dey listen with the microphone for your secret phrase and clear cry for help for English, like "they are trying to kill me".',
+      AppLanguage.english: 'While a session is on, Plateau Eye listens through the microphone for your secret phrase and for clear calls for help in English or Pidgin, such as "they are trying to kill me" or "dem wan kill me". Hausa is not understood yet.',
+      AppLanguage.hausa: 'Lokacin da yake kunne, Plateau Eye yana sauraro ta makirufo don kalmarka ta sirri da kiran neman taimako bayyananne a Turanci ko Pidgin, kamar "they are trying to kill me" ko "dem wan kill me". Har yanzu bai fahimci Hausa ba.',
+      AppLanguage.pidgin: 'When e dey on, Plateau Eye go dey listen with the microphone for your secret phrase and clear cry for help for English or Pidgin, like "they are trying to kill me" or "dem wan kill me". E never understand Hausa.',
     },
     'guardian_consent_sends': {
       AppLanguage.english: 'When it hears one, it sends a silent SOS with your location straight away, without asking you first. Cancel a false alarm with your Safe PIN.',
@@ -1451,14 +1451,14 @@ class Translations {
       AppLanguage.pidgin: 'If e hear one, e go send silent SOS with your location sharp sharp, e no go ask you first. Cancel false alarm with your Safe PIN.',
     },
     'guardian_consent_private': {
-      AppLanguage.english: 'What it hears is not recorded or saved. HQ is told only which rule matched, never your words. On iPhone, speech is recognized on the phone itself. On Android the app asks the phone to recognize speech offline, but some phones may still use Google\'s speech service.',
-      AppLanguage.hausa: 'Ba a nadar ko ajiye abin da ya ji ba. HQ tana samun sanin wace doka ce kawai ta yi daidai, ba kalmominka ba. A iPhone, ana gane magana a cikin wayar. A Android manhajar tana rokon wayar ta gane magana ba tare da intanet ba, amma wasu wayoyi na iya amfani da sabis na Google.',
-      AppLanguage.pidgin: 'Wetin e hear, dem no dey record am or keep am. HQ go only know which rule match, dem no go see your words. For iPhone, na the phone itself dey understand the talk. For Android the app dey ask the phone make e understand am offline, but some phones fit still use Google speech service.',
+      AppLanguage.english: 'What it hears is turned into text on the phone itself and then dropped. Nothing is recorded, saved or sent anywhere, on Android and iPhone alike. HQ is told only which rule matched, never your words.',
+      AppLanguage.hausa: 'Ana mayar da abin da ya ji zuwa rubutu a cikin wayar kanta sannan a jefar. Ba a nadar, ajiye ko aika komai ko\'ina, a Android da iPhone duka. HQ tana samun sanin wace doka ce kawai ta yi daidai, ba kalmominka ba.',
+      AppLanguage.pidgin: 'Wetin e hear, na inside the phone itself e dey turn am to text, then e go throw am away. Nothing dey record, save or go anywhere, for Android and iPhone. HQ go only know which rule match, dem no go see your words.',
     },
     'guardian_consent_limits': {
-      AppLanguage.english: 'It works only while Plateau Eye is open on screen. It pauses when the app is in the background or the screen is off, and while you dictate a voice report.',
-      AppLanguage.hausa: 'Yana aiki ne kawai lokacin da Plateau Eye ke bude a kan allo. Yana tsayawa idan manhajar tana baya ko allo a kashe, da kuma lokacin da kake fadin rahoto da murya.',
-      AppLanguage.pidgin: 'E dey work only when Plateau Eye open for screen. E go pause if the app dey background or screen off, and when you dey talk voice report.',
+      AppLanguage.english: 'It keeps listening with the app in the background or the screen off. On Android a notification shows while it listens, with a Stop button. It pauses while you dictate a voice report. It cannot listen once the phone is off or the app is swiped away from recent apps.',
+      AppLanguage.hausa: 'Yana ci gaba da saurare ko da manhajar tana baya ko allo a kashe. A Android sanarwa tana bayyana yayin da yake saurare, tare da maballin Tsayawa. Yana dakatawa lokacin da kake fadin rahoto da murya. Ba zai iya saurare ba idan waya a kashe take ko an rufe manhajar daga jerin manhajoji na kwanan nan.',
+      AppLanguage.pidgin: 'E go still dey listen even if the app dey background or screen off. For Android, notification go show while e dey listen, with Stop button. E go pause when you dey talk voice report. E no fit listen if phone off or you close the app from recent apps.',
     },
     'guardian_consent_accept': {
       AppLanguage.english: 'I UNDERSTAND',
@@ -1566,14 +1566,14 @@ class Translations {
       AppLanguage.pidgin: 'Guardian need microphone. Allow am for your phone settings.',
     },
     'guardian_problem_recognizer': {
-      AppLanguage.english: 'This phone cannot recognize speech offline, so Guardian cannot run on it yet.',
-      AppLanguage.hausa: 'Wannan wayar ba za ta iya gane magana ba tare da intanet ba, don haka Mai Tsaro ba zai yi aiki a kanta ba tukuna.',
-      AppLanguage.pidgin: 'This phone no fit understand talk offline, so Guardian no fit run for am yet.',
+      AppLanguage.english: 'Guardian\'s speech model could not start on this phone, so Guardian cannot run on it yet.',
+      AppLanguage.hausa: 'Samfurin magana na Mai Tsaro bai iya farawa a wannan wayar ba, don haka Mai Tsaro ba zai yi aiki a kanta ba tukuna.',
+      AppLanguage.pidgin: 'Guardian speech model no fit start for this phone, so Guardian no fit run for am yet.',
     },
     'guardian_problem_failing': {
-      AppLanguage.english: 'The phone\'s speech recognizer kept stopping, so Guardian has stopped. Try again.',
-      AppLanguage.hausa: 'Mai gane maganar wayar ya ci gaba da tsayawa, don haka Mai Tsaro ya tsaya. Sake gwadawa.',
-      AppLanguage.pidgin: 'The phone speech recognizer dey stop again and again, so Guardian don stop. Try again.',
+      AppLanguage.english: 'The microphone kept stopping, so Guardian has stopped. Try again.',
+      AppLanguage.hausa: 'Makirufo ya ci gaba da tsayawa, don haka Mai Tsaro ya tsaya. Sake gwadawa.',
+      AppLanguage.pidgin: 'The microphone dey stop again and again, so Guardian don stop. Try again.',
     },
     'guardian_sent': {
       AppLanguage.english: 'Guardian heard distress and sent a silent SOS.',
@@ -1584,6 +1584,66 @@ class Translations {
       AppLanguage.english: 'Guardian is listening',
       AppLanguage.hausa: 'Mai Tsaro yana saurare',
       AppLanguage.pidgin: 'Guardian dey listen',
+    },
+    'guardian_notify_text': {
+      AppLanguage.english: 'Listening for distress on this phone. Nothing is recorded or sent unless it sends an SOS.',
+      AppLanguage.hausa: 'Yana sauraron alamar hatsari a wannan wayar. Ba a nadar ko aika komai sai idan ya aika SOS.',
+      AppLanguage.pidgin: 'E dey listen for wahala for this phone. Nothing dey record or go anywhere unless e send SOS.',
+    },
+    'guardian_notify_stop': {
+      AppLanguage.english: 'Stop',
+      AppLanguage.hausa: 'Tsayawa',
+      AppLanguage.pidgin: 'Stop',
+    },
+    'guardian_rec_entry': {
+      AppLanguage.english: 'Help build Guardian for Hausa',
+      AppLanguage.hausa: 'Taimaka a gina Mai Tsaro na Hausa',
+      AppLanguage.pidgin: 'Help build Guardian for Hausa',
+    },
+    'guardian_rec_title': {
+      AppLanguage.english: 'Hausa recordings',
+      AppLanguage.hausa: 'Muryoyin Hausa',
+      AppLanguage.pidgin: 'Hausa recordings',
+    },
+    'guardian_rec_consent': {
+      AppLanguage.english: 'Guardian cannot understand Hausa yet. If Hausa is your first language, you can help by reading a few short sentences aloud, some calls for help and some everyday talk.\n\nYour voice is recorded only while you press Record, and the recordings stay on this phone. Nothing is sent unless you press Share and choose where to send them yourself. You can delete them all at any time.\n\nThey will be used only to build and test Guardian for Hausa. Do not say your name or anything private.',
+      AppLanguage.hausa: 'Mai Tsaro bai fahimci Hausa ba tukuna. Idan Hausa ce harshenka na farko, za ka iya taimakawa ta karanta wasu gajerun jimloli da babbar murya, wasu kiran neman taimako, wasu kuma maganar yau da kullum.\n\nAna nadar muryarka ne kawai lokacin da ka danna Nada, kuma nadin yana zama a wannan wayar. Ba a aika komai sai idan ka danna Raba ka zabi inda za a aika da kanka. Za ka iya goge su duka a kowane lokaci.\n\nZa a yi amfani da su ne kawai don gina da gwada Mai Tsaro na Hausa. Kada ka fadi sunanka ko wani abu na sirri.',
+      AppLanguage.pidgin: 'Guardian never understand Hausa. If Hausa na your first language, you fit help by reading some short sentences loud, some cry for help and some everyday talk.\n\nNa only when you press Record e go record your voice, and the recordings go stay for this phone. Nothing go send unless you press Share and choose where to send am yourself. You fit delete all of them anytime.\n\nNa only to build and test Guardian for Hausa dem go use am. No talk your name or anything private.',
+    },
+    'guardian_rec_accept': {
+      AppLanguage.english: 'I AGREE',
+      AppLanguage.hausa: 'NA YARDA',
+      AppLanguage.pidgin: 'I AGREE',
+    },
+    'guardian_rec_record': {
+      AppLanguage.english: 'RECORD',
+      AppLanguage.hausa: 'NADA',
+      AppLanguage.pidgin: 'RECORD',
+    },
+    'guardian_rec_stop': {
+      AppLanguage.english: 'STOP',
+      AppLanguage.hausa: 'TSAYA',
+      AppLanguage.pidgin: 'STOP',
+    },
+    'guardian_rec_done': {
+      AppLanguage.english: 'Recorded. Press Record to say it again.',
+      AppLanguage.hausa: 'An nada. Danna Nada don sake fada.',
+      AppLanguage.pidgin: 'E don record. Press Record to talk am again.',
+    },
+    'guardian_rec_share': {
+      AppLanguage.english: 'SHARE RECORDINGS',
+      AppLanguage.hausa: 'RABA NADE-NADEN',
+      AppLanguage.pidgin: 'SHARE RECORDINGS',
+    },
+    'guardian_rec_delete': {
+      AppLanguage.english: 'DELETE ALL RECORDINGS',
+      AppLanguage.hausa: 'GOGE DUKAN NADE-NADEN',
+      AppLanguage.pidgin: 'DELETE ALL RECORDINGS',
+    },
+    'guardian_rec_none_yet': {
+      AppLanguage.english: 'Nothing recorded yet.',
+      AppLanguage.hausa: 'Ba a nada komai ba tukuna.',
+      AppLanguage.pidgin: 'Nothing don record yet.',
     },
   };
 

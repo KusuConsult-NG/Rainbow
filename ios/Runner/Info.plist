@@ -90,6 +90,7 @@
 	<!-- Background Modes — Required for location tracking during active emergency -->
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>audio</string>
 		<string>location</string>
 		<string>fetch</string>
 		<string>remote-notification</string>

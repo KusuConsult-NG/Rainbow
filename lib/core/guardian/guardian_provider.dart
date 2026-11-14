@@ -1,15 +1,16 @@
-/// AI Emergency Guardian, phase 1: an opt-in listening session, English only,
-/// while Plateau Eye is open on screen.
+/// AI Emergency Guardian: an opt-in listening session.
 ///
 /// What a session does:
-/// - listens through the phone's recognizer in short passes, restarting each
-///   one as it ends (the recognizer stops after every pause);
+/// - listens with the microphone and turns speech into text on the phone
+///   itself (phase 2; see guardian_ear.dart), restarting if listening ends;
 /// - feeds what it hears to [DistressDetector] and drops the words at once:
 ///   nothing heard is stored or sent;
 /// - on a match, ends itself and raises a Silent SOS whose description names
 ///   the rule that matched, never the words;
-/// - steps aside while a voice report or the dispatcher chat is dictating,
-///   and while the app is in the background, where phase 1 cannot listen;
+/// - steps aside while a voice report or the dispatcher chat is dictating;
+/// - keeps listening with the app in the background or the screen off, kept
+///   alive by [GuardianKeepAlive] (on Android, a visible notification with a
+///   Stop button); if that cannot start, it pauses off screen as phase 1 did;
 /// - ends by itself at the time the user chose, at most 8 hours.
 ///
 /// There is no confirmation prompt before the SOS: a person under threat may
@@ -25,7 +26,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:rainbow_app/core/guardian/distress_detector.dart';
 import 'package:rainbow_app/core/guardian/guardian_ear.dart';
+import 'package:rainbow_app/core/guardian/guardian_keep_alive.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const String guardianConsentKey = 'guardian_consent_v1';
@@ -67,7 +70,9 @@ class SecureGuardianPhraseStore implements GuardianPhraseStore {
   }
 }
 
-final guardianEarProvider = Provider<GuardianEar>((ref) => SpeechToTextEar());
+final guardianEarProvider = Provider<GuardianEar>((ref) => OfflineEar());
+final guardianKeepAliveProvider =
+    Provider<GuardianKeepAlive>((ref) => PlatformGuardianKeepAlive());
 final guardianPhraseStoreProvider =
     Provider<GuardianPhraseStore>((ref) => SecureGuardianPhraseStore());
 
@@ -139,11 +144,10 @@ enum GuardianProblem {
   /// The microphone permission was refused.
   microphoneDenied,
 
-  /// The phone's speech recognizer is missing, or refuses on-device
-  /// recognition for this language.
+  /// The speech model or the microphone could not be started.
   recognizerUnavailable,
 
-  /// The recognizer kept stopping straight after starting.
+  /// Listening kept stopping straight after starting.
   recognizerKeepsFailing,
 }
 
@@ -183,6 +187,10 @@ class GuardianNotifier extends Notifier<GuardianState> {
   bool _passRunning = false;
   int _quickFailures = 0;
 
+  /// Whether this session listens with the app off screen. Decided when the
+  /// session starts: true only if the ear can and the keep-alive started.
+  bool _backgroundListening = false;
+
   /// Clock seam for tests.
   @visibleForTesting
   DateTime Function() now = DateTime.now;
@@ -191,6 +199,7 @@ class GuardianNotifier extends Notifier<GuardianState> {
   static const Duration _quickPass = Duration(seconds: 1);
 
   GuardianEar get _ear => ref.read(guardianEarProvider);
+  GuardianKeepAlive get _keepAlive => ref.read(guardianKeepAliveProvider);
 
   @override
   GuardianState build() {
@@ -200,6 +209,7 @@ class GuardianNotifier extends Notifier<GuardianState> {
       onHide: () => _setBackground(true),
       onShow: () => _setBackground(false),
     );
+    ref.read(guardianKeepAliveProvider).whenStopPressed(() => unawaited(stop()));
     ref.onDispose(() {
       busy.removeListener(_onBusyChanged);
       lifecycle.dispose();
@@ -240,6 +250,16 @@ class GuardianNotifier extends Notifier<GuardianState> {
       await stop();
       return _fail(GuardianProblem.recognizerUnavailable);
     }
+
+    _backgroundListening = false;
+    if (state.active && ear.listensInBackground) {
+      final lang = ref.read(languageProvider);
+      _backgroundListening = await _keepAlive.start(
+        title: Translations.get('guardian_home_banner', lang),
+        text: Translations.get('guardian_notify_text', lang),
+        stopLabel: Translations.get('guardian_notify_stop', lang),
+      );
+    }
     return null;
   }
 
@@ -248,11 +268,13 @@ class GuardianNotifier extends Notifier<GuardianState> {
   Future<void> stop({GuardianProblem? problem}) async {
     _endTimer?.cancel();
     _restartTimer?.cancel();
-    final wasRunning = _passRunning;
     _passRunning = false;
     _detector.reset();
+    final hadBackground = _backgroundListening;
+    _backgroundListening = false;
     state = GuardianState(problem: problem, lastMatch: state.lastMatch);
-    if (wasRunning) await _ear.stop();
+    await _ear.release();
+    if (hadBackground) await _keepAlive.stop();
   }
 
   GuardianProblem _fail(GuardianProblem p) {
@@ -283,16 +305,18 @@ class GuardianNotifier extends Notifier<GuardianState> {
     // utterance, and the next report must not send a second time.
     _endTimer?.cancel();
     _restartTimer?.cancel();
-    final wasRunning = _passRunning;
     _passRunning = false;
     _detector.reset();
+    final hadBackground = _backgroundListening;
+    _backgroundListening = false;
     state = GuardianState(lastMatch: match);
     // The SOS before the microphone: nothing waits on stopping a recognizer.
     final sos = ref.read(emergencyProvider.notifier).startEmergency(
           silent: true,
           description: match.description,
         );
-    if (wasRunning) unawaited(_ear.stop());
+    unawaited(_ear.release());
+    if (hadBackground) unawaited(_keepAlive.stop());
     await sos;
   }
 
@@ -327,9 +351,12 @@ class GuardianNotifier extends Notifier<GuardianState> {
       lastMatch: state.lastMatch,
     );
     if (busy) {
-      // The other feature's own listen has already taken the recognizer over.
+      // The microphone is the other feature's until it is done.
       _restartTimer?.cancel();
-      _passRunning = false;
+      if (_passRunning) {
+        _passRunning = false;
+        unawaited(_ear.stop());
+      }
     } else {
       unawaited(_listenOnce());
     }
@@ -337,6 +364,8 @@ class GuardianNotifier extends Notifier<GuardianState> {
 
   void _setBackground(bool background) {
     if (!state.active) return;
+    // A session kept alive in the background simply carries on listening.
+    if (_backgroundListening) return;
     state = GuardianState(
       active: true,
       startedAt: state.startedAt,

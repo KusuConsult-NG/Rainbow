@@ -13,9 +13,11 @@
 /// ("the movie was about a kidnapping") and negated phrases ("nobody is
 /// kidnapping me") send nothing.
 ///
-/// English only. The phone's speech recognizer has no Hausa or Nigerian Pidgin
-/// model, so phrases in those languages need the on-device phrase-spotting
-/// model planned for phase 2.
+/// English, and Nigerian Pidgin (phase 2). The recognizer on the phone is an
+/// English model; Pidgin is close enough to English that it writes Pidgin
+/// down in English spelling, so the Pidgin rules below are written against
+/// what it produces: "dem wan kill me" usually arrives as "THEM WANT KILL ME"
+/// or "THEY ONE KILL ME". Hausa needs its own model, planned for phase 3.
 library;
 
 /// What started a Guardian SOS.
@@ -111,25 +113,48 @@ class DistressDetector {
       'abduction',
       RegExp(r'\b(im|i am|ive been|i have been|were|we are|weve been|we have been) (being )?(kidnapped|abducted)\b'),
     ),
+    // Nigerian Pidgin, as the English recognizer writes it down. The verb
+    // must follow the subject directly: "dem no wan kill me" ("they don't want
+    // to kill me") has "no" in between and does not match. Not the future
+    // "go", and not "e": "this work go kill me", "my oga go kill me if I
+    // late", "e go kill me" are everyday exaggeration, not a threat.
+    (
+      'threat_to_life',
+      RegExp(r'\b(dem|them|they|im|him|he|she|una) (wan|want|one|won|dey|day|the|don|done) (kill|shoot|stab|wound) (me|us)\b'),
+    ),
+    (
+      // "abeg no kill me", "make una no shoot me": in Pidgin "no" before the
+      // verb is the plea itself, "don't".
+      'threat_to_life',
+      RegExp(r'\b(abeg|a beg|i beg|please|make (una|you|dem|them)) (no|not) (kill|shoot|stab) (me|us)\b'),
+    ),
+    (
+      'abduction',
+      RegExp(r'\b(dem|them|they|kidnappers) (wan|want|one|won|don|done|dey|day|the|go) kidnap (me|us)\b'),
+    ),
   ];
 
   static final RegExp _weapon =
-      RegExp(r'\b(gun|guns|knife|knives|machete|cutlass|rifle|pistol|weapon)\b');
+      RegExp(r'\b(gun|guns|knife|knives|machete|matchet|cutlass|rifle|pistol|dagger|weapon)\b');
   static final RegExp _plea = RegExp(
-    // Not a bare "please": "please pass the knife" is not a plea.
-    r'\b(please dont|dont shoot|dont hurt|help me|help us|leave me|let me go|let us go)\b',
+    // Not a bare "please" or "abeg": "please pass the knife" is not a plea.
+    r'\b(please dont|dont shoot|dont hurt|help me|help us|leave me|let me go|let us go|abeg no|no shoot|no wound)\b',
   );
 
   static final RegExp _weakPlea = RegExp(
     // Not a bare "help me": "can you help me with this bag", asked twice,
-    // would add up to an SOS.
-    r'\b(leave me alone|let me go|let us go|get off me|stop hurting me|somebody help|someone help)\b',
+    // would add up to an SOS. The recognizer writes "someone" as "some one".
+    // Pidgin: "abeg leave me", "comot for my body" (get off me), "help me o".
+    r'\b(leave me alone|let me go|let us go|get off me|stop hurting me|some ?body help|some ?one help'
+    r'|abeg leave me|leave me (o|oh)|comot for my body|comot (your|ya) hand|help me (o|oh)|abeg help me|make una help me)\b',
   );
 
   /// Words that report rather than call for help. Any of them in the same
   /// utterance switches the built-in rules off for it.
   static final RegExp _reporting = RegExp(
-    r'\b(movie|movies|film|films|news|story|stories|book|novel|series|episode|song|game|heard that|yesterday|last night|last week|they said|he said|she said|imagine|pretend)\b',
+    r'\b(movie|movies|film|films|news|story|stories|book|novel|series|episode|song|game|heard that|yesterday|last night|last week|they said|he said|she said|imagine|pretend'
+    // Pidgin: "dem talk say", "I hear say", "e happen yesterday".
+    r'|talk say|hear say|dem talk|dem say)\b',
   );
 
   static const Set<String> _negations = {
@@ -144,7 +169,21 @@ class DistressDetector {
       .replaceAll(RegExp(r"['’`]"), '')
       .replaceAll(RegExp(r'[^a-z0-9 ]+'), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
+      .trim()
+      .replaceAllMapped(_kidnapLike, _kidnapWord);
+
+  // The recognizer sometimes mishears the one word that matters most:
+  // "I AM BEING KIDNACKED" for "kidnapped", "KID NAPPING". Nothing else in
+  // English starts with "kidna", so any such word is read as the kidnap word
+  // its ending suggests. "ACHE HID NAPPING" is not touched.
+  static final RegExp _kidnapLike = RegExp(r'\bkid ?na[a-z]*');
+  static String _kidnapWord(Match m) {
+    final w = m.group(0)!.replaceAll(' ', '');
+    if (w.endsWith('ing')) return 'kidnapping';
+    if (w.endsWith('ed') || w.endsWith('pt')) return 'kidnapped';
+    if (w.endsWith('er') || w.endsWith('ers')) return 'kidnappers';
+    return 'kidnap';
+  }
 
   /// Whether [phrase] may be used as a secret phrase; null when it may.
   static SecretPhraseProblem? checkSecretPhrase(String phrase) {
@@ -195,6 +234,13 @@ class DistressDetector {
       return const GuardianMatch(GuardianTrigger.distressPhrase, 'weapon_plea');
     }
 
+    // Two different pleas in one breath ("somebody help, leave me alone, get
+    // off me") is distress, not two requests: it sends at once.
+    if (isFinal && _distinctUnnegated(_weakPlea, text) >= 2) {
+      _lastPlea = null;
+      return const GuardianMatch(GuardianTrigger.distressPhrase, 'repeated_plea');
+    }
+
     if (isFinal && _matchesUnnegated(_weakPlea, text)) {
       final last = _lastPlea;
       _lastPlea = at;
@@ -212,17 +258,23 @@ class DistressDetector {
   static bool _containsPhrase(String text, String phrase) =>
       RegExp('\\b${RegExp.escape(phrase)}\\b').hasMatch(text);
 
+  /// How many different phrases of [pattern] occur in [text], unnegated.
+  static int _distinctUnnegated(RegExp pattern, String text) => pattern
+      .allMatches(text)
+      .where((m) => !_negatedAt(text, m.start))
+      .map((m) => m.group(0)!.replaceAll(' ', ''))
+      .toSet()
+      .length;
+
+  static bool _negatedAt(String text, int start) {
+    final before = text.substring(0, start).trim();
+    final words = before.isEmpty ? const <String>[] : before.split(' ');
+    final window = words.length <= 3 ? words : words.sublist(words.length - 3);
+    return window.any(_negations.contains) || window.join(' ').endsWith('no one');
+  }
+
   /// True when [pattern] matches somewhere in [text] with no negation among
   /// the three words before the match.
-  static bool _matchesUnnegated(RegExp pattern, String text) {
-    for (final m in pattern.allMatches(text)) {
-      final before = text.substring(0, m.start).trim();
-      final words = before.isEmpty ? const <String>[] : before.split(' ');
-      final window = words.length <= 3 ? words : words.sublist(words.length - 3);
-      final joined = window.join(' ');
-      final negated = window.any(_negations.contains) || joined.endsWith('no one');
-      if (!negated) return true;
-    }
-    return false;
-  }
+  static bool _matchesUnnegated(RegExp pattern, String text) =>
+      pattern.allMatches(text).any((m) => !_negatedAt(text, m.start));
 }

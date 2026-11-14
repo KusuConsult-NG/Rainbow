@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rainbow_app/core/guardian/guardian_ear.dart';
+import 'package:rainbow_app/core/guardian/guardian_keep_alive.dart';
 import 'package:rainbow_app/core/guardian/guardian_provider.dart';
 import 'package:rainbow_app/features/guardian/guardian_screen.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
@@ -13,14 +14,25 @@ class _FakeEar implements GuardianEar {
   bool isSupported = true;
   bool micAllowed = true;
   bool listenWorks = true;
+  bool background = false;
   int listens = 0;
   int stops = 0;
+  int releases = 0;
   void Function(String, bool)? _words;
   void Function()? _ended;
   final ValueNotifier<bool> busy = ValueNotifier<bool>(false);
 
   @override
   bool get supported => isSupported;
+
+  @override
+  bool get listensInBackground => background;
+
+  @override
+  Future<void> release() async {
+    releases++;
+    await stop();
+  }
 
   @override
   ValueListenable<bool> get otherFeatureBusy => busy;
@@ -58,6 +70,34 @@ class _FakeEar implements GuardianEar {
   }
 }
 
+/// Android's "Guardian is listening" service, without Android.
+class _FakeKeepAlive implements GuardianKeepAlive {
+  bool works = true;
+  bool running = false;
+  int starts = 0;
+  String? title;
+  String? stopLabel;
+  void Function()? _stop;
+
+  @override
+  Future<bool> start({required String title, required String text, required String stopLabel}) async {
+    starts++;
+    this.title = title;
+    this.stopLabel = stopLabel;
+    running = works;
+    return works;
+  }
+
+  @override
+  Future<void> stop() async => running = false;
+
+  @override
+  void whenStopPressed(void Function()? callback) => _stop = callback;
+
+  /// The person pressing Stop on the notification.
+  void pressStop() => _stop?.call();
+}
+
 class _MemoryPhrases implements GuardianPhraseStore {
   String? phrase;
   @override
@@ -79,12 +119,14 @@ class _RecordingEmergency extends EmergencyNotifier {
 
 void main() {
   late _FakeEar ear;
+  late _FakeKeepAlive keepAlive;
   late _MemoryPhrases phrases;
   late ProviderContainer c;
   late DateTime clock;
 
   List<Override> overrides() => [
         guardianEarProvider.overrideWithValue(ear),
+        guardianKeepAliveProvider.overrideWithValue(keepAlive),
         guardianPhraseStoreProvider.overrideWithValue(phrases),
         emergencyProvider.overrideWith(_RecordingEmergency.new),
       ];
@@ -93,6 +135,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     _RecordingEmergency.raised.clear();
     ear = _FakeEar();
+    keepAlive = _FakeKeepAlive();
     phrases = _MemoryPhrases();
     clock = DateTime(2026, 11, 14, 20);
     c = ProviderContainer(overrides: overrides());
@@ -232,6 +275,76 @@ void main() {
   testWidgets('the web build says Guardian needs the phone app', (t) async {
     ear.isSupported = false;
     expect(await g().start(const Duration(hours: 1)), GuardianProblem.unsupported);
+  });
+
+  group('phase 2: listening in the background', () {
+    testWidgets('with an ear that can, it keeps listening off screen, behind a visible notification', (t) async {
+      ear.background = true;
+      await g().start(const Duration(hours: 1));
+      expect(keepAlive.running, isTrue);
+      expect(keepAlive.title, 'Guardian is listening');
+      expect(keepAlive.stopLabel, 'Stop');
+
+      g().debugSetBackground(true);
+      await t.pump();
+      expect(s().listening, isTrue, reason: 'no pause: the session is kept alive');
+      expect(ear.stops, 0);
+
+      ear.say("they're kidnapping me");
+      await t.pump();
+      expect(_RecordingEmergency.raised.single.$2, 'Guardian: distress phrase heard (abduction)');
+      expect(keepAlive.running, isFalse, reason: 'the notification goes with the session');
+    });
+
+    testWidgets('Stop on the notification ends the session and frees the microphone', (t) async {
+      ear.background = true;
+      await g().start(const Duration(hours: 1));
+      keepAlive.pressStop();
+      await t.pump();
+      expect(s().active, isFalse);
+      expect(keepAlive.running, isFalse);
+      expect(ear.releases, 1);
+      expect(_RecordingEmergency.raised, isEmpty);
+    });
+
+    testWidgets('if the notification service cannot start, it pauses off screen as before', (t) async {
+      ear.background = true;
+      keepAlive.works = false;
+      await g().start(const Duration(hours: 1));
+      g().debugSetBackground(true);
+      await t.pump();
+      expect(s().pausedInBackground, isTrue);
+      ear.say("they're kidnapping me");
+      await t.pump();
+      expect(_RecordingEmergency.raised, isEmpty, reason: 'a pause is a promise not to be listening');
+      await g().stop();
+    });
+
+    testWidgets('an ear that cannot listen off screen never starts the notification', (t) async {
+      await g().start(const Duration(hours: 1));
+      expect(keepAlive.starts, 0);
+      await g().stop();
+    });
+
+    testWidgets('a voice report takes the microphone: Guardian lets go of it, then takes it back', (t) async {
+      ear.background = true;
+      await g().start(const Duration(hours: 1));
+      ear.busy.value = true;
+      await t.pump();
+      expect(ear.stops, 1, reason: 'the microphone is released for the dictation');
+      expect(s().listening, isFalse);
+      ear.busy.value = false;
+      await t.pump();
+      expect(ear.listens, 2);
+      expect(s().listening, isTrue);
+      await g().stop();
+    });
+
+    testWidgets('stopping the session frees the speech models', (t) async {
+      await g().start(const Duration(hours: 1));
+      await g().stop();
+      expect(ear.releases, 1);
+    });
   });
 
   group('the screen', () {
