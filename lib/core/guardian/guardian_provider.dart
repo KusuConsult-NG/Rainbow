@@ -27,6 +27,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:rainbow_app/core/guardian/distress_detector.dart';
 import 'package:rainbow_app/core/guardian/guardian_ear.dart';
 import 'package:rainbow_app/core/guardian/guardian_keep_alive.dart';
+import 'package:rainbow_app/core/guardian/hausa_provider.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -191,6 +192,10 @@ class GuardianNotifier extends Notifier<GuardianState> {
   /// session starts: true only if the ear can and the keep-alive started.
   bool _backgroundListening = false;
 
+  /// The downloaded Hausa model, when Hausa is switched on. Read when the
+  /// session starts.
+  String? _hausaDir;
+
   /// Clock seam for tests.
   @visibleForTesting
   DateTime Function() now = DateTime.now;
@@ -231,6 +236,7 @@ class GuardianNotifier extends Notifier<GuardianState> {
 
     final phrase = await ref.read(guardianPhraseStoreProvider).read();
     _detector = DistressDetector(secretPhrase: phrase);
+    _hausaDir = ref.read(guardianHausaProvider).listeningDir;
     _quickFailures = 0;
 
     final cap = guardianDurations.last;
@@ -286,7 +292,7 @@ class GuardianNotifier extends Notifier<GuardianState> {
     if (!state.listening || _passRunning) return true;
     _passRunning = true;
     _passStartedAt = now();
-    final ok = await _ear.listen(onWords: _onWords, onEnded: _onPassEnded);
+    final ok = await _ear.listen(onWords: _onWords, onEnded: _onPassEnded, hausaModelDir: _hausaDir);
     if (!ok) _passRunning = false;
     return ok;
   }

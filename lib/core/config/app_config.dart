@@ -84,6 +84,17 @@ class AppConfig {
     return bytes;
   }
 
+  /// Where Guardian's Hausa model is published: the manifest.json that
+  /// training/hausa/publish.py uploads, e.g.
+  /// `https://huggingface.co/<org>/guardian-hausa/resolve/main/manifest.json`.
+  ///
+  /// Public by nature, a download address. `null` (unset, or not https) hides
+  /// the Hausa option: Guardian listens in English and Pidgin only.
+  static String? get guardianHausaManifestUrl {
+    final raw = _read('GUARDIAN_HAUSA_MANIFEST_URL')?.trim();
+    return raw != null && raw.startsWith('https://') ? raw : null;
+  }
+
   static String? get cloudinaryCloudName => _read('CLOUDINARY_CLOUD_NAME');
   static String? get cloudinaryUploadPreset => _read('CLOUDINARY_UPLOAD_PRESET');
   static String? get demoCitizenEmail => _read('DEMO_CITIZEN_EMAIL');

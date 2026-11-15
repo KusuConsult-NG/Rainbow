@@ -75,6 +75,7 @@ class OfflineTranscriber {
     GuardianModelFiles files, {
     required this.onText,
     this.numThreads = 1,
+    String? hausaDir,
   }) {
     _vad = sherpa.VoiceActivityDetector(
       config: sherpa.VadModelConfig(
@@ -107,7 +108,32 @@ class OfflineTranscriber {
         ),
       ),
     );
+    // Phase 3: the downloaded Hausa model (hausa_model.dart), a Whisper
+    // fine-tuned on Hausa. Each utterance is transcribed by both, and both
+    // texts go to the detector, which holds the rules for every language.
+    if (hausaDir != null) {
+      _hausa = sherpa.OfflineRecognizer(
+        sherpa.OfflineRecognizerConfig(
+          model: sherpa.OfflineModelConfig(
+            whisper: sherpa.OfflineWhisperModelConfig(
+              encoder: '$hausaDir/hausa-encoder.int8.onnx',
+              decoder: '$hausaDir/hausa-decoder.int8.onnx',
+              language: 'ha',
+              task: 'transcribe',
+            ),
+            tokens: '$hausaDir/hausa-tokens.txt',
+            numThreads: numThreads,
+            debug: false,
+          ),
+        ),
+      );
+    }
   }
+
+  sherpa.OfflineRecognizer? _hausa;
+
+  /// Whether the Hausa model is loaded.
+  bool get hearsHausa => _hausa != null;
 
   static const int sampleRate = 16000;
   static const int maxUtteranceSeconds = 12;
@@ -188,14 +214,16 @@ class OfflineTranscriber {
   }
 
   void _transcribe(Float32List speech) {
-    final stream = _recognizer.createStream();
-    try {
-      stream.acceptWaveform(samples: speech, sampleRate: sampleRate);
-      _recognizer.decode(stream);
-      final text = _recognizer.getResult(stream).text.trim();
-      if (text.isNotEmpty) onText(text);
-    } finally {
-      stream.free();
+    for (final recognizer in [_recognizer, if (_hausa != null) _hausa!]) {
+      final stream = recognizer.createStream();
+      try {
+        stream.acceptWaveform(samples: speech, sampleRate: sampleRate);
+        recognizer.decode(stream);
+        final text = recognizer.getResult(stream).text.trim();
+        if (text.isNotEmpty) onText(text);
+      } finally {
+        stream.free();
+      }
     }
   }
 
@@ -227,6 +255,7 @@ class OfflineTranscriber {
     if (_freed) return;
     _freed = true;
     _recognizer.free();
+    _hausa?.free();
     _vad.free();
   }
 }

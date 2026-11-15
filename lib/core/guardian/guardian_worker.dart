@@ -29,13 +29,17 @@ class GuardianWorker {
 
   bool _closed = false;
 
-  /// Starts a worker with the models in [modelDir]. Fails if they cannot be
-  /// loaded, so a broken install is reported instead of listening to nothing.
-  static Future<GuardianWorker> spawn(String modelDir) async {
+  /// The Hausa model folder this worker loaded, if any.
+  String? hausaDir;
+
+  /// Starts a worker with the models in [modelDir], and the downloaded Hausa
+  /// model in [hausaDir] if given. Fails if they cannot be loaded, so a broken
+  /// install is reported instead of listening to nothing.
+  static Future<GuardianWorker> spawn(String modelDir, {String? hausaDir}) async {
     final fromWorker = ReceivePort();
     final isolate = await Isolate.spawn(
       _main,
-      [fromWorker.sendPort, modelDir],
+      [fromWorker.sendPort, modelDir, hausaDir],
       debugName: 'guardian-worker',
       errorsAreFatal: true,
     );
@@ -57,7 +61,7 @@ class GuardianWorker {
     });
     try {
       final port = await ready.future.timeout(const Duration(seconds: 30));
-      return worker = GuardianWorker._(isolate, port, fromWorker);
+      return worker = GuardianWorker._(isolate, port, fromWorker)..hausaDir = hausaDir;
     } on Object {
       isolate.kill(priority: Isolate.immediate);
       fromWorker.close();
@@ -89,12 +93,14 @@ class GuardianWorker {
   static void _main(List<Object?> args) {
     final toMain = args[0]! as SendPort;
     final modelDir = args[1]! as String;
+    final hausaDir = args[2] as String?;
     final inbox = ReceivePort();
     OfflineTranscriber? t;
     try {
       sherpa.initBindings();
       t = OfflineTranscriber(
         GuardianModelFiles.inDirectory(modelDir),
+        hausaDir: hausaDir,
         onText: toMain.send,
       );
     } on Object catch (e) {

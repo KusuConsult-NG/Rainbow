@@ -3,7 +3,11 @@
 //
 //   dart run tool/guardian_eval.dart --models assets/guardian \
 //       --labels recordings/labels.csv [--secret "the blue goat sings"] \
-//       [--show-text]
+//       [--show-text] [--hausa-model path/to/downloaded/hausa]
+//
+// --hausa-model: a folder with the Hausa model (hausa-encoder.int8.onnx,
+// hausa-decoder.int8.onnx, hausa-tokens.txt), as training/hausa/ exports it
+// and the app downloads it. Each utterance is then transcribed by both.
 //
 // labels.csv, one recording per line, paths relative to the CSV:
 //
@@ -40,6 +44,7 @@ void main(List<String> args) {
   final labels = arg('--labels');
   final secret = arg('--secret');
   final showText = args.contains('--show-text');
+  final hausa = arg('--hausa-model');
   if (labels == null) {
     stderr.writeln('usage: dart run tool/guardian_eval.dart --labels labels.csv '
         '[--models assets/guardian] [--secret "phrase"] [--show-text]');
@@ -60,7 +65,7 @@ void main(List<String> args) {
     if (row.length < 2) continue;
     final path = '$base/${row[0]}';
     final expect = row[1];
-    results.add(_run(path, expect, models, secret, showText));
+    results.add(_run(path, expect, models, secret, showText, hausa));
   }
   _report(results, secret != null);
 }
@@ -75,7 +80,7 @@ class _Result {
   bool get sent => match != null;
 }
 
-_Result _run(String path, String expect, String models, String? secret, bool showText) {
+_Result _run(String path, String expect, String models, String? secret, bool showText, String? hausa) {
   final wave = sherpa.readWave(path);
   if (wave.sampleRate != OfflineTranscriber.sampleRate) {
     stderr.writeln('$path: ${wave.sampleRate} Hz, needs 16000 Hz mono — skipped');
@@ -89,6 +94,7 @@ _Result _run(String path, String expect, String models, String? secret, bool sho
 
   final t = OfflineTranscriber(
     GuardianModelFiles.inDirectory(models),
+    hausaDir: hausa,
     onText: (text) {
       texts.add(text);
       match ??= detector.hear(text, at, isFinal: true);

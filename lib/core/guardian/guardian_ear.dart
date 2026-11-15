@@ -39,10 +39,12 @@ abstract class GuardianEar {
 
   /// Starts listening. [onWords] gets every recognized utterance; [onEnded]
   /// is called once when listening ends for any reason other than [stop].
-  /// Returns false when listening could not start.
+  /// [hausaModelDir], when given, also listens in Hausa with that downloaded
+  /// model. Returns false when listening could not start.
   Future<bool> listen({
     required void Function(String words, bool isFinal) onWords,
     required void Function() onEnded,
+    String? hausaModelDir,
   });
 
   /// Stops listening and forgets anything heard but not yet transcribed.
@@ -90,11 +92,20 @@ class OfflineEar implements GuardianEar {
   Future<bool> listen({
     required void Function(String words, bool isFinal) onWords,
     required void Function() onEnded,
+    String? hausaModelDir,
   }) async {
     if (!supported) return false;
     await _stopMic();
     try {
-      final worker = _worker ??= await GuardianWorker.spawn(await GuardianModels.install());
+      // A worker loaded for a different set of languages is replaced.
+      if (_worker != null && _worker!.hausaDir != hausaModelDir) {
+        _worker!.close();
+        _worker = null;
+      }
+      final worker = _worker ??= await GuardianWorker.spawn(
+        await GuardianModels.install(),
+        hausaDir: hausaModelDir,
+      );
       worker
         ..onText = ((text) => onWords(text, true))
         ..onFailed = ((e) {

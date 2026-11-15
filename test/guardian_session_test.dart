@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rainbow_app/core/guardian/guardian_ear.dart';
 import 'package:rainbow_app/core/guardian/guardian_keep_alive.dart';
 import 'package:rainbow_app/core/guardian/guardian_provider.dart';
+import 'package:rainbow_app/core/guardian/hausa_model.dart';
+import 'package:rainbow_app/core/guardian/hausa_provider.dart';
 import 'package:rainbow_app/features/guardian/guardian_screen.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,6 +22,7 @@ class _FakeEar implements GuardianEar {
   int listens = 0;
   int stops = 0;
   int releases = 0;
+  String? lastHausaDir;
   void Function(String, bool)? _words;
   void Function()? _ended;
   final ValueNotifier<bool> busy = ValueNotifier<bool>(false);
@@ -44,8 +49,10 @@ class _FakeEar implements GuardianEar {
   Future<bool> listen({
     required void Function(String words, bool isFinal) onWords,
     required void Function() onEnded,
+    String? hausaModelDir,
   }) async {
     if (!listenWorks) return false;
+    lastHausaDir = hausaModelDir;
     listens++;
     _words = onWords;
     _ended = onEnded;
@@ -123,12 +130,17 @@ void main() {
   late _MemoryPhrases phrases;
   late ProviderContainer c;
   late DateTime clock;
+  late Directory modelRoot;
+  String? hausaUrl;
 
   List<Override> overrides() => [
         guardianEarProvider.overrideWithValue(ear),
         guardianKeepAliveProvider.overrideWithValue(keepAlive),
         guardianPhraseStoreProvider.overrideWithValue(phrases),
         emergencyProvider.overrideWith(_RecordingEmergency.new),
+        guardianHausaStoreProvider.overrideWith(
+          (ref) async => HausaModelStore(root: modelRoot, manifestUrl: hausaUrl),
+        ),
       ];
 
   setUp(() {
@@ -138,11 +150,16 @@ void main() {
     keepAlive = _FakeKeepAlive();
     phrases = _MemoryPhrases();
     clock = DateTime(2026, 11, 14, 20);
+    modelRoot = Directory.systemTemp.createTempSync('guardian_models');
+    hausaUrl = null;
     c = ProviderContainer(overrides: overrides());
     c.read(guardianProvider.notifier).now = () => clock;
   });
 
-  tearDown(() => c.dispose());
+  tearDown(() {
+    c.dispose();
+    if (modelRoot.existsSync()) modelRoot.deleteSync(recursive: true);
+  });
 
   GuardianNotifier g() => c.read(guardianProvider.notifier);
   GuardianState s() => c.read(guardianProvider);
@@ -347,6 +364,66 @@ void main() {
     });
   });
 
+  group('phase 3: Hausa', () {
+    /// A complete, verified Hausa model on disk, as HausaModelStore leaves one.
+    String installHausa() {
+      final d = Directory('${modelRoot.path}/hausa-202611150900')..createSync(recursive: true);
+      for (final f in hausaModelFiles) {
+        File('${d.path}/$f').writeAsStringSync('x');
+      }
+      File('${d.path}/.complete').writeAsStringSync('202611150900');
+      return d.path;
+    }
+
+    Future<ProviderContainer> containerWith({required bool enabled}) async {
+      hausaUrl = 'https://huggingface.co/example/guardian-hausa/resolve/main/manifest.json';
+      SharedPreferences.setMockInitialValues({guardianHausaEnabledKey: enabled});
+      c.dispose();
+      c = ProviderContainer(overrides: overrides());
+      c.read(guardianProvider.notifier).now = () => clock;
+      c.read(guardianHausaProvider);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      return c;
+    }
+
+    testWidgets('with no model address configured, Hausa is not offered and nothing loads it', (t) async {
+      await t.runAsync(() async {
+        c.read(guardianHausaProvider);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      expect(c.read(guardianHausaProvider).status, HausaStatus.unavailable);
+      await g().start(const Duration(hours: 1));
+      expect(ear.lastHausaDir, isNull);
+      await g().stop();
+    });
+
+    testWidgets('a downloaded model that is switched on is listened with', (t) async {
+      final dir = installHausa();
+      await t.runAsync(() => containerWith(enabled: true));
+      expect(c.read(guardianHausaProvider).status, HausaStatus.ready);
+      await g().start(const Duration(hours: 1));
+      expect(ear.lastHausaDir, dir);
+      await g().stop();
+    });
+
+    testWidgets('a downloaded model that is switched off is not', (t) async {
+      installHausa();
+      await t.runAsync(() => containerWith(enabled: false));
+      await g().start(const Duration(hours: 1));
+      expect(ear.lastHausaDir, isNull);
+      await g().stop();
+    });
+
+    testWidgets('a Hausa call for help heard in a session sends a silent SOS', (t) async {
+      installHausa();
+      await t.runAsync(() => containerWith(enabled: true));
+      await g().start(const Duration(hours: 1));
+      ear.say('taimake ni suna son su kashe ni');
+      await t.pump();
+      expect(_RecordingEmergency.raised.single, (true, 'Guardian: distress phrase heard (threat to life)'));
+    });
+  });
+
   group('the screen', () {
     Future<void> pumpScreen(WidgetTester t) async {
       await t.binding.setSurfaceSize(const Size(400, 1600));
@@ -384,6 +461,15 @@ void main() {
       await t.pump();
       expect(s().active, isFalse);
       expect(find.text('Guardian is off'), findsOneWidget);
+    });
+
+    testWidgets('with no Hausa model address, the screen says Hausa is not available yet', (t) async {
+      await c.read(guardianConsentProvider.notifier).accept();
+      await pumpScreen(t);
+      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await t.pump();
+      expect(find.textContaining('cannot listen in Hausa yet'), findsOneWidget);
+      expect(find.byKey(const ValueKey('guardian_ha_download')), findsNothing);
     });
 
     testWidgets('a weak secret phrase is refused and a good one is saved', (t) async {

@@ -17,7 +17,12 @@
 /// English model; Pidgin is close enough to English that it writes Pidgin
 /// down in English spelling, so the Pidgin rules below are written against
 /// what it produces: "dem wan kill me" usually arrives as "THEM WANT KILL ME"
-/// or "THEY ONE KILL ME". Hausa needs its own model, planned for phase 3.
+/// or "THEY ONE KILL ME".
+///
+/// Hausa (phase 3) is heard by its own downloaded model (hausa_model.dart),
+/// whose text comes here like any other. The Hausa rules below were written
+/// without a native speaker and must be reviewed by one before Hausa is
+/// offered; each carries its English meaning for that review.
 library;
 
 /// What started a Guardian SOS.
@@ -132,13 +137,42 @@ class DistressDetector {
       'abduction',
       RegExp(r'\b(dem|them|they|kidnappers) (wan|want|one|won|don|done|dey|day|the|go) kidnap (me|us)\b'),
     ),
+    // Hausa, after normalize() (hooked letters made plain: ɗ -> d, ƙ -> k).
+    // "suna son su kashe ni" (they want to kill me), "za su kashe ni" (they
+    // will kill me), "suna kashe mu" (they are killing us), "sun harbe ni"
+    // (they shot me). "ba za su kashe ni ba" (they will not kill me) is
+    // negated by the "ba" before it.
+    (
+      'threat_to_life',
+      RegExp(r'\b(suna|yana|tana|sun|ya|ta|za su|zasu|zai|za ta|zata)( son (su|ya|ta))? (kashe|harbe|soke) (ni|mu)\b'),
+    ),
+    (
+      // "kar ku kashe ni", "kada ka harbe ni": don't kill / shoot / stab me.
+      'threat_to_life',
+      RegExp(r'\b(kar|kada) (ku|ka|ki|su) (kashe|harbe|soke) (ni|mu)\b'),
+    ),
+    (
+      // "an sace ni" (I have been kidnapped), "suna sace mu" (they are
+      // kidnapping us), "masu garkuwa sun kama ni" (kidnappers have seized me).
+      'abduction',
+      RegExp(r'\b(an|suna|sun|za su|zasu) (sace|yi garkuwa da) (ni|mu)\b'),
+    ),
+    (
+      'abduction',
+      RegExp(r'\bmasu garkuwa (sun|suna) (kama|dauke|sace|tafi da) (ni|mu)\b'),
+    ),
   ];
 
   static final RegExp _weapon =
-      RegExp(r'\b(gun|guns|knife|knives|machete|matchet|cutlass|rifle|pistol|dagger|weapon)\b');
+      RegExp(r'\b(gun|guns|knife|knives|machete|matchet|cutlass|rifle|pistol|dagger|weapon'
+          // Hausa: bindiga (gun), wuka/wukake (knife/knives), adda (machete).
+          r'|bindiga|bindigogi|wuka|wukake|adda|takobi)\b');
   static final RegExp _plea = RegExp(
     // Not a bare "please" or "abeg": "please pass the knife" is not a plea.
-    r'\b(please dont|dont shoot|dont hurt|help me|help us|leave me|let me go|let us go|abeg no|no shoot|no wound)\b',
+    r'\b(please dont|dont shoot|dont hurt|help me|help us|leave me|let me go|let us go|abeg no|no shoot|no wound'
+    // Hausa: "kar ka harbe" (don't shoot), "ku taimake ni" (help me), "don
+    // Allah kar" (please don't), "ku bar ni" (leave me).
+    r'|kar ka harbe|kar ku harbe|ku taimake ni|a taimake ni|don allah kar|ku bar ni)\b',
   );
 
   static final RegExp _weakPlea = RegExp(
@@ -146,7 +180,13 @@ class DistressDetector {
     // would add up to an SOS. The recognizer writes "someone" as "some one".
     // Pidgin: "abeg leave me", "comot for my body" (get off me), "help me o".
     r'\b(leave me alone|let me go|let us go|get off me|stop hurting me|some ?body help|some ?one help'
-    r'|abeg leave me|leave me (o|oh)|comot for my body|comot (your|ya) hand|help me (o|oh)|abeg help me|make una help me)\b',
+    r'|abeg leave me|leave me (o|oh)|comot for my body|comot (your|ya) hand|help me (o|oh)|abeg help me|make una help me'
+    // Hausa: "ku bar ni" (leave me), "ku sake ni" (let me go), "ku cece ni"
+    // (save me), "wani ya taimake ni" (somebody help me), "a taimake ni"
+    // (help, someone). Not "ka taimake ni": "help me carry this" is everyday.
+    // "kar ku cuce ni" (don't hurt me) counts as a plea, as "don't hurt me" does
+    // in English: on its own it is not enough.
+    r'|ku bar ni|ku sake ni|ku cece ni|wani ya taimake ni|a taimake ni|a cece ni|kar (ku|ka) cuce ni)\b',
   );
 
   /// Words that report rather than call for help. Any of them in the same
@@ -154,19 +194,31 @@ class DistressDetector {
   static final RegExp _reporting = RegExp(
     r'\b(movie|movies|film|films|news|story|stories|book|novel|series|episode|song|game|heard that|yesterday|last night|last week|they said|he said|she said|imagine|pretend'
     // Pidgin: "dem talk say", "I hear say", "e happen yesterday".
-    r'|talk say|hear say|dem talk|dem say)\b',
+    r'|talk say|hear say|dem talk|dem say'
+    // Hausa: fim (film), labari/labarai (story/news), jiya (yesterday), "na
+    // ji" (I heard), "an ce" / "sun ce" / "ya ce" (it was said / they said).
+    r'|fim|labari|labarai|jiya|na ji|an ce|sun ce|ya ce|ta ce|wasan kwaikwayo)\b',
   );
 
   static const Set<String> _negations = {
     // Not a bare "no": "no no please don't shoot me" is a plea.
     'not', 'never', 'nobody', 'noone', 'isnt', 'arent', 'wasnt', 'werent',
+    // Hausa: ba (not), babu (there is no), bai/ban/basu/bata (he/I/they/she
+    // did not). "ba wanda zai kashe ni" is "nobody will kill me".
+    'ba', 'babu', 'bai', 'ban', 'basu', 'bata',
   };
 
   /// Lower case, letters/digits/spaces only, apostrophes dropped, single
   /// spaces. Applied to what was heard and to the secret phrase alike.
   static String normalize(String text) => text
       .toLowerCase()
-      .replaceAll(RegExp(r"['’`]"), '')
+      // Hausa's hooked letters, made plain before the clean-up below would
+      // split words on them: "ƙasa" -> "kasa", "ɗaya" -> "daya".
+      .replaceAll('ɓ', 'b')
+      .replaceAll('ɗ', 'd')
+      .replaceAll('ƙ', 'k')
+      .replaceAll('ƴ', 'y')
+      .replaceAll(RegExp(r"['’`ʼ]"), '')
       .replaceAll(RegExp(r'[^a-z0-9 ]+'), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim()

@@ -1441,9 +1441,9 @@ class Translations {
       AppLanguage.pidgin: 'Before you on am',
     },
     'guardian_consent_listens': {
-      AppLanguage.english: 'While a session is on, Plateau Eye listens through the microphone for your secret phrase and for clear calls for help in English or Pidgin, such as "they are trying to kill me" or "dem wan kill me". Hausa is not understood yet.',
-      AppLanguage.hausa: 'Lokacin da yake kunne, Plateau Eye yana sauraro ta makirufo don kalmarka ta sirri da kiran neman taimako bayyananne a Turanci ko Pidgin, kamar "they are trying to kill me" ko "dem wan kill me". Har yanzu bai fahimci Hausa ba.',
-      AppLanguage.pidgin: 'When e dey on, Plateau Eye go dey listen with the microphone for your secret phrase and clear cry for help for English or Pidgin, like "they are trying to kill me" or "dem wan kill me". E never understand Hausa.',
+      AppLanguage.english: 'While a session is on, Plateau Eye listens through the microphone for your secret phrase and for clear calls for help in English or Pidgin, such as "they are trying to kill me" or "dem wan kill me", and in Hausa too if you download it below.',
+      AppLanguage.hausa: 'Lokacin da yake kunne, Plateau Eye yana sauraro ta makirufo don kalmarka ta sirri da kiran neman taimako bayyananne a Turanci ko Pidgin, kamar "they are trying to kill me" ko "dem wan kill me", da Hausa ma idan ka sauke ta a kasa.',
+      AppLanguage.pidgin: 'When e dey on, Plateau Eye go dey listen with the microphone for your secret phrase and clear cry for help for English or Pidgin, like "they are trying to kill me" or "dem wan kill me", and for Hausa too if you download am for down.',
     },
     'guardian_consent_sends': {
       AppLanguage.english: 'When it hears one, it sends a silent SOS with your location straight away, without asking you first. Cancel a false alarm with your Safe PIN.',
@@ -1594,6 +1594,71 @@ class Translations {
       AppLanguage.english: 'Stop',
       AppLanguage.hausa: 'Tsayawa',
       AppLanguage.pidgin: 'Stop',
+    },
+    'guardian_ha_heading': {
+      AppLanguage.english: 'Hausa',
+      AppLanguage.hausa: 'Hausa',
+      AppLanguage.pidgin: 'Hausa',
+    },
+    'guardian_ha_unavailable': {
+      AppLanguage.english: 'Guardian cannot listen in Hausa yet. The Hausa model is still being trained.',
+      AppLanguage.hausa: 'Mai Tsaro bai iya saurare da Hausa ba tukuna. Ana ci gaba da horar da samfurin Hausa.',
+      AppLanguage.pidgin: 'Guardian never fit listen for Hausa. Dem still dey train the Hausa model.',
+    },
+    'guardian_ha_desc': {
+      AppLanguage.english: 'Guardian can also listen for calls for help in Hausa. This needs a one-time download, kept on this phone. Like the rest of Guardian, it works offline once downloaded.',
+      AppLanguage.hausa: 'Mai Tsaro na iya sauraron kiran neman taimako da Hausa ma. Wannan yana bukatar saukewa sau daya, wanda zai zauna a wannan wayar. Kamar sauran Mai Tsaro, yana aiki ba tare da intanet ba bayan an sauke shi.',
+      AppLanguage.pidgin: 'Guardian fit also listen for cry for help for Hausa. E need one-time download wey go stay for this phone. Like the rest of Guardian, e go work without network after you download am.',
+    },
+    'guardian_ha_download': {
+      AppLanguage.english: 'DOWNLOAD HAUSA ({mb} MB)',
+      AppLanguage.hausa: 'SAUKE HAUSA ({mb} MB)',
+      AppLanguage.pidgin: 'DOWNLOAD HAUSA ({mb} MB)',
+    },
+    'guardian_ha_downloading': {
+      AppLanguage.english: 'Downloading Hausa… {pct}%',
+      AppLanguage.hausa: 'Ana sauke Hausa… {pct}%',
+      AppLanguage.pidgin: 'E dey download Hausa… {pct}%',
+    },
+    'guardian_ha_failed': {
+      AppLanguage.english: 'The Hausa download did not finish, so nothing from it was kept. Try again on a steadier connection.',
+      AppLanguage.hausa: 'Saukewar Hausa ba ta kammala ba, don haka ba a ajiye komai ba. Sake gwadawa a kan intanet mai karfi.',
+      AppLanguage.pidgin: 'The Hausa download no finish, so nothing from am stay. Try again when network strong.',
+    },
+    'guardian_ha_on': {
+      AppLanguage.english: 'Also listen in Hausa',
+      AppLanguage.hausa: 'Saurara da Hausa ma',
+      AppLanguage.pidgin: 'Listen for Hausa too',
+    },
+    'guardian_ha_note': {
+      AppLanguage.english: 'Hausa listening is new and uses more battery than English alone. Your secret phrase is still matched in English.',
+      AppLanguage.hausa: 'Sauraron Hausa sabo ne kuma yana amfani da batir fiye da Turanci kadai. Har yanzu ana gane kalmarka ta sirri da Turanci.',
+      AppLanguage.pidgin: 'Hausa listening still new and e dey use more battery pass English alone. Your secret phrase still dey match for English.',
+    },
+    'guardian_ha_remove': {
+      AppLanguage.english: 'REMOVE HAUSA MODEL',
+      AppLanguage.hausa: 'CIRE SAMFURIN HAUSA',
+      AppLanguage.pidgin: 'REMOVE HAUSA MODEL',
+    },
+    'guardian_ha_mobile_title': {
+      AppLanguage.english: 'Download on mobile data?',
+      AppLanguage.hausa: 'A sauke da data ta waya?',
+      AppLanguage.pidgin: 'Download with mobile data?',
+    },
+    'guardian_ha_mobile_body': {
+      AppLanguage.english: 'This phone is not on Wi-Fi. The Hausa model is about {mb} MB of data.',
+      AppLanguage.hausa: 'Wannan wayar ba ta kan Wi-Fi. Samfurin Hausa ya kai kusan {mb} MB na data.',
+      AppLanguage.pidgin: 'This phone no dey on Wi-Fi. The Hausa model na about {mb} MB of data.',
+    },
+    'guardian_ha_mobile_go': {
+      AppLanguage.english: 'DOWNLOAD',
+      AppLanguage.hausa: 'SAUKE',
+      AppLanguage.pidgin: 'DOWNLOAD',
+    },
+    'guardian_ha_cancel': {
+      AppLanguage.english: 'NOT NOW',
+      AppLanguage.hausa: 'BA YANZU BA',
+      AppLanguage.pidgin: 'NO BE NOW',
     },
     'guardian_rec_entry': {
       AppLanguage.english: 'Help build Guardian for Hausa',

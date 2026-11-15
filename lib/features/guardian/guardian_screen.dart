@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/guardian/distress_detector.dart';
 import 'package:rainbow_app/core/guardian/guardian_provider.dart';
+import 'package:rainbow_app/core/guardian/hausa_provider.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
@@ -126,6 +128,7 @@ class _GuardianScreenState extends ConsumerState<GuardianScreen> {
       const SizedBox(height: 24),
       // Not while a session runs: the phrase is read when a session starts.
       if (!g.active) ..._phraseSection(hasPhrase),
+      if (!g.active) ...[const SizedBox(height: 24), ..._hausaSection()],
       const SizedBox(height: 24),
       Text(_t('guardian_consent_limits'), style: _body.copyWith(color: AppColors.textDim, fontSize: 13)),
       const SizedBox(height: 16),
@@ -196,6 +199,101 @@ class _GuardianScreenState extends ConsumerState<GuardianScreen> {
           ],
         ),
       ];
+
+  String _mb(int? bytes) => bytes == null ? '~100' : (bytes / 1e6).round().toString();
+
+  List<Widget> _hausaSection() {
+    final h = ref.watch(guardianHausaProvider);
+    final small = _body.copyWith(color: AppColors.textDim, fontSize: 13);
+    return [
+      Text(_t('guardian_ha_heading'), style: _heading),
+      const SizedBox(height: 6),
+      switch (h.status) {
+        HausaStatus.unavailable => Text(
+            _t('guardian_ha_unavailable'),
+            key: const ValueKey('guardian_ha_status'),
+            style: small,
+          ),
+        HausaStatus.notDownloaded || HausaStatus.failed => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                _t(h.status == HausaStatus.failed ? 'guardian_ha_failed' : 'guardian_ha_desc'),
+                key: const ValueKey('guardian_ha_status'),
+                style: h.status == HausaStatus.failed ? small.copyWith(color: AppColors.emergency) : small,
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                key: const ValueKey('guardian_ha_download'),
+                onPressed: _downloadHausa,
+                child: Text(_t('guardian_ha_download').replaceAll('{mb}', _mb(h.sizeBytes))),
+              ),
+            ],
+          ),
+        HausaStatus.downloading => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              LinearProgressIndicator(value: h.progress),
+              const SizedBox(height: 6),
+              Text(
+                _t('guardian_ha_downloading').replaceAll('{pct}', '${(h.progress * 100).round()}'),
+                key: const ValueKey('guardian_ha_status'),
+                style: small,
+              ),
+            ],
+          ),
+        HausaStatus.ready => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SwitchListTile(
+                key: const ValueKey('guardian_ha_switch'),
+                contentPadding: EdgeInsets.zero,
+                title: Text(_t('guardian_ha_on'), style: _body),
+                value: h.enabled,
+                onChanged: (on) => ref.read(guardianHausaProvider.notifier).setEnabled(on),
+              ),
+              Text(_t('guardian_ha_note'), style: small),
+              TextButton(
+                key: const ValueKey('guardian_ha_remove'),
+                onPressed: () => ref.read(guardianHausaProvider.notifier).remove(),
+                child: Text(_t('guardian_ha_remove')),
+              ),
+            ],
+          ),
+      },
+    ];
+  }
+
+  Future<void> _downloadHausa() async {
+    final notifier = ref.read(guardianHausaProvider.notifier);
+    await notifier.checkSize();
+    if (!mounted) return;
+    var onWifi = true;
+    try {
+      final c = await Connectivity().checkConnectivity();
+      onWifi = c.contains(ConnectivityResult.wifi) || c.contains(ConnectivityResult.ethernet);
+    } on Object catch (_) {}
+    if (!onWifi && mounted) {
+      final mb = _mb(ref.read(guardianHausaProvider).sizeBytes);
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(_t('guardian_ha_mobile_title')),
+          content: Text(_t('guardian_ha_mobile_body').replaceAll('{mb}', mb)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('guardian_ha_cancel'))),
+            FilledButton(
+              key: const ValueKey('guardian_ha_mobile_go'),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(_t('guardian_ha_mobile_go')),
+            ),
+          ],
+        ),
+      );
+      if (go != true) return;
+    }
+    await notifier.download();
+  }
 
   Widget _statusCard(GuardianState g) {
     final String line;

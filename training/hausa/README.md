@@ -8,7 +8,16 @@ switches Hausa on.
 ## The short version
 
 Open `train_hausa.ipynb` in Google Colab or Kaggle with a T4 GPU and run it
-top to bottom. It trains, measures, and publishes to Hugging Face.
+top to bottom. It trains, measures, and publishes to Hugging Face. Then put the
+address it prints in the app's `.env` before building:
+
+```
+GUARDIAN_HAUSA_MANIFEST_URL=https://huggingface.co/<repo>/resolve/main/manifest.json
+```
+
+The Guardian screen then offers *Download Hausa*. The app checks every file's
+size and SHA-256 against the manifest (`lib/core/guardian/hausa_model.dart`).
+Leave the variable blank and Guardian offers English and Pidgin only.
 
 ## The steps it runs
 
