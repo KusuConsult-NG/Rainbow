@@ -115,6 +115,51 @@ class Translations {
       AppLanguage.hausa: 'TAIMAKO A DINGE',
       AppLanguage.pidgin: 'SILENT HELP',
     },
+    'perm_allowed': {
+      AppLanguage.english: 'ALLOWED',
+      AppLanguage.hausa: 'AN BARI',
+      AppLanguage.pidgin: 'E DON ALLOW',
+    },
+    'perm_not_yet_required': {
+      AppLanguage.english: 'NOT YET \u00b7 REQUIRED',
+      AppLanguage.hausa: 'BA TUKUNA \u00b7 DOLE NE',
+      AppLanguage.pidgin: 'NEVER YET \u00b7 E MUST DEY',
+    },
+    'perm_not_yet_optional': {
+      AppLanguage.english: 'NOT YET \u00b7 OPTIONAL',
+      AppLanguage.hausa: 'BA TUKUNA \u00b7 ZABI NE',
+      AppLanguage.pidgin: 'NEVER YET \u00b7 NA YOUR CHOICE',
+    },
+    'volume_sos_title': {
+      AppLanguage.english: 'Volume Down \u00d73 sends a silent SOS',
+      AppLanguage.hausa: 'Danna rage sauti sau 3 don SOS a boye',
+      AppLanguage.pidgin: 'Press volume down 3 times to send silent SOS',
+    },
+    'volume_sos_desc': {
+      AppLanguage.english:
+          'Press Volume Down three times within 3 seconds to send a silent SOS '
+          'without touching the screen. Works only while Plateau Eye is open on '
+          'screen, not when the phone is locked or the app is in the background. '
+          'Off by default, because turning the volume down quickly can send one '
+          'by accident.',
+      AppLanguage.hausa:
+          'Danna maballin rage sauti sau uku cikin dakika 3 don tura SOS a boye '
+          'ba tare da taba allo ba. Yana aiki ne kawai idan Plateau Eye na bude '
+          'a kan allo, ba idan wayar a kulle take ba ko manhajar na baya. A '
+          'kashe yake da farko, domin rage sauti da sauri na iya tura shi bisa '
+          'kuskure.',
+      AppLanguage.pidgin:
+          'Press volume down three times inside 3 seconds to send silent SOS '
+          'without touching the screen. E dey work only when Plateau Eye dey '
+          'open for screen, no be when phone lock or the app dey background. '
+          'E dey off first, because if you press volume down quick-quick e fit '
+          'send one by mistake.',
+    },
+    'sos_tap_three': {
+      AppLanguage.english: 'TAP 3 TIMES',
+      AppLanguage.hausa: 'DANNA SAU 3',
+      AppLanguage.pidgin: 'TAP AM 3 TIMES',
+    },
     'safe_zone': {
       AppLanguage.english: 'SAFE ZONES',
       AppLanguage.hausa: 'SASHEN TSIRA',
@@ -419,6 +464,16 @@ class Translations {
       AppLanguage.hausa: 'Hatsarin muhalli ko na gine-gine',
       AppLanguage.pidgin: 'Danger from environment or bad structure',
     },
+    'rpt_showing_some': {
+      AppLanguage.english: 'Showing {n} of {total} categories for this situation.',
+      AppLanguage.hausa: 'Ana nuna nau\'i {n} cikin {total} na wannan yanayi.',
+      AppLanguage.pidgin: 'Na {n} for the {total} type wey match dis matter.',
+    },
+    'rpt_show_all_categories': {
+      AppLanguage.english: 'SHOW ALL',
+      AppLanguage.hausa: 'NUNA DUKA',
+      AppLanguage.pidgin: 'SHOW AM ALL',
+    },
     'rpt_protocol': {
       AppLanguage.english: 'REPORT PROTOCOL',
       AppLanguage.hausa: 'TSARIN RAHOTO',
@@ -559,10 +614,30 @@ class Translations {
       AppLanguage.hausa: 'An tura kiran dauki · Cibiyar umarni na duba shi...',
       AppLanguage.pidgin: 'Alert done go · Command HQ dey check am...',
     },
-    'eme_broadcasting_notified': {
-      AppLanguage.english: 'Emergency alert active · Command HQ notified',
-      AppLanguage.hausa: 'Kiran dauki na gudana · An sanar da cibiyar umarni',
-      AppLanguage.pidgin: 'Emergency dey on · Command HQ know',
+    'eme_sending': {
+      AppLanguage.english: 'SENDING ALERT',
+      AppLanguage.hausa: 'ANA TURA KIRAN DAUKI',
+      AppLanguage.pidgin: 'WE DEY SEND ALERT',
+    },
+    'eme_sending_desc': {
+      AppLanguage.english: 'Sending your alert and location to HQ...',
+      AppLanguage.hausa: 'Ana tura kiran dauki da wurinka zuwa cibiyar umarni...',
+      AppLanguage.pidgin: 'We dey send your alert and where you dey go HQ...',
+    },
+    'eme_received': {
+      AppLanguage.english: 'ALERT RECEIVED',
+      AppLanguage.hausa: 'AN KARBI KIRAN DAUKI',
+      AppLanguage.pidgin: 'HQ DON GET THE ALERT',
+    },
+    'eme_not_confirmed': {
+      AppLanguage.english: 'NOT CONFIRMED BY HQ YET',
+      AppLanguage.hausa: 'CIBIYAR UMARNI BA TA TABBATAR BA TUKUNA',
+      AppLanguage.pidgin: 'HQ NEVER CONFIRM AM YET',
+    },
+    'eme_not_confirmed_desc': {
+      AppLanguage.english: 'Saved on this phone and retrying when there is a connection. Your location is still being recorded.',
+      AppLanguage.hausa: 'An ajiye a wayar nan, za a sake turawa idan an samu sadarwa. Ana ci gaba da daukar wurinka.',
+      AppLanguage.pidgin: 'E dey save for this phone and e go send again when network come. We still dey record where you dey.',
     },
     'eme_scanning': {
       AppLanguage.english: 'SCANNING FOR SIGNAL...',
@@ -1158,16 +1233,20 @@ class Translations {
       AppLanguage.pidgin: 'PLACE NO CONFAM',
     },
     'sz_route_calculated_clear': {
-      AppLanguage.english: 'Safe route calculated to {name}. The path is clear.',
+      AppLanguage.english:
+          'Route to {name}. No incident has been reported near this route, '
+          'but that does not mean it is safe. Stay alert.',
       AppLanguage.hausa:
-          'An gano amintacciyar hanya zuwa {name}. Hanyar a bude take.',
+          'Hanya zuwa {name}. Ba a kai rahoton wani lamari kusa da hanyar ba, '
+          'amma hakan ba yana nufin babu hatsari ba. Ka kula.',
       AppLanguage.pidgin:
-          'Safe road to {name} dey ready. The road clear well.',
+          'Road to {name}. Nobody report wahala near this road, '
+          'but e no mean say e safe. Shine your eye.',
     },
     'sz_route_calculated_warning': {
       AppLanguage.english:
-          'Safe route calculated to {name}. Warning: The route passes near '
-          'an active threat. Proceed with extreme caution.',
+          'Route to {name}. Warning: this route passes near an active '
+          'incident. Proceed with extreme caution.',
       AppLanguage.hausa:
           'An gano hanya zuwa {name}. Gargadi: Hanyar ta kusa da hatsari. '
           'Yi tafiya da matukar kula.',
@@ -1266,9 +1345,14 @@ class Translations {
       AppLanguage.pidgin: 'WELCOME BACK',
     },
     'lock_sos_emergency': {
-      AppLanguage.english: 'EMERGENCY — SEND SOS NOW',
-      AppLanguage.hausa: 'GAGGAWA — NEMI TAIMAKON SOS YANZU',
-      AppLanguage.pidgin: 'EMERGENCY — SEND SOS NOW',
+      AppLanguage.english: 'EMERGENCY — TAP 3 TIMES FOR SOS',
+      AppLanguage.hausa: 'GAGGAWA — DANNA SAU 3 DON SOS',
+      AppLanguage.pidgin: 'EMERGENCY — TAP AM 3 TIMES FOR SOS',
+    },
+    'lock_sos_open_active': {
+      AppLanguage.english: 'SOS ACTIVE — OPEN IT',
+      AppLanguage.hausa: 'SOS NA GUDANA — BUDE SHI',
+      AppLanguage.pidgin: 'SOS DEY RUN — OPEN AM',
     },
     'lock_sos_works_always': {
       AppLanguage.english: 'Works whether or not you unlock.',
@@ -1338,6 +1422,228 @@ class Translations {
       AppLanguage.pidgin:
           'You dey offline, so code no fit enter. Your emergency button '
           'still dey work — everything else don lock till network show.',
+    },
+    // AI Emergency Guardian (phase 1). The Hausa and Pidgin need review by
+    // a native speaker before release.
+    'guardian_title': {
+      AppLanguage.english: 'AI Emergency Guardian',
+      AppLanguage.hausa: 'Mai Tsaro na AI don Gaggawa',
+      AppLanguage.pidgin: 'AI Emergency Guardian',
+    },
+    'guardian_settings_desc': {
+      AppLanguage.english: 'Listens for your secret phrase or a clear call for help, and sends a silent SOS by itself.',
+      AppLanguage.hausa: 'Yana sauraron kalmarka ta sirri ko kiran neman taimako bayyananne, sannan ya aika SOS a boye da kansa.',
+      AppLanguage.pidgin: 'E dey listen for your secret phrase or clear cry for help, then e go send silent SOS by itself.',
+    },
+    'guardian_consent_heading': {
+      AppLanguage.english: 'Before you switch it on',
+      AppLanguage.hausa: 'Kafin ka kunna shi',
+      AppLanguage.pidgin: 'Before you on am',
+    },
+    'guardian_consent_listens': {
+      AppLanguage.english: 'While a session is on, Plateau Eye listens through the microphone for your secret phrase and for clear calls for help in English or Pidgin, such as "they are trying to kill me" or "dem wan kill me". Hausa is not understood yet.',
+      AppLanguage.hausa: 'Lokacin da yake kunne, Plateau Eye yana sauraro ta makirufo don kalmarka ta sirri da kiran neman taimako bayyananne a Turanci ko Pidgin, kamar "they are trying to kill me" ko "dem wan kill me". Har yanzu bai fahimci Hausa ba.',
+      AppLanguage.pidgin: 'When e dey on, Plateau Eye go dey listen with the microphone for your secret phrase and clear cry for help for English or Pidgin, like "they are trying to kill me" or "dem wan kill me". E never understand Hausa.',
+    },
+    'guardian_consent_sends': {
+      AppLanguage.english: 'When it hears one, it sends a silent SOS with your location straight away, without asking you first. Cancel a false alarm with your Safe PIN.',
+      AppLanguage.hausa: 'Idan ya ji daya, zai aika SOS a boye tare da wurin da kake nan take, ba tare da ya tambaye ka ba. Soke kuskure da Safe PIN dinka.',
+      AppLanguage.pidgin: 'If e hear one, e go send silent SOS with your location sharp sharp, e no go ask you first. Cancel false alarm with your Safe PIN.',
+    },
+    'guardian_consent_private': {
+      AppLanguage.english: 'What it hears is turned into text on the phone itself and then dropped. Nothing is recorded, saved or sent anywhere, on Android and iPhone alike. HQ is told only which rule matched, never your words.',
+      AppLanguage.hausa: 'Ana mayar da abin da ya ji zuwa rubutu a cikin wayar kanta sannan a jefar. Ba a nadar, ajiye ko aika komai ko\'ina, a Android da iPhone duka. HQ tana samun sanin wace doka ce kawai ta yi daidai, ba kalmominka ba.',
+      AppLanguage.pidgin: 'Wetin e hear, na inside the phone itself e dey turn am to text, then e go throw am away. Nothing dey record, save or go anywhere, for Android and iPhone. HQ go only know which rule match, dem no go see your words.',
+    },
+    'guardian_consent_limits': {
+      AppLanguage.english: 'It keeps listening with the app in the background or the screen off. On Android a notification shows while it listens, with a Stop button. It pauses while you dictate a voice report. It cannot listen once the phone is off or the app is swiped away from recent apps.',
+      AppLanguage.hausa: 'Yana ci gaba da saurare ko da manhajar tana baya ko allo a kashe. A Android sanarwa tana bayyana yayin da yake saurare, tare da maballin Tsayawa. Yana dakatawa lokacin da kake fadin rahoto da murya. Ba zai iya saurare ba idan waya a kashe take ko an rufe manhajar daga jerin manhajoji na kwanan nan.',
+      AppLanguage.pidgin: 'E go still dey listen even if the app dey background or screen off. For Android, notification go show while e dey listen, with Stop button. E go pause when you dey talk voice report. E no fit listen if phone off or you close the app from recent apps.',
+    },
+    'guardian_consent_accept': {
+      AppLanguage.english: 'I UNDERSTAND',
+      AppLanguage.hausa: 'NA FAHIMTA',
+      AppLanguage.pidgin: 'I UNDERSTAND',
+    },
+    'guardian_phrase_heading': {
+      AppLanguage.english: 'Your secret phrase',
+      AppLanguage.hausa: 'Kalmarka ta sirri',
+      AppLanguage.pidgin: 'Your secret phrase',
+    },
+    'guardian_phrase_desc': {
+      AppLanguage.english: 'A sentence only you would say, at least three words, that sounds ordinary to anyone nearby. It is stored only on this phone, and only in English for now.',
+      AppLanguage.hausa: 'Jimla da kai kadai za ka fada, akalla kalmomi uku, wadda za ta yi kama da magana ta yau da kullum ga wanda ke kusa. Ana ajiye ta a wannan wayar kawai, kuma a Turanci kawai a yanzu.',
+      AppLanguage.pidgin: 'Sentence wey only you go talk, at least three words, wey go sound normal to anybody wey dey near. Na only this phone e dey, and only for English for now.',
+    },
+    'guardian_phrase_set': {
+      AppLanguage.english: 'A secret phrase is set.',
+      AppLanguage.hausa: 'An saita kalmar sirri.',
+      AppLanguage.pidgin: 'Secret phrase don set.',
+    },
+    'guardian_phrase_not_set': {
+      AppLanguage.english: 'No secret phrase yet. Guardian will listen only for clear calls for help.',
+      AppLanguage.hausa: 'Babu kalmar sirri tukuna. Mai Tsaro zai saurari kiran neman taimako bayyananne kawai.',
+      AppLanguage.pidgin: 'No secret phrase yet. Guardian go only listen for clear cry for help.',
+    },
+    'guardian_phrase_hint': {
+      AppLanguage.english: 'For example: The mangoes are ripe',
+      AppLanguage.hausa: 'Misali: The mangoes are ripe',
+      AppLanguage.pidgin: 'Like: The mangoes are ripe',
+    },
+    'guardian_phrase_save': {
+      AppLanguage.english: 'SAVE PHRASE',
+      AppLanguage.hausa: 'AJIYE KALMA',
+      AppLanguage.pidgin: 'SAVE PHRASE',
+    },
+    'guardian_phrase_remove': {
+      AppLanguage.english: 'REMOVE PHRASE',
+      AppLanguage.hausa: 'CIRE KALMA',
+      AppLanguage.pidgin: 'REMOVE PHRASE',
+    },
+    'guardian_phrase_saved': {
+      AppLanguage.english: 'Secret phrase saved on this phone.',
+      AppLanguage.hausa: 'An ajiye kalmar sirri a wannan wayar.',
+      AppLanguage.pidgin: 'Secret phrase don save for this phone.',
+    },
+    'guardian_phrase_too_short': {
+      AppLanguage.english: 'Use at least three words.',
+      AppLanguage.hausa: 'Yi amfani da akalla kalmomi uku.',
+      AppLanguage.pidgin: 'Use at least three words.',
+    },
+    'guardian_phrase_too_common': {
+      AppLanguage.english: 'That is too close to something people say every day, or to a call for help. Choose something more unusual.',
+      AppLanguage.hausa: 'Wannan ya yi kama da abin da mutane ke fada kullum, ko kiran neman taimako. Zabi wani abu da ba a saba ji ba.',
+      AppLanguage.pidgin: 'That one too resemble wetin people dey talk every day, or cry for help. Choose something wey no common.',
+    },
+    'guardian_length': {
+      AppLanguage.english: 'Listen for',
+      AppLanguage.hausa: 'Saurara na tsawon',
+      AppLanguage.pidgin: 'Listen for',
+    },
+    'guardian_hours': {
+      AppLanguage.english: '{n} h',
+      AppLanguage.hausa: 'awa {n}',
+      AppLanguage.pidgin: '{n} h',
+    },
+    'guardian_start': {
+      AppLanguage.english: 'START GUARDIAN',
+      AppLanguage.hausa: 'FARA MAI TSARO',
+      AppLanguage.pidgin: 'START GUARDIAN',
+    },
+    'guardian_stop': {
+      AppLanguage.english: 'STOP GUARDIAN',
+      AppLanguage.hausa: 'DAKATAR DA MAI TSARO',
+      AppLanguage.pidgin: 'STOP GUARDIAN',
+    },
+    'guardian_listening_until': {
+      AppLanguage.english: 'Listening until {time}',
+      AppLanguage.hausa: 'Yana saurare har zuwa {time}',
+      AppLanguage.pidgin: 'E dey listen till {time}',
+    },
+    'guardian_paused_dictation': {
+      AppLanguage.english: 'Paused while you dictate',
+      AppLanguage.hausa: 'An dakata yayin da kake magana',
+      AppLanguage.pidgin: 'E pause while you dey talk',
+    },
+    'guardian_paused_background': {
+      AppLanguage.english: 'Paused: Plateau Eye is not on screen',
+      AppLanguage.hausa: 'An dakata: Plateau Eye ba ya kan allo',
+      AppLanguage.pidgin: 'E pause: Plateau Eye no dey for screen',
+    },
+    'guardian_off': {
+      AppLanguage.english: 'Guardian is off',
+      AppLanguage.hausa: 'Mai Tsaro a kashe yake',
+      AppLanguage.pidgin: 'Guardian dey off',
+    },
+    'guardian_problem_unsupported': {
+      AppLanguage.english: 'Guardian needs the Android or iPhone app.',
+      AppLanguage.hausa: 'Mai Tsaro yana bukatar manhajar Android ko iPhone.',
+      AppLanguage.pidgin: 'Guardian need the Android or iPhone app.',
+    },
+    'guardian_problem_mic': {
+      AppLanguage.english: 'Guardian needs the microphone. Allow it in your phone settings.',
+      AppLanguage.hausa: 'Mai Tsaro yana bukatar makirufo. Ba da izini a saitunan wayarka.',
+      AppLanguage.pidgin: 'Guardian need microphone. Allow am for your phone settings.',
+    },
+    'guardian_problem_recognizer': {
+      AppLanguage.english: 'Guardian\'s speech model could not start on this phone, so Guardian cannot run on it yet.',
+      AppLanguage.hausa: 'Samfurin magana na Mai Tsaro bai iya farawa a wannan wayar ba, don haka Mai Tsaro ba zai yi aiki a kanta ba tukuna.',
+      AppLanguage.pidgin: 'Guardian speech model no fit start for this phone, so Guardian no fit run for am yet.',
+    },
+    'guardian_problem_failing': {
+      AppLanguage.english: 'The microphone kept stopping, so Guardian has stopped. Try again.',
+      AppLanguage.hausa: 'Makirufo ya ci gaba da tsayawa, don haka Mai Tsaro ya tsaya. Sake gwadawa.',
+      AppLanguage.pidgin: 'The microphone dey stop again and again, so Guardian don stop. Try again.',
+    },
+    'guardian_sent': {
+      AppLanguage.english: 'Guardian heard distress and sent a silent SOS.',
+      AppLanguage.hausa: 'Mai Tsaro ya ji alamar hatsari kuma ya aika SOS a boye.',
+      AppLanguage.pidgin: 'Guardian hear say wahala dey and e don send silent SOS.',
+    },
+    'guardian_home_banner': {
+      AppLanguage.english: 'Guardian is listening',
+      AppLanguage.hausa: 'Mai Tsaro yana saurare',
+      AppLanguage.pidgin: 'Guardian dey listen',
+    },
+    'guardian_notify_text': {
+      AppLanguage.english: 'Listening for distress on this phone. Nothing is recorded or sent unless it sends an SOS.',
+      AppLanguage.hausa: 'Yana sauraron alamar hatsari a wannan wayar. Ba a nadar ko aika komai sai idan ya aika SOS.',
+      AppLanguage.pidgin: 'E dey listen for wahala for this phone. Nothing dey record or go anywhere unless e send SOS.',
+    },
+    'guardian_notify_stop': {
+      AppLanguage.english: 'Stop',
+      AppLanguage.hausa: 'Tsayawa',
+      AppLanguage.pidgin: 'Stop',
+    },
+    'guardian_rec_entry': {
+      AppLanguage.english: 'Help build Guardian for Hausa',
+      AppLanguage.hausa: 'Taimaka a gina Mai Tsaro na Hausa',
+      AppLanguage.pidgin: 'Help build Guardian for Hausa',
+    },
+    'guardian_rec_title': {
+      AppLanguage.english: 'Hausa recordings',
+      AppLanguage.hausa: 'Muryoyin Hausa',
+      AppLanguage.pidgin: 'Hausa recordings',
+    },
+    'guardian_rec_consent': {
+      AppLanguage.english: 'Guardian cannot understand Hausa yet. If Hausa is your first language, you can help by reading a few short sentences aloud, some calls for help and some everyday talk.\n\nYour voice is recorded only while you press Record, and the recordings stay on this phone. Nothing is sent unless you press Share and choose where to send them yourself. You can delete them all at any time.\n\nThey will be used only to build and test Guardian for Hausa. Do not say your name or anything private.',
+      AppLanguage.hausa: 'Mai Tsaro bai fahimci Hausa ba tukuna. Idan Hausa ce harshenka na farko, za ka iya taimakawa ta karanta wasu gajerun jimloli da babbar murya, wasu kiran neman taimako, wasu kuma maganar yau da kullum.\n\nAna nadar muryarka ne kawai lokacin da ka danna Nada, kuma nadin yana zama a wannan wayar. Ba a aika komai sai idan ka danna Raba ka zabi inda za a aika da kanka. Za ka iya goge su duka a kowane lokaci.\n\nZa a yi amfani da su ne kawai don gina da gwada Mai Tsaro na Hausa. Kada ka fadi sunanka ko wani abu na sirri.',
+      AppLanguage.pidgin: 'Guardian never understand Hausa. If Hausa na your first language, you fit help by reading some short sentences loud, some cry for help and some everyday talk.\n\nNa only when you press Record e go record your voice, and the recordings go stay for this phone. Nothing go send unless you press Share and choose where to send am yourself. You fit delete all of them anytime.\n\nNa only to build and test Guardian for Hausa dem go use am. No talk your name or anything private.',
+    },
+    'guardian_rec_accept': {
+      AppLanguage.english: 'I AGREE',
+      AppLanguage.hausa: 'NA YARDA',
+      AppLanguage.pidgin: 'I AGREE',
+    },
+    'guardian_rec_record': {
+      AppLanguage.english: 'RECORD',
+      AppLanguage.hausa: 'NADA',
+      AppLanguage.pidgin: 'RECORD',
+    },
+    'guardian_rec_stop': {
+      AppLanguage.english: 'STOP',
+      AppLanguage.hausa: 'TSAYA',
+      AppLanguage.pidgin: 'STOP',
+    },
+    'guardian_rec_done': {
+      AppLanguage.english: 'Recorded. Press Record to say it again.',
+      AppLanguage.hausa: 'An nada. Danna Nada don sake fada.',
+      AppLanguage.pidgin: 'E don record. Press Record to talk am again.',
+    },
+    'guardian_rec_share': {
+      AppLanguage.english: 'SHARE RECORDINGS',
+      AppLanguage.hausa: 'RABA NADE-NADEN',
+      AppLanguage.pidgin: 'SHARE RECORDINGS',
+    },
+    'guardian_rec_delete': {
+      AppLanguage.english: 'DELETE ALL RECORDINGS',
+      AppLanguage.hausa: 'GOGE DUKAN NADE-NADEN',
+      AppLanguage.pidgin: 'DELETE ALL RECORDINGS',
+    },
+    'guardian_rec_none_yet': {
+      AppLanguage.english: 'Nothing recorded yet.',
+      AppLanguage.hausa: 'Ba a nada komai ba tukuna.',
+      AppLanguage.pidgin: 'Nothing don record yet.',
     },
   };
 

@@ -73,7 +73,7 @@ describe('an agency liaison', () => {
 describe('Operation Rainbow command', () => {
   it('HQ keeps everything, including the administration section', () => {
     const access = consoleAccess('HQ_COMMAND');
-    for (const tab of ['map', 'alerts', 'history', 'broadcast', 'agency', 'admin', 'audit', 'settings', 'uninstall', 'sim'] as const) {
+    for (const tab of ['map', 'alerts', 'history', 'analytics', 'broadcast', 'agency', 'admin', 'audit', 'settings', 'uninstall', 'sim'] as const) {
       expect(access.tabs).toContain(tab);
     }
     expect(access.administration).toBe(true);
@@ -138,6 +138,8 @@ describe('a role that has not resolved yet', () => {
     // mounted the portal with `isHq` true and no agency, which froze an Army
     // liaison on the Police desk for the life of the mount.
     expect(access.tabs).not.toContain('agency');
+    // Statewide figures are HQ's, not a role still resolving.
+    expect(access.tabs).not.toContain('analytics');
     expect(access.administration).toBe(false);
     expect(consoleAccess(undefined).tabs).toEqual(access.tabs);
     expect(consoleAccess(null).tabs).toEqual(access.tabs);

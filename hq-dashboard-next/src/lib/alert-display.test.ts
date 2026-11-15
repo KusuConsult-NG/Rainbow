@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Alert } from '@/app/dashboard/types';
-import { CLUSTER_WINDOW_MS, NO_FILTERS, clusterAlerts, filterAlerts } from './alert-display';
+import { CLUSTER_WINDOW_MS, NO_FILTERS, clusterAlerts, filterAlerts, isGuardianAlert } from './alert-display';
 
 const a = (over: Partial<Alert> & { id: string }): Alert =>
   ({
@@ -397,5 +397,18 @@ describe('ungraded alerts', () => {
   it('UNKNOWN severity is not critical', () => {
     const rows = [a({ id: 'ungraded', severity: 'UNKNOWN' as Alert['severity'], priority: 'UNKNOWN' })];
     expect(ids(filterAlerts(rows, { ...NO_FILTERS, status: 'CRITICAL' }))).toEqual([]);
+  });
+});
+
+describe('isGuardianAlert', () => {
+  it('recognises the line the app writes for a Guardian SOS', () => {
+    expect(isGuardianAlert({ description: 'Guardian: secret phrase heard' })).toBe(true);
+    expect(isGuardianAlert({ description: 'Guardian: distress phrase heard (abduction)' })).toBe(true);
+  });
+
+  it('does not mistake other SOS lines, or a missing description, for one', () => {
+    expect(isGuardianAlert({ description: 'Silent SOS activated (triple tap)' })).toBe(false);
+    expect(isGuardianAlert({ description: 'Neighbour said Guardian: heard shouting' })).toBe(false);
+    expect(isGuardianAlert({ description: undefined as unknown as string })).toBe(false);
   });
 });

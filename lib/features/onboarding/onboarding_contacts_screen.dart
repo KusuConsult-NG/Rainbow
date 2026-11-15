@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +8,7 @@ import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/router/safe_pop.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/features/settings/settings_screen.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 
 class OnboardingContactsScreen extends ConsumerStatefulWidget {
@@ -90,14 +93,23 @@ class _OnboardingContactsScreenState
                       final user = ref.read(authProvider).user;
                       if (user != null) {
                         try {
+                          // ADDED to the list, as text. This replaced the whole
+                          // list with one {name, phone} map, so saving a
+                          // second contact deleted the first, and Settings
+                          // showed the map's raw text.
+                          final existing = ((ref.read(authProvider).profile?['emergency_contacts']
+                                      as List<dynamic>?) ??
+                                  const [])
+                              .map(emergencyContactLabel)
+                              .where((c) => c.isNotEmpty)
+                              .toList();
+                          final entry = emergencyContactLabel({'name': name, 'phone': phone});
+                          if (!existing.contains(entry)) existing.add(entry);
                           await SupabaseConfig.client
                               .from('profiles')
-                              .update({
-                                'emergency_contacts': [
-                                  {'name': name, 'phone': phone},
-                                ],
-                              })
+                              .update({'emergency_contacts': existing})
                               .eq('id', user.id);
+                          unawaited(ref.read(authProvider.notifier).refreshProfile());
                         } catch (e) {
                           // This was unguarded, so a failed write looked
                           // exactly like a successful one: the screen moved on

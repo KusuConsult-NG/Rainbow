@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
+import 'package:rainbow_app/providers/emergency_provider.dart';
 import 'package:rainbow_app/services/speech_service.dart';
 import 'package:rainbow_app/services/tts_service.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
@@ -65,7 +66,12 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
 
         if (msgId != _lastMessageId && senderId != myUid && text != null && text.isNotEmpty) {
           _lastMessageId = msgId;
-          unawaited(TtsService.instance.speak(text));
+          // Not during a Silent SOS. Someone hiding from an attacker cannot
+          // have the phone read HQ's replies out loud — on the loudspeaker,
+          // which is the default. The message still shows on screen.
+          if (!ref.read(emergencyProvider).isSilent) {
+            unawaited(TtsService.instance.speak(text));
+          }
         }
       }
     });
@@ -129,13 +135,23 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
       setState(() => _isListening = false);
     } else {
       setState(() => _isListening = true);
-      unawaited(speechService.startListening(onResult: (text) {
-        setState(() {
-          _controller.text = text;
-          _isListening = false;
-        });
-      },),);
+      unawaited(_startDictation(speechService));
     }
+  }
+
+  // The service must be initialized before it listens. This screen used to
+  // rely on a voice report having done that earlier in the session; opened
+  // first, its dictate button did nothing.
+  Future<void> _startDictation(SpeechService speechService) async {
+    await speechService.initialize();
+    if (!mounted || !_isListening) return;
+    await speechService.startListening(onResult: (text) {
+      if (!mounted) return;
+      setState(() {
+        _controller.text = text;
+        _isListening = false;
+      });
+    },);
   }
 
   @override

@@ -135,10 +135,13 @@ async function signInMobile(page, role) {
   if (role === 'citizen') {
     const person = byKey('citizen');
     if (!person) throw new Error('signInMobile: no citizen in fixtures');
-    await page.evaluate(() => {
-      const el = document.querySelector('input');
-      if (el) { el.focus(); el.value = ''; }
-    });
+    // The field on screen, not the first <input> in the document. A second
+    // sign-in (after a lock, say) finds the previous login's inputs still in
+    // the DOM, and the first of them is a stale one: the number went there,
+    // the real field stayed empty, and AUTHORIZE ACCESS sent nothing.
+    if (!await typeIntoLastField(page, '')) {
+      throw new Error(`signInMobile(${role}): no identifier field on the login screen`);
+    }
     await typeText(page, person.phone.replace('+234', '0'));
     await sleep(400);
     if (!await clickButton(page, 'authorize access')) {
@@ -152,10 +155,13 @@ async function signInMobile(page, role) {
       throw new Error('signInMobile(citizen): no VERIFY OTP control');
     }
   } else {
-    await page.evaluate(() => {
-      const el = document.querySelector('input');
-      if (el) { el.focus(); el.value = ''; }
-    });
+    // The field on screen, not the first <input> in the document. A second
+    // sign-in (after a lock, say) finds the previous login's inputs still in
+    // the DOM, and the first of them is a stale one: the number went there,
+    // the real field stayed empty, and AUTHORIZE ACCESS sent nothing.
+    if (!await typeIntoLastField(page, '')) {
+      throw new Error(`signInMobile(${role}): no identifier field on the login screen`);
+    }
     await typeText(page, `${role}@${DOMAIN}`);
     await sleep(400);
     if (!await clickButton(page, 'authorize access')) {
@@ -180,8 +186,17 @@ async function signInMobile(page, role) {
     }
   }
 
-  await sleep(8500);
-  const hash = await page.evaluate(() => window.location.hash);
+  // At least the 8.5 s every caller was written against, and then on until
+  // the app leaves the login screen, up to 25 s. The fixed wait alone was
+  // enough on a quiet machine but not under the full suite's load: one run
+  // lost a whole pass to a sign-in that landed a moment later.
+  let hash = '';
+  for (let waited = 0; waited < 25000; waited += 500) {
+    await sleep(500);
+    hash = await page.evaluate(() => window.location.hash);
+    const left = hash && hash !== '#/' && !/login/i.test(hash);
+    if (left && waited >= 8000) break;
+  }
   if (!hash || hash === '#/' || /login/i.test(hash)) {
     throw new Error(
       `signInMobile(${role}): still on the login screen (hash `

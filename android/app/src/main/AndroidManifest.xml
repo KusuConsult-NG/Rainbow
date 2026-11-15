@@ -18,6 +18,10 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- AI Emergency Guardian listens with the app in the background through a
+         foreground service of the microphone type (Android 14+ requires the
+         type and this permission). See lib/core/guardian/guardian_keep_alive.dart. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
@@ -142,6 +146,17 @@
         <service
             android:name="com.baseflow.geolocator.GeolocatorLocationService"
             android:foregroundServiceType="location"
+            android:exported="false" />
+
+        <!-- AI Emergency Guardian's "Guardian is listening" service. Microphone
+             type, so listening may continue with the app off screen; stops
+             with the app, so a notification never claims Guardian is
+             listening after the app has been swiped away. The name is the
+             plugin's own and must not change. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="microphone"
+            android:stopWithTask="true"
             android:exported="false" />
 
         <service

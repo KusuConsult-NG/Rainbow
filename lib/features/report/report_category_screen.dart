@@ -11,13 +11,26 @@ import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
 
 /// Documentation for this public member.
 
-class ReportCategoryScreen extends ConsumerWidget {
-  /// Documentation for this public member.
-  const ReportCategoryScreen({super.key});
+class ReportCategoryScreen extends ConsumerStatefulWidget {
+  /// [situation] narrows the list to one of the four Situation Report cards
+  /// ('danger', 'crime', 'suspicious', 'environment'). Null shows all twelve.
+  const ReportCategoryScreen({super.key, this.situation});
+
+  final String? situation;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ReportCategoryScreen> createState() =>
+      _ReportCategoryScreenState();
+}
+
+class _ReportCategoryScreenState extends ConsumerState<ReportCategoryScreen> {
+  late String? _situation = widget.situation;
+
+  @override
+  Widget build(BuildContext context) {
     final lang = ref.watch(languageProvider);
+    final shown = categoriesForSituation(_situation);
+    final narrowed = shown.length < alertCategories.length;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -69,8 +82,37 @@ class ReportCategoryScreen extends ConsumerWidget {
               letterSpacing: 2,
             ),
           ),
+          if (narrowed) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${Translations.get('rpt_showing_some', lang).replaceAll('{n}', '${shown.length}').replaceAll('{total}', '${alertCategories.length}')}',
+                    style: GoogleFonts.outfit(
+                      fontSize: 11,
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  key: const ValueKey('show_all_categories'),
+                  onPressed: () => setState(() => _situation = null),
+                  child: Text(
+                    Translations.get('rpt_show_all_categories', lang),
+                    style: GoogleFonts.outfit(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 20),
-          ...alertCategories.map(
+          ...shown.map(
             (cat) => _CategoryCard(
               info: cat,
               onTap: () => context.push(AppRoutes.reportSubtype, extra: cat),

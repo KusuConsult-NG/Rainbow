@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
+import 'package:rainbow_app/shared/widgets/build_stamp.dart';
 
 /// Documentation for this public member.
 
@@ -87,15 +88,10 @@ class TacticalDrawer extends ConsumerWidget {
           ),
           Padding(
             padding: const EdgeInsets.all(24),
-            child: Text(
-              'v1.4.2 · ENCRYPTED CONNECTION',
-              style: GoogleFonts.outfit(
-                color: AppColors.textDim,
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1,
-              ),
-            ),
+            // The real version, read from the build. This said v1.4.2 while
+            // the splash said v4.5.0 and the app was 1.0.10 — three answers
+            // to the first question asked when somebody reports a fault.
+            child: const BuildStamp(),
           ),
         ],
       ),

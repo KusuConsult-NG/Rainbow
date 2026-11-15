@@ -6,6 +6,8 @@ class EmergencyState {
     this.startTime,
     this.alertId,
     this.errorMessage,
+    this.isSilent = false,
+    this.sendFinished = false,
   });
 
   /// Documentation for this public member.
@@ -20,6 +22,16 @@ class EmergencyState {
   /// Documentation for this public member.
   final String? errorMessage;
 
+  /// Raised by the triple tap, which leaves the user on the screen they were
+  /// on. The UI shows a discreet marker instead of the emergency screen.
+  final bool isSilent;
+
+  /// The first attempt to file the alert has returned, whichever way it went.
+  /// With [alertId] still null afterwards, HQ has NOT confirmed the alert: it
+  /// was queued on the phone or refused. The screen must say so rather than
+  /// claim HQ was notified.
+  final bool sendFinished;
+
   /// Documentation for this public member.
 
   EmergencyState copyWith({
@@ -27,12 +39,16 @@ class EmergencyState {
     DateTime? startTime,
     String? alertId,
     String? errorMessage,
+    bool? isSilent,
+    bool? sendFinished,
   }) {
     return EmergencyState(
       isEmergencyActive: isEmergencyActive ?? this.isEmergencyActive,
       startTime: startTime ?? this.startTime,
       alertId: alertId ?? this.alertId,
       errorMessage: errorMessage ?? this.errorMessage,
+      isSilent: isSilent ?? this.isSilent,
+      sendFinished: sendFinished ?? this.sendFinished,
     );
   }
 

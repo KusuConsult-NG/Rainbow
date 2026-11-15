@@ -13,6 +13,7 @@ import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -137,18 +138,28 @@ class _LockScreenState extends ConsumerState<LockScreen> {
     });
   }
 
-  Future<void> _raiseEmergency() async {
-    // Deliberately before any verification. Whoever is holding this phone can
-    // raise an alarm; that is the product.
-    await ref.read(emergencyProvider.notifier).startEmergency();
-    if (!mounted) return;
-    context.go(AppRoutes.emergencyActive);
+  /// The SOS control works without unlocking, and follows the same rule as
+  /// everywhere else: three taps raise a Silent SOS and this screen stays as it
+  /// was. One tap used to send, and then replaced the lock screen with the
+  /// emergency screen. Once an emergency is running, a single tap opens it —
+  /// the router lets the emergency screen through the lock.
+  void _onSosTap() {
+    switch (registerSosTap(ref.read)) {
+      case SosTapOutcome.counting:
+        break;
+      case SosTapOutcome.sent:
+        unawaited(HapticFeedback.selectionClick());
+      case SosTapOutcome.alreadyActive:
+        context.go(AppRoutes.emergencyActive);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final lang = ref.watch(languageProvider);
     final offline = _path == UnlockPath.emergencyOnly;
+    final emergencyActive =
+        ref.watch(emergencyProvider.select((s) => s.isEmergencyActive));
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -207,7 +218,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                   height: 60,
                   child: ElevatedButton.icon(
                     key: const ValueKey('lock_sos'),
-                    onPressed: _raiseEmergency,
+                    onPressed: _onSosTap,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.danger,
                       foregroundColor: Colors.white,
@@ -217,7 +228,12 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                     ),
                     icon: const Icon(Icons.campaign_rounded),
                     label: Text(
-                      Translations.get('lock_sos_emergency', lang),
+                      Translations.get(
+                        emergencyActive
+                            ? 'lock_sos_open_active'
+                            : 'lock_sos_emergency',
+                        lang,
+                      ),
                       style: GoogleFonts.outfit(
                         fontWeight: FontWeight.w900,
                         fontSize: 14,

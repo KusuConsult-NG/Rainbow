@@ -118,9 +118,17 @@ describe('AgencyAccessManager', () => {
     await waitFor(() => expect(db.selectCount('profiles')).toBeGreaterThan(before));
   });
 
-  it('creates the account, upserts the profile, and re-reads', async () => {
+  // Through the server, never `supabase.auth.signUp` plus a profile upsert
+  // from the browser: sign-up ignores a role the browser states, so that made
+  // a CITIZEN, and a browser that could write the role would be the hole.
+  it('creates the account through the server and re-reads', async () => {
     db.setRows('profiles', []);
-    db.authResult = { data: { user: { id: 'new-user-id' } }, error: null };
+    const provision = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'new-user-id', role: 'POLICE_LIAISON' }),
+    }));
+    vi.stubGlobal('fetch', provision);
     const AgencyAccessManager = await load();
 
     render(<AgencyAccessManager />);
@@ -130,23 +138,40 @@ describe('AgencyAccessManager', () => {
     await userEvent.click(screen.getByRole('button', { name: /GRANT ACCESS/i }));
     await userEvent.type(screen.getByPlaceholderText(/DSP Audu Ibrahim/), 'Insp Grace Bala');
     await userEvent.type(screen.getByPlaceholderText(/liaison@agency.gov.ng/), 'g.bala@police.gov.ng');
-    await userEvent.type(screen.getByPlaceholderText(/Min. 8 characters/), 'temp-pass-123');
+    await userEvent.type(screen.getByPlaceholderText(/Min. 12 characters/), 'temp-pass-1234');
     await userEvent.click(screen.getByRole('button', { name: /Create Liaison Account/i }));
 
-    await waitFor(() =>
-      expect(db.inserts).toContainEqual(
-        expect.objectContaining({
-          table: 'profiles',
-          values: expect.objectContaining({
-            id: 'new-user-id',
-            full_name: 'Insp Grace Bala',
-            role: 'POLICE_LIAISON',
-          }),
-        }),
-      ),
-    );
-    await waitFor(() => expect(db.selectCount('profiles')).toBeGreaterThan(before));
     expect(await screen.findByText(/created as POLICE Liaison/i)).toBeInTheDocument();
+    const [url, init] = provision.mock.calls[0] as unknown as [string, { body: string }];
+    expect(url).toBe('/api/admin/provision');
+    expect(JSON.parse(init.body)).toMatchObject({
+      fullName: 'Insp Grace Bala',
+      role: 'POLICE_LIAISON',
+      agency: 'POLICE',
+    });
+    expect(db.inserts.filter((w) => w.table === 'profiles')).toHaveLength(0);
+    await waitFor(() => expect(db.selectCount('profiles')).toBeGreaterThan(before));
+  });
+
+  it('reports a refused creation rather than claiming success', async () => {
+    db.setRows('profiles', []);
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'Password must be at least 12 characters.' }),
+    })));
+    const AgencyAccessManager = await load();
+
+    render(<AgencyAccessManager />);
+    await screen.findByText(/No agency liaisons registered/i);
+    await userEvent.click(screen.getByRole('button', { name: /GRANT ACCESS/i }));
+    await userEvent.type(screen.getByPlaceholderText(/DSP Audu Ibrahim/), 'Insp Grace Bala');
+    await userEvent.type(screen.getByPlaceholderText(/liaison@agency.gov.ng/), 'g@police.gov.ng');
+    await userEvent.type(screen.getByPlaceholderText(/Min. 12 characters/), 'short');
+    await userEvent.click(screen.getByRole('button', { name: /Create Liaison Account/i }));
+
+    expect(await screen.findByText(/at least 12 characters/i)).toBeInTheDocument();
+    expect(screen.queryByText(/created as/i)).not.toBeInTheDocument();
   });
 
   it('refuses to submit an incomplete form and says why', async () => {

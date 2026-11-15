@@ -329,15 +329,21 @@ void main() {
 
       expect(find.text('HQ BROADCAST SENDER'), findsOneWidget);
 
-      final sendBtn = find.text('SEND BROADCAST');
-      await tester.scrollUntilVisible(sendBtn, 300, scrollable: find.byType(Scrollable).first);
-      expect(sendBtn, findsOneWidget);
-
+      // Message first, while it is on screen: the form has an Area field
+      // now, and once it is scrolled to SEND BROADCAST the message box at the
+      // top of the list is no longer built.
       final messageInput = find.byType(TextField).first;
       await tester.enterText(messageInput, 'URGENT: Curfew in effect across Jos South starting 21:00');
       await settleFast(tester, pumps: 2);
-
       expect(find.text('URGENT: Curfew in effect across Jos South starting 21:00'), findsOneWidget);
+
+      // The place is its own control, not an audience value nobody reads.
+      expect(find.byKey(const ValueKey('broadcast_lga')), findsOneWidget);
+      expect(find.text('LGA_JOS_NORTH'), findsNothing);
+
+      final sendBtn = find.text('SEND BROADCAST');
+      await tester.scrollUntilVisible(sendBtn, 300, scrollable: find.byType(Scrollable).first);
+      expect(sendBtn, findsOneWidget);
     });
 
     testWidgets('5. Settings & Uninstall Request UI screens load and permit form input', (tester) async {

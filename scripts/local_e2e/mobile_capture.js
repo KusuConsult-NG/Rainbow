@@ -311,6 +311,25 @@ async function semanticsText(page) {
   }
 
   /**
+   * Scrolls until a button matching [pattern] exists, then taps it.
+   *
+   * Settings is a lazily built list: a control below the fold is not in the
+   * semantics tree at all until it is scrolled to. "Lock this phone" fell off
+   * the first screen when the Guardian entry was added above it, and a plain
+   * tapLabelled then found nothing and the lock screen was never captured.
+   */
+  async function scrollToAndTap(pattern) {
+    for (let i = 0; i < 15; i += 1) {
+      if (await tapLabelled(pattern)) return true;
+      const vp = page.viewport();
+      await page.mouse.move(vp.width / 2, vp.height / 2);
+      await page.mouse.wheel({ deltaY: 400 });
+      await sleep(400);
+    }
+    return false;
+  }
+
+  /**
    * Sign in.
    *
    * Two different paths, because the app has two:
@@ -456,7 +475,6 @@ async function semanticsText(page) {
   const ROUTES = [
     ['/splash', 'splash', 'splash_screen.dart'],
     ['/login', 'login', 'login_screen.dart'],
-    ['/onboarding-profile', 'onboarding-profile', 'onboarding_profile_screen.dart'],
     ['/onboarding-permissions', 'onboarding-permissions', 'onboarding_permissions_screen.dart'],
     ['/onboarding-contacts', 'onboarding-contacts', 'onboarding_contacts_screen.dart'],
     ['/home', 'home', 'home_screen.dart'],
@@ -615,7 +633,7 @@ async function semanticsText(page) {
           // Phone".
           await page.evaluate(() => { window.location.hash = '#/settings'; });
           await sleep(2500);
-          await tapLabelled('lock this phone');
+          await scrollToAndTap('lock this phone');
           await sleep(2500);
         } else {
           await page.evaluate((r) => { window.location.hash = `#${r}`; }, route);

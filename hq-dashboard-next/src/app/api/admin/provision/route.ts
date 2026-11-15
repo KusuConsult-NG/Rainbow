@@ -45,10 +45,14 @@ const ASSIGNABLE = [
   'LGA_OFFICER',
   'HQ_COMMAND',
   'HQ_OFFICER',
+  // Every agency the console has a desk for. FRSC and OPSH were missing, so
+  // a liaison for either could not be created at all.
   'POLICE_LIAISON',
   'ARMY_LIAISON',
   'NSCDC_LIAISON',
   'DSS_LIAISON',
+  'FRSC_LIAISON',
+  'OPSH_LIAISON',
   'ADMIN',
 ];
 

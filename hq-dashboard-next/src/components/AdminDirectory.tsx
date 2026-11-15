@@ -90,6 +90,19 @@ export default function AdminDirectory() {
     setError(null);
     setSuccess(null);
 
+    const needsLga = role !== 'HQ_COMMAND';
+    const needsWard = role === 'WARD_COMMAND' || role === 'UNIT_COMMAND';
+    if (needsLga && !selectedLga) {
+      setError('Choose the LGA this officer is posted to. Without it they command no one and see no incidents.');
+      setLoading(false);
+      return;
+    }
+    if (needsWard && !selectedWard) {
+      setError('Choose the ward this officer is posted to.');
+      setLoading(false);
+      return;
+    }
+
     try {
       // NOT `supabase.auth.signUp` with the role in `options.data`.
       //
@@ -115,9 +128,13 @@ export default function AdminDirectory() {
           phone,
           role,
           agency,
-          geoLga: (selectedLga as any)?.name || 'STATEWIDE HQ',
-          geoWard: selectedWard?.name || 'N/A',
-          geoPu: selectedPu || 'N/A',
+          // null, not 'STATEWIDE HQ' / 'N/A'. The form had no posting fields,
+          // so every officer was saved as posted to an LGA called "STATEWIDE
+          // HQ" — a place no alert is ever in — and so commanded nobody and
+          // was shown nothing.
+          geoLga: selectedLga?.name ?? null,
+          geoWard: selectedWard?.name ?? null,
+          geoPu: selectedPu || null,
         }),
       });
 
@@ -234,6 +251,69 @@ export default function AdminDirectory() {
               ))}
             </select>
           </div>
+
+          {role !== 'HQ_COMMAND' && (
+            <div>
+              <label htmlFor="posting-lga" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Posted to LGA</label>
+              <select
+                id="posting-lga"
+                className="input-tactical"
+                style={{ width: '100%' }}
+                value={selectedLga?.id ?? ''}
+                onChange={(e) => {
+                  setSelectedLga(plateauTacticalMap.find((l) => l.id === e.target.value) ?? null);
+                  setSelectedWard(null);
+                  setSelectedPu('');
+                }}
+              >
+                <option value="">Choose an LGA</option>
+                {plateauTacticalMap.map((l) => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {(role === 'WARD_COMMAND' || role === 'UNIT_COMMAND') && (
+            <div>
+              <label htmlFor="posting-ward" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Posted to ward</label>
+              <select
+                id="posting-ward"
+                className="input-tactical"
+                style={{ width: '100%' }}
+                disabled={!selectedLga}
+                value={selectedWard?.id ?? ''}
+                onChange={(e) => {
+                  setSelectedWard(selectedLga?.wards.find((w) => w.id === e.target.value) ?? null);
+                  setSelectedPu('');
+                }}
+              >
+                <option value="">{selectedLga ? 'Choose a ward' : 'Choose an LGA first'}</option>
+                {(selectedLga?.wards ?? []).map((w) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {role === 'UNIT_COMMAND' && (
+            <div>
+              <label htmlFor="posting-pu" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Polling unit (optional)</label>
+              <select
+                id="posting-pu"
+                className="input-tactical"
+                style={{ width: '100%' }}
+                disabled={!selectedWard}
+                value={selectedPu}
+                onChange={(e) => setSelectedPu(e.target.value)}
+              >
+                <option value="">{selectedWard ? 'Whole ward' : 'Choose a ward first'}</option>
+                {(selectedWard?.pollingUnits ?? []).map((pu) => (
+                  <option key={pu} value={pu}>{pu}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div style={{ gridColumn: '1 / -1', marginTop: 8 }}>
             <button

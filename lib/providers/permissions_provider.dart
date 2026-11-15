@@ -1,36 +1,29 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Documentation for this public member.
-
+/// What the phone has actually granted, for the setup screen to show.
+///
+/// These were four switches that started at "location on, persistence on"
+/// before anything had been asked, and toggling them changed nothing: GRANT
+/// CLEARANCE requested all four regardless. Now they are read from the phone
+/// and only ever say what the phone said. Everything starts false — nothing is
+/// granted until the phone says so.
 final permissionsProvider =
     NotifierProvider<PermissionsNotifier, PermissionsState>(
   PermissionsNotifier.new,
 );
 
-/// Documentation for this public member.
-
 class PermissionsState {
-  /// Documentation for this public member.
   const PermissionsState({
-    this.location = true,
+    this.location = false,
     this.sms = false,
     this.audio = false,
-    this.persistence = true,
+    this.persistence = false,
   });
 
-  /// Documentation for this public member.
   final bool location;
-
-  /// Documentation for this public member.
   final bool sms;
-
-  /// Documentation for this public member.
   final bool audio;
-
-  /// Documentation for this public member.
   final bool persistence;
-
-  /// Documentation for this public member.
 
   PermissionsState copyWith({
     bool? location,
@@ -47,33 +40,17 @@ class PermissionsState {
   }
 }
 
-/// Documentation for this public member.
-
 class PermissionsNotifier extends Notifier<PermissionsState> {
   @override
   PermissionsState build() => const PermissionsState();
 
-  /// Documentation for this public member.
-
-  void toggle(String key) {
-    switch (key) {
-      case 'location':
-        state = state.copyWith(location: !state.location);
-      case 'sms':
-        state = state.copyWith(sms: !state.sms);
-      case 'audio':
-        state = state.copyWith(audio: !state.audio);
-      case 'persistence':
-        state = state.copyWith(persistence: !state.persistence);
-    }
-  }
-
-  /// Documentation for this public member.
-
-  void grantAll() {
-    state = const PermissionsState(
-      sms: true,
-      audio: true,
+  /// Records what the phone reported. Only the values given change.
+  void record({bool? location, bool? sms, bool? audio, bool? persistence}) {
+    state = state.copyWith(
+      location: location,
+      sms: sms,
+      audio: audio,
+      persistence: persistence,
     );
   }
 }

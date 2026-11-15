@@ -215,6 +215,7 @@ async function chooseTactical(page, triggerText, optionText) {
     ['Incident Feed', 'feed'],
     ['Incidents For Us', 'feed'],
     ['Mission History', 'history'],
+    ['Analytics', 'analytics'],
     ['Communications & Broadcast', 'broadcast'],
     ['Agent Directory', 'directory'],
     ['Forensic Audit', 'audit'],

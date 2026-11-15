@@ -65,13 +65,13 @@
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>Operation Rainbow tracks your location in the background so emergency services can reach you even if your screen is off during an incident.</string>
 
-	<!-- Microphone — Required for future duress voice detection -->
+	<!-- Microphone — voice reports, voice notes, and AI Emergency Guardian -->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Operation Rainbow may use your microphone for voice-activated emergency alerts and duress detection features.</string>
+	<string>Plateau Eye uses the microphone for voice reports and voice notes, and, only while you switch Emergency Guardian on, to listen for your secret phrase or a call for help. What Guardian hears is not recorded.</string>
 
 	<!-- Speech Recognition — Required for voice report dictation -->
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Operation Rainbow uses speech recognition to transcribe your spoken voice reports and chat messages into text.</string>
+	<string>Plateau Eye uses speech recognition to turn your voice reports and chat messages into text, and, while Emergency Guardian is on, to recognize your secret phrase or a call for help on this phone.</string>
 
 	<!-- Camera & Photo Library — Required for adding incident evidence -->
 	<key>NSBluetoothAlwaysUsageDescription</key>
@@ -90,6 +90,7 @@
 	<!-- Background Modes — Required for location tracking during active emergency -->
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>audio</string>
 		<string>location</string>
 		<string>fetch</string>
 		<string>remote-notification</string>

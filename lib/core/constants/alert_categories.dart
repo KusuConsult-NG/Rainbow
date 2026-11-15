@@ -370,3 +370,33 @@ const List<AlertCategoryInfo> alertCategories = [
 
 AlertCategoryInfo categoryById(AlertCategory cat) =>
     alertCategories.firstWhere((c) => c.category == cat);
+
+/// The categories each card on the Situation Report screen leads to.
+///
+/// All four cards opened the same full list, so choosing "Civil hazard" and
+/// being shown Kidnap first was the screen ignoring the answer it had just
+/// asked for. A category can sit under more than one situation — a kidnap is
+/// both a threat to life and a crime — and the list screen always offers the
+/// full twelve as well, so a wrong guess here costs one tap, never a report.
+const Map<String, List<String>> situationCategoryLabels = {
+  'danger': [
+    'Kidnap', 'Community attack', 'Child abuse', 'Domestic violence', 'Fire',
+  ],
+  'crime': [
+    'Kidnap', 'Cattle rustling', 'Police brutality', 'Domestic violence',
+    'Drug abuse', 'Cyber crime', 'Community attack',
+  ],
+  'suspicious': [
+    'Kidnap', 'Cattle rustling', 'Drug abuse', 'Community attack',
+    'Cyber crime',
+  ],
+  'environment': ['Fire', 'Flood', 'Public property', 'Public service'],
+};
+
+/// The categories for [situation], in their usual order; every category when
+/// [situation] is null or not one of the four.
+List<AlertCategoryInfo> categoriesForSituation(String? situation) {
+  final labels = situationCategoryLabels[situation];
+  if (labels == null) return alertCategories;
+  return alertCategories.where((c) => labels.contains(c.label)).toList();
+}

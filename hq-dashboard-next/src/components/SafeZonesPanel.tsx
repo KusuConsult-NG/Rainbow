@@ -61,7 +61,20 @@ export default function SafeZonesPanel() {
     else setFailed(res.error);
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  // The initial load, written out rather than calling `refresh()` as the
+  // effect body, which made its setState a set-state-in-effect (the pattern
+  // AdminDirectory uses). `cancelled` also stops a setState landing after the
+  // panel is closed mid-request.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await loadSafeZones();
+      if (cancelled) return;
+      if (res.ok) { setZones(res.zones); setFailed(null); }
+      else setFailed(res.error);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const lat = Number.parseFloat(form.lat);
   const lng = Number.parseFloat(form.lng);

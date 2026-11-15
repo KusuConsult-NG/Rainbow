@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/app.dart';
@@ -40,6 +41,13 @@ void main() {
     // loads a blank page and stops there" — which is what an installed APK
     // did. This replaces it with a screen that names the failure.
     installReadableErrorWidget();
+
+    // The channel Guardian's "listening" notification uses to deliver a press
+    // of its Stop button; must exist before runApp. Android only: the
+    // notification exists nowhere else, and on the web its ReceivePort throws.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      FlutterForegroundTask.initCommunicationPort();
+    }
 
     // SECOND, and before anything opens a socket.
     //

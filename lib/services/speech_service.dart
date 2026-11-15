@@ -13,6 +13,19 @@ class SpeechService {
 
   void Function(String status)? _onStatusCallback;
 
+  /// True while a voice report or the dispatcher chat is dictating. The
+  /// phone has one recognizer: Guardian watches this, steps aside while it is
+  /// true and resumes when it goes false.
+  final ValueNotifier<bool> inUseByFeature = ValueNotifier<bool>(false);
+
+  void _onStatus(String val) {
+    debugPrint('[SPEECH_STATUS] status: $val');
+    _onStatusCallback?.call(val);
+    if (val == SpeechToText.doneStatus || val == SpeechToText.notListeningStatus) {
+      inUseByFeature.value = false;
+    }
+  }
+
   Future<bool> initialize() async {
     if (useFallback) {
       _isInitialized = true;
@@ -26,10 +39,7 @@ class SpeechService {
       }
       _isInitialized = await _speech.initialize(
         onError: (val) => debugPrint('[SPEECH_ERR] error: $val'),
-        onStatus: (val) {
-          debugPrint('[SPEECH_STATUS] status: $val');
-          _onStatusCallback?.call(val);
-        },
+        onStatus: _onStatus,
       );
       if (!_isInitialized) {
         useFallback = true;
@@ -64,6 +74,11 @@ class SpeechService {
         if (_simulatedListening) onResult('Help! Urgent response team needed at my location. Protesters blocking road access.');
       });
     } else {
+      // The plugin keeps ONE set of listeners, set by whoever initialized it
+      // first. Guardian may have, so claim them back for this dictation.
+      _speech.statusListener = _onStatus;
+      _speech.errorListener = (val) => debugPrint('[SPEECH_ERR] error: $val');
+      inUseByFeature.value = true;
       await _speech.listen(
         onResult: (result) {
           onResult(result.recognizedWords);
@@ -87,5 +102,6 @@ class SpeechService {
     } else {
       await _speech.stop();
     }
+    inUseByFeature.value = false;
   }
 }

@@ -17,6 +17,7 @@ dependencies:
   flutter_background_service: ^5.1.0
   flutter_background_service_android: ^6.3.1
   flutter_dotenv: ^6.0.0
+  flutter_foreground_task: ^10.0.0
   flutter_map: ^7.0.2
   flutter_riverpod: ^2.5.1
   flutter_secure_storage: ^9.0.0
@@ -59,6 +60,7 @@ dependencies:
   sentry_flutter: ^8.14.2
   share_plus: ^12.0.2
   shared_preferences: ^2.2.2
+  sherpa_onnx: ^2.0.1
   speech_to_text: any
   sqflite: ^2.3.0
   supabase_flutter: ^2.8.0
@@ -97,6 +99,10 @@ flutter:
     # reaching a Google CDN. `main.dart` sets allowRuntimeFetching = false so a
     # missing weight fails loudly in development instead of silently at 3am.
     - assets/google_fonts/
+    # Guardian's offline speech models (about 29 MB): bundled so Guardian
+    # works the moment it is switched on, with no network. Licences and
+    # checksums in assets/guardian/LICENSES.md.
+    - assets/guardian/
     # Jurisdiction geometry, so an incident's coordinates can be resolved to
     # the LGA and ward that own it. Bundled rather than fetched: routing an
     # emergency must not depend on reaching a network that may be the reason

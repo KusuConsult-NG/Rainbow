@@ -79,8 +79,12 @@ def live(path: Path) -> str:
         for line in src.split('\n'))
 
 
-perms, profile, contacts, pins, router = (
-    live(p) for p in (PERMS, PROFILE, CONTACTS, PINS, ROUTER))
+perms, contacts, pins, router = (
+    live(p) for p in (PERMS, CONTACTS, PINS, ROUTER))
+# The profile screen was removed: no route led to it, and Settings' Edit Name
+# does what it did. Absent, it cannot gate setup; if it ever comes back it is
+# checked like the contacts screen.
+profile = live(PROFILE) if PROFILE.exists() else ''
 if faults:
     print('FAIL: setup cannot be checked.')
     for f in faults:

@@ -147,7 +147,12 @@ async function launch({
     args: [
       '--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none',
       ...(fakeMedia
-        ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']
+        // The mDNS switch: Chromium hides a peer's local address behind a
+        // random .local name, and the live-stream pass connects two peers on
+        // this machine — the app and an HQ stand-in — that must find each
+        // other by address.
+        ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream',
+          '--disable-features=WebRtcHideLocalIpsWithMdns']
         : []),
     ],
     defaultViewport: viewport,

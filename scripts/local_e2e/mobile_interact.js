@@ -10,7 +10,7 @@
  *
  * Flows asserted:
  *   panic SOS (long press)      -> alerts insert
- *   silent SOS (tap)            -> alerts insert
+ *   silent SOS (3 taps)         -> ONE alerts insert
  *   all ten reporting categories-> ten alerts inserts, each carrying its type
  *   AI / voice report           -> opens, and says so when it cannot listen
  *   emergency PIN               -> reaches the server-side PIN function
@@ -237,8 +237,16 @@ async function logMark() {
   }
 
   async function typeInto(text) {
+    // The field Flutter has focused, else the newest text-like input. Flutter
+    // web leaves earlier screens' inputs in the DOM — the login form's among
+    // them — so the FIRST input was usually a stale one, often a zero-size
+    // submit button: the emergency PIN was typed into nothing.
     const box = await page.evaluate(() => {
-      const el = document.querySelector('input, textarea');
+      const textLike = (e) => e && (e.tagName === 'TEXTAREA'
+        || (e.tagName === 'INPUT' && !['submit', 'hidden', 'button', 'checkbox'].includes(e.type)));
+      const active = document.activeElement;
+      const all = [...document.querySelectorAll('input, textarea')].filter(textLike);
+      const el = textLike(active) ? active : all[all.length - 1];
       if (!el) return null;
       el.focus();
       const r = el.getBoundingClientRect();
@@ -285,42 +293,69 @@ async function logMark() {
   }
 
   // ---- SOS ------------------------------------------------------------------
-  // Tap is the SILENT SOS; long press is the full panic alarm. Both must reach
-  // the database — the fallback that enqueues offline makes a refused insert
-  // look identical to a successful one from inside the app.
+  // THREE taps inside three seconds are the Silent SOS; one or two send nothing.
+  // It must reach the database — the fallback that enqueues offline makes a
+  // refused insert look identical to a successful one from inside the app —
+  // and it must reach it ONCE: the old single tap filed two incidents.
+  const SOS = 'TAP 3 TIMES';
   state.screen = 'mobile:silent-sos';
   let mark = await writeMark();
-  const tapped = await tap('SILENT SOS', { role: 'button', settle: 5000 });
-  await shot('90-mobile-sos-01-silent-tapped');
+  const tappedOnce = await tap(SOS, { role: 'button', settle: 300 });
+  await tap(SOS, { role: 'button', settle: 1500 });
   let w = await writesSince(mark, 'alerts');
   check(
-    'SILENT SOS reaches the database',
-    tapped && w.some((x) => x.method === 'POST'),
+    'one or two taps on SOS send nothing',
+    tappedOnce && !w.some((x) => x.method === 'POST'),
+    tappedOnce ? `${w.length} write(s) after two taps` : 'SOS control not found',
+  );
+
+  // The first two taps above are still inside the window, so one more fires.
+  const tapped = await tap(SOS, { role: 'button', settle: 5000 });
+  await shot('90-mobile-sos-01-silent-tapped');
+  w = await writesSince(mark, 'alerts');
+  const silentPosts = w.filter((x) => x.method === 'POST');
+  check(
+    'the third tap sends a SILENT SOS to the database',
+    tapped && silentPosts.length >= 1,
     w.length ? JSON.stringify(w[0].rows[0]).slice(0, 180) : (tapped ? 'tapped, nothing inserted' : 'SOS control not found'),
   );
-  if (w.length) {
-    const row = w[0].rows[0];
+  check(
+    'a silent SOS is ONE incident, not two',
+    silentPosts.length === 1 && silentPosts[0].rows.length === 1,
+    `${silentPosts.length} insert(s): ${silentPosts.map((x) => x.rows.map((r) => r.type).join('+')).join(', ')}`,
+  );
+  if (silentPosts.length) {
+    const row = silentPosts[0].rows[0];
     check(
       'the silent SOS carries the reporter and a real position',
       !!row.reported_by && row.latitude != null && row.longitude != null,
       `reported_by=${row.reported_by ? 'set' : 'MISSING'} lat=${row.latitude} lng=${row.longitude}`,
     );
   }
+  const stayed = await page.evaluate(() => window.location.hash);
+  check(
+    'a silent SOS leaves the citizen on the screen they were on',
+    /home/.test(stayed),
+    `on ${stayed}`,
+  );
 
+  // Holding the button is the visible SOS. With one already running it opens
+  // THAT emergency — the route to HOLD TO CANCEL and the PIN pad, which a
+  // silent SOS had no way back to — and files nothing new.
   state.screen = 'mobile:panic-sos';
   await go('/home');
   mark = await writeMark();
-  const pressed = await longPress('SILENT SOS');
+  const pressed = await longPress(SOS);
   await shot('90-mobile-sos-02-panic-longpress');
   w = await writesSince(mark, 'alerts');
   check(
-    'PANIC SOS (long press) reaches the database',
-    pressed && w.some((x) => x.method === 'POST'),
-    w.length ? `type=${w[0].rows[0].type} severity=${w[0].rows[0].severity}` : (pressed ? 'pressed, nothing inserted' : 'SOS control not found'),
+    'holding SOS while one is active files no second incident',
+    pressed && !w.some((x) => x.method === 'POST'),
+    pressed ? `${w.filter((x) => x.method === 'POST').length} new insert(s)` : 'SOS control not found',
   );
   const onEmergency = await page.evaluate(() => window.location.hash);
   check(
-    'the panic SOS opens the emergency screen',
+    'holding SOS opens the running emergency, where it can be cancelled',
     /emergency/.test(onEmergency),
     `on ${onEmergency}`,
   );
@@ -569,6 +604,42 @@ async function logMark() {
   await go('/settings', 3000);
   await shot('93-mobile-settings');
 
+  // ---- AI Emergency Guardian ------------------------------------------------
+  //
+  // A browser has no speech recognizer Guardian may use, so the honest answer
+  // here is "this needs the phone app" — and, above all, NO SOS. The speech
+  // service's simulated dictation ("Help! Urgent response team needed…")
+  // would have read as a call for help; this is the run that would show it.
+  const guardianTile = await bringIntoView('emergency guardian', { role: 'button' });
+  check('Settings offers AI Emergency Guardian', guardianTile);
+
+  state.screen = 'mobile:guardian';
+  await go('/guardian', 3000);
+  await shot('93c-mobile-guardian-notice');
+  const noticeText = await screenText();
+  check(
+    'Guardian shows its notice before anything can be switched on',
+    /without asking you first/i.test(noticeText) && !/START GUARDIAN/i.test(noticeText),
+    noticeText.slice(0, 120).replace(/\n/g, ' / '),
+  );
+  await tap('I UNDERSTAND', { role: 'button', settle: 1500 });
+  const gMark = await writeMark();
+  await tap('START GUARDIAN', { role: 'button', settle: 3000 });
+  await shot('93c-mobile-guardian-web');
+  const gText = await screenText();
+  check(
+    'Guardian in a browser says it needs the phone app',
+    /needs the Android or iPhone app/i.test(gText),
+    gText.slice(0, 160).replace(/\n/g, ' / '),
+  );
+  const gWrites = await writesSince(gMark, 'alerts');
+  check(
+    'starting Guardian where it cannot listen sends no SOS',
+    gWrites.length === 0,
+    `${gWrites.length} alert write(s)`,
+  );
+  await go('/settings', 3000);
+
   // ---- the re-entry lock ---------------------------------------------------
   //
   // The lock engages by itself once the app has been away from the foreground
@@ -604,8 +675,8 @@ async function logMark() {
     );
     check(
       'the emergency button is on the lock screen',
-      /EMERGENCY|SEND SOS/i.test(lockText),
-      /EMERGENCY|SEND SOS/i.test(lockText) ? '' : 'the panic button is behind the lock',
+      /EMERGENCY|SOS/i.test(lockText),
+      /EMERGENCY|SOS/i.test(lockText) ? '' : 'the panic button is behind the lock',
     );
     check(
       'the lock screen says it will send a code, and to which number',
@@ -787,7 +858,7 @@ async function logMark() {
   const SCREENS = [
     '/home', '/report-initial', '/incident-history', '/safe-zone',
     '/settings', '/emergency-pins', '/live-tracking', '/secure-chat',
-    '/dispatcher-chat', '/uninstall-request', '/onboarding-profile',
+    '/dispatcher-chat', '/uninstall-request',
     '/onboarding-permissions', '/onboarding-contacts',
   ];
 
@@ -974,7 +1045,11 @@ async function logMark() {
       // which is exactly what happened once the sweep started reaching enough
       // controls to find it. The lock is asserted in full in its own section
       // above, including that a locked phone cannot be walked into any screen.
-      if (/sign ?out|log ?out|terminate|send sos|silent sos|\bsos\b|panic|lock this phone/i.test(label)) {
+      // The bottom-bar SOS reads "Emergency. Tap three times quickly to send a
+      // silent SOS." — and the label is cut to 40 characters before it gets
+      // here, which loses the word SOS. One press of it doing nothing is the
+      // design; three would file an alert. It is asserted on its own above.
+      if (/sign ?out|log ?out|terminate|send sos|silent sos|\bsos\b|panic|lock this phone|tap three times|emergency is active/i.test(label)) {
         skipped += 1;
         continue;
       }

@@ -3,14 +3,34 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:rainbow_app/core/guardian/guardian_provider.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
+import 'package:rainbow_app/core/sos/volume_sos.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/language_picker.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/reentry_lock_provider.dart';
 import 'package:rainbow_app/services/mesh_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
+
+/// One emergency contact as text.
+///
+/// Settings stores contacts as strings and the side menu's form stored them as
+/// `{name, phone}` maps — in the same column — so a contact saved there showed
+/// here as "{name: Ada, phone: 0803…}". Both now store text; this reads the
+/// older maps the same way.
+String emergencyContactLabel(Object? entry) {
+  if (entry is Map) {
+    final name = (entry['name'] ?? '').toString().trim();
+    final phone = (entry['phone'] ?? '').toString().trim();
+    if (name.isEmpty) return phone;
+    if (phone.isEmpty) return name;
+    return '$name · $phone';
+  }
+  return entry?.toString() ?? '';
+}
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -80,7 +100,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (user == null) return;
     final profile = ref.read(authProvider).profile ?? {};
     final contacts = ((profile['emergency_contacts'] as List<dynamic>?) ?? [])
-        .map((e) => e.toString())
+        .map(emergencyContactLabel)
         .toList();
     if (!contacts.contains(contact)) {
       contacts.add(contact);
@@ -96,7 +116,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (user == null) return;
     final profile = ref.read(authProvider).profile ?? {};
     final contacts = ((profile['emergency_contacts'] as List<dynamic>?) ?? [])
-        .map((e) => e.toString())
+        .map(emergencyContactLabel)
         .toList();
     if (contacts.contains(contact)) {
       contacts.remove(contact);
@@ -185,7 +205,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final fullName = profile['full_name'] as String? ?? 'Citizen User';
     final pushEnabled = profile['push_enabled'] as bool? ?? true;
     final contacts = ((profile['emergency_contacts'] as List<dynamic>?) ?? [])
-        .map((e) => e.toString())
+        .map(emergencyContactLabel)
         .toList();
 
     return Scaffold(
@@ -246,6 +266,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           const SizedBox(height: 16),
 
+          // 2c. Volume Down x3 silent SOS
+          SwitchListTile(
+            key: const ValueKey('volume_sos_toggle'),
+            title: Text(Translations.get('volume_sos_title', ref.watch(languageProvider)), style: GoogleFonts.outfit(color: AppColors.onBackground)),
+            subtitle: Text(
+              Translations.get('volume_sos_desc', ref.watch(languageProvider)),
+              style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12),
+            ),
+            value: ref.watch(volumeSosEnabledProvider),
+            activeThumbColor: AppColors.primary,
+            tileColor: AppColors.surfaceContainer,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            onChanged: (v) => ref.read(volumeSosEnabledProvider.notifier).set(v),
+          ),
+          const SizedBox(height: 16),
+
           // 3. Emergency Contacts
           Container(
             padding: const EdgeInsets.all(16),
@@ -293,6 +329,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           // = 'ha'. So this control changed nothing, and it offered two of the
           // three languages the app actually has. One widget, one provider.
           const LanguagePicker(),
+          const SizedBox(height: 16),
+
+          // AI Emergency Guardian.
+          ListTile(
+            key: const ValueKey('guardian_settings_tile'),
+            tileColor: AppColors.surfaceContainer,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            leading: Icon(
+              ref.watch(guardianProvider).active ? Icons.hearing : Icons.hearing_disabled,
+              color: AppColors.primary,
+            ),
+            title: Text(
+              Translations.get('guardian_title', ref.watch(languageProvider)),
+              style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: AppColors.onBackground),
+            ),
+            subtitle: Text(
+              Translations.get('guardian_settings_desc', ref.watch(languageProvider)),
+              style: GoogleFonts.inter(fontSize: 12, color: AppColors.textDim),
+            ),
+            onTap: () => context.push(AppRoutes.guardian),
+          ),
           const SizedBox(height: 16),
 
           // Emergency PINs — per-user, verified on the server.

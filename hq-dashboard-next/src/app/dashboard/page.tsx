@@ -33,7 +33,7 @@ import {
   Sun, Moon, X, Sparkles, MapPin, Menu, SignalZero,
 } from 'lucide-react';
 import type { Alert } from './types';
-import { clusterAlerts, filterAlerts, isLiveIncident } from '@/lib/alert-display';
+import { clusterAlerts, filterAlerts, isGuardianAlert, isLiveIncident } from '@/lib/alert-display';
 import { emptyBoardMeaning, emptyBoardWording } from '@/lib/empty-board';
 import { geoKey, geoMatchesKeyed } from '@/lib/geo-key';
 import UssdProvenancePanel from '@/components/UssdProvenancePanel';
@@ -496,6 +496,10 @@ export default function DashboardPage() {
   const [alertsTotal, setAlertsTotal] = useState<number | null>(null);
   /** Non-null when the last read of the feed FAILED. Never "no incidents". */
   const [feedError, setFeedError] = useState<string | null>(null);
+  // The realtime channel's own state. LIVE UPLINK was a hard-coded green dot:
+  // it stayed green with the feed refused and the channel down, which on a
+  // board whose emptiness reads as "all clear" is the one thing it must not do.
+  const [uplink, setUplink] = useState<'CONNECTING' | 'LIVE' | 'DOWN'>('CONNECTING');
   /**
    * Whether the database confirmed it knows who is asking, checked only when
    * the board came back empty. false means an empty board proves nothing.
@@ -677,10 +681,30 @@ export default function DashboardPage() {
     document.body.classList.toggle('dark-theme', theme === 'dark');
   }, [theme]);
 
+  // Which incident's dispatch panel to open on the Incident Feed.
+  //
+  // The map popup's DISPATCH only switched tabs, leaving the operator to find
+  // the card again, and the dossier's DISPATCH SQUAD skipped the picker
+  // altogether: it assigned `agentLocations[0]`, the first tracked handset on
+  // the board — which can be a CITIZEN in an active SOS, since citizens are
+  // tracked in the same table. Both now land on the card with its officer
+  // picker open, which is the only place an officer is chosen.
+  const [dispatchFor, setDispatchFor] = useState<string | null>(null);
+  const openDispatchFor = useCallback((alertId: string) => {
+    setSelectedReport(null);
+    setActiveTab('alerts');
+    setDispatchFor(alertId);
+  }, []);
+
   useEffect(() => {
     const handleShowDispatch = (e: any) => {
-      setActiveTab('alerts');
-      // Potential logic to scroll to specific alert card
+      const alertId = e?.detail?.alertId;
+      if (typeof alertId === 'string') {
+        setActiveTab('alerts');
+        setDispatchFor(alertId);
+      } else {
+        setActiveTab('alerts');
+      }
     };
     window.addEventListener('hq-show-dispatch', handleShowDispatch);
     return () => window.removeEventListener('hq-show-dispatch', handleShowDispatch);
@@ -973,7 +997,16 @@ export default function DashboardPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => {
         debouncedFetchAlerts();
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setUplink('LIVE');
+          // Anything that changed while the channel was down arrived as no
+          // event at all; read the board again rather than trust it.
+          debouncedFetchAlerts();
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          setUplink('DOWN');
+        }
+      });
 
     const telemetryChannel = supabase
       .channel('hq-telemetry-channel')
@@ -1436,6 +1469,9 @@ export default function DashboardPage() {
                 badge={alerts.length > 0 ? alerts.length : undefined}
               />
             )}
+            {access.tabs.includes('analytics') && (
+              <NavItem icon={<Target size={18} />} label="Analytics" active={activeTab === 'analytics'} onClick={() => setActiveTab('analytics')} />
+            )}
             {access.tabs.includes('history') && (
               <NavItem icon={<Clock size={18} />} label="Mission History" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
             )}
@@ -1559,14 +1595,28 @@ export default function DashboardPage() {
                 {activeTab === 'settings' && 'Platform Core'}
                 {activeTab === 'agency' && 'Inter-Agency Command'}
                 {activeTab === 'sim' && 'Handset SMS Channel'}
+                {activeTab === 'analytics' && 'Statewide Figures'}
               </h2>
             </div>
             {!isNarrow && <div style={{ height: 20, width: 1, background: 'var(--border)', flexShrink: 0 }}></div>}
             <div style={{ display: isNarrow ? 'none' : 'flex', gap: 12, flexShrink: 0 }}>
-               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--success)', boxShadow: 'var(--success-glow)' }} className="pulse-emerald"></div>
-                  <span style={{ fontSize: 10, fontWeight: 900, color: 'var(--success)', letterSpacing: 0.5 }}>LIVE UPLINK</span>
-               </div>
+               {(() => {
+                  const state = feedError ? 'FEED ERROR' : uplink === 'LIVE' ? 'LIVE UPLINK' : uplink === 'DOWN' ? 'UPLINK DOWN' : 'CONNECTING';
+                  const colour = state === 'LIVE UPLINK' ? 'var(--success)' : state === 'CONNECTING' ? 'var(--warning)' : 'var(--duress)';
+                  return (
+                    <div
+                      role="status"
+                      data-testid="uplink-state"
+                      title={state === 'LIVE UPLINK'
+                        ? 'Receiving incidents as they happen'
+                        : 'New incidents may not appear here until this is LIVE. Use radio.'}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: colour }} className={state === 'LIVE UPLINK' ? 'pulse-emerald' : undefined}></div>
+                      <span style={{ fontSize: 10, fontWeight: 900, color: colour, letterSpacing: 0.5 }}>{state}</span>
+                    </div>
+                  );
+               })()}
                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Clock size={13} color="var(--text-muted)" />
                   <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{timeString}</span>
@@ -2043,7 +2093,7 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 24 }}>
-                  {filtered.map(a => <AlertCard key={a.id} alert={a} agents={agentLocations} usersMap={usersMap} dispatcher={dispatcherPosting} onViewDossier={(alert) => setSelectedReport(alert)} onDispatch={dispatchAlert} onEscalate={escalateAlert} onResolve={resolveAlert} onHqOverride={hqOverride} />)}
+                  {filtered.map(a => <AlertCard key={a.id} alert={a} agents={agentLocations} usersMap={usersMap} dispatcher={dispatcherPosting} onViewDossier={(alert) => setSelectedReport(alert)} onDispatch={dispatchAlert} onEscalate={escalateAlert} onResolve={resolveAlert} onHqOverride={hqOverride} openDispatch={dispatchFor !== null && (a.member_ids ?? [a.id]).includes(dispatchFor)} onDispatchOpened={() => setDispatchFor(null)} />)}
                 </div>
               )}
             </div>
@@ -2589,11 +2639,7 @@ export default function DashboardPage() {
                   {selectedReport.status !== 'RESOLVED' && (
                     <>
                       <button
-                        onClick={async () => {
-                          const responderUid = agentLocations[0]?.user_id || user?.id || '';
-                          await dispatchAlert(selectedReport.id, responderUid);
-                          setSelectedReport(null);
-                        }}
+                        onClick={() => openDispatchFor(selectedReport.id)}
                         className="btn-tactical"
                         style={{ flex: 1, background: 'var(--primary)', color: '#fff' }}
                       >
@@ -2741,7 +2787,7 @@ function MetricCard({ label, value, color }: { label: string, value: string | nu
 }
 
 
-function AlertCard({ alert, agents, usersMap, dispatcher, onViewDossier, onDispatch, onEscalate, onResolve, onHqOverride }: { 
+function AlertCard({ alert, agents, usersMap, dispatcher, onViewDossier, onDispatch, onEscalate, onResolve, onHqOverride, openDispatch, onDispatchOpened }: { 
   alert: Alert; 
   agents: any[];
   usersMap: Record<string, any>;
@@ -2756,6 +2802,9 @@ function AlertCard({ alert, agents, usersMap, dispatcher, onViewDossier, onDispa
   onEscalate: (ids: AlertIds, t: string, notes?: string, agency?: string) => Promise<void> | void; 
   onResolve: (ids: AlertIds) => Promise<void> | void; 
   onHqOverride: (ids: AlertIds) => Promise<void> | void;
+  /** Open this card's officer picker now (from the map or the dossier). */
+  openDispatch?: boolean;
+  onDispatchOpened?: () => void;
 }) {
   // A clustered card stands for every report in `member_ids`. Acting on the
   // card acts on all of them — never just the first, which used to leave the
@@ -2775,7 +2824,20 @@ function AlertCard({ alert, agents, usersMap, dispatcher, onViewDossier, onDispa
   const color = statusColors[alert.status] || 'white';
   const a = alert as any;
   const toast = useToast();
-  const [showDispatch, setShowDispatch] = useState(false);
+  const [dispatchOpenedHere, setDispatchOpenedHere] = useState(false);
+  // Open when this card's DISPATCH was pressed, or when the map or the dossier
+  // asked for it. Derived rather than copied into state by an effect.
+  const showDispatch = dispatchOpenedHere || !!openDispatch;
+  const setShowDispatch = (open: boolean) => {
+    setDispatchOpenedHere(open);
+    if (!open && openDispatch) onDispatchOpened?.();
+  };
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (openDispatch) {
+      cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [openDispatch]);
   const [showEscalate, setShowEscalate] = useState(false);
   const [selectedResponders, setSelectedResponders] = useState<string[]>([]);
   const [targetLga, setTargetLga] = useState('ALL');
@@ -2940,6 +3002,23 @@ Respond ONLY with a JSON object with this exact shape:
     }
   };
 
+  // HQ TAKES COMMAND. The action existed — passed to every card — with no
+  // button. HQ only, and only while the incident sits below HQ: it reassigns
+  // the incident to the operator at HQ tier and marks it CRITICAL, which also
+  // stops the escalation timer, so it asks first.
+  const canTakeCommand = commandsWholeState(dispatcher?.role)
+    && alert.status !== 'RESOLVED'
+    && a.assigned_tier !== 'HQ';
+  const handleTakeCommand = async () => {
+    if (!window.confirm('Take command of this incident at HQ? It becomes CRITICAL and is assigned to you.')) return;
+    setLoading(true);
+    try {
+      await onHqOverride(targetIds);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleResolve = async () => {
     setLoading(true);
     try {
@@ -2964,7 +3043,7 @@ Respond ONLY with a JSON object with this exact shape:
   };
 
   return (
-    <div className="tactical-panel glass tactical-panel-hover fade-in" style={{ padding: 24, borderTop: `4px solid ${color}`, position: 'relative', overflow: 'hidden' }}>
+    <div ref={cardRef} className="tactical-panel glass tactical-panel-hover fade-in" style={{ padding: 24, borderTop: `4px solid ${color}`, position: 'relative', overflow: 'hidden' }}>
       {isDuress && <div className="duress-pulse" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 40, opacity: 0.1, pointerEvents: 'none' }}></div>}
 
       {/* A report that arrived from a keypad. Renders nothing for anything else.
@@ -2972,6 +3051,23 @@ Respond ONLY with a JSON object with this exact shape:
           is where a named officer stands behind it — see
           components/UssdProvenancePanel.tsx and migration 20261011000000. */}
       <UssdProvenancePanel alert={alert as never} />
+
+      {/* Raised by the app's AI Emergency Guardian from something it heard.
+          The person may not know it went and may not be able to talk; how to
+          respond to that is the dispatch protocol's call, not this label's. */}
+      {isGuardianAlert(alert) && (
+        <div data-testid="guardian-badge" style={{
+          background: 'rgba(11, 35, 75, 0.08)',
+          border: '1px solid rgba(11, 35, 75, 0.35)',
+          padding: '8px 12px',
+          borderRadius: 10,
+          marginBottom: 14,
+        }}>
+          <span style={{ fontSize: 10, fontWeight: 900, color: '#0B234B', letterSpacing: 0.8 }}>
+            AI GUARDIAN: SENT BY THE APP FROM WHAT IT HEARD. THE PERSON MAY NOT KNOW IT WENT, OR BE ABLE TO TALK.
+          </span>
+        </div>
+      )}
 
       {((alert as any).via === 'SMS_GATEWAY' || (alert as any).source === 'SMS' || (alert.description || '').includes('[OFFLINE_SMS]') || (alert.description || '').includes('[SMS]')) && (
         <div style={{
@@ -3705,6 +3801,9 @@ Respond ONLY with a JSON object with this exact shape:
           <button onClick={() => setShowEscalate(false)} className="btn-tactical btn-secondary" style={{ width: '100%' }}>CANCEL ESCALATION</button>
         ) : (
           <>
+            {canTakeCommand && (
+              <button onClick={handleTakeCommand} className="btn-tactical" style={{ flex: 1, background: 'var(--duress-dim)', color: 'var(--duress)', border: '1px solid rgba(239,68,68,0.2)' }}>HQ TAKE COMMAND</button>
+            )}
             <button onClick={() => { setShowEscalate(true); setShowDispatch(false); }} className="btn-tactical" style={{ flex: 1, background: 'var(--warning-dim)', color: 'var(--warning)', border: '1px solid rgba(245,158,11,0.2)' }}>ESCALATE</button>
             <button onClick={() => { setShowDispatch(true); setShowEscalate(false); }} className="btn-tactical" style={{ flex: 1, background: 'var(--primary-dim)', color: 'var(--primary)', border: '1px solid rgba(59,130,246,0.2)' }}>DISPATCH</button>
             <button onClick={handleResolve} className="btn-tactical" style={{ flex: 1, background: 'var(--success-dim)', color: 'var(--success)', border: '1px solid rgba(16,185,129,0.2)' }}>RESOLVE</button>

@@ -8,9 +8,11 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/services/alert_media.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/shared/widgets/evidence_viewer.dart';
 import 'package:rainbow_app/shared/widgets/voice_note_player.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/services/cloudinary_service.dart';
@@ -33,19 +35,6 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
   void initState() {
     super.initState();
     alertData = Map.from(widget.alertData);
-  }
-
-  Future<void> _updateStatus(String newStatus) async {
-    final alertId = alertData['id'] as String?;
-    if (alertId != null) {
-      try {
-        await SupabaseConfig.client.from('alerts').update({'status': newStatus}).eq('id', alertId);
-        setState(() { alertData['status'] = newStatus; });
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Status updated to $newStatus')));
-      } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
-    }
   }
 
   Future<void> _attachEvidence() async {
@@ -224,35 +213,10 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
                     final isImage = !isVideo && !isAudio;
                     
                     return GestureDetector(
-                      onTap: () {
-                        if (isAudio) {
-                          // Plays in a sheet rather than in whatever app the
-                          // phone hands an .m4a url to. A Cloudinary `/raw/`
-                          // link is often DOWNLOADED rather than played, so
-                          // TAP TO PLAY could leave the app and then not play.
-                          unawaited(showModalBottomSheet<void>(
-                            context: context,
-                            backgroundColor: AppColors.background,
-                            builder: (context) => Padding(
-                              padding: const EdgeInsets.all(20),
-                              child: VoiceNotePlayer(
-                                url: url,
-                                label: 'RECORDING ATTACHED TO THIS INCIDENT',
-                              ),
-                            ),
-                          ),);
-                        } else {
-                          unawaited(showDialog<void>(
-                            context: context,
-                            builder: (context) => Dialog(
-                              backgroundColor: Colors.black,
-                              child: isVideo
-                                ? const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 64))
-                                : InteractiveViewer(child: Image.network(url)),
-                            ),
-                          ),);
-                        }
-                      },
+                      // Photo, voice note in a sheet, or video in the
+                      // phone's own player: see evidence_viewer.dart. A video
+                      // used to open a play icon that did nothing.
+                      onTap: () => openEvidenceUnawaited(context, url),
                       child: Container(
                         width: 120,
                         margin: const EdgeInsets.only(right: 8),
@@ -290,9 +254,15 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Expanded(child: ElevatedButton(onPressed: () => _updateStatus('RESOLVED'), style: ElevatedButton.styleFrom(backgroundColor: AppColors.success), child: const Text('RESOLVE', style: TextStyle(color: Colors.white)))),
-                  const SizedBox(width: 8),
-                  Expanded(child: ElevatedButton(onPressed: () => _updateStatus('DISPATCHED'), style: ElevatedButton.styleFrom(backgroundColor: AppColors.warning), child: const Text('DISPATCH', style: TextStyle(color: Colors.black)))),
+                  // RESOLVE goes through the debrief, as it does from the
+                  // mission sheet. It wrote RESOLVED straight onto the alert:
+                  // no debrief, no record of who resolved it or when.
+                  //
+                  // DISPATCH is gone. It set DISPATCHED with nobody assigned,
+                  // which tells the citizen's screen SQUAD DISPATCHED when no
+                  // squad exists. Officers are chosen in DISPATCH UNIT on the
+                  // mission feed.
+                  Expanded(child: ElevatedButton(onPressed: alertData['status'] == 'RESOLVED' ? null : () => context.push(AppRoutes.missionResolution, extra: alertData), style: ElevatedButton.styleFrom(backgroundColor: AppColors.success), child: const Text('RESOLVE WITH DEBRIEF', style: TextStyle(color: Colors.white)))),
                 ],
               ),
               const SizedBox(height: 24),
@@ -301,9 +271,13 @@ class _MissionIntelScreenState extends ConsumerState<MissionIntelScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: () => context.push('/dispatcher-chat?alertId=$alertId'),
+                  // The router reads the alert from `extra`, never from the
+                  // query string, so this fell through to the fallback screen
+                  // every time. The responder's channel is Secure Chat — the
+                  // same thread, without the citizen screen's read-aloud.
+                  onPressed: () => context.push(AppRoutes.secureChat, extra: alertData),
                   icon: const Icon(Icons.chat, color: Colors.white),
-                  label: Text('DISPATCHER CHAT', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white)),
+                  label: Text('SECURE CHAT', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white)),
                   style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, padding: const EdgeInsets.symmetric(vertical: 16)),
                 ),
               ),
