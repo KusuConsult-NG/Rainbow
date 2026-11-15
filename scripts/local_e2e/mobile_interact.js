@@ -29,6 +29,7 @@ const path = require('path');
 const { launch } = require('./browser');
 const { DOMAIN, byKey } = require('./fixtures');
 const { signInMobile } = require('./mobile_login');
+const { watchPage } = require('./stall_report');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -110,6 +111,7 @@ async function logMark() {
   await browser.defaultBrowserContext().overridePermissions(origin, ['geolocation']);
 
   const page = await newPage();
+  const watch = watchPage(page);
   await page.setGeolocation(HERE);
 
   // ---- helpers that speak Flutter's semantics tree --------------------------
@@ -276,8 +278,9 @@ async function logMark() {
 
   // ---- boot + sign in -------------------------------------------------------
   state.screen = 'mobile:boot';
+  watch.mark('boot');
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 90000 });
+  await watch.waitForApp(90000, OUT);
   await sleep(6500);
   await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
   await sleep(2000);
@@ -412,8 +415,11 @@ async function logMark() {
     // report flow's own state behind, and after the first submission the
     // category list stopped appearing at all — which looked like nine broken
     // categories and was one dirty starting point.
+    // A reload here once never brought the app back (2026-11-14); if it
+    // happens again, stall_report.js writes down why before failing.
+    watch.mark(`reload ${cat}`);
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 60000 });
+    await watch.waitForApp(60000, OUT);
     await sleep(5000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1500);
