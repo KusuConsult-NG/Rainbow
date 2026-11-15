@@ -20,7 +20,12 @@ const MAX_EVENTS = 400;
 
 /// Starts recording what [page] does. Call `mark(label)` just before a
 /// navigation, then `waitForApp(...)` in place of the bare wait.
-function watchPage(page) {
+///
+/// [serverLog], if given, returns what the harness's own file server saw
+/// since a time (ms since epoch): the other side of every request, so a
+/// request the browser is still waiting on can be told apart as "never
+/// arrived" or "arrived and was never answered".
+function watchPage(page, { serverLog } = {}) {
   let since = Date.now();
   let label = 'start';
   let events = [];
@@ -109,6 +114,12 @@ function watchPage(page) {
     const shotFile = path.join(outDir, `stall-${slug}.png`);
     const shot = await within(10000, page.screenshot({ path: shotFile }).then(() => path.basename(shotFile)));
 
+    let server = null;
+    try {
+      server = serverLog ? serverLog(since) : null;
+    } catch (e) {
+      server = [{ error: String(e) }];
+    }
     const body = {
       label,
       waitedMs: timeoutMs,
@@ -117,6 +128,7 @@ function watchPage(page) {
       metrics,
       pendingRequests: stillPending,
       events,
+      server,
       screenshot: shot,
     };
     try {
@@ -144,6 +156,16 @@ function watchPage(page) {
       console.log(`        at ${e.t} ms ${e.kind}: ${e.text || e.error || ''} ${e.url || ''}`.trimEnd());
     }
     if (!errs.length && !stillPending.length) console.log('        no errors and no requests outstanding');
+    if (server) {
+      // What the file server did about each request the browser still waits on.
+      for (const p of stillPending) {
+        const tail = p.url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
+        const seen = server.filter((e) => e.path === tail);
+        console.log(`        server, ${tail}: ${seen.length
+          ? seen.map((e) => `${e.event} at ${e.at - since} ms`).join(', ')
+          : 'never received it'}`);
+      }
+    }
   }
 
   /// The wait the harness always did, plus a report when it times out. The

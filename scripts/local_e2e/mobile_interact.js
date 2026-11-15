@@ -61,14 +61,30 @@ const TYPES = {
   '.css': 'text/css', '.svg': 'image/svg+xml', '.symbols': 'text/plain',
 };
 
+// What the file server did with each request, for the stall report: a
+// reload once waited 60 s on canvaskit.wasm (2026-11-15) with no way to say
+// whether the request ever got here. Bounded; only the recent past matters.
+const served = [];
+const serve = (event, p) => {
+  served.push({ at: Date.now(), event, path: p });
+  if (served.length > 2000) served.splice(0, served.length - 2000);
+};
+
 const server = http.createServer((req, res) => {
-  const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html';
+  const urlPath = req.url.split('?')[0];
+  serve('received', urlPath);
+  const rel = decodeURIComponent(urlPath).replace(/^\/+/, '') || 'index.html';
   const file = path.join(WEB, rel);
   if (!file.startsWith(WEB) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    serve('404', urlPath);
     res.writeHead(404); return res.end('not found');
   }
+  res.on('finish', () => serve('sent', urlPath));
+  res.on('close', () => { if (!res.writableFinished) serve('connection closed before the end', urlPath); });
   res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
-  fs.createReadStream(file).pipe(res);
+  fs.createReadStream(file)
+    .on('error', (e) => { serve(`read error: ${e.code || e}`, urlPath); res.destroy(); })
+    .pipe(res);
 });
 
 async function control(p = '') {
@@ -111,7 +127,7 @@ async function logMark() {
   await browser.defaultBrowserContext().overridePermissions(origin, ['geolocation']);
 
   const page = await newPage();
-  const watch = watchPage(page);
+  const watch = watchPage(page, { serverLog: (since) => served.filter((e) => e.at >= since) });
   await page.setGeolocation(HERE);
 
   // ---- helpers that speak Flutter's semantics tree --------------------------
