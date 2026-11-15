@@ -26,7 +26,7 @@ Leave the variable blank and Guardian offers English and Pidgin only.
 | 1 | `prepare_data.py` | Builds training lists from Google FLEURS Hausa (CC-BY-4.0) and any recordings shared from the app's Hausa recording screen. One in five of the recorded calls for help is held back for testing. |
 | 2 | `train.py` | Fine-tunes Whisper (default `openai/whisper-base`) on Hausa, with the language fixed to Hausa. |
 | 3 | `convert_to_openai.py` | Renames the weights to OpenAI's layout, which the exporter reads. It then loads the result in OpenAI's code. |
-| 4 | `export_onnx.py` | sherpa-onnx's own Whisper exporter (Apache-2.0), vendored with three marked changes. It writes the int8 ONNX files the app runs. |
+| 4 | `export_onnx.py` | sherpa-onnx's own Whisper exporter (Apache-2.0), vendored with changes marked `GUARDIAN`. It writes the int8 ONNX files the app runs. |
 | 5 | `evaluate.py` | Transcribes the test sets with sherpa-onnx 2.0.1, the same runtime and version as the app, and reports the word error rate. |
 | 6 | `publish.py` | Uploads the three files plus a `manifest.json` (sizes and SHA-256) to your Hugging Face repo. |
 
@@ -39,7 +39,8 @@ FLEURS sentences. This was a smoke test of the plumbing, not a usable model:
 - The converted checkpoint gives exactly the same encoder outputs and logits
   as the trained one (largest difference 0.0).
 - The export produced `hausa-encoder.int8.onnx` (13 MB),
-  `hausa-decoder.int8.onnx` (90 MB) and `hausa-tokens.txt`.
+  `hausa-decoder.int8.onnx` (90 MB then; 50 MB since the change under
+  *Size and speed*) and `hausa-tokens.txt`.
 - sherpa-onnx transcribed Hausa with them at 0.08× real time. Accuracy, as
   expected after 20 steps: word error 0.97, character error 0.34. The output
   sounded like Hausa but was wrongly split into words.
@@ -49,13 +50,36 @@ FLEURS sentences. This was a smoke test of the plumbing, not a usable model:
 notebook runs on a GPU. The notebook says how to read the result before
 publishing it.
 
-## Size
+## Size and speed
 
-A `whisper-tiny` model is about 103 MB to download, and `whisper-base`
-somewhat more. Most of it is the decoder's vocabulary table, which int8
-quantization leaves at full precision. Quantizing that table as well was
-tried: it made the file larger, because the table is shared with the output
-layer and ended up stored twice.
+A `whisper-tiny` model is about 63 MB to download. A `whisper-base` model is
+larger.
+
+Most of the decoder is its table of 51,865 word pieces. sherpa-onnx's
+exporter uses that one table twice:
+- to look up each word piece going in;
+- to score every word piece coming out, at every decoding step.
+
+The second use stopped int8 quantization from reaching the table, so it
+stayed in 32-bit floats, and the scoring step was most of the decoder's time.
+`export_onnx.py` now gives the scoring step its own copy of the table, and
+quantizes both copies to int8.
+
+Measured on 2026-11-15 with stock `whisper-tiny`, one CPU thread, through
+sherpa-onnx 2.0.1:
+
+| | Before | After |
+|---|---|---|
+| Decoder file | 90 MB | 50 MB |
+| Time per word piece | 34 ms | 23 ms |
+| Word error, 60 English FLEURS clips | 0.40 | 0.35 |
+
+English was used because stock Whisper can't transcribe Hausa, so on Hausa
+there is nothing to compare. Run `evaluate.py` on the trained model as usual.
+
+**Tried, and not used:** less trailing silence for sherpa-onnx's Whisper
+(`tail_paddings`, 10 s by default). It saved no time and raised word error from
+0.35 to 0.54 at 5 s.
 
 ## Running a step by hand
 

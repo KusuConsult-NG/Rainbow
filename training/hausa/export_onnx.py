@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # Vendored from sherpa-onnx (Apache License 2.0):
 #   https://github.com/k2-fsa/sherpa-onnx/blob/master/scripts/whisper/export-onnx.py
-# Changed for Guardian's Hausa model, and only in three places, all marked
-# "GUARDIAN": --model takes any name, --checkpoint loads a local OpenAI-
-# format checkpoint (from convert_to_openai.py), and torch.onnx.export keeps
-# the TorchScript exporter the script was written for. The export itself is as
-# sherpa-onnx wrote it, so the app's sherpa-onnx runtime reads the result.
+# Changed for Guardian's Hausa model, all marked "GUARDIAN": --model takes
+# any name, --checkpoint loads a local OpenAI-format checkpoint (from
+# convert_to_openai.py), torch.onnx.export keeps the TorchScript exporter the
+# script was written for, and the decoder's vocabulary table is quantized to
+# int8 (a separate output projection plus a quantized lookup), which makes it
+# faster and smaller. The inputs and outputs are as sherpa-onnx wrote them, so
+# the app's sherpa-onnx runtime reads the result.
 #
 #   python export_onnx.py --model hausa --checkpoint runs/base/hausa.pt
 #
@@ -229,6 +231,19 @@ class TextDecoderTensorCache(nn.Module):
         self.textDecoder = inTextDecoder
         self.n_ctx = in_n_ctx
 
+        # GUARDIAN: the output projection gets its own copy of the vocabulary
+        # table, already transposed. Upstream multiplies by the embedding
+        # table itself, shared with the token lookup, so int8 quantization
+        # never reaches it: every decoding step did a full float32
+        # 384 x 51865 multiply, most of the Hausa model's time on a phone,
+        # and the 80 MB float table was most of its download. As a plain
+        # MatMul weight it quantizes, and the lookup is quantized as a
+        # Gather (see the end of main). Same numbers, in int8.
+        self.out_proj = nn.Parameter(
+            inTextDecoder.token_embedding.weight.detach().t().contiguous(),
+            requires_grad=False,
+        )
+
         self.blocks = []
         for orginal_block in self.textDecoder.blocks:
             self.blocks.append(ResidualAttentionBlockTensorCache(orginal_block))
@@ -268,7 +283,10 @@ class TextDecoderTensorCache(nn.Module):
 
         x = self.textDecoder.ln(x)
 
-        if False:
+        # GUARDIAN: x @ out_proj, a weight int8 quantization can reach.
+        if True:
+            logits = torch.matmul(x, self.out_proj.to(x.dtype)).float()
+        elif False:
             # x.shape (1, 3, 384)
             # weight.shape (51684, 384)
 
@@ -663,7 +681,10 @@ def main():
     quantize_dynamic(
         model_input=decoder_filename,
         model_output=decoder_filename_int8,
-        op_types_to_quantize=["MatMul"],
+        # GUARDIAN: Gather as well, for the token lookup table. Upstream
+        # leaves it in float32; with the output projection separated (see
+        # TextDecoderTensorCache) both tables are int8.
+        op_types_to_quantize=["MatMul", "Gather"],
         weight_type=QuantType.QInt8,
     )
 
