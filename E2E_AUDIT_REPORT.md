@@ -7280,6 +7280,24 @@ launch would still settle the original cause, and the lines to look for are
   `workmanager` (WorkManager resolves `Worker` subclasses reflectively),
   `just_audio` (ExoPlayer) and `sentry_flutter` are not in the list. That is a
   release-only failure class with no gate on it.
+  **Measured 2026-11-16: nothing is stripped or renamed that Android or
+  WorkManager looks up by name.** The libraries' own consumer rules cover what
+  the hand-kept list does not. A release build with Flutter 3.38.4 ran R8 to
+  completion; it stopped at signing only because no keystore was present.
+  `scripts/inspect_release_r8_names.py` read its merged manifest and
+  `mapping.txt`:
+  - All 47 manifest components kept their names, among them
+    flutter_foreground_task's `ForegroundService` and `RebootReceiver`, which
+    Guardian depends on. The one missing entry, Play services'
+    `ModuleDependencies`, is declared disabled and has no class by design.
+  - All six WorkManager workers kept theirs: workmanager's `BackgroundWorker`,
+    three OneSignal workers, and two of androidx.work's own.
+
+  The tool was proven to catch a renamed worker, a removed service and a
+  renamed receiver. Run it after any release build. It is not a CI gate,
+  because CI builds no APK. What it cannot see is reflection outside the
+  manifest and WorkManager (ExoPlayer's optional extensions, for instance);
+  that is for the phone tests.
 
 ## A gate that was red for a reason it was not about, and said something it had not checked
 

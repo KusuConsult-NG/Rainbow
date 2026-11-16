@@ -3,6 +3,7 @@
 
     flutter build apk --release
     python3 scripts/inspect_release_r8_names.py
+    python3 scripts/inspect_release_r8_names.py --manifest M.xml --mapping mapping.txt
 
 Why this exists. Release builds set `isMinifyEnabled = true`, so R8 renames
 and removes classes it cannot see being used. Android itself starts every
@@ -21,8 +22,9 @@ reading the list. This reads what R8 actually did instead.
 What it checks, from the last release build's own output:
   * every component the merged release manifest names exists in the APK
     under that exact name (R8's mapping.txt maps it to itself);
-  * every subclass of androidx.work.ListenableWorker that survived R8 kept its
-    name, because WorkManager persists the name and looks it up later.
+  * every WorkManager worker that survived R8 kept its name, because
+    WorkManager persists the name and looks it up later. A worker is known by
+    the (Context, WorkerParameters) constructor WorkManager calls.
 
 What it cannot check: reflection that is not in the manifest and not a
 worker, and anything only a running phone shows. Those are the phone tests.
@@ -47,91 +49,119 @@ BUILD = REPO / 'build' / 'app'
 ANDROID = '{http://schemas.android.com/apk/res/android}'
 COMPONENTS = ('activity', 'activity-alias', 'service', 'receiver', 'provider')
 
+# WorkManager's abstract base classes. They carry the worker constructor, but
+# nothing is ever scheduled as one of them, so R8 may rename them freely (and
+# does: ListenableWorker became P1.w in the 2026-11-16 build). mapping.txt
+# cannot say a class is abstract, so they are named here.
+ABSTRACT_WORKERS = {
+    'androidx.work.ListenableWorker',
+    'androidx.work.Worker',
+    'androidx.work.CoroutineWorker',
+    'androidx.work.RxWorker',
+    'androidx.work.rxjava3.RxWorker',
+}
+
 
 def find_one(pattern: str) -> Path | None:
     hits = sorted(BUILD.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
     return hits[0] if hits else None
 
 
-def manifest_classes(manifest: Path) -> dict[str, str]:
-    """Component class -> its kind, from the merged release manifest."""
+def manifest_classes(manifest: Path) -> dict[str, tuple[str, bool]]:
+    """Component class -> (its kind, whether it is enabled), from the merged
+    release manifest. Android's own classes (android.*, java.*) are left out:
+    they live in the phone, never in the APK."""
     root = ET.parse(manifest).getroot()
     package = root.get('package', '')
     app = root.find('application')
-    found: dict[str, str] = {}
+    found: dict[str, tuple[str, bool]] = {}
     if app is None:
         return found
+
+    def add(name: str, kind: str, enabled: bool) -> None:
+        if name.startswith('.'):
+            name = package + name
+        if not name.startswith(('android.', 'java.', 'javax.')):
+            found[name] = (kind, enabled)
+
     for kind in COMPONENTS:
         for el in app.findall(kind):
             # An activity-alias names its target, not a class of its own.
             name = el.get(ANDROID + ('targetActivity' if kind == 'activity-alias' else 'name'))
-            if not name:
-                continue
-            if name.startswith('.'):
-                name = package + name
-            found[name] = kind
+            if name:
+                add(name, kind, el.get(ANDROID + 'enabled') != 'false')
     application = app.get(ANDROID + 'name')
     if application:
-        found[package + application if application.startswith('.') else application] = 'application'
+        add(application, 'application', True)
     return found
 
 
-def read_mapping(mapping: Path) -> tuple[dict[str, str], dict[str, str]]:
-    """(original -> new name for every class R8 kept, new name -> original)."""
+def read_mapping(mapping: Path) -> tuple[dict[str, str], list[str]]:
+    """(original -> new name for every class R8 kept, the kept WorkManager
+    workers by original name).
+
+    mapping.txt does not record superclasses, so a worker is recognised by
+    the constructor WorkManager calls reflectively,
+    `<init>(android.content.Context,androidx.work.WorkerParameters)`, which
+    mapping.txt lists under its class. Going by name instead wrongly took
+    sqflite's DatabaseWorker, a HandlerThread wrapper, for one."""
     kept: dict[str, str] = {}
+    workers: list[str] = []
+    current = None
     for line in mapping.read_text(encoding='utf-8', errors='replace').splitlines():
         m = re.match(r'^(\S+) -> (\S+):$', line)
         if m:
-            kept[m.group(1)] = m.group(2)
-    return kept, {v: k for k, v in kept.items()}
+            current = m.group(1)
+            kept[current] = m.group(2)
+        elif (current and '<init>(android.content.Context,androidx.work.WorkerParameters)' in line
+              and current not in workers and current not in ABSTRACT_WORKERS):
+            workers.append(current)
+    return kept, workers
 
 
-def worker_classes(mapping: Path) -> list[str]:
-    """Kept classes whose name says they are WorkManager workers.
-
-    mapping.txt does not record superclasses, so this goes by name: a class
-    whose name ends in Worker or Work, outside androidx, Kotlin and Java.
-    mapping.txt lists every kept class by its ORIGINAL name on the left, so a
-    worker R8 renamed is still found here, by the name it had, and reported.
-    A worker R8 removed entirely is not listed at all; WorkManager would fail
-    to find it too, but this check cannot tell it from a class never used."""
-    kept, _ = read_mapping(mapping)
-    return [c for c in kept if re.search(r'(Worker|Work)$', c.split('.')[-1])
-            and not c.startswith(('androidx.', 'kotlin', 'java'))]
-
-
-def main() -> int:
-    manifest = find_one('intermediates/merged_manifests/release/**/AndroidManifest.xml') \
-        or find_one('intermediates/merged_manifest/release/**/AndroidManifest.xml')
-    mapping = find_one('outputs/mapping/release/mapping.txt')
-    if manifest is None or mapping is None:
+def main(argv: list[str]) -> int:
+    args = dict(zip(argv[::2], argv[1::2]))
+    manifest = Path(args['--manifest']) if '--manifest' in args else (
+        find_one('intermediates/merged_manifests/release/**/AndroidManifest.xml')
+        or find_one('intermediates/merged_manifest/release/**/AndroidManifest.xml'))
+    mapping = Path(args['--mapping']) if '--mapping' in args else \
+        find_one('outputs/mapping/release/mapping.txt')
+    if manifest is None or mapping is None or not manifest.exists() or not mapping.exists():
         print('No release build to read. Run `flutter build apk --release` first.')
         print(f'  merged manifest: {manifest or "missing"}')
         print(f'  mapping.txt:     {mapping or "missing"}')
         return 2
 
-    kept, _ = read_mapping(mapping)
+    kept, workers = read_mapping(mapping)
     problems: list[str] = []
-    checked = 0
+    notes: list[str] = []
+    components = manifest_classes(manifest)
 
-    for cls, kind in sorted(manifest_classes(manifest).items()):
-        checked += 1
+    for cls, (kind, enabled) in sorted(components.items()):
         new = kept.get(cls)
-        if new is None:
+        if new is None and not enabled:
+            # Declared disabled, with no class behind it: Play services'
+            # ModuleDependencies is a metadata entry of exactly this kind.
+            # A component enabled at run time (WorkManager's receivers are)
+            # does have a class, and is held to the rule below.
+            notes.append(f'{kind} {cls}: not in the APK, and declared disabled')
+        elif new is None:
             problems.append(f'{kind} {cls}: not in the APK (R8 removed it, or it was never compiled in)')
         elif new != cls:
             problems.append(f'{kind} {cls}: renamed to {new}; Android will not find it')
 
-    workers = worker_classes(mapping)
     for cls in workers:
-        checked += 1
         if kept[cls] != cls:
             problems.append(f'worker {cls}: renamed to {kept[cls]}; WorkManager will not find it')
 
-    print(f'Read {manifest.relative_to(REPO)}')
-    print(f'and  {mapping.relative_to(REPO)}')
-    print(f'{checked} classes Android or WorkManager look up by name '
-          f'({len(workers)} worker(s): {", ".join(workers) or "none"}).')
+    print(f'Read {manifest}')
+    print(f'and  {mapping}')
+    print(f'{len(components)} manifest components and {len(workers)} WorkManager worker(s), '
+          'all looked up by name:')
+    for w in workers:
+        print(f'  worker {w}')
+    for n in notes:
+        print(f'  note: {n}')
     if problems:
         print('\nNOT KEPT under their own names:')
         for p in problems:
@@ -143,4 +173,4 @@ def main() -> int:
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
