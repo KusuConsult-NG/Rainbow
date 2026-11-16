@@ -106,19 +106,6 @@ void main() {
 /// asserted about a closure inside `main`.
 @visibleForTesting
 Future<void> boot() async {
-  // ─── The one dependency the app cannot be built without ───
-  //
-  // Every screen reaches `SupabaseConfig.client`, and `AuthNotifier`'s
-  // constructor reaches it synchronously during the first build. Building
-  // `RainbowApp` without a client guarantees a build-time throw, so this is
-  // checked rather than swallowed.
-  //
-  // BOUNDED, not merely guarded. The first version of this function wrapped
-  // this in a try/catch and argued that `Supabase.initialize` does no network
-  // I/O and therefore cannot hang. A try/catch catches a throw; it does not
-  // catch a step that never finishes — and a step that never finishes here is
-  // the same blank page as one that throws, because `runApp` is never
-  // reached. The browser harness found the stall the argument had ruled out.
   // ─── Configuration and error reporting, before anything can fail ───
   //
   // `.env` used to be read after Supabase started, and nothing ever started
@@ -134,6 +121,19 @@ Future<void> boot() async {
     await ErrorReporting.start().timeout(const Duration(seconds: 3));
   });
 
+  // ─── The one dependency the app cannot be built without ───
+  //
+  // Every screen reaches `SupabaseConfig.client`, and `AuthNotifier`'s
+  // constructor reaches it synchronously during the first build. Building
+  // `RainbowApp` without a client guarantees a build-time throw, so this is
+  // checked rather than swallowed.
+  //
+  // BOUNDED, not merely guarded. The first version of this function wrapped
+  // this in a try/catch and argued that `Supabase.initialize` does no network
+  // I/O and therefore cannot hang. A try/catch catches a throw; it does not
+  // catch a step that never finishes — and a step that never finishes here is
+  // the same blank page as one that throws, because `runApp` is never
+  // reached. The browser harness found the stall the argument had ruled out.
   debugPrint('🚀 [MAIN] Starting Supabase initialization...');
   final supabaseFailure = await runRequiredStartupStep(
     'Supabase initialization',
