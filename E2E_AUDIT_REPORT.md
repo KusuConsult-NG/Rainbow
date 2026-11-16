@@ -832,12 +832,17 @@ directions — silent on the fixed tree, and firing when the pre-fix files are r
 The first attempt at the source gate was silently blind: its comment filter matched the
 `//` inside `https://`, so it could not see the very endpoint it existed to find.
 
-**Still open, and deliberately not fixed here.** `DURESS_PIN`/`SAFE_PIN` remain
+**Closed 2026-09-02; this paragraph was not updated when it was.** It said, when
+written: *"Still open, and deliberately not fixed here. `DURESS_PIN`/`SAFE_PIN` remain
 build-time constants shared by every install, so they are still extractable. Per-user,
 server-verified PINs are a product change — new schema, new verification flow, migration
-for existing users — not a defect patch. The dangerous part (a duress PIN silently
-defaulting to `9999`, a value published in this repository) is fixed; the shared-constant
-design is not.
+for existing users — not a defect patch."* That product change was made in
+`supabase/migrations/20260902000000_per_user_emergency_pins.sql`. Each person sets their
+own PINs, stored only as bcrypt hashes in a table the API cannot read. They are checked
+on the server, with a lockout after five wrong tries, and no PIN material is left on the
+device. See *The duress PIN was a shared constant inside the APK — now per-user,
+server-verified*, and the C-findings status table (PR #71), which already marked it fixed.
+(Corrected 2026-11-16, after this paragraph was read as an open item.)
 
 ### H-4. Hardcoded HMAC shared secret
 
@@ -4232,6 +4237,11 @@ mechanism. That is a piece of work with real decisions in it (how many times do
 you re-send an SMS about an emergency, and to whom does it escalate when the
 agency's own channel is down), not a line of code, so it is named here rather
 than guessed at.
+
+**Closed since, by T-89** (`supabase/migrations/20261027000000_agency_handovers_retry.sql`).
+Failed handovers are now drained the way `notification_outbox` is, with the same backoff
+(`attempts * 2` minutes, capped at 60). See *T-89. The index said "(retry jobs)" since
+July, and `sent_at` was a lie*. (Noted 2026-11-16: this subsection still read as open.)
 
 `scripts/agency_delivery_behaviour_test.sql` proves it on a real PostgreSQL:
 all ten columns present, a leg that records its own reason, a skipped channel
