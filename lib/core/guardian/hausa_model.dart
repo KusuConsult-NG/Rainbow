@@ -132,10 +132,16 @@ class HausaModelStore {
 
   /// Downloads every file of [m], verifying each. Reports progress as bytes
   /// done out of [HausaModelManifest.totalBytes]. Returns the model folder.
-  /// On any failure nothing half-done is left behind, and older complete
-  /// models are only removed once the new one is complete.
+  /// On any failure nothing half-done is left behind, and the model already
+  /// on the phone, even the same version, is only replaced once the new one
+  /// is complete and verified.
   Future<String> download(HausaModelManifest m, {void Function(int done, int total)? onProgress}) async {
-    final dir = _dirFor(m.version);
+    final target = _dirFor(m.version);
+    // Downloaded beside the installed model, never into it. This used to
+    // delete the target first, so re-downloading the version already
+    // installed and failing part-way left the phone with no Hausa at all.
+    // installed() ignores this folder: it has no .complete until the swap.
+    final dir = Directory('${target.path}.downloading');
     if (dir.existsSync()) dir.deleteSync(recursive: true);
     dir.createSync(recursive: true);
     final base = Uri.parse(manifestUrl!);
@@ -168,17 +174,20 @@ class HausaModelStore {
         if (digest != f.sha256) throw HttpException('${f.name}: checksum does not match');
         part.renameSync('${dir.path}/${f.name}');
       }
-      File('${dir.path}/.complete').writeAsStringSync(m.version);
+      // Verified. Only now does the old copy of this version make way.
+      if (target.existsSync()) target.deleteSync(recursive: true);
+      dir.renameSync(target.path);
+      File('${target.path}/.complete').writeAsStringSync(m.version);
     } on Object {
       if (dir.existsSync()) dir.deleteSync(recursive: true);
       rethrow;
     }
     for (final d in root.listSync().whereType<Directory>()) {
-      if (d.path != dir.path && d.uri.pathSegments.where((s) => s.isNotEmpty).last.startsWith('hausa-')) {
+      if (d.path != target.path && d.uri.pathSegments.where((s) => s.isNotEmpty).last.startsWith('hausa-')) {
         d.deleteSync(recursive: true);
       }
     }
-    return dir.path;
+    return target.path;
   }
 
   /// Removes every Hausa model from the phone.

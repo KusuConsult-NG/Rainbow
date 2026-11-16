@@ -58,6 +58,23 @@ void main() {
     expect(File('$dir/hausa-decoder.int8.onnx').lengthSync(), 3000);
   });
 
+  // A re-download of the version already installed used to delete the working
+  // model before the new copy had arrived, so a failed re-download left the
+  // phone with no Hausa at all.
+  test('a failed re-download of the same version keeps the working model', () async {
+    final good = HausaModelStore(root: root, manifestUrl: url, client: serve(manifestFor(files), files));
+    final dir = await good.download(await good.fetchManifest());
+
+    final broken = Map.of(files)..['hausa-decoder.int8.onnx'] = List.filled(10, 9);
+    final bad = HausaModelStore(root: root, manifestUrl: url, client: serve(manifestFor(files), broken));
+    await expectLater(bad.download(await bad.fetchManifest()), throwsA(isA<HttpException>()));
+
+    expect(await good.installed(), dir);
+    expect(File('$dir/hausa-decoder.int8.onnx').lengthSync(), 3000);
+    expect(root.listSync().whereType<Directory>().map((d) => d.path), [dir],
+        reason: 'nothing half-done is left beside it');
+  });
+
   test('a file whose checksum does not match is rejected and nothing is left', () async {
     final wrong = {'hausa-decoder.int8.onnx': 'f' * 64};
     final store = HausaModelStore(root: root, manifestUrl: url, client: serve(manifestFor(files, hashes: wrong), files));
