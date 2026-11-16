@@ -7267,6 +7267,13 @@ launch would still settle the original cause, and the lines to look for are
   goes nowhere — including the start-up failures above, which is why this was
   only ever visible as a blank page and not as an alert. Worth wiring up or
   removing; leaving it looks like error reporting and is not.
+  **✅ Wired up 2026-11-16** (`lib/core/startup/error_reporting.dart`). Reporting
+  starts when `SENTRY_DSN` is set in `.env` and stays off, saying so in the log,
+  when it is blank. `.env` is now read before Supabase starts, so a Supabase
+  failure is reported too. Reports carry the error, stack trace and versions
+  only: no breadcrumbs, user, IP or screenshot. And `main.dart`'s
+  `FlutterError` and `PlatformDispatcher` handlers no longer report
+  themselves, because Sentry wraps them and would send each error twice.
 * **`android/app/build.gradle.kts` sets `isMinifyEnabled = true`, and
   `proguard-rules.pro` keeps a hand-maintained list of six plugins.** The ones
   that instantiate classes by name are the ones that need rules, and

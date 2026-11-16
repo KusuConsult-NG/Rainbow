@@ -12,6 +12,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/app.dart';
 import 'package:rainbow_app/core/config/app_config.dart';
 import 'package:rainbow_app/core/providers/tactical_provider_observer.dart';
+import 'package:rainbow_app/core/startup/error_reporting.dart';
 import 'package:rainbow_app/core/startup/startup_failure.dart';
 import 'package:rainbow_app/core/net/resolving_http_overrides.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
@@ -66,20 +67,16 @@ void main() {
     // the realtime channel keeps the unmodified one for the session.
     ResolvingHttpOverrides.install();
 
+    // These two do not report to Sentry themselves. When reporting is on
+    // (ErrorReporting.start, in boot), Sentry wraps both handlers: it reports
+    // and then calls them, so reporting here as well sent every error twice.
     FlutterError.onError = (details) {
       FlutterError.presentError(details);
       debugPrint('[CRITICAL_FLUTTER_ERR] ${details.exception}');
-      unawaited(
-        Sentry.captureException(
-          details.exception,
-          stackTrace: details.stack,
-        ),
-      );
     };
 
     PlatformDispatcher.instance.onError = (error, stack) {
       debugPrint('[CRITICAL_PLATFORM_ERR] $error');
-      unawaited(Sentry.captureException(error, stackTrace: stack));
       return true;
     };
 
@@ -122,6 +119,21 @@ Future<void> boot() async {
   // catch a step that never finishes — and a step that never finishes here is
   // the same blank page as one that throws, because `runApp` is never
   // reached. The browser harness found the stall the argument had ruled out.
+  // ─── Configuration and error reporting, before anything can fail ───
+  //
+  // `.env` used to be read after Supabase started, and nothing ever started
+  // Sentry, so a Supabase failure was "reported" to nobody. Reading `.env`
+  // first lets reporting start before the first step that can fail, so that
+  // failure is reported when a DSN is set. Both steps are bounded and
+  // non-fatal: neither can cost the first frame.
+  await runStartupStep('.env load', () async {
+    await dotenv.load().timeout(const Duration(seconds: 3));
+    debugPrint('🚀 [MAIN] .env Loaded. keys=${dotenv.env.length}');
+  });
+  await runStartupStep('error reporting', () async {
+    await ErrorReporting.start().timeout(const Duration(seconds: 3));
+  });
+
   debugPrint('🚀 [MAIN] Starting Supabase initialization...');
   final supabaseFailure = await runRequiredStartupStep(
     'Supabase initialization',
@@ -159,14 +171,6 @@ Future<void> boot() async {
   // immediately and visibly, rather than working for whoever has warm cache
   // and failing for whoever does not.
   GoogleFonts.config.allowRuntimeFetching = false;
-
-  // Bounded and guarded, and kept before the first frame because AppConfig
-  // reads these values: a screen built before they land would silently use
-  // its fallbacks.
-  await runStartupStep('.env load', () async {
-    await dotenv.load().timeout(const Duration(seconds: 3));
-    debugPrint('🚀 [MAIN] .env Loaded. keys=${dotenv.env.length}');
-  });
 
   // Report configuration state explicitly. The load above is intentionally
   // non-fatal, which means a missing .env used to leave the app running with

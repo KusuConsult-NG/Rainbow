@@ -66,6 +66,9 @@ FEATURES: dict[str, tuple[int, str, str]] = {
     'CLOUDINARY_UPLOAD_PRESET': (
         2, 'photo and video evidence cannot upload',
         'attaching media to a report fails'),
+    'SENTRY_DSN': (
+        3, 'crash and error reports go nowhere',
+        'nothing on the phone; the team does not learn about failures in the field'),
     'DEMO_CITIZEN_EMAIL': (
         3, 'nothing — a demonstration account only',
         'no effect on a real deployment'),
