@@ -53,6 +53,11 @@ class AlertService {
     String? geoSiecWard,
     String? geoPu,
     String syncStatus = 'COMPLETED',
+    /// Whether to look for a position when none is given. The SOS passes
+    /// false: it has just looked, without asking and against a deadline, and
+    /// looking again here (with the permission dialog and its 30 s wait)
+    /// delayed the alert a second time.
+    bool lookUpLocation = true,
   }) async {
     /// `isCritical` was a parameter that did nothing.
     ///
@@ -78,7 +83,7 @@ class AlertService {
     var finalLng = longitude;
 
     try {
-      if (finalLat == null || finalLng == null) {
+      if (lookUpLocation && (finalLat == null || finalLng == null)) {
         final pos = await LocationService().getCurrentPosition(force: true);
         if (pos != null) {
           finalLat = pos.latitude;

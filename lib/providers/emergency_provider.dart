@@ -82,10 +82,25 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
     final lga = auth.profile?['geo_lga'] as String?;
     final ward = auth.profile?['geo_ward'] as String?;
 
+    // A position only if one can be had at once, never by asking, and never
+    // for longer than [sosLocationLimit]. This used to request permission
+    // (up to 30 s) and wait for a fix (5 s) before the alert existed, and
+    // submitAlert then did it all again on a miss: up to about 70 s between
+    // the press and the row HQ sees. A missing fix stays null (C-5), and the
+    // tracking started below fills the location in, asking if it must.
     Position? currentPos;
     try {
-      currentPos = await LocationService().getCurrentPosition(force: true);
-    } catch (_) {}
+      final lookup = sosPositionOverride?.call() ??
+          LocationService().positionWithoutAsking(limit: sosLocationLimit);
+      // .then<Position?> first: a Future<Position> (not nullable) cannot take
+      // the timeout's null, and the TypeError was swallowed below, silently
+      // dropping a position that had been found.
+      currentPos = await lookup
+          .then<Position?>((p) => p)
+          .timeout(sosLocationLimit + const Duration(seconds: 1), onTimeout: () => null);
+    } on Object catch (e) {
+      debugPrint('[SOS] no position for the alert: $e');
+    }
 
     final latVal = currentPos?.latitude;
     final lngVal = currentPos?.longitude;
@@ -108,6 +123,7 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
             isCritical: true,
             geoLga: lga,
             geoWard: ward,
+            lookUpLocation: false,
           );
 
       final safeAlertId = alertId ?? 'OFFLINE_PENDING';
@@ -187,6 +203,14 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
       state = state.copyWith();
     }
   }
+
+  /// The longest an SOS waits for a position before its alert is written.
+  @visibleForTesting
+  static Duration sosLocationLimit = const Duration(seconds: 5);
+
+  /// Test seam: replaces the SOS position lookup.
+  @visibleForTesting
+  static Future<Position?> Function()? sosPositionOverride;
 
   /// Test seam: BackgroundTrackingService talks to platform channels, which do
   /// not exist under `flutter test`.

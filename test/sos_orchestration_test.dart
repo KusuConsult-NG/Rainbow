@@ -19,6 +19,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
@@ -77,6 +78,7 @@ void main() {
         isCritical: any(named: 'isCritical'),
         geoLga: any(named: 'geoLga'),
         geoWard: any(named: 'geoWard'),
+        lookUpLocation: any(named: 'lookUpLocation'),
       ),
     ).thenAnswer((_) async {
       callOrder.add('alert');
@@ -239,6 +241,85 @@ void main() {
     });
   });
 
+  // The alert is the thing HQ acts on, so nothing about finding a position may
+  // hold it up. The lookup used to ask for permission (up to 30 s) and wait for
+  // a fix (5 s) before the alert existed, and submitAlert repeated it all on a
+  // miss: about 70 s, worst case, between the press and the row.
+  group('startEmergency — the alert is not held up by finding a position', () {
+    tearDown(() {
+      EmergencyNotifier.sosPositionOverride = null;
+      EmergencyNotifier.sosLocationLimit = const Duration(seconds: 5);
+    });
+
+    List<Object?> sentCoords() => verify(
+          () => alerts.submitAlert(
+            type: any(named: 'type'),
+            description: any(named: 'description'),
+            reportedBy: any(named: 'reportedBy'),
+            latitude: captureAny(named: 'latitude'),
+            longitude: captureAny(named: 'longitude'),
+            isCritical: any(named: 'isCritical'),
+            geoLga: any(named: 'geoLga'),
+            geoWard: any(named: 'geoWard'),
+            lookUpLocation: any(named: 'lookUpLocation'),
+          ),
+        ).captured;
+
+    test('the alert service is told not to look for a position again', () async {
+      final c = containerWith(onSubmit: () async => kServerAlertId);
+      addTearDown(c.dispose);
+      await c.read(emergencyProvider.notifier).startEmergency();
+      await settle();
+      final asked = verify(
+        () => alerts.submitAlert(
+          type: any(named: 'type'),
+          description: any(named: 'description'),
+          reportedBy: any(named: 'reportedBy'),
+          latitude: any(named: 'latitude'),
+          longitude: any(named: 'longitude'),
+          isCritical: any(named: 'isCritical'),
+          geoLga: any(named: 'geoLga'),
+          geoWard: any(named: 'geoWard'),
+          lookUpLocation: captureAny(named: 'lookUpLocation'),
+        ),
+      ).captured;
+      expect(asked, [false]);
+    });
+
+    test('a position lookup that never finishes does not hold the alert', () async {
+      EmergencyNotifier.sosLocationLimit = const Duration(milliseconds: 20);
+      EmergencyNotifier.sosPositionOverride = () => Completer<Position?>().future;
+      final c = containerWith(onSubmit: () async => kServerAlertId);
+      addTearDown(c.dispose);
+
+      await c.read(emergencyProvider.notifier).startEmergency()
+          .timeout(const Duration(seconds: 3));
+      await settle();
+      expect(callOrder.first, 'alert');
+      expect(sentCoords(), [null, null]);
+    });
+
+    test('a position that is found quickly is sent with the alert', () async {
+      EmergencyNotifier.sosPositionOverride = () async => Position(
+            latitude: 9.92,
+            longitude: 8.89,
+            timestamp: DateTime(2026, 11, 16),
+            accuracy: 8,
+            altitude: 0,
+            altitudeAccuracy: 0,
+            heading: 0,
+            headingAccuracy: 0,
+            speed: 0,
+            speedAccuracy: 0,
+          );
+      final c = containerWith(onSubmit: () async => kServerAlertId);
+      addTearDown(c.dispose);
+      await c.read(emergencyProvider.notifier).startEmergency();
+      await settle();
+      expect(sentCoords(), [9.92, 8.89]);
+    });
+  });
+
   group('startEmergency — C-5, no fabricated coordinates', () {
     // Geolocator has no platform implementation under `flutter test`, so
     // getCurrentPosition throws and the SOS proceeds with no fix. That is the
@@ -260,6 +341,7 @@ void main() {
           isCritical: any(named: 'isCritical'),
           geoLga: any(named: 'geoLga'),
           geoWard: any(named: 'geoWard'),
+          lookUpLocation: any(named: 'lookUpLocation'),
         ),
       ).captured;
       expect(alertCoords, [null, null],
@@ -292,6 +374,7 @@ void main() {
           isCritical: any(named: 'isCritical'),
           geoLga: captureAny(named: 'geoLga'),
           geoWard: captureAny(named: 'geoWard'),
+          lookUpLocation: any(named: 'lookUpLocation'),
         ),
       ).captured;
       expect(captured, ['JOS NORTH', 'NARAGUTA'],
@@ -315,6 +398,7 @@ void main() {
           isCritical: captureAny(named: 'isCritical'),
           geoLga: any(named: 'geoLga'),
           geoWard: any(named: 'geoWard'),
+          lookUpLocation: any(named: 'lookUpLocation'),
         ),
       ).captured.single;
       expect(captured, isTrue);
@@ -365,6 +449,7 @@ void main() {
           isCritical: any(named: 'isCritical'),
           geoLga: any(named: 'geoLga'),
           geoWard: any(named: 'geoWard'),
+          lookUpLocation: any(named: 'lookUpLocation'),
         ),
       ).captured.single;
       expect(description, contains('Silent'));

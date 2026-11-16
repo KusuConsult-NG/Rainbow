@@ -49,6 +49,7 @@ class FakeAlertService implements AlertService {
     String? geoSiecWard,
     String? geoPu,
     String syncStatus = 'COMPLETED',
+    bool lookUpLocation = true,
   }) async {
     return 'media-test-alert-123';
   }
