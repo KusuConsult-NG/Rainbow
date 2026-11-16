@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -199,7 +200,7 @@ class AlertService {
           longitude: finalLng,
         );
 
-        await BackgroundTrackingService().startSosTracking(localId, reportedBy);
+        _startTracking(localId, reportedBy);
         return localId;
       }
 
@@ -324,7 +325,7 @@ class AlertService {
             .timeout(insertLimit);
 
         final alertId = response?['id'] as String? ?? localId;
-        await BackgroundTrackingService().startSosTracking(alertId, reportedBy);
+        _startTracking(alertId, reportedBy);
         return alertId;
       } catch (e) {
         debugPrint(
@@ -365,7 +366,7 @@ class AlertService {
           longitude: finalLng,
         );
 
-        await BackgroundTrackingService().startSosTracking(localId, reportedBy);
+        _startTracking(localId, reportedBy);
         return localId;
       }
     } catch (e) {
@@ -487,6 +488,25 @@ class AlertService {
 
   /// Test seam: the "has this already arrived?" lookup, so the flush can be
   /// tested without Supabase.
+  /// Starts live tracking for the report, WITHOUT waiting for it.
+  ///
+  /// This was awaited before submitAlert returned. startSosTracking asks for
+  /// location permission when it is denied, with no time limit, and with the
+  /// app in the background (a Guardian SOS) that request can stay pending
+  /// until the person next opens the app. Meanwhile startEmergency, waiting on
+  /// this method for the alert id, held back the escalation SMS. The alert id
+  /// does not depend on tracking having started, so nothing waits for it.
+  void _startTracking(String alertId, String userId) {
+    unawaited(
+      (startTrackingOverride ?? BackgroundTrackingService().startSosTracking)(alertId, userId)
+          .catchError((Object e) => debugPrint('[ALERT_SERVICE] tracking did not start: $e')),
+    );
+  }
+
+  /// Test seam: replaces BackgroundTrackingService.startSosTracking.
+  @visibleForTesting
+  static Future<void> Function(String alertId, String userId)? startTrackingOverride;
+
   /// The longest an alert insert may take before the report goes the offline
   /// way instead (queue, mesh, SMS). See the insert in [submitAlert].
   @visibleForTesting

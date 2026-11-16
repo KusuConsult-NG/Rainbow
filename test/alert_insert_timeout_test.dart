@@ -80,6 +80,36 @@ void main() {
     expect(escalated, [id], reason: 'and the offline channels were tried');
   });
 
+  // startSosTracking may ask for location permission and wait, with no limit,
+  // for an answer that a backgrounded app cannot get. The alert id, and with
+  // it startEmergency's escalation SMS, used to wait on that.
+  test('tracking that never finishes starting does not hold the alert id', () async {
+    installOfflineSupabase(handler: jsonRows([
+      {'id': '7f3a1c94-2b6d-4e58-9a01-5c8e2d4f6b70'},
+    ]));
+    AlertService.insertLimit = const Duration(seconds: 5);
+    final started = <String>[];
+    AlertService.startTrackingOverride = (alertId, userId) {
+      started.add(alertId);
+      return Completer<void>().future; // a permission request nobody answers
+    };
+    addTearDown(() => AlertService.startTrackingOverride = null);
+
+    final id = await AlertService()
+        .submitAlert(
+          type: 'PANIC SOS',
+          description: 'Public Panic Button Activated',
+          reportedBy: 'test-user',
+          isCritical: true,
+          lookUpLocation: false,
+        )
+        .timeout(const Duration(seconds: 3),
+            onTimeout: () => fail('submitAlert waited for tracking to start'));
+
+    expect(id, '7f3a1c94-2b6d-4e58-9a01-5c8e2d4f6b70');
+    expect(started, [id], reason: 'tracking is still started, for the real id');
+  });
+
   test('an insert that answers in time is not affected', () async {
     installOfflineSupabase(handler: jsonRows([
       {'id': '7f3a1c94-2b6d-4e58-9a01-5c8e2d4f6b70'},
