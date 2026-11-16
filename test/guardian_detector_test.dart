@@ -136,6 +136,41 @@ void main() {
     test('an unusual phrase is accepted', () {
       expect(DistressDetector.checkSecretPhrase('the mangoes are ripe'), isNull);
     });
+
+    test('a Hausa greeting is everyday filler too', () {
+      // Good morning, I'm well / welcome / thank you very much.
+      expect(DistressDetector.checkSecretPhrase('ina kwana lafiya'), SecretPhraseProblem.tooCommon);
+      expect(DistressDetector.checkSecretPhrase('sannu da zuwa'), SecretPhraseProblem.tooCommon);
+      expect(DistressDetector.checkSecretPhrase('na gode sosai'), SecretPhraseProblem.tooCommon);
+    });
+
+    test('a Hausa call for help is refused, as an English one is', () {
+      expect(DistressDetector.checkSecretPhrase('za su kashe ni'), SecretPhraseProblem.tooCommon);
+      expect(DistressDetector.checkSecretPhrase('wani ya taimake ni'), SecretPhraseProblem.tooCommon);
+    });
+
+    test('an unusual Hausa phrase is accepted', () {
+      expect(DistressDetector.checkSecretPhrase('mangwaro ya nuna sosai'), isNull);
+    });
+  });
+
+  group('a secret phrase in Hausa', () {
+    // With Hausa on, the Hausa recognizer's text goes through the same
+    // detector, so a phrase typed in Hausa is matched against it.
+    test('is matched in what the Hausa recognizer wrote', () {
+      expect(once('Mangwaro ya nuna sosai.', secret: 'mangwaro ya nuna sosai'), isNotNull);
+    });
+
+    test('is matched whether or not the hooked letters were typed', () {
+      // Typed with ɗ and written by the recognizer without, and the reverse.
+      expect(once('ruwan dumi ya zuba', secret: 'ruwan ɗumi ya zuba'), isNotNull);
+      expect(once('ruwan ɗumi ya zuba', secret: 'ruwan dumi ya zuba'), isNotNull);
+    });
+
+    test('is matched inside a longer sentence, on whole words only', () {
+      expect(once('kai yau mangwaro ya nuna sosai fa', secret: 'mangwaro ya nuna sosai'), isNotNull);
+      expect(once('mangwaron ya nuna sosai', secret: 'mangwaro ya nuna sosai'), isNull);
+    });
   });
 
   test('HQ is told the rule, never the words', () {

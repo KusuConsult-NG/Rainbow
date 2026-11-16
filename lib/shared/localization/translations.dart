@@ -1471,9 +1471,9 @@ class Translations {
       AppLanguage.pidgin: 'Your secret phrase',
     },
     'guardian_phrase_desc': {
-      AppLanguage.english: 'A sentence only you would say, at least three words, that sounds ordinary to anyone nearby. It is stored only on this phone, and only in English for now.',
-      AppLanguage.hausa: 'Jimla da kai kadai za ka fada, akalla kalmomi uku, wadda za ta yi kama da magana ta yau da kullum ga wanda ke kusa. Ana ajiye ta a wannan wayar kawai, kuma a Turanci kawai a yanzu.',
-      AppLanguage.pidgin: 'Sentence wey only you go talk, at least three words, wey go sound normal to anybody wey dey near. Na only this phone e dey, and only for English for now.',
+      AppLanguage.english: 'A sentence only you would say, at least three words, that sounds ordinary to anyone nearby. Say it in English, or in Hausa if Hausa listening is on below. It is stored only on this phone.',
+      AppLanguage.hausa: 'Jimla da kai kadai za ka fada, akalla kalmomi uku, wadda za ta yi kama da magana ta yau da kullum ga wanda ke kusa. Fade ta da Turanci, ko da Hausa idan sauraron Hausa yana kunne a kasa. Ana ajiye ta a wannan wayar kawai.',
+      AppLanguage.pidgin: 'Sentence wey only you go talk, at least three words, wey go sound normal to anybody wey dey near. Talk am for English, or for Hausa if Hausa listening dey on for down. Na only this phone e dey.',
     },
     'guardian_phrase_set': {
       AppLanguage.english: 'A secret phrase is set.',
@@ -1631,9 +1631,9 @@ class Translations {
       AppLanguage.pidgin: 'Listen for Hausa too',
     },
     'guardian_ha_note': {
-      AppLanguage.english: 'Hausa listening is new and uses more battery than English alone. Your secret phrase is still matched in English.',
-      AppLanguage.hausa: 'Sauraron Hausa sabo ne kuma yana amfani da batir fiye da Turanci kadai. Har yanzu ana gane kalmarka ta sirri da Turanci.',
-      AppLanguage.pidgin: 'Hausa listening still new and e dey use more battery pass English alone. Your secret phrase still dey match for English.',
+      AppLanguage.english: 'Hausa listening is new and uses more battery than English alone. A secret phrase in Hausa is heard only while this is on.',
+      AppLanguage.hausa: 'Sauraron Hausa sabo ne kuma yana amfani da batir fiye da Turanci kadai. Ana jin kalmar sirri ta Hausa ne kawai idan wannan yana kunne.',
+      AppLanguage.pidgin: 'Hausa listening still new and e dey use more battery pass English alone. Secret phrase for Hausa go only work when this one dey on.',
     },
     'guardian_ha_remove': {
       AppLanguage.english: 'REMOVE HAUSA MODEL',

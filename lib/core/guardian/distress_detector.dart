@@ -258,6 +258,15 @@ class DistressDetector {
     'yes', 'no', 'ok', 'okay', 'good', 'morning', 'night', 'afternoon',
     'evening', 'hello', 'hi', 'thank', 'thanks', 'please', 'to', 'and', 'of',
     'in', 'on', 'my', 'your', 'now', 'here', 'there', 'fine', 'well',
+    // Hausa, now that a phrase can be said in Hausa: greetings and the small
+    // words around them. "ina kwana lafiya" (good morning, I'm well) is said
+    // every day and would send an SOS by accident, as would "na gode sosai"
+    // (thank you very much). Written without the hooked letters, as
+    // normalize() leaves them. ("to", "okay", is in the English list.)
+    'sannu', 'ina', 'kwana', 'lafiya', 'yaya', 'kana', 'kina', 'kuna', 'yini',
+    'barka', 'da', 'zuwa', 'na', 'gode', 'nagode', 'godiya', 'sosai', 'sai',
+    'anjima', 'jima', 'gobe', 'yau', 'eh', 'aa', 'ni', 'ka', 'ki', 'ku', 'mu',
+    'su', 'shi', 'ita', 'ne', 'ce', 'ma', 'kai', 'gida', 'aiki', 'ya', 'ta',
   };
 
   /// Feeds one recognized utterance. Returns the match that should send an
