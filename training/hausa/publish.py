@@ -1,7 +1,10 @@
 """Publish an exported Hausa model to Hugging Face for the app to download.
 
     HF_TOKEN=... python publish.py --model-dir export/ --name hausa \\
-        --repo your-org/guardian-hausa --report export/report.json
+        --repo your-org/guardian-hausa --report export/report.json --data data/
+
+Refuses to upload when the test word error is above --max-wer (0.5), the
+point above which the notebook says not to publish.
 
 Uploads the three files the app needs and a manifest.json beside them:
 
@@ -46,6 +49,11 @@ def main() -> None:
     p.add_argument("--report", type=Path, default=None, help="evaluate.py's JSON for the test set")
     p.add_argument("--base-model", default="openai/whisper-base")
     p.add_argument("--dry-run", action="store_true", help="write manifest.json only, upload nothing")
+    p.add_argument("--data", type=Path, default=Path("data"),
+                   help="prepare_data.py's folder; its train.jsonl says whether app recordings were used")
+    p.add_argument("--max-wer", type=float, default=0.5,
+                   help="refuse to upload a model whose test word error is above this")
+    p.add_argument("--force", action="store_true", help="upload even above --max-wer")
     args = p.parse_args()
 
     files = []
@@ -56,6 +64,20 @@ def main() -> None:
         files.append({"name": path.name, "size": path.stat().st_size, "sha256": sha256(path)})
 
     report = json.loads(args.report.read_text()) if args.report else {}
+
+    # What it was really trained on: the manifest is shown to whoever reviews
+    # the model, so it must not claim recordings that were never used.
+    train_list = args.data / "train.jsonl"
+    if not train_list.exists():
+        raise SystemExit(f"missing {train_list}: pass --data, the folder prepare_data.py wrote")
+    rows = [json.loads(l) for l in train_list.read_text(encoding="utf-8").splitlines() if l.strip()]
+    recorded = sum(1 for r in rows if "expect" in r)  # only app recordings carry "expect"
+    trained_on = [f"google/fleurs ha_ng (CC-BY-4.0): {len(rows) - recorded} sentences"]
+    licence = "Model weights derived from OpenAI Whisper (MIT). Trained on Google FLEURS (CC-BY-4.0)"
+    if recorded:
+        trained_on.append(f"Plateau Eye contributed recordings, given with consent: {recorded}")
+        licence += " and recordings contributed through Plateau Eye with consent"
+    licence += "."
     manifest = {
         "version": dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d%H%M"),
         "language": "ha",
@@ -64,16 +86,29 @@ def main() -> None:
         "wer": report.get("wer"),
         "cer": report.get("cer"),
         "evaluated_on": report.get("manifest"),
-        "licence": "Model weights derived from OpenAI Whisper (MIT). Trained on Google FLEURS "
-        "(CC-BY-4.0) and recordings contributed through Plateau Eye with consent.",
-        "trained_on": ["google/fleurs ha_ng (CC-BY-4.0)", "Plateau Eye contributed recordings"],
+        "licence": licence,
+        "trained_on": trained_on,
     }
     out = args.model_dir / "manifest.json"
     out.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(manifest, indent=2))
+    # The notebook says not to publish above 0.5; this makes that hold even
+    # when the cell is run without reading it. Phones would download a model
+    # that misses most calls for help.
+    wer = report.get("wer")
+    blocked = None
+    if wer is None:
+        blocked = "no word error rate: pass --report with evaluate.py's JSON for the test set"
+    elif wer > args.max_wer:
+        blocked = f"word error {wer:.2f} is above {args.max_wer:.2f}"
     if args.dry_run:
+        if blocked:
+            print(f"note: a real upload would be refused: {blocked}")
         print(f"dry run: wrote {out}, uploaded nothing")
         return
+    if blocked and not args.force:
+        raise SystemExit(f"not uploading: {blocked}. Train more (add recordings, more epochs), "
+                         "or pass --force if you are sure.")
 
     token = os.environ.get("HF_TOKEN")
     if not token:

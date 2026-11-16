@@ -28,7 +28,7 @@ Leave the variable blank and Guardian offers English and Pidgin only.
 | 3 | `convert_to_openai.py` | Renames the weights to OpenAI's layout, which the exporter reads. It then loads the result in OpenAI's code. |
 | 4 | `export_onnx.py` | sherpa-onnx's own Whisper exporter (Apache-2.0), vendored with changes marked `GUARDIAN`. It writes the int8 ONNX files the app runs. |
 | 5 | `evaluate.py` | Transcribes the test sets with sherpa-onnx 2.0.1, the same runtime and version as the app, and reports the word error rate. |
-| 6 | `publish.py` | Uploads the three files plus a `manifest.json` (sizes and SHA-256) to your Hugging Face repo. |
+| 6 | `publish.py` | Uploads the three files plus a `manifest.json` (sizes and SHA-256) to your Hugging Face repo. It refuses when word error is above 0.50 (`--force` overrides), and lists in the manifest what the model was trained on. |
 
 ## What has been verified, and what has not
 
@@ -46,14 +46,25 @@ FLEURS sentences. This was a smoke test of the plumbing, not a usable model:
   sounded like Hausa but was wrongly split into words.
 - Reading app recordings, and `publish.py --dry-run`, both worked.
 
+Rehearsed again on 2026-11-16 with the notebook's own commands and
+`whisper-base`, its default. This time training took the real run's path: no
+`--max-steps`, so it evaluated and saved after each epoch, warmed up, and
+reloaded the best checkpoint at the end. (Two epochs on 96 sentences, CPU.)
+- Training: 6 GB peak memory on a CPU; dev loss fell from 3.23 to 2.94.
+- Convert, export, evaluate (0.14x real time on 2 threads) and
+  `publish.py --dry-run` all worked on the result.
+- The export is about 107 MB.
+- The rehearsal found that the notebook cloned `main` before this code was
+  merged; it now has a `BRANCH` setting.
+
 **Not yet done: the real training run.** Its accuracy is unknown until the
 notebook runs on a GPU. The notebook says how to read the result before
 publishing it.
 
 ## Size and speed
 
-A `whisper-tiny` model is about 63 MB to download. A `whisper-base` model is
-larger.
+A `whisper-tiny` model is about 63 MB to download, and a `whisper-base` model
+(the notebook's default) about 107 MB: a 29 MB encoder and a 78 MB decoder.
 
 Most of the decoder is its table of 51,865 word pieces. sherpa-onnx's
 exporter uses that one table twice:
@@ -91,7 +102,7 @@ python train.py --data data --model openai/whisper-base --out runs/hausa
 python convert_to_openai.py --hf runs/hausa --out runs/hausa/hausa.pt
 mkdir export && cd export && python ../export_onnx.py --model hausa --checkpoint ../runs/hausa/hausa.pt && cd ..
 python evaluate.py --model-dir export --manifest data/test.jsonl --report export/report.json
-HF_TOKEN=... python publish.py --model-dir export --repo your-org/guardian-hausa --report export/report.json
+HF_TOKEN=... python publish.py --model-dir export --repo your-org/guardian-hausa --report export/report.json --data data
 ```
 
 For a quick check that everything runs on a laptop, add `--max-steps 20
