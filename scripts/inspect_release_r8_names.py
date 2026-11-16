@@ -2,7 +2,7 @@
 """Check that R8 kept every class Android looks up by name in a release build.
 
     flutter build apk --release
-    python3 scripts/check_release_keeps_named_classes.py
+    python3 scripts/inspect_release_r8_names.py
 
 Why this exists. Release builds set `isMinifyEnabled = true`, so R8 renames
 and removes classes it cannot see being used. Android itself starts every
@@ -28,7 +28,12 @@ What it cannot check: reflection that is not in the manifest and not a
 worker, and anything only a running phone shows. Those are the phone tests.
 
 Exit 0 when every name survived, 1 when one did not, 2 when there is no
-release build to read. Not run in CI: CI builds the web app, not the APK.
+release build to read.
+
+Named inspect_*, not check_*: CI builds the web app, not the APK, so this
+cannot run on a push, and check_every_gate_runs.py holds every check_*.py to
+running there. Run it by hand after any release build, and before shipping
+one.
 """
 from __future__ import annotations
 
