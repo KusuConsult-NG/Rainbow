@@ -1635,6 +1635,11 @@ class Translations {
       AppLanguage.hausa: 'Sauraron Hausa sabo ne kuma yana amfani da batir fiye da Turanci kadai. Ana jin kalmar sirri ta Hausa ne kawai idan wannan yana kunne.',
       AppLanguage.pidgin: 'Hausa listening still new and e dey use more battery pass English alone. Secret phrase for Hausa go only work when this one dey on.',
     },
+    'guardian_ha_lost': {
+      AppLanguage.english: 'Hausa listening stopped: the Hausa model failed on this phone. Guardian is still listening in English and Pidgin.',
+      AppLanguage.hausa: 'Sauraron Hausa ya tsaya: samfurin Hausa ya kasa aiki a wannan wayar. Mai Tsaro yana ci gaba da saurare da Turanci da Pidgin.',
+      AppLanguage.pidgin: 'Hausa listening don stop: the Hausa model no work for this phone. Guardian still dey listen for English and Pidgin.',
+    },
     'guardian_ha_remove': {
       AppLanguage.english: 'REMOVE HAUSA MODEL',
       AppLanguage.hausa: 'CIRE SAMFURIN HAUSA',

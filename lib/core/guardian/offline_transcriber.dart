@@ -76,6 +76,7 @@ class OfflineTranscriber {
     required this.onText,
     this.numThreads = 1,
     String? hausaDir,
+    this.onHausaLost,
   }) {
     _vad = sherpa.VoiceActivityDetector(
       config: sherpa.VadModelConfig(
@@ -111,8 +112,23 @@ class OfflineTranscriber {
     // Phase 3: the downloaded Hausa model (hausa_model.dart), a Whisper
     // fine-tuned on Hausa. Each utterance is transcribed by both, and both
     // texts go to the detector, which holds the rules for every language.
+    //
+    // Hausa is an addition, never a dependency: if its model will not load,
+    // English listening goes on without it and [onHausaLost] says why. A
+    // Guardian that cannot start at all because an optional download is
+    // broken would leave the person with nothing.
     if (hausaDir != null) {
-      _hausa = sherpa.OfflineRecognizer(
+      try {
+        _hausa = _loadHausa(hausaDir, numThreads);
+      } on Object catch (e) {
+        _hausa = null;
+        onHausaLost?.call('the Hausa model did not load: $e');
+      }
+    }
+  }
+
+  static sherpa.OfflineRecognizer _loadHausa(String hausaDir, int numThreads) =>
+      sherpa.OfflineRecognizer(
         sherpa.OfflineRecognizerConfig(
           model: sherpa.OfflineModelConfig(
             whisper: sherpa.OfflineWhisperModelConfig(
@@ -127,10 +143,12 @@ class OfflineTranscriber {
           ),
         ),
       );
-    }
-  }
 
   sherpa.OfflineRecognizer? _hausa;
+
+  /// Called once if Hausa listening stops, at load or later, with the reason.
+  /// English listening carries on.
+  final void Function(String reason)? onHausaLost;
 
   /// Whether the Hausa model is loaded.
   bool get hearsHausa => _hausa != null;
@@ -214,16 +232,34 @@ class OfflineTranscriber {
   }
 
   void _transcribe(Float32List speech) {
-    for (final recognizer in [_recognizer, if (_hausa != null) _hausa!]) {
-      final stream = recognizer.createStream();
+    // English first, and outside the Hausa guard: an English call for help is
+    // never held up by, or lost to, the Hausa model.
+    _decodeWith(_recognizer, speech);
+    final hausa = _hausa;
+    if (hausa == null) return;
+    try {
+      _decodeWith(hausa, speech);
+    } on Object catch (e) {
+      // A Hausa failure used to leave this method, which ended the worker and
+      // with it ALL listening. Now Hausa alone stops, for the rest of the
+      // session, and English goes on.
+      _hausa = null;
       try {
-        stream.acceptWaveform(samples: speech, sampleRate: sampleRate);
-        recognizer.decode(stream);
-        final text = recognizer.getResult(stream).text.trim();
-        if (text.isNotEmpty) onText(text);
-      } finally {
-        stream.free();
-      }
+        hausa.free();
+      } on Object catch (_) {}
+      onHausaLost?.call('the Hausa model failed while listening: $e');
+    }
+  }
+
+  void _decodeWith(sherpa.OfflineRecognizer recognizer, Float32List speech) {
+    final stream = recognizer.createStream();
+    try {
+      stream.acceptWaveform(samples: speech, sampleRate: sampleRate);
+      recognizer.decode(stream);
+      final text = recognizer.getResult(stream).text.trim();
+      if (text.isNotEmpty) onText(text);
+    } finally {
+      stream.free();
     }
   }
 

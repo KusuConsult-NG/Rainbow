@@ -25,6 +25,7 @@ class _FakeEar implements GuardianEar {
   String? lastHausaDir;
   void Function(String, bool)? _words;
   void Function()? _ended;
+  void Function(String reason)? _hausaLost;
   final ValueNotifier<bool> busy = ValueNotifier<bool>(false);
 
   @override
@@ -50,9 +51,11 @@ class _FakeEar implements GuardianEar {
     required void Function(String words, bool isFinal) onWords,
     required void Function() onEnded,
     String? hausaModelDir,
+    void Function(String reason)? onHausaLost,
   }) async {
     if (!listenWorks) return false;
     lastHausaDir = hausaModelDir;
+    _hausaLost = onHausaLost;
     listens++;
     _words = onWords;
     _ended = onEnded;
@@ -68,6 +71,9 @@ class _FakeEar implements GuardianEar {
   }
 
   void say(String words, {bool isFinal = true}) => _words?.call(words, isFinal);
+
+  /// The Hausa model failing, at load or while listening.
+  void loseHausa(String reason) => _hausaLost?.call(reason);
 
   /// The recognizer ending a pass by itself, as it does after every pause.
   void passEnds() {
@@ -421,6 +427,62 @@ void main() {
       ear.say('taimake ni suna son su kashe ni');
       await t.pump();
       expect(_RecordingEmergency.raised.single, (true, 'Guardian: distress phrase heard (threat to life)'));
+    });
+
+    // A broken optional download must never cost the person English
+    // listening: the transcriber drops Hausa and reports it, and the session
+    // carries on in English and says so.
+    testWidgets('when the Hausa model fails, the session goes on in English and says so', (t) async {
+      final dir = installHausa();
+      await t.runAsync(() => containerWith(enabled: true));
+      await g().start(const Duration(hours: 1));
+      expect(ear.lastHausaDir, dir);
+
+      ear.loseHausa('the Hausa model did not load');
+      expect(c.read(guardianProvider).active, isTrue);
+      expect(c.read(guardianProvider).hausaLost, isTrue);
+
+      ear.say('they are trying to kill me');
+      await t.pump();
+      expect(_RecordingEmergency.raised.single.$2, 'Guardian: distress phrase heard (threat to life)');
+    });
+
+    testWidgets('after Hausa fails, later passes do not ask for it again', (t) async {
+      installHausa();
+      await t.runAsync(() => containerWith(enabled: true));
+      await g().start(const Duration(hours: 1));
+      ear.loseHausa('the Hausa model failed while listening');
+      clock = clock.add(const Duration(minutes: 1));
+      await ear.stop(); // the pass ends, and is restarted
+      await t.pump(const Duration(seconds: 2));
+      expect(ear.listens, greaterThanOrEqualTo(2));
+      expect(ear.lastHausaDir, isNull);
+      expect(c.read(guardianProvider).hausaLost, isTrue, reason: 'still said after a restart');
+      await g().stop();
+    });
+
+    testWidgets('a pause keeps the Hausa-stopped notice', (t) async {
+      installHausa();
+      await t.runAsync(() => containerWith(enabled: true));
+      await g().start(const Duration(hours: 1));
+      ear.loseHausa('the Hausa model failed while listening');
+      ear.busy.value = true;
+      expect(c.read(guardianProvider).hausaLost, isTrue);
+      ear.busy.value = false;
+      expect(c.read(guardianProvider).hausaLost, isTrue);
+      await g().stop();
+    });
+
+    testWidgets('a new session starts with Hausa again', (t) async {
+      final dir = installHausa();
+      await t.runAsync(() => containerWith(enabled: true));
+      await g().start(const Duration(hours: 1));
+      ear.loseHausa('the Hausa model failed while listening');
+      await g().stop();
+      expect(c.read(guardianProvider).hausaLost, isFalse);
+      await g().start(const Duration(hours: 1));
+      expect(ear.lastHausaDir, dir);
+      await g().stop();
     });
   });
 

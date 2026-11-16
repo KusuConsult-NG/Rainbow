@@ -296,7 +296,7 @@ class _GuardianScreenState extends ConsumerState<GuardianScreen> {
   }
 
   Widget _statusCard(GuardianState g) {
-    final String line;
+    String line;
     var colour = AppColors.textDim;
     if (g.active) {
       colour = AppColors.success;
@@ -309,6 +309,12 @@ class _GuardianScreenState extends ConsumerState<GuardianScreen> {
       } else {
         line = _t('guardian_listening_until')
             .replaceAll('{time}', TimeOfDay.fromDateTime(g.endsAt!).format(context));
+      }
+      // Still listening, in English; only Hausa stopped. Said, not hidden: a
+      // person who switched Hausa on is relying on it.
+      if (g.hausaLost) {
+        line = '$line\n${_t('guardian_ha_lost')}';
+        colour = AppColors.warning;
       }
     } else if (g.problem != null) {
       colour = AppColors.emergency;

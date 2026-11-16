@@ -95,6 +95,9 @@ _Result _run(String path, String expect, String models, String? secret, bool sho
   final t = OfflineTranscriber(
     GuardianModelFiles.inDirectory(models),
     hausaDir: hausa,
+    // Said, not swallowed: an evaluation meant to include Hausa that quietly
+    // measured English alone would report the wrong thing.
+    onHausaLost: (reason) => stderr.writeln('$path: Hausa listening stopped ($reason); English only'),
     onText: (text) {
       texts.add(text);
       match ??= detector.hear(text, at, isFinal: true);

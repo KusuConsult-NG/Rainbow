@@ -27,6 +27,13 @@ class GuardianWorker {
   /// The worker stopped by itself (its models failed to load or it crashed).
   void Function(Object error)? onFailed;
 
+  /// Hausa listening stopped (its model would not load, or failed later);
+  /// English goes on. Set as soon as it happens, even before a listener is.
+  String? hausaLost;
+
+  /// Called when [hausaLost] is set.
+  void Function(String reason)? onHausaLost;
+
   bool _closed = false;
 
   /// The Hausa model folder this worker loaded, if any.
@@ -45,8 +52,18 @@ class GuardianWorker {
     );
     final ready = Completer<SendPort>();
     late final GuardianWorker worker;
+    String? lostBeforeReady;
     fromWorker.listen((Object? m) {
-      if (m is SendPort) {
+      if (m is List && m.length == 2 && m.first == 'hausa_lost') {
+        final reason = '${m[1]}';
+        if (ready.isCompleted) {
+          worker
+            ..hausaLost = reason
+            ..onHausaLost?.call(reason);
+        } else {
+          lostBeforeReady = reason; // a load failure, reported during start-up
+        }
+      } else if (m is SendPort) {
         ready.complete(m);
       } else if (m is String) {
         worker.onText?.call(m);
@@ -61,7 +78,9 @@ class GuardianWorker {
     });
     try {
       final port = await ready.future.timeout(const Duration(seconds: 30));
-      return worker = GuardianWorker._(isolate, port, fromWorker)..hausaDir = hausaDir;
+      return worker = GuardianWorker._(isolate, port, fromWorker)
+        ..hausaDir = hausaDir
+        ..hausaLost = lostBeforeReady;
     } on Object {
       isolate.kill(priority: Isolate.immediate);
       fromWorker.close();
@@ -102,6 +121,7 @@ class GuardianWorker {
         GuardianModelFiles.inDirectory(modelDir),
         hausaDir: hausaDir,
         onText: toMain.send,
+        onHausaLost: (reason) => toMain.send(['hausa_lost', reason]),
       );
     } on Object catch (e) {
       toMain.send(['error', '$e']);

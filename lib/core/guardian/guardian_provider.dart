@@ -162,6 +162,7 @@ class GuardianState {
     this.pausedInBackground = false,
     this.problem,
     this.lastMatch,
+    this.hausaLost = false,
   });
 
   final bool active;
@@ -173,6 +174,9 @@ class GuardianState {
 
   /// What sent the last Guardian SOS, for the screen to say so.
   final GuardianMatch? lastMatch;
+
+  /// Hausa listening stopped during this session; English goes on.
+  final bool hausaLost;
 
   bool get listening => active && !pausedForOtherFeature && !pausedInBackground;
 }
@@ -292,9 +296,31 @@ class GuardianNotifier extends Notifier<GuardianState> {
     if (!state.listening || _passRunning) return true;
     _passRunning = true;
     _passStartedAt = now();
-    final ok = await _ear.listen(onWords: _onWords, onEnded: _onPassEnded, hausaModelDir: _hausaDir);
+    final ok = await _ear.listen(
+      onWords: _onWords,
+      onEnded: _onPassEnded,
+      hausaModelDir: _hausaDir,
+      onHausaLost: _onHausaLost,
+    );
     if (!ok) _passRunning = false;
     return ok;
+  }
+
+  /// Hausa stopped; English goes on. The rest of this session listens in
+  /// English only, and the screen says so.
+  void _onHausaLost(String reason) {
+    debugPrint('[GUARDIAN] Hausa listening stopped: $reason');
+    _hausaDir = null;
+    if (!state.active || state.hausaLost) return;
+    state = GuardianState(
+      active: true,
+      startedAt: state.startedAt,
+      endsAt: state.endsAt,
+      pausedForOtherFeature: state.pausedForOtherFeature,
+      pausedInBackground: state.pausedInBackground,
+      lastMatch: state.lastMatch,
+      hausaLost: true,
+    );
   }
 
   void _onWords(String words, bool isFinal) {
@@ -355,6 +381,7 @@ class GuardianNotifier extends Notifier<GuardianState> {
       pausedForOtherFeature: busy,
       pausedInBackground: state.pausedInBackground,
       lastMatch: state.lastMatch,
+      hausaLost: state.hausaLost,
     );
     if (busy) {
       // The microphone is the other feature's until it is done.
@@ -379,6 +406,7 @@ class GuardianNotifier extends Notifier<GuardianState> {
       pausedForOtherFeature: state.pausedForOtherFeature,
       pausedInBackground: background,
       lastMatch: state.lastMatch,
+      hausaLost: state.hausaLost,
     );
     if (background) {
       _restartTimer?.cancel();
