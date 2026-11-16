@@ -101,8 +101,14 @@ class OfflineEar implements GuardianEar {
     if (!supported) return false;
     await _stopMic();
     try {
-      // A worker loaded for a different set of languages is replaced.
-      if (_worker != null && _worker!.hausaDir != hausaModelDir) {
+      // A worker loaded for a different set of languages is replaced, except
+      // one that has already dropped Hausa and is now asked for none: it is
+      // English-only as it stands, and replacing it would leave a gap with
+      // nothing listening while the English model loads again, straight
+      // after a failure.
+      final w = _worker;
+      final alreadyEnglishOnly = w != null && hausaModelDir == null && w.hausaLost != null;
+      if (w != null && w.hausaDir != hausaModelDir && !alreadyEnglishOnly) {
         _worker!.close();
         _worker = null;
       }
