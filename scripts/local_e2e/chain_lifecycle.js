@@ -16,11 +16,11 @@
  */
 
 const fs = require('fs');
-const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
 const { DOMAIN, PASSWORD, byKey } = require('./fixtures');
 const { signInMobile } = require('./mobile_login');
+const { watchPage, loggedStaticServer } = require('./stall_report');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -52,20 +52,9 @@ function check(name, pass, detail = '') {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const TYPES = {
-  '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json',
-  '.wasm': 'application/wasm', '.png': 'image/png', '.otf': 'font/otf',
-  '.ttf': 'font/ttf', '.woff2': 'font/woff2', '.css': 'text/css', '.symbols': 'text/plain',
-};
-const server = http.createServer((req, res) => {
-  const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html';
-  const file = path.join(WEB, rel);
-  if (!file.startsWith(WEB) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-    res.writeHead(404); return res.end();
-  }
-  res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
-  fs.createReadStream(file).pipe(res);
-});
+// The file server, logging what it does with each request for the stall
+// report (see stall_report.js).
+const { server, serverLog } = loggedStaticServer(WEB);
 
 const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
 
@@ -271,12 +260,18 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
   async function signIn(role) {
     try { await page.close(); } catch { /* gone */ }
     page = await newPage();
+    // The reload stall was seen here too (2026-11-16, before the LGA
+    // officer's sign-in): the app never appeared after this reload. The wait
+    // below fails exactly as signInMobile's did, but says why first.
+    const watch = watchPage(page, { serverLog });
     await page.setGeolocation(HERE);
     await page.goto(origin, { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
     });
+    watch.mark(`sign-in ${role}`);
     await page.reload({ waitUntil: 'domcontentloaded' });
+    await watch.waitForApp(120000, OUT);
     // One shared flow — see mobile_login.js. The staff branch here typed the
     // badge, tapped AUTHORIZE ACCESS and returned the hash, which stopped being
     // a sign-in when the screen grew a password step.

@@ -24,12 +24,11 @@
  */
 
 const fs = require('fs');
-const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
 const { DOMAIN, byKey } = require('./fixtures');
 const { signInMobile } = require('./mobile_login');
-const { watchPage } = require('./stall_report');
+const { watchPage, loggedStaticServer } = require('./stall_report');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -54,38 +53,10 @@ function check(name, pass, detail = '') {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const TYPES = {
-  '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
-  '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png',
-  '.otf': 'font/otf', '.ttf': 'font/ttf', '.woff2': 'font/woff2',
-  '.css': 'text/css', '.svg': 'image/svg+xml', '.symbols': 'text/plain',
-};
 
-// What the file server did with each request, for the stall report: a
-// reload once waited 60 s on canvaskit.wasm (2026-11-15) with no way to say
-// whether the request ever got here. Bounded; only the recent past matters.
-const served = [];
-const serve = (event, p) => {
-  served.push({ at: Date.now(), event, path: p });
-  if (served.length > 2000) served.splice(0, served.length - 2000);
-};
-
-const server = http.createServer((req, res) => {
-  const urlPath = req.url.split('?')[0];
-  serve('received', urlPath);
-  const rel = decodeURIComponent(urlPath).replace(/^\/+/, '') || 'index.html';
-  const file = path.join(WEB, rel);
-  if (!file.startsWith(WEB) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-    serve('404', urlPath);
-    res.writeHead(404); return res.end('not found');
-  }
-  res.on('finish', () => serve('sent', urlPath));
-  res.on('close', () => { if (!res.writableFinished) serve('connection closed before the end', urlPath); });
-  res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
-  fs.createReadStream(file)
-    .on('error', (e) => { serve(`read error: ${e.code || e}`, urlPath); res.destroy(); })
-    .pipe(res);
-});
+// The file server, logging what it does with each request for the stall
+// report (see stall_report.js).
+const { server, serverLog } = loggedStaticServer(WEB);
 
 async function control(p = '') {
   return (await fetch(CONTROL + p)).json();
@@ -127,7 +98,7 @@ async function logMark() {
   await browser.defaultBrowserContext().overridePermissions(origin, ['geolocation']);
 
   const page = await newPage();
-  const watch = watchPage(page, { serverLog: (since) => served.filter((e) => e.at >= since) });
+  const watch = watchPage(page, { serverLog });
   await page.setGeolocation(HERE);
 
   // ---- helpers that speak Flutter's semantics tree --------------------------

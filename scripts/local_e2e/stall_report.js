@@ -14,6 +14,7 @@
 // navigation started — so the next occurrence explains itself.
 
 const fs = require('fs');
+const http = require('http');
 const path = require('path');
 
 const MAX_EVENTS = 400;
@@ -189,4 +190,43 @@ function watchPage(page, { serverLog } = {}) {
   return { mark, waitForApp };
 }
 
-module.exports = { watchPage };
+const STATIC_TYPES = {
+  '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
+  '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png',
+  '.otf': 'font/otf', '.ttf': 'font/ttf', '.woff2': 'font/woff2',
+  '.css': 'text/css', '.svg': 'image/svg+xml', '.symbols': 'text/plain',
+};
+
+/// The harness's file server for the web build in [webRoot], recording what it
+/// did with every request: received, sent, closed early, read error, 404.
+/// Pass `serverLog` to watchPage so a stall report can say whether a request
+/// the browser is still waiting on ever arrived. Shared, so every script that
+/// reloads the app gets the same evidence: the reload stall has now been seen
+/// in mobile_interact.js (2026-11-14, 2026-11-15) and chain_lifecycle.js
+/// (2026-11-16).
+function loggedStaticServer(webRoot) {
+  const served = [];
+  const note = (event, p) => {
+    served.push({ at: Date.now(), event, path: p });
+    if (served.length > 2000) served.splice(0, served.length - 2000);
+  };
+  const server = http.createServer((req, res) => {
+    const urlPath = req.url.split('?')[0];
+    note('received', urlPath);
+    const rel = decodeURIComponent(urlPath).replace(/^\/+/, '') || 'index.html';
+    const file = path.join(webRoot, rel);
+    if (!file.startsWith(webRoot) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+      note('404', urlPath);
+      res.writeHead(404); return res.end('not found');
+    }
+    res.on('finish', () => note('sent', urlPath));
+    res.on('close', () => { if (!res.writableFinished) note('connection closed before the end', urlPath); });
+    res.writeHead(200, { 'content-type': STATIC_TYPES[path.extname(file)] || 'application/octet-stream' });
+    fs.createReadStream(file)
+      .on('error', (e) => { note(`read error: ${e.code || e}`, urlPath); res.destroy(); })
+      .pipe(res);
+  });
+  return { server, serverLog: (since) => served.filter((e) => e.at >= since) };
+}
+
+module.exports = { watchPage, loggedStaticServer };
