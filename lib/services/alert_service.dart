@@ -307,11 +307,21 @@ class AlertService {
       };
 
       try {
+        // Bounded. With no limit, a connection that is "up" and carries
+        // nothing (a captive portal, a dead 2G link, a congested tower) held
+        // this insert for as long as the OS's TCP timeouts allowed, minutes,
+        // and none of the fallbacks below ran: not the offline queue, not the
+        // mesh, and not the SOS escalation SMS, which startEmergency sends
+        // only after this returns. On the limit it falls through to the
+        // offline path like any other failure. If the insert in fact landed,
+        // the queue's flush finds the row by this same local_id's tag and
+        // does not file it twice (_findAlreadyDelivered).
         final response = await SupabaseConfig.client
             .from('alerts')
             .insert(alertPayload)
             .select('id')
-            .maybeSingle();
+            .maybeSingle()
+            .timeout(insertLimit);
 
         final alertId = response?['id'] as String? ?? localId;
         await BackgroundTrackingService().startSosTracking(alertId, reportedBy);
@@ -477,6 +487,11 @@ class AlertService {
 
   /// Test seam: the "has this already arrived?" lookup, so the flush can be
   /// tested without Supabase.
+  /// The longest an alert insert may take before the report goes the offline
+  /// way instead (queue, mesh, SMS). See the insert in [submitAlert].
+  @visibleForTesting
+  static Duration insertLimit = const Duration(seconds: 15);
+
   @visibleForTesting
   static Future<String?> Function(String tagHex)? alreadyDeliveredOverride;
 
