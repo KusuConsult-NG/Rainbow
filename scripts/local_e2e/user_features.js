@@ -24,11 +24,11 @@
  */
 
 const fs = require('fs');
-const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
 const { PEOPLE, byKey } = require('./fixtures');
 const { signInMobile } = require('./mobile_login');
+const { watchPage, loggedStaticServer } = require('./stall_report');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -54,20 +54,9 @@ function check(name, pass, detail = '') {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const TYPES = {
-  '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json',
-  '.wasm': 'application/wasm', '.png': 'image/png', '.otf': 'font/otf',
-  '.ttf': 'font/ttf', '.woff2': 'font/woff2', '.css': 'text/css', '.symbols': 'text/plain',
-};
-const server = http.createServer((req, res) => {
-  const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html';
-  const file = path.join(WEB, rel);
-  if (!file.startsWith(WEB) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-    res.writeHead(404); return res.end();
-  }
-  res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
-  fs.createReadStream(file).pipe(res);
-});
+// The shared file server: it logs what it did with every request, so a
+// stall report can say whether the file the browser waits on was sent.
+const { server, serverLog } = loggedStaticServer(WEB);
 
 const control = async () => (await fetch(CONTROL)).json();
 const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
@@ -93,6 +82,7 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
   let { browser, newPage } = await launch(LAUNCH);
   await browser.defaultBrowserContext().overridePermissions(origin, ['geolocation', 'camera', 'microphone']);
   let page;
+  let watch;
 
   const shot = async (name) => {
     step += 1;
@@ -176,14 +166,17 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
     await browser.defaultBrowserContext()
       .overridePermissions(origin, ['geolocation', 'camera', 'microphone']);
     page = await newPage();
+    watch = watchPage(page, { serverLog });
     await page.setGeolocation(HERE);
     await page.goto(origin, { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
     });
+    watch.mark(`sign-in ${'citizen'}`);
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(
-      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 120000 });
+    // A stall here is reported, and reloaded once if it is the known
+    // browser-side one; see stall_report.js.
+    await watch.waitForApp(120000, OUT);
     await sleep(6000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1600);

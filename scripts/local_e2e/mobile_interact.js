@@ -1141,11 +1141,9 @@ async function logMark() {
   await page.evaluate(() => {
     try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ }
   });
+  watch.mark('responder sign-in');
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(
-    () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-    { timeout: 90000 },
-  );
+  await watch.waitForApp(90000, OUT);
   await sleep(6000);
   await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
   await sleep(1500);
