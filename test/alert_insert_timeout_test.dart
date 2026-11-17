@@ -147,6 +147,36 @@ void main() {
     expect(started, [id], reason: 'and tracking started, not held behind them');
   });
 
+  // Only one flush runs at a time, so a request in it that never answered
+  // kept every later flush, and every queued SOS, waiting until a restart.
+  test('a flush whose insert never answers ends, and leaves the row for retry', () async {
+    // Queue one report: the first insert fails outright.
+    installOfflineSupabase(handler: jsonError(503, 'down'));
+    final id = await AlertService().submitAlert(
+      type: 'PANIC SOS',
+      description: 'Public Panic Button Activated',
+      reportedBy: 'test-user',
+      isCritical: true,
+      lookUpLocation: false,
+    );
+    expect((await sqlite.getPendingAlerts()).single['local_id'], id);
+
+    // Now the server accepts the connection and never replies.
+    installOfflineSupabase(handler: (_) => Completer<http.Response>().future);
+    AlertService.resetFlushGuard();
+    AlertService.alreadyDeliveredOverride = (_) async => null;
+    addTearDown(() => AlertService.alreadyDeliveredOverride = null);
+
+    final synced = await AlertService()
+        .flushOfflineQueue()
+        .timeout(const Duration(seconds: 3),
+            onTimeout: () => fail('the flush was still waiting on the insert'));
+    expect(synced, isEmpty);
+    final pending = await sqlite.getPendingAlerts();
+    expect(pending.single['local_id'], id, reason: 'still queued');
+    expect(pending.single['sync_status'], 'FAILED', reason: 'and retried by the next flush');
+  });
+
   test('an insert that answers in time is not affected', () async {
     installOfflineSupabase(handler: jsonRows([
       {'id': '7f3a1c94-2b6d-4e58-9a01-5c8e2d4f6b70'},

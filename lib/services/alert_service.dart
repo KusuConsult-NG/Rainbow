@@ -553,11 +553,15 @@ class AlertService {
       if (alreadyDeliveredOverride != null) {
         return await alreadyDeliveredOverride!(tag);
       }
+      // Bounded like the insert: a lookup that never answered held the flush,
+      // and the flush guard then held every later flush behind it. A timeout
+      // is a failed lookup, and fails towards delivering (below).
       final rows = await SupabaseConfig.client
           .from('alerts')
           .select('id')
           .like('local_id', '%$tag%')
-          .limit(1);
+          .limit(1)
+          .timeout(insertLimit);
       if (rows.isEmpty) return null;
       return rows.first['id'] as String?;
     } catch (e) {
@@ -638,20 +642,25 @@ class AlertService {
             // Same reasoning as below: this report reached HQ over SMS or the
             // mesh and already has a real row, so a live track bound to the
             // local id must follow it there.
-            await BackgroundTrackingService().rebindAlertId(
-              localId,
-              alreadyThere,
-            );
+            await BackgroundTrackingService()
+                .rebindAlertId(localId, alreadyThere)
+                .timeout(const Duration(seconds: 5), onTimeout: () {});
             continue;
           }
 
           final payload = buildOfflineSyncPayload(row);
 
+          // Bounded. Only one flush runs at a time (_flushInFlight), so an
+          // insert that never answered kept every queued report, SOS included,
+          // from being sent until the app restarted. On the limit the row is
+          // marked FAILED, which the next flush retries; if it did land, that
+          // flush's _findAlreadyDelivered finds it by its tag.
           final response = await SupabaseConfig.client
               .from('alerts')
               .insert(payload)
               .select()
-              .single();
+              .single()
+              .timeout(insertLimit);
 
           final alertId = response['id'] as String?;
           if (alertId != null) {
@@ -668,7 +677,9 @@ class AlertService {
             // did nothing with it.
             //
             // A no-op unless this handset is tracking exactly this local id.
-            await BackgroundTrackingService().rebindAlertId(localId, alertId);
+            await BackgroundTrackingService()
+                .rebindAlertId(localId, alertId)
+                .timeout(const Duration(seconds: 5), onTimeout: () {});
           }
         } catch (e) {
           debugPrint('[SYNC_ERR] Alert sync failed for $localId: $e');
