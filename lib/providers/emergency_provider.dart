@@ -204,6 +204,10 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
     }
   }
 
+  /// The longest a PIN check may take before it is reported as unverified.
+  @visibleForTesting
+  static Duration cancelLimit = const Duration(seconds: 15);
+
   /// The longest an SOS waits for a position before its alert is written.
   @visibleForTesting
   static Duration sosLocationLimit = const Duration(seconds: 5);
@@ -231,15 +235,21 @@ class EmergencyNotifier extends Notifier<EmergencyState> {
   /// difference is that tracking keeps running under duress, so HQ can follow.
   Future<CancelOutcome> verifyCancellation(String pin) async {
     try {
-      final dynamic raw = state.alertId != null
-          ? await SupabaseConfig.client.rpc<dynamic>(
+      // Bounded. With no limit, a stalled connection left the PIN screen
+      // waiting for minutes. Under duress that matters: the code only
+      // protects the person if the screen behaves normally. On the limit this
+      // is an error, which shows "could not be verified" for ANY PIN, safe or
+      // duress alike, so a timeout says nothing about which was typed.
+      final Future<dynamic> call = state.alertId != null
+          ? SupabaseConfig.client.rpc<dynamic>(
               'resolve_emergency',
               params: <String, dynamic>{'p_alert_id': state.alertId, 'p_pin': pin},
             )
-          : await SupabaseConfig.client.rpc<dynamic>(
+          : SupabaseConfig.client.rpc<dynamic>(
               'verify_emergency_pin',
               params: <String, dynamic>{'p_pin': pin},
             );
+      final dynamic raw = await call.timeout(cancelLimit);
       final code = raw is String ? raw : raw?.toString() ?? '';
 
       switch (code) {
