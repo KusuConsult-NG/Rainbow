@@ -20,11 +20,11 @@
  */
 
 const fs = require('fs');
-const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
 const { DOMAIN } = require('./fixtures');
 const { signInMobile } = require('./mobile_login');
+const { watchPage, loggedStaticServer } = require('./stall_report');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -50,20 +50,9 @@ function check(name, pass, detail = '') {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const TYPES = {
-  '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json',
-  '.wasm': 'application/wasm', '.png': 'image/png', '.otf': 'font/otf',
-  '.ttf': 'font/ttf', '.woff2': 'font/woff2', '.css': 'text/css', '.symbols': 'text/plain',
-};
-const server = http.createServer((req, res) => {
-  const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html';
-  const file = path.join(WEB, rel);
-  if (!file.startsWith(WEB) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-    res.writeHead(404); return res.end();
-  }
-  res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
-  fs.createReadStream(file).pipe(res);
-});
+// The shared file server: it logs what it did with every request, so a
+// stall report can say whether the file the browser waits on was sent.
+const { server, serverLog } = loggedStaticServer(WEB);
 
 /**
  * What each tier must be offered, and what it must NOT be.
@@ -145,6 +134,7 @@ const DRAWER = [
   let { browser, newPage } = await launch(LAUNCH);
   await browser.defaultBrowserContext().overridePermissions(origin, ['geolocation']);
   let page;
+  let watch;
 
   const shot = async (name) => {
     step += 1;
@@ -174,12 +164,17 @@ const DRAWER = [
     ({ browser, newPage } = await launch(LAUNCH));
     await browser.defaultBrowserContext().overridePermissions(origin, ['geolocation']);
     page = await newPage();
+    watch = watchPage(page, { serverLog });
     await page.setGeolocation(HERE);
     await page.goto(origin, { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
     });
+    watch.mark(`sign-in ${role}`);
     await page.reload({ waitUntil: 'domcontentloaded' });
+    // A stall here is reported, and reloaded once if it is the known
+    // browser-side one; see stall_report.js.
+    await watch.waitForApp(120000, OUT);
     // The flow itself lives in mobile_login.js. It used to live here, in six
     // copies across six harnesses, and when the login screen grew a password
     // step not one of them was updated. See that file.
@@ -342,6 +337,7 @@ const DRAWER = [
     // item now starts from a reloaded page with the drawer freshly opened.
     for (const item of DRAWER) {
       await page.evaluate(() => { window.location.hash = '#/agent-dashboard'; });
+      watch.mark(`${tier.role} drawer ${item.label}`);
       await page.reload({ waitUntil: 'domcontentloaded' });
       // This wait is where CI run #396 died: 60 seconds exceeded, reported as a
       // bare puppeteer stack at a line number, with nothing saying which tier
@@ -355,13 +351,16 @@ const DRAWER = [
       // account's Actions billing is unresolved, so this has not been confirmed
       // against it. It is here so the next real run says what happened instead
       // of pointing at a line number.
+      //
+      // Each failed wait also writes a stall report (stall_report.js). This
+      // retry already reloads for any failure, so the report's own narrower
+      // retry is off here (`retry: false`).
       const bootedAt = Date.now();
-      const bootWait = () => page.waitForFunction(
-        () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-        { timeout: 60000 });
+      const bootWait = () => watch.waitForApp(60000, OUT, { retry: false });
       try {
         await bootWait();
       } catch {
+        watch.mark(`${tier.role} drawer ${item.label} retry`);
         await page.reload({ waitUntil: 'domcontentloaded' });
         try {
           await bootWait();
@@ -396,9 +395,9 @@ const DRAWER = [
     // stays open across a hash change, and an open drawer covers the app bar —
     // which made every control after this loop report as missing.
     await page.evaluate(() => { window.location.hash = '#/agent-dashboard'; });
+    watch.mark(`${tier.role} back to the dashboard`);
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(
-      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 60000 });
+    await watch.waitForApp(60000, OUT);
     await sleep(5000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1500);

@@ -72,6 +72,7 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
   });
   await browser.defaultBrowserContext().overridePermissions(origin, ['geolocation']);
   let page = await newPage();
+  let watch = null;
   await page.setGeolocation(HERE);
 
   const shot = async (name) => {
@@ -264,7 +265,7 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
     // officer's sign-in): the app never appeared after this reload. The wait
     // below says why; only the known browser-side stall gets one more reload
     // (see isBrowserHeldWasm in stall_report.js).
-    const watch = watchPage(page, { serverLog });
+    watch = watchPage(page, { serverLog });
     await page.setGeolocation(HERE);
     await page.goto(origin, { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
@@ -296,9 +297,9 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
   for (const [i, cat] of CATEGORIES.entries()) {
     state.screen = `lifecycle:report:${cat}`;
     if (i > 0) {
+      watch.mark(`reload ${cat}`);
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 60000 });
+      await watch.waitForApp(60000, OUT);
       await sleep(5000);
       await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
       await sleep(1400);

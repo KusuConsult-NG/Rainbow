@@ -29,6 +29,7 @@ const path = require('path');
 const { launch } = require('./browser');
 const { DOMAIN, PASSWORD, byKey } = require('./fixtures');
 const { signInMobile } = require('./mobile_login');
+const { watchPage, loggedStaticServer } = require('./stall_report');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -54,27 +55,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ---------------------------------------------------------------------------
 // Static server for the built app.
 // ---------------------------------------------------------------------------
-const TYPES = {
-  '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
-  '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png',
-  '.otf': 'font/otf', '.ttf': 'font/ttf', '.woff2': 'font/woff2',
-  '.css': 'text/css', '.svg': 'image/svg+xml', '.symbols': 'text/plain',
-};
-
-const server = http.createServer((req, res) => {
-  const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html';
-  const file = path.join(WEB, rel);
-  if (!file.startsWith(WEB) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-    res.writeHead(404); return res.end('not found');
-  }
-  res.writeHead(200, {
-    'content-type': TYPES[path.extname(file)] || 'application/octet-stream',
-    // CanvasKit's wasm wants these to use SharedArrayBuffer paths.
+// The shared file server: it logs what it did with every request, so a
+// stall report can say whether the file the browser waits on was sent.
+const { server, serverLog } = loggedStaticServer(WEB, {
+  // CanvasKit's wasm wants these to use SharedArrayBuffer paths.
+  headers: {
     'cross-origin-opener-policy': 'same-origin',
     'cross-origin-embedder-policy': 'require-corp',
     'cross-origin-resource-policy': 'cross-origin',
-  });
-  fs.createReadStream(file).pipe(res);
+  },
 });
 
 /**
@@ -137,6 +126,8 @@ async function semanticsText(page) {
 
   let { browser, newPage } = await launch(LAUNCH);
   let page = await newPage();
+  // Every page gets a stall watch; see stall_report.js.
+  let watch = watchPage(page, { serverLog });
 
   /**
    * Replace the browser.
@@ -170,6 +161,7 @@ async function semanticsText(page) {
     }
     ({ browser, newPage } = await launch(LAUNCH));
     page = await newPage();
+    watch = watchPage(page, { serverLog });
   }
 
   /** What the machine has left, so a resource failure says so rather than timing out. */
@@ -196,10 +188,10 @@ async function semanticsText(page) {
 
   async function waitForPaint(what, timeout = PAINT_TIMEOUT) {
     try {
-      await page.waitForFunction(
-        () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-        { timeout },
-      );
+      // Writes a stall report on a timeout, and reloads once for the known
+      // browser-side stall only. The fresh browser below is still the
+      // recovery for everything else.
+      await watch.waitForApp(timeout, OUT);
       return;
     } catch (err) {
       const seen = await page.evaluate(() => ({
@@ -230,14 +222,11 @@ async function semanticsText(page) {
   // otherwise the app never paints and every screenshot is a blank page.
 
   state.screen = 'mobile:boot';
+  watch.mark('capture boot');
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
 
   // Flutter paints into a canvas; wait for it rather than for the network.
-  const painted = await page
-    .waitForFunction(
-      () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-      { timeout: 90000 },
-    )
+  const painted = await watch.waitForApp(90000, OUT)
     .then(() => true)
     .catch(() => false);
   check('the app boots and paints in a browser', painted, painted ? '' : 'no canvas appeared');
@@ -358,6 +347,7 @@ async function semanticsText(page) {
     // one role into the next.
     try { await page.close(); } catch { /* already gone */ }
     page = await newPage();
+    watch = watchPage(page, { serverLog });
 
     // A new PAGE does not mean new storage: localStorage is per origin per
     // browser context, so the previous role's Supabase session is still there
@@ -369,6 +359,7 @@ async function semanticsText(page) {
     await page.evaluate(() => {
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* blocked */ }
     });
+    watch.mark(`capture sign-in ${role}`);
     await page.reload({ waitUntil: 'domcontentloaded' });
     // ROLE_PAINT_MS exists so the retry below can be PROVEN rather than
     // described. `ROLE_PAINT_MS=1` makes every role's first paint wait fail,
@@ -538,6 +529,7 @@ async function semanticsText(page) {
     state.screen = `mobile:signed-out:${slug}`;
     try { await page.close(); } catch { /* already gone */ }
     page = await newPage();
+    watch = watchPage(page, { serverLog });
     // Clear this origin's storage WITHOUT booting the app to get at it.
     //
     // This used to `goto(origin)`, then clear `localStorage` from the page,
@@ -564,6 +556,7 @@ async function semanticsText(page) {
       storageTypes: 'local_storage,session_storage,indexeddb,websql,cache_storage',
     });
     await cdp.detach();
+    watch.mark(`capture signed-out ${slug}`);
     await page.goto(`${origin}/#${route}`, { waitUntil: 'domcontentloaded' });
     await waitForPaint(`signed-out${route.replace(/\//g, '-')}`);
     await sleep(6000);

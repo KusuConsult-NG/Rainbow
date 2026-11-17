@@ -212,7 +212,11 @@ function watchPage(page, { serverLog } = {}) {
   /// must still start, on its own, from a clean load. A second stall, or any
   /// other kind of failure, rethrows the original error unchanged. Every
   /// stall still writes its report and says so in the log.
-  async function waitForApp(timeoutMs, outDir) {
+  ///
+  /// `retry: false` is for a caller with a recovery of its own (a fresh
+  /// browser, a reload of any failure): the report is written, and the error
+  /// goes straight back to that caller.
+  async function waitForApp(timeoutMs, outDir, { retry = true } = {}) {
     try {
       await appUp(timeoutMs);
       return;
@@ -223,7 +227,7 @@ function watchPage(page, { serverLog } = {}) {
       } catch (e) {
         console.log(`      stall report failed: ${e}`);
       }
-      if (!diagnosis || !diagnosis.browserHeldWasm) throw err;
+      if (!retry || !diagnosis || !diagnosis.browserHeldWasm) throw err;
 
       const first = label;
       console.log(`      ${first}: the browser held a WebAssembly file the server had sent`
@@ -260,8 +264,11 @@ const STATIC_TYPES = {
 /// the browser is still waiting on ever arrived. Shared, so every script that
 /// reloads the app gets the same evidence: the reload stall has now been seen
 /// in mobile_interact.js (2026-11-14, 2026-11-15) and chain_lifecycle.js
-/// (2026-11-16).
-function loggedStaticServer(webRoot) {
+/// (2026-11-16, 2026-11-17).
+///
+/// [headers] are added to every file served (mobile_capture.js sends the
+/// cross-origin isolation headers it always has).
+function loggedStaticServer(webRoot, { headers = {} } = {}) {
   const served = [];
   const note = (event, p) => {
     served.push({ at: Date.now(), event, path: p });
@@ -278,7 +285,10 @@ function loggedStaticServer(webRoot) {
     }
     res.on('finish', () => note('sent', urlPath));
     res.on('close', () => { if (!res.writableFinished) note('connection closed before the end', urlPath); });
-    res.writeHead(200, { 'content-type': STATIC_TYPES[path.extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'content-type': STATIC_TYPES[path.extname(file)] || 'application/octet-stream',
+      ...headers,
+    });
     fs.createReadStream(file)
       .on('error', (e) => { note(`read error: ${e.code || e}`, urlPath); res.destroy(); })
       .pipe(res);
