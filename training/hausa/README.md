@@ -15,8 +15,20 @@ address it prints in the app's `.env` before building:
 GUARDIAN_HAUSA_MANIFEST_URL=https://huggingface.co/<repo>/resolve/main/manifest.json
 ```
 
-The Guardian screen then offers *Download Hausa*. The app checks every file's
-size and SHA-256 against the manifest (`lib/core/guardian/hausa_model.dart`).
+Check the published model from the repository before building, the way a
+phone will, and let it write that line for you:
+
+```
+dart run tool/verify_hausa_manifest.dart https://huggingface.co/<repo>/resolve/main/manifest.json --env .env
+```
+
+It downloads every file and checks each size and SHA-256 with the app's own
+code (`lib/core/guardian/hausa_model.dart`). It refuses a model above 0.50
+word error, or one with no word error recorded. Only then does it write the
+address. Without `--env` it only checks.
+
+The Guardian screen then offers *Download Hausa*. The app makes the same
+checks on the phone.
 Leave the variable blank and Guardian offers English and Pidgin only.
 
 ## The steps it runs
