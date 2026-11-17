@@ -107,18 +107,9 @@ CITIZEN = [
 # fails, asking for the number to be lowered. So the debt is visible, cannot
 # grow, and each screen converted is one line deleted from here.
 NOT_YET: dict[str, int] = {
-    'lib/features/splash/splash_screen.dart': 5,
-    'lib/features/auth/login_screen.dart': 13,
-    'lib/features/onboarding/onboarding_permissions_screen.dart': 22,
-    'lib/features/onboarding/onboarding_contacts_screen.dart': 7,
-    'lib/features/home/home_screen.dart': 3,
-    'lib/features/home/widgets/voice_report_dialog.dart': 12,
-    'lib/features/history/incident_history_screen.dart': 12,
-    'lib/features/settings/emergency_pin_screen.dart': 16,
-    'lib/features/citizen/dispatcher_chat_screen.dart': 9,
-    'lib/features/settings/settings_screen.dart': 26,
-    'lib/features/settings/uninstall_request_screen.dart': 20,
-    'lib/shared/widgets/voice_note_player.dart': 4,
+    # Empty since 2026-11-17: every citizen screen reads the chosen language.
+    # The Hausa and Pidgin for the twelve converted then are drafts awaiting a
+    # speaker; see the DRAFT block in translations.dart.
 }
 
 # Values that are DATA, not labels: `alerts.status` is compared by string, so
@@ -136,6 +127,18 @@ DATA = {
     'SAFE_HAVEN', 'JOS SOUTH COMMAND HQ', 'COMMAND_POST', 'BUKURU TACTICAL OUTPOST',
     'SHELTER', 'JOS NORTH POLICE DIVISION', 'ACTIVE', 'HOSPITAL', 'MEDICAL',
     'POLICE', 'MILITARY', 'COMMAND_HQ', 'OUTPOST', 'SAFE_POINT',
+    # What a voice report STORES for HQ to read (voice_report_dialog.dart): the
+    # inferred incident type and the operator-facing description. HQ works in
+    # English, and the type is matched by string on the console.
+    'INCIDENT - AI Voice Report', 'CRIME - Active Threat / Weapon',
+    'ENVIRONMENT - Fire / Hazard', 'SUSPICIOUS - Activity',
+    'DANGER - Civil Unrest', 'Nothing was transcribed — play the recording.',
+    # The sender's role, stored with each chat message.
+    'CITIZEN',
+    # The reason codes an app removal request stores; their labels are
+    # translated. And an internal exception that is caught, never shown.
+    'TRANSFER', 'RETIREMENT', 'PHONE_CHANGE', 'MISCONDUCT', 'OTHER',
+    'No authenticated user',
 }
 
 LITERAL = re.compile(r"'((?:[^'\\\n]|\\.){3,90})'")

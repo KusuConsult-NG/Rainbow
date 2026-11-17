@@ -10,6 +10,7 @@ import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 
 /// Sets the user's safe PIN and duress PIN.
 ///
@@ -31,6 +32,9 @@ class EmergencyPinScreen extends ConsumerStatefulWidget {
 enum _Step { safe, safeConfirm, duress, duressConfirm }
 
 class _EmergencyPinScreenState extends ConsumerState<EmergencyPinScreen> {
+  /// This screen's text in the chosen language.
+  String _t(String key) => Translations.get(key, ref.read(languageProvider));
+
   _Step _step = _Step.safe;
   final _controller = TextEditingController();
   String _safe = '';
@@ -47,20 +51,18 @@ class _EmergencyPinScreenState extends ConsumerState<EmergencyPinScreen> {
   }
 
   String get _title => switch (_step) {
-        _Step.safe => 'Choose your SAFE PIN',
-        _Step.safeConfirm => 'Confirm your SAFE PIN',
-        _Step.duress => 'Choose your DURESS PIN',
-        _Step.duressConfirm => 'Confirm your DURESS PIN',
+        _Step.safe => _t('pin_choose_safe'),
+        _Step.safeConfirm => _t('pin_confirm_safe'),
+        _Step.duress => _t('pin_choose_duress'),
+        _Step.duressConfirm => _t('pin_confirm_duress'),
       };
 
   String get _hint => switch (_step) {
-        _Step.safe => 'Enter this to cancel an SOS normally. 4–8 digits.',
-        _Step.safeConfirm => 'Enter the same PIN again.',
+        _Step.safe => _t('pin_safe_hint'),
+        _Step.safeConfirm => _t('pin_same_again'),
         _Step.duress =>
-          'Enter this if you are forced to cancel. The screen will look '
-              'normal, but HQ will be told you are in danger. Must differ from '
-              'your safe PIN.',
-        _Step.duressConfirm => 'Enter the same PIN again.',
+          _t('pin_duress_hint'),
+        _Step.duressConfirm => _t('pin_same_again'),
       };
 
   Future<void> _next() async {
@@ -70,32 +72,32 @@ class _EmergencyPinScreenState extends ConsumerState<EmergencyPinScreen> {
     switch (_step) {
       case _Step.safe:
         if (!_digits.hasMatch(value)) {
-          setState(() => _error = 'Use 4 to 8 digits.');
+          setState(() => _error = _t('pin_err_length'));
           return;
         }
         _safe = value;
         _advance(_Step.safeConfirm);
       case _Step.safeConfirm:
         if (value != _safe) {
-          setState(() => _error = 'The PINs do not match. Try again.');
+          setState(() => _error = _t('pin_err_mismatch'));
           _controller.clear();
           return;
         }
         _advance(_Step.duress);
       case _Step.duress:
         if (!_digits.hasMatch(value)) {
-          setState(() => _error = 'Use 4 to 8 digits.');
+          setState(() => _error = _t('pin_err_length'));
           return;
         }
         if (value == _safe) {
-          setState(() => _error = 'The duress PIN must be different from the safe PIN.');
+          setState(() => _error = _t('pin_err_same'));
           return;
         }
         _duress = value;
         _advance(_Step.duressConfirm);
       case _Step.duressConfirm:
         if (value != _duress) {
-          setState(() => _error = 'The PINs do not match. Try again.');
+          setState(() => _error = _t('pin_err_mismatch'));
           _controller.clear();
           return;
         }
@@ -118,7 +120,7 @@ class _EmergencyPinScreenState extends ConsumerState<EmergencyPinScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Emergency PINs saved.')),
+        SnackBar(content: Text(_t('pin_saved'))),
       );
       if (widget.fromOnboarding) {
         // THIS is now what completes setup. It used to be
@@ -143,7 +145,7 @@ class _EmergencyPinScreenState extends ConsumerState<EmergencyPinScreen> {
       if (!mounted) return;
       setState(() {
         _saving = false;
-        _error = 'Could not save PINs — check your connection and try again.';
+        _error = _t('pin_save_failed');
       });
     } finally {
       // Never keep either PIN around longer than the call that consumed it.
@@ -154,6 +156,8 @@ class _EmergencyPinScreenState extends ConsumerState<EmergencyPinScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Redraw when the language changes; _t reads it.
+    ref.watch(languageProvider);
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -161,7 +165,7 @@ class _EmergencyPinScreenState extends ConsumerState<EmergencyPinScreen> {
         elevation: 0,
         automaticallyImplyLeading: !widget.fromOnboarding,
         title: Text(
-          'EMERGENCY PIN',
+          _t('pin_title'),
           style: GoogleFonts.outfit(
             color: AppColors.onBackground,
             fontWeight: FontWeight.w900,
@@ -177,7 +181,7 @@ class _EmergencyPinScreenState extends ConsumerState<EmergencyPinScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Step ${_step.index + 1} of 4',
+                _t('pin_step_of').replaceFirst('{step}', '${_step.index + 1}').replaceFirst('{total}', '4'),
                 style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12),
               ),
               const SizedBox(height: 8),
@@ -249,7 +253,7 @@ class _EmergencyPinScreenState extends ConsumerState<EmergencyPinScreen> {
                         ),
                       )
                     : Text(
-                        _step == _Step.duressConfirm ? 'SAVE PINS' : 'CONTINUE',
+                        _step == _Step.duressConfirm ? _t('pin_save') : _t('pin_continue'),
                         style: GoogleFonts.outfit(
                           fontWeight: FontWeight.w900,
                           letterSpacing: 2,

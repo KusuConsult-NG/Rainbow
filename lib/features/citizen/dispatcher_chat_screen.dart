@@ -29,6 +29,9 @@ class DispatcherChatScreen extends ConsumerStatefulWidget {
 }
 
 class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
+  /// This screen's text in the chosen language.
+  String _t(String key) => Translations.get(key, ref.read(languageProvider));
+
   final _controller = TextEditingController();
   bool _isListening = false;
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
@@ -117,9 +120,9 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: AppColors.error,
-          content: const Text('MESSAGE NOT SENT — check your connection and retry'),
+          content: Text(_t('chat_not_sent')),
           action: SnackBarAction(
-            label: 'RETRY',
+            label: _t('chat_retry'),
             textColor: Colors.white,
             onPressed: () => unawaited(_sendMessage()),
           ),
@@ -173,7 +176,7 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
                 if (snapshot.hasError) {
                   return Center(
                     child: Text(
-                      'Error loading channel messages',
+                      Translations.get('chat_load_failed', currentLang),
                       style: GoogleFonts.outfit(color: AppColors.danger),
                     ),
                   );
@@ -186,7 +189,7 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
                 if (messages.isEmpty) {
                   return Center(
                     child: Text(
-                      'NO SECURE MESSAGES RECORDED',
+                      Translations.get('chat_empty', currentLang),
                       style: GoogleFonts.outfit(
                         color: AppColors.textDim,
                         fontSize: 12,
@@ -205,7 +208,7 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
                     final data = messages[index];
                     final isMe = data['sender_id'] == myUid;
                     final text = data['message'] as String? ?? '';
-                    final senderName = data['sender_name'] as String? ?? 'Dispatcher';
+                    final senderName = data['sender_name'] as String? ?? Translations.get('chat_dispatcher', currentLang);
 
                     return Align(
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -232,7 +235,7 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
                               : CrossAxisAlignment.start,
                           children: [
                             Text(
-                              isMe ? 'YOU' : senderName.toUpperCase(),
+                              isMe ? Translations.get('chat_you', currentLang) : senderName.toUpperCase(),
                               style: GoogleFonts.outfit(
                                 fontSize: 9,
                                 fontWeight: FontWeight.bold,
@@ -271,7 +274,7 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
                   // icon swapping mic_none for mic, which a screen reader does
                   // not announce and the control sweep cannot see — so the
                   // sweep reported this button as doing nothing.
-                  tooltip: _isListening ? 'Stop dictating' : 'Dictate a message',
+                  tooltip: _isListening ? Translations.get('chat_stop_dictating', currentLang) : Translations.get('chat_dictate', currentLang),
                   isSelected: _isListening,
                   icon: Icon(
                     _isListening ? Icons.mic : Icons.mic_none,
@@ -284,14 +287,14 @@ class _DispatcherChatScreenState extends ConsumerState<DispatcherChatScreen> {
                     controller: _controller,
                     style: GoogleFonts.inter(color: AppColors.onBackground),
                     decoration: InputDecoration(
-                      hintText: 'Type secure message...',
+                      hintText: Translations.get('chat_hint', currentLang),
                       hintStyle: GoogleFonts.inter(color: AppColors.textDim),
                       border: InputBorder.none,
                     ),
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Send',
+                  tooltip: Translations.get('chat_send', currentLang),
                   icon: const Icon(Icons.send_rounded, color: AppColors.primary),
                   onPressed: _sendMessage,
                 ),

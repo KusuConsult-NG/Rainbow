@@ -6,6 +6,7 @@ import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 
 class UninstallRequestScreen extends ConsumerStatefulWidget {
   const UninstallRequestScreen({super.key});
@@ -17,6 +18,9 @@ class UninstallRequestScreen extends ConsumerStatefulWidget {
 
 class _UninstallRequestScreenState
     extends ConsumerState<UninstallRequestScreen> {
+  /// This screen's text in the chosen language.
+  String _t(String key) => Translations.get(key, ref.read(languageProvider));
+
   final _remarksCtrl = TextEditingController();
   bool _isSubmitting = false;
   String _reason = 'TRANSFER';
@@ -46,8 +50,8 @@ class _UninstallRequestScreenState
       if (!mounted) return;
       setState(() => _isSubmitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Uninstall request submitted to HQ Command for authorization.'),
+        SnackBar(
+          content: Text(_t('uninst_submitted')),
         ),
       );
     } catch (e) {
@@ -58,8 +62,8 @@ class _UninstallRequestScreenState
       // was simply lost while the officer believed it was pending.
       debugPrint('[UNINSTALL_REQ] not sent: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Request NOT sent. Check your connection and submit again.'),
+        SnackBar(
+          content: Text(_t('uninst_not_sent')),
           backgroundColor: AppColors.danger,
         ),
       );
@@ -68,11 +72,13 @@ class _UninstallRequestScreenState
 
   @override
   Widget build(BuildContext context) {
+    // Redraw when the language changes; _t reads it.
+    ref.watch(languageProvider);
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const RainbowAppBar(
-        title: 'APP REMOVAL AUTHORIZATION',
-        subtitle: 'TACTICAL SECURITY POLICY',
+      appBar: RainbowAppBar(
+        title: _t('uninst_title'),
+        subtitle: _t('uninst_subtitle'),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -80,7 +86,7 @@ class _UninstallRequestScreenState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'REMOVAL CATEGORY',
+              _t('uninst_category'),
               style: GoogleFonts.outfit(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
@@ -101,12 +107,13 @@ class _UninstallRequestScreenState
                 ),
               ),
               style: const TextStyle(color: AppColors.onBackground),
-              items: const [
-                DropdownMenuItem(value: 'TRANSFER', child: Text('Transfer to Another Unit')),
-                DropdownMenuItem(value: 'RETIREMENT', child: Text('Retirement / End of Service')),
-                DropdownMenuItem(value: 'PHONE_CHANGE', child: Text('Device Replacement')),
-                DropdownMenuItem(value: 'MISCONDUCT', child: Text('Disciplinary Removal')),
-                DropdownMenuItem(value: 'OTHER', child: Text('Other (specify in remarks)')),
+              // The values are what is stored; only the labels are translated.
+              items: [
+                DropdownMenuItem(value: 'TRANSFER', child: Text(_t('uninst_transfer'))),
+                DropdownMenuItem(value: 'RETIREMENT', child: Text(_t('uninst_retirement'))),
+                DropdownMenuItem(value: 'PHONE_CHANGE', child: Text(_t('uninst_phone_change'))),
+                DropdownMenuItem(value: 'MISCONDUCT', child: Text(_t('uninst_misconduct'))),
+                DropdownMenuItem(value: 'OTHER', child: Text(_t('uninst_other'))),
               ],
               onChanged: (val) {
                 if (val != null) setState(() => _reason = val);
@@ -114,7 +121,7 @@ class _UninstallRequestScreenState
             ),
             const SizedBox(height: 16),
             Text(
-              'REMOVAL REASON & JUSTIFICATION',
+              _t('uninst_reason'),
               style: GoogleFonts.outfit(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
@@ -128,7 +135,7 @@ class _UninstallRequestScreenState
               maxLines: 4,
               style: GoogleFonts.inter(color: AppColors.onBackground),
               decoration: InputDecoration(
-                hintText: 'Enter operational justification...',
+                hintText: _t('uninst_reason_hint'),
                 hintStyle: GoogleFonts.inter(color: AppColors.textDim),
                 filled: true,
                 fillColor: AppColors.surfaceContainer,
@@ -151,7 +158,7 @@ class _UninstallRequestScreenState
                   ),
                 ),
                 child: Text(
-                  _isSubmitting ? 'TRANSMITTING...' : 'SUBMIT UNINSTALL REQUEST',
+                  _isSubmitting ? _t('uninst_sending') : _t('uninst_submit'),
                   style: GoogleFonts.outfit(
                     fontWeight: FontWeight.bold,
                     color: Colors.white,

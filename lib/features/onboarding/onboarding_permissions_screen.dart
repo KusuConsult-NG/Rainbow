@@ -26,6 +26,9 @@ class OnboardingPermissionsScreen extends ConsumerStatefulWidget {
 class _OnboardingPermissionsScreenState
     extends ConsumerState<OnboardingPermissionsScreen>
     with WidgetsBindingObserver {
+  /// This screen's text in the chosen language.
+  String _t(String key) => Translations.get(key, ref.read(languageProvider));
+
   bool _isProcessing = false;
 
   /// Location was asked for and refused. Setup does not continue.
@@ -236,6 +239,8 @@ class _OnboardingPermissionsScreenState
   @override
   Widget build(BuildContext context) {
     final perms = ref.watch(permissionsProvider);
+    // Redraw when the language changes; _t reads it.
+    ref.watch(languageProvider);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -276,7 +281,7 @@ class _OnboardingPermissionsScreenState
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'TACTICAL CLEARANCE',
+                                _t('onb_perm_title'),
                                 style: GoogleFonts.outfit(
                                   color: AppColors.primary,
                                   fontWeight: FontWeight.w900,
@@ -286,7 +291,7 @@ class _OnboardingPermissionsScreenState
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'Establish operational permissions to enable field telemetry.',
+                                _t('onb_perm_subtitle'),
                                 style: GoogleFonts.outfit(
                                   color: AppColors.textSecondary,
                                   fontSize: 13,
@@ -309,27 +314,27 @@ class _OnboardingPermissionsScreenState
                     children: [
                       _TacticalPermCard(
                         icon: Icons.location_on_rounded,
-                        title: 'GEOSPATIAL',
-                        desc: 'Real-time location beacon',
+                        title: _t('onb_perm_location'),
+                        desc: _t('onb_perm_location_desc'),
                         granted: perms.location,
                         required: true,
                       ),
                       _TacticalPermCard(
                         icon: Icons.sms_rounded,
-                        title: 'COMMS LINK',
-                        desc: 'Offline SMS redundancy',
+                        title: _t('onb_perm_sms'),
+                        desc: _t('onb_perm_sms_desc'),
                         granted: perms.sms,
                       ),
                       _TacticalPermCard(
                         icon: Icons.mic_rounded,
-                        title: 'FIELD AUDIO',
-                        desc: 'Active evidence recording',
+                        title: _t('onb_perm_mic'),
+                        desc: _t('onb_perm_mic_desc'),
                         granted: perms.audio,
                       ),
                       _TacticalPermCard(
                         icon: Icons.battery_saver_rounded,
-                        title: 'PERSISTENCE',
-                        desc: 'Background session lock',
+                        title: _t('onb_perm_background'),
+                        desc: _t('onb_perm_background_desc'),
                         granted: perms.persistence,
                       ),
                     ],
@@ -337,7 +342,7 @@ class _OnboardingPermissionsScreenState
                   const SizedBox(height: 40),
                   Center(
                     child: Text(
-                      'CLEARANCE LEVEL: STANDARD',
+                      _t('onb_perm_level'),
                       style: GoogleFonts.outfit(
                         color: AppColors.textDim,
                         fontSize: 10,
@@ -376,16 +381,8 @@ class _OnboardingPermissionsScreenState
                           Expanded(
                             child: Text(
                               _locationBlockedBySystem
-                                  ? 'Your phone has stopped asking about '
-                                      'location, so it can only be switched on '
-                                      'in settings. Without it an alert cannot '
-                                      'say where you are, and nobody can be '
-                                      'sent to you.'
-                                  : 'Location is how a responder finds you. '
-                                      'Without it your alert says that '
-                                      'something happened but not where, and '
-                                      'nobody can be sent. Please allow it to '
-                                      'continue.',
+                                  ? _t('onb_perm_location_blocked')
+                                  : _t('onb_perm_location_refused'),
                               style: GoogleFonts.outfit(
                                 color: AppColors.dangerDeep,
                                 fontWeight: FontWeight.w600,
@@ -424,10 +421,7 @@ class _OnboardingPermissionsScreenState
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'You stay anonymous. No personal data is collected '
-                            '\u2014 your phone number is your only identity in '
-                            'this app, and it is there so responders can reach '
-                            'you.',
+                            _t('onb_perm_privacy'),
                             style: GoogleFonts.outfit(
                               color: AppColors.emeraldDeep,
                               fontWeight: FontWeight.w600,
@@ -454,12 +448,12 @@ class _OnboardingPermissionsScreenState
                 ? _openSystemSettings
                 : _handlePermissions,
         nextLabel: _isProcessing
-            ? 'AUTHORIZING...'
+            ? _t('onb_perm_authorizing')
             : _locationBlockedBySystem
-                ? 'OPEN SETTINGS'
+                ? _t('onb_perm_open_settings')
                 : _locationRefused
-                    ? 'ALLOW LOCATION'
-                    : 'GRANT CLEARANCE',
+                    ? _t('onb_perm_allow_location')
+                    : _t('onb_perm_grant'),
       ),
     );
   }
@@ -578,7 +572,7 @@ class _TacticalPermCard extends ConsumerWidget {
 
 /// Documentation for this public member.
 
-class OnboardingHeader extends StatelessWidget {
+class OnboardingHeader extends ConsumerWidget {
   /// Documentation for this public member.
   const OnboardingHeader({required this.step, super.key});
 
@@ -586,7 +580,8 @@ class OnboardingHeader extends StatelessWidget {
   final int step;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lang = ref.watch(languageProvider);
     return Container(
       padding: EdgeInsets.fromLTRB(
         24,
@@ -610,7 +605,7 @@ class OnboardingHeader extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Text(
-                'INITIALIZATION',
+                Translations.get('onb_header', lang),
                 style: GoogleFonts.outfit(
                   color: AppColors.primary,
                   fontWeight: FontWeight.w900,
@@ -620,7 +615,9 @@ class OnboardingHeader extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                'STEP $step / 2',
+                Translations.get('onb_step_of', lang)
+                    .replaceFirst('{step}', '$step')
+                    .replaceFirst('{total}', '2'),
                 style: GoogleFonts.outfit(
                   color: AppColors.textDim,
                   fontWeight: FontWeight.w800,
@@ -662,7 +659,7 @@ class OnboardingHeader extends StatelessWidget {
 
 /// Documentation for this public member.
 
-class OnboardingBottomNav extends StatelessWidget {
+class OnboardingBottomNav extends ConsumerWidget {
   /// Documentation for this public member.
   const OnboardingBottomNav({
     required this.onBack,
@@ -681,7 +678,8 @@ class OnboardingBottomNav extends StatelessWidget {
   final String nextLabel;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lang = ref.watch(languageProvider);
     return Container(
       padding: EdgeInsets.fromLTRB(
         24,
@@ -701,7 +699,7 @@ class OnboardingBottomNav extends StatelessWidget {
           // semantics — see rainbow_app_bar.dart, which learned that twice.
           Semantics(
             button: true,
-            label: 'Go back to the previous setup step',
+            label: Translations.get('onb_back', lang),
             excludeSemantics: true,
             onTap: onBack,
             child: GestureDetector(

@@ -40,6 +40,9 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  /// This screen's text in the chosen language.
+  String _t(String key) => Translations.get(key, ref.read(languageProvider));
+
   /// Whether this phone relays others' sealed alerts over Bluetooth. Null until
   /// read, so the switch never flashes the wrong position.
   bool? _meshRelay;
@@ -67,11 +70,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // Switched on, and the radio did not start. Say so rather than leave a
     // switch that claims something is happening when it is not.
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Bluetooth relay is on, but Bluetooth is off or not allowed. '
-          'Turn on Bluetooth and allow it for Plateau Eye.',
-        ),
+      SnackBar(
+        content: Text(_t('set_bt_unavailable')),
       ),
     );
   }
@@ -133,19 +133,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceContainer,
-        title: Text('Edit Name', style: GoogleFonts.outfit(color: AppColors.onBackground)),
+        title: Text(_t('set_edit_name_title'), style: GoogleFonts.outfit(color: AppColors.onBackground)),
         content: TextField(
           controller: controller,
           style: const TextStyle(color: AppColors.onBackground),
-          decoration: const InputDecoration(
-            hintText: 'Full Name',
-            hintStyle: TextStyle(color: AppColors.textDim),
+          decoration: InputDecoration(
+            hintText: _t('set_full_name'),
+            hintStyle: const TextStyle(color: AppColors.textDim),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.textDim)),
+            child: Text(_t('set_cancel'), style: const TextStyle(color: AppColors.textDim)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -155,7 +155,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Navigator.pop(ctx);
             },
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-            child: const Text('Save'),
+            child: Text(_t('set_save')),
           ),
         ],
       ),
@@ -168,20 +168,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceContainer,
-        title: Text('Add Emergency Contact', style: GoogleFonts.outfit(color: AppColors.onBackground)),
+        title: Text(_t('set_add_contact_title'), style: GoogleFonts.outfit(color: AppColors.onBackground)),
         content: TextField(
           controller: controller,
           style: const TextStyle(color: AppColors.onBackground),
-          decoration: const InputDecoration(
-            hintText: 'Phone Number',
-            hintStyle: TextStyle(color: AppColors.textDim),
+          decoration: InputDecoration(
+            hintText: _t('set_phone_number'),
+            hintStyle: const TextStyle(color: AppColors.textDim),
           ),
           keyboardType: TextInputType.phone,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.textDim)),
+            child: Text(_t('set_cancel'), style: const TextStyle(color: AppColors.textDim)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -191,7 +191,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Navigator.pop(ctx);
             },
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-            child: const Text('Add'),
+            child: Text(_t('set_add')),
           ),
         ],
       ),
@@ -201,8 +201,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
+    // Redraw when the language changes; _t reads it.
+    ref.watch(languageProvider);
     final profile = auth.profile ?? {};
-    final fullName = profile['full_name'] as String? ?? 'Citizen User';
+    final fullName = profile['full_name'] as String? ?? _t('set_default_name');
     final pushEnabled = profile['push_enabled'] as bool? ?? true;
     final contacts = ((profile['emergency_contacts'] as List<dynamic>?) ?? [])
         .map(emergencyContactLabel)
@@ -210,9 +212,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const RainbowAppBar(
-        title: 'TACTICAL SYSTEM SETTINGS',
-        subtitle: 'PREFERENCES & SECURITY',
+      appBar: RainbowAppBar(
+        title: _t('set_title'),
+        subtitle: _t('set_subtitle'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(24),
@@ -227,11 +229,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: AppColors.onBackground),
             ),
             subtitle: Text(
-              auth.user?.email ?? 'Phone User: ${auth.user?.phone ?? "Unknown"}',
+              auth.user?.email ?? '${_t('set_phone_user')} ${auth.user?.phone ?? _t('set_unknown')}',
               style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12),
             ),
             trailing: IconButton(
-                        tooltip: 'Edit your name',
+                        tooltip: _t('set_edit_name'),
               icon: const Icon(Icons.edit, color: AppColors.textDim),
               onPressed: () => _showEditNameDialog(fullName),
             ),
@@ -240,8 +242,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           
           // 2. Notifications toggle
           SwitchListTile(
-            title: Text('Push Notifications', style: GoogleFonts.outfit(color: AppColors.onBackground)),
-            subtitle: Text('Receive emergency alerts', style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12)),
+            title: Text(_t('set_push'), style: GoogleFonts.outfit(color: AppColors.onBackground)),
+            subtitle: Text(_t('set_push_desc'), style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12)),
             value: pushEnabled,
             activeThumbColor: AppColors.primary,
             tileColor: AppColors.surfaceContainer,
@@ -252,10 +254,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           // 2b. Bluetooth mesh relaying
           SwitchListTile(
-            title: Text('Relay emergency alerts', style: GoogleFonts.outfit(color: AppColors.onBackground)),
+            title: Text(_t('set_relay'), style: GoogleFonts.outfit(color: AppColors.onBackground)),
             subtitle: Text(
-              'When there is no network, pass sealed SOS alerts between nearby phones over Bluetooth '
-              'until one reaches HQ. Phones that carry an alert cannot read it.',
+              _t('set_relay_desc'),
               style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12),
             ),
             value: _meshRelay ?? false,
@@ -295,22 +296,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Emergency Contacts', style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold)),
+                    Text(_t('set_contacts'), style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold)),
                     IconButton(
-                      tooltip: 'Add an emergency contact',
+                      tooltip: _t('set_add_contact'),
                       icon: const Icon(Icons.add, color: AppColors.primary),
                       onPressed: _showAddContactDialog,
                     ),
                   ],
                 ),
                 if (contacts.isEmpty)
-                  Text('No emergency contacts added.', style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12))
+                  Text(_t('set_no_contacts'), style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 12))
                 else
                   ...contacts.map((c) => ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(c, style: GoogleFonts.inter(color: AppColors.onBackground)),
                     trailing: IconButton(
-                                tooltip: 'Remove this emergency contact',
+                                tooltip: _t('set_remove_contact'),
                       icon: const Icon(Icons.remove_circle_outline, color: AppColors.danger),
                       onPressed: () => _removeEmergencyContact(c),
                     ),
@@ -358,11 +359,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             leading: const Icon(Icons.pin_outlined, color: AppColors.emergency),
             title: Text(
-              'Emergency PIN',
+              _t('set_pin'),
               style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: AppColors.onBackground),
             ),
             subtitle: Text(
-              'Set or change your safe and duress PINs',
+              _t('set_pin_desc'),
               style: GoogleFonts.inter(fontSize: 12, color: AppColors.textDim),
             ),
             onTap: () => context.push(AppRoutes.emergencyPins),
@@ -389,15 +390,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
             leading: const Icon(Icons.lock_outline, color: AppColors.primary),
             title: Text(
-              'Lock This Phone',
+              _t('set_lock'),
               style: GoogleFonts.outfit(
                 fontWeight: FontWeight.bold,
                 color: AppColors.onBackground,
               ),
             ),
             subtitle: Text(
-              'Ask for a code before this app can be used again. '
-              'The emergency button keeps working.',
+              _t('set_lock_desc'),
               style: GoogleFonts.inter(fontSize: 12, color: AppColors.textDim),
             ),
             onTap: () {
@@ -413,7 +413,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             leading: const Icon(Icons.security_outlined, color: AppColors.warning),
             title: Text(
-              'App Removal Authorization',
+              _t('set_removal'),
               style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: AppColors.onBackground),
             ),
             onTap: () => context.push(AppRoutes.uninstallRequest),
@@ -426,7 +426,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             leading: const Icon(Icons.logout_rounded, color: AppColors.danger),
             title: Text(
-              'Sign Out Tactical Session',
+              _t('set_sign_out'),
               style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: AppColors.danger),
             ),
             onTap: () async {
