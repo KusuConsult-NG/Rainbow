@@ -1,4 +1,6 @@
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:rainbow_app/core/net/bounded_http_client.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Central configuration for Supabase client initialization.
@@ -47,9 +49,17 @@ class SupabaseConfig {
       url: url,
       publishableKey: anonKey,
       debug: false,
+      // Every request bounded: see bounded_http_client.dart. Without it a
+      // dead link held any screen's request for minutes, with no error.
+      httpClient: newHttpClient(),
     );
     _initialized = true;
   }
+
+  /// The HTTP client every Supabase request goes through: bounded, so a
+  /// request on a dead link fails in seconds instead of waiting on TCP.
+  @visibleForTesting
+  static http.Client newHttpClient() => BoundedHttpClient(http.Client());
 
   static SupabaseClient? _override;
 
