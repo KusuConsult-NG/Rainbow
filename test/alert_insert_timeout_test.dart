@@ -110,6 +110,43 @@ void main() {
     expect(started, [id], reason: 'tracking is still started, for the real id');
   });
 
+  // MeshNode.send awaits a Bluetooth exchange with nearby phones, with no
+  // limit. submitAlert awaited the escalation, and only then started tracking.
+  test('an offline escalation that never finishes holds neither the id nor tracking', () async {
+    installOfflineSupabase(handler: jsonError(503, 'down'));
+    AlertService.insertLimit = const Duration(seconds: 5);
+    AlertService.offlineEscalationLimit = const Duration(milliseconds: 100);
+    addTearDown(() => AlertService.offlineEscalationLimit = const Duration(seconds: 20));
+    AlertService.escalateOverride = ({
+      required String localId,
+      required String type,
+      required String severity,
+      double? latitude,
+      double? longitude,
+    }) {
+      escalated.add(localId);
+      return Completer<OfflineEscalationReport>().future; // a stalled exchange
+    };
+    final started = <String>[];
+    AlertService.startTrackingOverride = (alertId, userId) async => started.add(alertId);
+    addTearDown(() => AlertService.startTrackingOverride = null);
+
+    final id = await AlertService()
+        .submitAlert(
+          type: 'PANIC SOS',
+          description: 'Public Panic Button Activated',
+          reportedBy: 'test-user',
+          isCritical: true,
+          lookUpLocation: false,
+        )
+        .timeout(const Duration(seconds: 3),
+            onTimeout: () => fail('submitAlert waited for the offline escalation'));
+
+    expect((await sqlite.getPendingAlerts()).single['local_id'], id);
+    expect(escalated, [id], reason: 'the offline channels were still tried');
+    expect(started, [id], reason: 'and tracking started, not held behind them');
+  });
+
   test('an insert that answers in time is not affected', () async {
     installOfflineSupabase(handler: jsonRows([
       {'id': '7f3a1c94-2b6d-4e58-9a01-5c8e2d4f6b70'},

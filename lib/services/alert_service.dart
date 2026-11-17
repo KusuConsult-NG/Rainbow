@@ -192,6 +192,10 @@ class AlertService {
         // The radio says there is no data path. Try the ones that do not need
         // one — SMS if there is cell signal and this is urgent enough to spend a
         // message on, and the mesh, which costs nothing.
+        // Tracking first: the escalation below can wait on a Bluetooth
+        // exchange, and tracking must not wait behind it.
+        _startTracking(localId, reportedBy);
+
         await _escalateOffline(
           localId: localId,
           type: type,
@@ -199,8 +203,6 @@ class AlertService {
           latitude: finalLat,
           longitude: finalLng,
         );
-
-        _startTracking(localId, reportedBy);
         return localId;
       }
 
@@ -358,6 +360,10 @@ class AlertService {
         // carries a text but not a TLS handshake, an expired token, an RLS
         // refusal, a column the schema lacks, HQ simply down. The report reached
         // nobody, so the offline channels are exactly as necessary here.
+        // Tracking first: the escalation below can wait on a Bluetooth
+        // exchange, and tracking must not wait behind it.
+        _startTracking(localId, reportedBy);
+
         await _escalateOffline(
           localId: localId,
           type: type,
@@ -365,8 +371,6 @@ class AlertService {
           latitude: finalLat,
           longitude: finalLng,
         );
-
-        _startTracking(localId, reportedBy);
         return localId;
       }
     } catch (e) {
@@ -386,7 +390,33 @@ class AlertService {
     double? longitude,
   })? escalateOverride;
 
+  /// The longest submitAlert waits for the offline channels. The SMS goes
+  /// first and returns as soon as Android has it; what can take longer is the
+  /// mesh's Bluetooth exchange with nearby phones (MeshNode.send awaits
+  /// gossip), which had no limit. The alert is already in the relay by then
+  /// and is carried at the next meeting, so stopping the wait loses nothing.
+  @visibleForTesting
+  static Duration offlineEscalationLimit = const Duration(seconds: 20);
+
   Future<void> _escalateOffline({
+    required String localId,
+    required String type,
+    required String severity,
+    double? latitude,
+    double? longitude,
+  }) =>
+      _escalateOfflineUnbounded(
+        localId: localId,
+        type: type,
+        severity: severity,
+        latitude: latitude,
+        longitude: longitude,
+      ).timeout(offlineEscalationLimit, onTimeout: () {
+        debugPrint('[ALERT_SERVICE] offline escalation still running after '
+            '${offlineEscalationLimit.inSeconds} s; not waiting for it ($localId)');
+      });
+
+  Future<void> _escalateOfflineUnbounded({
     required String localId,
     required String type,
     required String severity,
