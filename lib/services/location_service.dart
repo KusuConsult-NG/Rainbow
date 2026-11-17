@@ -103,6 +103,41 @@ class LocationService {
     }
   }
 
+  /// A position for an SOS: only if location is already allowed, never by
+  /// asking, and within [limit]; null otherwise.
+  ///
+  /// [getCurrentPosition] may show the permission dialog and waits up to 30 s
+  /// for an answer, then 5 s for a fix. An SOS waited on all of that before
+  /// its alert was written, and in the background, where a dialog cannot
+  /// show, it waited the full 30 s; a dialog during a SILENT SOS would also
+  /// show anyone watching that help was being called. The alert goes first;
+  /// tracking, which starts right after it, can still ask.
+  Future<Position?> positionWithoutAsking({Duration limit = const Duration(seconds: 5)}) async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return null;
+      final permission = await Geolocator.checkPermission();
+      if (permission != LocationPermission.whileInUse &&
+          permission != LocationPermission.always) {
+        return null;
+      }
+      try {
+        return await Geolocator.getCurrentPosition(
+          locationSettings: _buildLocationSettings(),
+        ).timeout(limit);
+      } catch (_) {
+        final lastKnown = await Geolocator.getLastKnownPosition();
+        if (lastKnown != null &&
+            DateTime.now().difference(lastKnown.timestamp).inMinutes < 30) {
+          return lastKnown;
+        }
+        return null;
+      }
+    } catch (e) {
+      debugPrint('[LOC_ERR] positionWithoutAsking: $e');
+      return null;
+    }
+  }
+
   /// Gets the current instantaneous position.
   Future<Position?> getCurrentPosition({bool force = false}) async {
     try {

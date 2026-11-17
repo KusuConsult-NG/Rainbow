@@ -39,10 +39,15 @@ abstract class GuardianEar {
 
   /// Starts listening. [onWords] gets every recognized utterance; [onEnded]
   /// is called once when listening ends for any reason other than [stop].
-  /// Returns false when listening could not start.
+  /// [hausaModelDir], when given, also listens in Hausa with that downloaded
+  /// model; [onHausaLost] is called if Hausa stops (it would not load, or
+  /// failed later) while English goes on. Returns false when listening could
+  /// not start.
   Future<bool> listen({
     required void Function(String words, bool isFinal) onWords,
     required void Function() onEnded,
+    String? hausaModelDir,
+    void Function(String reason)? onHausaLost,
   });
 
   /// Stops listening and forgets anything heard but not yet transcribed.
@@ -90,11 +95,30 @@ class OfflineEar implements GuardianEar {
   Future<bool> listen({
     required void Function(String words, bool isFinal) onWords,
     required void Function() onEnded,
+    String? hausaModelDir,
+    void Function(String reason)? onHausaLost,
   }) async {
     if (!supported) return false;
     await _stopMic();
     try {
-      final worker = _worker ??= await GuardianWorker.spawn(await GuardianModels.install());
+      // A worker loaded for a different set of languages is replaced, except
+      // one that has already dropped Hausa and is now asked for none: it is
+      // English-only as it stands, and replacing it would leave a gap with
+      // nothing listening while the English model loads again, straight
+      // after a failure.
+      final w = _worker;
+      final alreadyEnglishOnly = w != null && hausaModelDir == null && w.hausaLost != null;
+      if (w != null && w.hausaDir != hausaModelDir && !alreadyEnglishOnly) {
+        _worker!.close();
+        _worker = null;
+      }
+      final worker = _worker ??= await GuardianWorker.spawn(
+        await GuardianModels.install(),
+        hausaDir: hausaModelDir,
+      );
+      worker.onHausaLost = onHausaLost;
+      final lost = worker.hausaLost;
+      if (lost != null) onHausaLost?.call(lost);
       worker
         ..onText = ((text) => onWords(text, true))
         ..onFailed = ((e) {

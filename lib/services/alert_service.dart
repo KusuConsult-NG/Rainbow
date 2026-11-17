@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -53,6 +54,11 @@ class AlertService {
     String? geoSiecWard,
     String? geoPu,
     String syncStatus = 'COMPLETED',
+    /// Whether to look for a position when none is given. The SOS passes
+    /// false: it has just looked, without asking and against a deadline, and
+    /// looking again here (with the permission dialog and its 30 s wait)
+    /// delayed the alert a second time.
+    bool lookUpLocation = true,
   }) async {
     /// `isCritical` was a parameter that did nothing.
     ///
@@ -78,7 +84,7 @@ class AlertService {
     var finalLng = longitude;
 
     try {
-      if (finalLat == null || finalLng == null) {
+      if (lookUpLocation && (finalLat == null || finalLng == null)) {
         final pos = await LocationService().getCurrentPosition(force: true);
         if (pos != null) {
           finalLat = pos.latitude;
@@ -186,6 +192,10 @@ class AlertService {
         // The radio says there is no data path. Try the ones that do not need
         // one — SMS if there is cell signal and this is urgent enough to spend a
         // message on, and the mesh, which costs nothing.
+        // Tracking first: the escalation below can wait on a Bluetooth
+        // exchange, and tracking must not wait behind it.
+        _startTracking(localId, reportedBy);
+
         await _escalateOffline(
           localId: localId,
           type: type,
@@ -193,8 +203,6 @@ class AlertService {
           latitude: finalLat,
           longitude: finalLng,
         );
-
-        await BackgroundTrackingService().startSosTracking(localId, reportedBy);
         return localId;
       }
 
@@ -302,14 +310,24 @@ class AlertService {
       };
 
       try {
+        // Bounded. With no limit, a connection that is "up" and carries
+        // nothing (a captive portal, a dead 2G link, a congested tower) held
+        // this insert for as long as the OS's TCP timeouts allowed, minutes,
+        // and none of the fallbacks below ran: not the offline queue, not the
+        // mesh, and not the SOS escalation SMS, which startEmergency sends
+        // only after this returns. On the limit it falls through to the
+        // offline path like any other failure. If the insert in fact landed,
+        // the queue's flush finds the row by this same local_id's tag and
+        // does not file it twice (_findAlreadyDelivered).
         final response = await SupabaseConfig.client
             .from('alerts')
             .insert(alertPayload)
             .select('id')
-            .maybeSingle();
+            .maybeSingle()
+            .timeout(insertLimit);
 
         final alertId = response?['id'] as String? ?? localId;
-        await BackgroundTrackingService().startSosTracking(alertId, reportedBy);
+        _startTracking(alertId, reportedBy);
         return alertId;
       } catch (e) {
         debugPrint(
@@ -342,6 +360,10 @@ class AlertService {
         // carries a text but not a TLS handshake, an expired token, an RLS
         // refusal, a column the schema lacks, HQ simply down. The report reached
         // nobody, so the offline channels are exactly as necessary here.
+        // Tracking first: the escalation below can wait on a Bluetooth
+        // exchange, and tracking must not wait behind it.
+        _startTracking(localId, reportedBy);
+
         await _escalateOffline(
           localId: localId,
           type: type,
@@ -349,8 +371,6 @@ class AlertService {
           latitude: finalLat,
           longitude: finalLng,
         );
-
-        await BackgroundTrackingService().startSosTracking(localId, reportedBy);
         return localId;
       }
     } catch (e) {
@@ -370,7 +390,33 @@ class AlertService {
     double? longitude,
   })? escalateOverride;
 
+  /// The longest submitAlert waits for the offline channels. The SMS goes
+  /// first and returns as soon as Android has it; what can take longer is the
+  /// mesh's Bluetooth exchange with nearby phones (MeshNode.send awaits
+  /// gossip), which had no limit. The alert is already in the relay by then
+  /// and is carried at the next meeting, so stopping the wait loses nothing.
+  @visibleForTesting
+  static Duration offlineEscalationLimit = const Duration(seconds: 20);
+
   Future<void> _escalateOffline({
+    required String localId,
+    required String type,
+    required String severity,
+    double? latitude,
+    double? longitude,
+  }) =>
+      _escalateOfflineUnbounded(
+        localId: localId,
+        type: type,
+        severity: severity,
+        latitude: latitude,
+        longitude: longitude,
+      ).timeout(offlineEscalationLimit, onTimeout: () {
+        debugPrint('[ALERT_SERVICE] offline escalation still running after '
+            '${offlineEscalationLimit.inSeconds} s; not waiting for it ($localId)');
+      });
+
+  Future<void> _escalateOfflineUnbounded({
     required String localId,
     required String type,
     required String severity,
@@ -472,6 +518,30 @@ class AlertService {
 
   /// Test seam: the "has this already arrived?" lookup, so the flush can be
   /// tested without Supabase.
+  /// Starts live tracking for the report, WITHOUT waiting for it.
+  ///
+  /// This was awaited before submitAlert returned. startSosTracking asks for
+  /// location permission when it is denied, with no time limit, and with the
+  /// app in the background (a Guardian SOS) that request can stay pending
+  /// until the person next opens the app. Meanwhile startEmergency, waiting on
+  /// this method for the alert id, held back the escalation SMS. The alert id
+  /// does not depend on tracking having started, so nothing waits for it.
+  void _startTracking(String alertId, String userId) {
+    unawaited(
+      (startTrackingOverride ?? BackgroundTrackingService().startSosTracking)(alertId, userId)
+          .catchError((Object e) => debugPrint('[ALERT_SERVICE] tracking did not start: $e')),
+    );
+  }
+
+  /// Test seam: replaces BackgroundTrackingService.startSosTracking.
+  @visibleForTesting
+  static Future<void> Function(String alertId, String userId)? startTrackingOverride;
+
+  /// The longest an alert insert may take before the report goes the offline
+  /// way instead (queue, mesh, SMS). See the insert in [submitAlert].
+  @visibleForTesting
+  static Duration insertLimit = const Duration(seconds: 15);
+
   @visibleForTesting
   static Future<String?> Function(String tagHex)? alreadyDeliveredOverride;
 
@@ -483,11 +553,15 @@ class AlertService {
       if (alreadyDeliveredOverride != null) {
         return await alreadyDeliveredOverride!(tag);
       }
+      // Bounded like the insert: a lookup that never answered held the flush,
+      // and the flush guard then held every later flush behind it. A timeout
+      // is a failed lookup, and fails towards delivering (below).
       final rows = await SupabaseConfig.client
           .from('alerts')
           .select('id')
           .like('local_id', '%$tag%')
-          .limit(1);
+          .limit(1)
+          .timeout(insertLimit);
       if (rows.isEmpty) return null;
       return rows.first['id'] as String?;
     } catch (e) {
@@ -568,20 +642,25 @@ class AlertService {
             // Same reasoning as below: this report reached HQ over SMS or the
             // mesh and already has a real row, so a live track bound to the
             // local id must follow it there.
-            await BackgroundTrackingService().rebindAlertId(
-              localId,
-              alreadyThere,
-            );
+            await BackgroundTrackingService()
+                .rebindAlertId(localId, alreadyThere)
+                .timeout(const Duration(seconds: 5), onTimeout: () {});
             continue;
           }
 
           final payload = buildOfflineSyncPayload(row);
 
+          // Bounded. Only one flush runs at a time (_flushInFlight), so an
+          // insert that never answered kept every queued report, SOS included,
+          // from being sent until the app restarted. On the limit the row is
+          // marked FAILED, which the next flush retries; if it did land, that
+          // flush's _findAlreadyDelivered finds it by its tag.
           final response = await SupabaseConfig.client
               .from('alerts')
               .insert(payload)
               .select()
-              .single();
+              .single()
+              .timeout(insertLimit);
 
           final alertId = response['id'] as String?;
           if (alertId != null) {
@@ -598,7 +677,9 @@ class AlertService {
             // did nothing with it.
             //
             // A no-op unless this handset is tracking exactly this local id.
-            await BackgroundTrackingService().rebindAlertId(localId, alertId);
+            await BackgroundTrackingService()
+                .rebindAlertId(localId, alertId)
+                .timeout(const Duration(seconds: 5), onTimeout: () {});
           }
         } catch (e) {
           debugPrint('[SYNC_ERR] Alert sync failed for $localId: $e');

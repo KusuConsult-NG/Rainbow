@@ -1,0 +1,12 @@
+# Versions the pipeline was run with on 2026-11-15 (CPU smoke run).
+# torch: install the build for your machine (CUDA on Colab/Kaggle, CPU otherwise).
+torch>=2.6
+accelerate==1.15.0
+huggingface_hub==2.4.0
+jiwer==4.0.0
+onnx==1.23.2
+onnxruntime==1.32.0
+openai-whisper==20250625
+sherpa-onnx==2.0.1
+soundfile==0.14.0
+transformers==5.23.0

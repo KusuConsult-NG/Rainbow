@@ -51,6 +51,9 @@ FEATURES: dict[str, tuple[int, str, str]] = {
     'MESH_HQ_PUBLIC_KEY': (
         2, 'the offline mesh cannot seal anything to HQ',
         'a handset with no network queues reports it can never deliver'),
+    'GUARDIAN_HAUSA_MANIFEST_URL': (
+        2, 'AI Emergency Guardian cannot listen in Hausa',
+        'Guardian offers English and Pidgin only; the Hausa option says it is not available yet'),
     'MAP_TILE_URL': (
         2, 'the app map has no tiles',
         'the map renders as empty space with markers floating on it'),
@@ -63,6 +66,9 @@ FEATURES: dict[str, tuple[int, str, str]] = {
     'CLOUDINARY_UPLOAD_PRESET': (
         2, 'photo and video evidence cannot upload',
         'attaching media to a report fails'),
+    'SENTRY_DSN': (
+        3, 'crash and error reports go nowhere',
+        'nothing on the phone; the team does not learn about failures in the field'),
     'DEMO_CITIZEN_EMAIL': (
         3, 'nothing — a demonstration account only',
         'no effect on a real deployment'),

@@ -84,6 +84,28 @@ class AppConfig {
     return bytes;
   }
 
+  /// Where Guardian's Hausa model is published: the manifest.json that
+  /// training/hausa/publish.py uploads, e.g.
+  /// `https://huggingface.co/<org>/guardian-hausa/resolve/main/manifest.json`.
+  ///
+  /// Public by nature, a download address. `null` (unset, or not https) hides
+  /// the Hausa option: Guardian listens in English and Pidgin only.
+  static String? get guardianHausaManifestUrl {
+    final raw = _read('GUARDIAN_HAUSA_MANIFEST_URL')?.trim();
+    return raw != null && raw.startsWith('https://') ? raw : null;
+  }
+
+  /// Where crash and error reports go: a Sentry project's DSN, e.g.
+  /// `https://<public key>@o0.ingest.sentry.io/<project>`.
+  ///
+  /// Safe to bundle: a DSN only lets a client send reports in, never read
+  /// them, and Sentry publishes it in every web page that uses it. `null`
+  /// (unset, or not https) leaves reporting off; see `ErrorReporting`.
+  static String? get sentryDsn {
+    final raw = _read('SENTRY_DSN')?.trim();
+    return raw != null && raw.startsWith('https://') ? raw : null;
+  }
+
   static String? get cloudinaryCloudName => _read('CLOUDINARY_CLOUD_NAME');
   static String? get cloudinaryUploadPreset => _read('CLOUDINARY_UPLOAD_PRESET');
   static String? get demoCitizenEmail => _read('DEMO_CITIZEN_EMAIL');

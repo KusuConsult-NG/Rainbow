@@ -24,11 +24,11 @@
  */
 
 const fs = require('fs');
-const http = require('http');
 const path = require('path');
 const { launch } = require('./browser');
 const { DOMAIN, byKey } = require('./fixtures');
 const { signInMobile } = require('./mobile_login');
+const { watchPage, loggedStaticServer } = require('./stall_report');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'build', 'web');
@@ -53,22 +53,10 @@ function check(name, pass, detail = '') {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const TYPES = {
-  '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
-  '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png',
-  '.otf': 'font/otf', '.ttf': 'font/ttf', '.woff2': 'font/woff2',
-  '.css': 'text/css', '.svg': 'image/svg+xml', '.symbols': 'text/plain',
-};
 
-const server = http.createServer((req, res) => {
-  const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html';
-  const file = path.join(WEB, rel);
-  if (!file.startsWith(WEB) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-    res.writeHead(404); return res.end('not found');
-  }
-  res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
-  fs.createReadStream(file).pipe(res);
-});
+// The file server, logging what it does with each request for the stall
+// report (see stall_report.js).
+const { server, serverLog } = loggedStaticServer(WEB);
 
 async function control(p = '') {
   return (await fetch(CONTROL + p)).json();
@@ -110,6 +98,7 @@ async function logMark() {
   await browser.defaultBrowserContext().overridePermissions(origin, ['geolocation']);
 
   const page = await newPage();
+  const watch = watchPage(page, { serverLog });
   await page.setGeolocation(HERE);
 
   // ---- helpers that speak Flutter's semantics tree --------------------------
@@ -276,8 +265,9 @@ async function logMark() {
 
   // ---- boot + sign in -------------------------------------------------------
   state.screen = 'mobile:boot';
+  watch.mark('boot');
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 90000 });
+  await watch.waitForApp(90000, OUT);
   await sleep(6500);
   await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
   await sleep(2000);
@@ -412,8 +402,11 @@ async function logMark() {
     // report flow's own state behind, and after the first submission the
     // category list stopped appearing at all — which looked like nine broken
     // categories and was one dirty starting point.
+    // A reload here once never brought the app back (2026-11-14); if it
+    // happens again, stall_report.js writes down why before failing.
+    watch.mark(`reload ${cat}`);
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => !!document.querySelector('flutter-view, flt-glass-pane, canvas'), { timeout: 60000 });
+    await watch.waitForApp(60000, OUT);
     await sleep(5000);
     await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
     await sleep(1500);

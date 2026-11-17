@@ -30,9 +30,13 @@ class GuardianModels {
         Error.throwWithStackTrace(e, s);
       });
 
+  /// The folder every Guardian model lives under, the downloaded Hausa one
+  /// included.
+  static Future<Directory> root() async =>
+      Directory('${(await getApplicationSupportDirectory()).path}/guardian_models');
+
   static Future<String> _install() async {
-    final support = await getApplicationSupportDirectory();
-    final dir = Directory('${support.path}/guardian_models/$version');
+    final dir = Directory('${(await root()).path}/$version');
     await dir.create(recursive: true);
     for (final name in GuardianModelFiles.all) {
       final data = await rootBundle.load('assets/guardian/$name');
@@ -47,9 +51,12 @@ class GuardianModels {
       );
       await part.rename(file.path);
     }
-    // Earlier model versions are dead weight once this one is in place.
+    // Earlier English model versions are dead weight once this one is in
+    // place. Not the downloaded Hausa model beside them (hausa-*), which
+    // this would otherwise delete on every start.
     await for (final old in dir.parent.list()) {
-      if (old is Directory && old.path != dir.path) {
+      final name = old.uri.pathSegments.where((s) => s.isNotEmpty).last;
+      if (old is Directory && old.path != dir.path && !name.startsWith('hausa-')) {
         try {
           await old.delete(recursive: true);
         } on Object catch (_) {}

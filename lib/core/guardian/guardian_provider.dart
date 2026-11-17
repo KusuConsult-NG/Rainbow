@@ -27,6 +27,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:rainbow_app/core/guardian/distress_detector.dart';
 import 'package:rainbow_app/core/guardian/guardian_ear.dart';
 import 'package:rainbow_app/core/guardian/guardian_keep_alive.dart';
+import 'package:rainbow_app/core/guardian/hausa_provider.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -161,6 +162,7 @@ class GuardianState {
     this.pausedInBackground = false,
     this.problem,
     this.lastMatch,
+    this.hausaLost = false,
   });
 
   final bool active;
@@ -172,6 +174,9 @@ class GuardianState {
 
   /// What sent the last Guardian SOS, for the screen to say so.
   final GuardianMatch? lastMatch;
+
+  /// Hausa listening stopped during this session; English goes on.
+  final bool hausaLost;
 
   bool get listening => active && !pausedForOtherFeature && !pausedInBackground;
 }
@@ -190,6 +195,10 @@ class GuardianNotifier extends Notifier<GuardianState> {
   /// Whether this session listens with the app off screen. Decided when the
   /// session starts: true only if the ear can and the keep-alive started.
   bool _backgroundListening = false;
+
+  /// The downloaded Hausa model, when Hausa is switched on. Read when the
+  /// session starts.
+  String? _hausaDir;
 
   /// Clock seam for tests.
   @visibleForTesting
@@ -231,6 +240,7 @@ class GuardianNotifier extends Notifier<GuardianState> {
 
     final phrase = await ref.read(guardianPhraseStoreProvider).read();
     _detector = DistressDetector(secretPhrase: phrase);
+    _hausaDir = ref.read(guardianHausaProvider).listeningDir;
     _quickFailures = 0;
 
     final cap = guardianDurations.last;
@@ -286,9 +296,31 @@ class GuardianNotifier extends Notifier<GuardianState> {
     if (!state.listening || _passRunning) return true;
     _passRunning = true;
     _passStartedAt = now();
-    final ok = await _ear.listen(onWords: _onWords, onEnded: _onPassEnded);
+    final ok = await _ear.listen(
+      onWords: _onWords,
+      onEnded: _onPassEnded,
+      hausaModelDir: _hausaDir,
+      onHausaLost: _onHausaLost,
+    );
     if (!ok) _passRunning = false;
     return ok;
+  }
+
+  /// Hausa stopped; English goes on. The rest of this session listens in
+  /// English only, and the screen says so.
+  void _onHausaLost(String reason) {
+    debugPrint('[GUARDIAN] Hausa listening stopped: $reason');
+    _hausaDir = null;
+    if (!state.active || state.hausaLost) return;
+    state = GuardianState(
+      active: true,
+      startedAt: state.startedAt,
+      endsAt: state.endsAt,
+      pausedForOtherFeature: state.pausedForOtherFeature,
+      pausedInBackground: state.pausedInBackground,
+      lastMatch: state.lastMatch,
+      hausaLost: true,
+    );
   }
 
   void _onWords(String words, bool isFinal) {
@@ -349,6 +381,7 @@ class GuardianNotifier extends Notifier<GuardianState> {
       pausedForOtherFeature: busy,
       pausedInBackground: state.pausedInBackground,
       lastMatch: state.lastMatch,
+      hausaLost: state.hausaLost,
     );
     if (busy) {
       // The microphone is the other feature's until it is done.
@@ -373,6 +406,7 @@ class GuardianNotifier extends Notifier<GuardianState> {
       pausedForOtherFeature: state.pausedForOtherFeature,
       pausedInBackground: background,
       lastMatch: state.lastMatch,
+      hausaLost: state.hausaLost,
     );
     if (background) {
       _restartTimer?.cancel();

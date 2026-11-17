@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rainbow_app/core/guardian/distress_detector.dart';
+import 'package:rainbow_app/core/guardian/hausa_prompts.dart';
 
 void main() {
   final t0 = DateTime(2026, 11, 14, 20);
@@ -135,6 +136,41 @@ void main() {
     test('an unusual phrase is accepted', () {
       expect(DistressDetector.checkSecretPhrase('the mangoes are ripe'), isNull);
     });
+
+    test('a Hausa greeting is everyday filler too', () {
+      // Good morning, I'm well / welcome / thank you very much.
+      expect(DistressDetector.checkSecretPhrase('ina kwana lafiya'), SecretPhraseProblem.tooCommon);
+      expect(DistressDetector.checkSecretPhrase('sannu da zuwa'), SecretPhraseProblem.tooCommon);
+      expect(DistressDetector.checkSecretPhrase('na gode sosai'), SecretPhraseProblem.tooCommon);
+    });
+
+    test('a Hausa call for help is refused, as an English one is', () {
+      expect(DistressDetector.checkSecretPhrase('za su kashe ni'), SecretPhraseProblem.tooCommon);
+      expect(DistressDetector.checkSecretPhrase('wani ya taimake ni'), SecretPhraseProblem.tooCommon);
+    });
+
+    test('an unusual Hausa phrase is accepted', () {
+      expect(DistressDetector.checkSecretPhrase('mangwaro ya nuna sosai'), isNull);
+    });
+  });
+
+  group('a secret phrase in Hausa', () {
+    // With Hausa on, the Hausa recognizer's text goes through the same
+    // detector, so a phrase typed in Hausa is matched against it.
+    test('is matched in what the Hausa recognizer wrote', () {
+      expect(once('Mangwaro ya nuna sosai.', secret: 'mangwaro ya nuna sosai'), isNotNull);
+    });
+
+    test('is matched whether or not the hooked letters were typed', () {
+      // Typed with ɗ and written by the recognizer without, and the reverse.
+      expect(once('ruwan dumi ya zuba', secret: 'ruwan ɗumi ya zuba'), isNotNull);
+      expect(once('ruwan ɗumi ya zuba', secret: 'ruwan dumi ya zuba'), isNotNull);
+    });
+
+    test('is matched inside a longer sentence, on whole words only', () {
+      expect(once('kai yau mangwaro ya nuna sosai fa', secret: 'mangwaro ya nuna sosai'), isNotNull);
+      expect(once('mangwaron ya nuna sosai', secret: 'mangwaro ya nuna sosai'), isNull);
+    });
   });
 
   test('HQ is told the rule, never the words', () {
@@ -206,6 +242,57 @@ void main() {
 
     test('a misheard film about a kidnapping still sends nothing', () {
       expect(once('THE MOVY LAST NIGHT WAS ABOUT ACHE HID NAPPING'), isNull);
+    });
+  });
+
+  group('phase 3: Hausa', () {
+    // The recording prompts are the sentences native speakers will record for
+    // the Hausa model. Every call for help among them must send, and no
+    // everyday sentence may: this ties the rules to what will be measured.
+    for (final p in hausaPrompts) {
+      if (p.expect == 'sos') {
+        test('prompt ${p.id} ("${p.english}") sends, at once or when repeated', () {
+          // A strong phrase sends at once. A plea on its own only counts, as
+          // "somebody help!" does in English: said again within a minute, it
+          // sends.
+          final d = DistressDetector();
+          final first = d.hear(p.hausa, t0, isFinal: true);
+          final second = first ?? d.hear(p.hausa, t0.add(const Duration(minutes: 1)), isFinal: true);
+          expect(second, isNotNull, reason: p.hausa);
+        });
+      } else {
+        test('prompt ${p.id} ("${p.english}") does not send', () {
+          expect(once(p.hausa), isNull, reason: p.hausa);
+        });
+      }
+    }
+
+    test('hooked letters are made plain, not split on', () {
+      expect(DistressDetector.normalize('Ƙasa ɗaya ɓera ƴaƴa'), 'kasa daya bera yaya');
+    });
+
+    test('"ba za su kashe ni ba" (they will not kill me) is negated', () {
+      expect(once('ba za su kashe ni ba'), isNull);
+    });
+
+    test('"kashe wuta" (switch off the light) is not a threat', () {
+      expect(once('don allah ka kashe wuta'), isNull);
+    });
+
+    test('"ka taimake ni" (help me carry this), said twice, does not add up', () {
+      final d = DistressDetector();
+      expect(d.hear('ka taimake ni in dauki kaya', t0, isFinal: true), isNull);
+      expect(d.hear('ka taimake ni in dauki kaya', t0.add(const Duration(seconds: 20)), isFinal: true), isNull);
+    });
+
+    test('a weapon with a Hausa plea sends', () {
+      expect(once('yana da bindiga don allah kar ka harbe ni')?.rule, isIn(['threat_to_life', 'weapon_plea']));
+    });
+
+    test('two Hausa pleas a minute apart send', () {
+      final d = DistressDetector();
+      expect(d.hear('ku bar ni', t0, isFinal: true), isNull);
+      expect(d.hear('ku sake ni', t0.add(const Duration(minutes: 1)), isFinal: true)?.rule, 'repeated_plea');
     });
   });
 }

@@ -832,12 +832,17 @@ directions — silent on the fixed tree, and firing when the pre-fix files are r
 The first attempt at the source gate was silently blind: its comment filter matched the
 `//` inside `https://`, so it could not see the very endpoint it existed to find.
 
-**Still open, and deliberately not fixed here.** `DURESS_PIN`/`SAFE_PIN` remain
+**Closed 2026-09-02; this paragraph was not updated when it was.** It said, when
+written: *"Still open, and deliberately not fixed here. `DURESS_PIN`/`SAFE_PIN` remain
 build-time constants shared by every install, so they are still extractable. Per-user,
 server-verified PINs are a product change — new schema, new verification flow, migration
-for existing users — not a defect patch. The dangerous part (a duress PIN silently
-defaulting to `9999`, a value published in this repository) is fixed; the shared-constant
-design is not.
+for existing users — not a defect patch."* That product change was made in
+`supabase/migrations/20260902000000_per_user_emergency_pins.sql`. Each person sets their
+own PINs, stored only as bcrypt hashes in a table the API cannot read. They are checked
+on the server, with a lockout after five wrong tries, and no PIN material is left on the
+device. See *The duress PIN was a shared constant inside the APK — now per-user,
+server-verified*, and the C-findings status table (PR #71), which already marked it fixed.
+(Corrected 2026-11-16, after this paragraph was read as an open item.)
 
 ### H-4. Hardcoded HMAC shared secret
 
@@ -2520,7 +2525,7 @@ script to get wrong, and it would have shipped.
 
 | # | Finding | Status |
 |---|---|---|
-| T-17 | **GitHub Actions jobs are refused before a runner is assigned.** *(Corrected 2026-10-16: this row said "an account billing condition" and named billing as the cause in every summary I gave. The operator said there is no billing prompt on the account, and they are right that I never established one — the API returns no reason. What IS established, and re-verified today on run #517: 12 jobs created with correct names, so the workflow file parsed and expanded; `runner_id: 0`, `runner_name: ""`, no `steps` array; `total_ms: 0` billable across all 12; the check run carries empty `output.title`, `summary` and `text`. The repository is PRIVATE and owned by a personal account, so Actions minutes are metered rather than unlimited as they are for a public repo. That is as far as the evidence goes: no runner is assigned, and the reason is not visible from any API this session can reach.)** (This row said "has not run since 2026-09-29"; wrong — see T-27. Run #392 passed at 16:30 on 2026-10-06, and runs have been created continuously since.) Every job in every run completes in about two seconds with `runner_id: 0`, no runner name and no logs — nothing picks the jobs up. Not a failing test, not the workflow file, and nothing in this repository can fix it: the jobs are never scheduled. Where to look, in order — the account's Actions usage for the month (github.com/settings/billing), then the repository's Settings → Actions → General permissions. | 🔴 **open, and now load-bearing.** Moving to Railway removed the one structural protection App Hosting gave (a secret marked RUNTIME-only, absent during `next build`). The CI job that greps `.next/static` for key material is what remains between this deployment and C-1 recurring, and it is switched off. Fifty merges landed with every gate unexercised, which is how T-10, T-11, T-12 and T-13 survived | **Still open on 2026-10-10, and now measured rather than inferred.** Run #458 (push, `224ceb8`) and #459 (pull_request, same head): all twelve jobs `conclusion: failure`, every one with `runner_id: 0`, no runner name, no steps, and logs returning 404 — and `get_workflow_run_usage` reports **`total_ms: 0` for all twelve**, so not one of them consumed a millisecond of runner time. Eleven finished in 2 seconds and the Flutter job in 38, which is the same refusal with a longer queue gap, not a job that ran. The base branch is red identically: run #443 on `main`'s own head (`2c5b5a6`) failed in 4 seconds. So every gate in this repository has now been unexercised by CI for four days, and the only evidence any of them pass is the local runs recorded above.
+| T-17 | **GitHub Actions jobs are refused before a runner is assigned.** *(Corrected 2026-10-16: this row said "an account billing condition" and named billing as the cause in every summary I gave. The operator said there is no billing prompt on the account, and they are right that I never established one — the API returns no reason. What IS established, and re-verified today on run #517: 12 jobs created with correct names, so the workflow file parsed and expanded; `runner_id: 0`, `runner_name: ""`, no `steps` array; `total_ms: 0` billable across all 12; the check run carries empty `output.title`, `summary` and `text`. The repository is PRIVATE and owned by a personal account, so Actions minutes are metered rather than unlimited as they are for a public repo. That is as far as the evidence goes: no runner is assigned, and the reason is not visible from any API this session can reach.)** (This row said "has not run since 2026-09-29"; wrong — see T-27. Run #392 passed at 16:30 on 2026-10-06, and runs have been created continuously since.) Every job in every run completes in about two seconds with `runner_id: 0`, no runner name and no logs — nothing picks the jobs up. Not a failing test, not the workflow file, and nothing in this repository can fix it: the jobs are never scheduled. Where to look, in order — the account's Actions usage for the month (github.com/settings/billing), then the repository's Settings → Actions → General permissions. | 🔴 **open, and now load-bearing.** Moving to Railway removed the one structural protection App Hosting gave (a secret marked RUNTIME-only, absent during `next build`). The CI job that greps `.next/static` for key material is what remains between this deployment and C-1 recurring, and it is switched off. Fifty merges landed with every gate unexercised, which is how T-10, T-11, T-12 and T-13 survived | **Still open on 2026-10-10, and now measured rather than inferred.** Run #458 (push, `224ceb8`) and #459 (pull_request, same head): all twelve jobs `conclusion: failure`, every one with `runner_id: 0`, no runner name, no steps, and logs returning 404 — and `get_workflow_run_usage` reports **`total_ms: 0` for all twelve**, so not one of them consumed a millisecond of runner time. Eleven finished in 2 seconds and the Flutter job in 38, which is the same refusal with a longer queue gap, not a job that ran. The base branch is red identically: run #443 on `main`'s own head (`2c5b5a6`) failed in 4 seconds. So every gate in this repository has now been unexercised by CI for four days, and the only evidence any of them pass is the local runs recorded above. **✅ No longer true; noted 2026-11-16, when this row was read as open.** Jobs get runners and run: on 2026-11-15 the mobile job of run 43720098520 ran on `GitHub Actions 1000022870` (`runner_id` 1000022870) for 23 minutes, every step logged, and PR #73 (merged 2026-11-15) and PR #74 ran every job green except the RLS anon-access probe, which runs only when started by hand. When it started working again is not recorded here. **The `total_ms: 0` evidence above does not show what it was taken to show:** `get_workflow_run_usage` reports `total_ms: 0` for all twelve jobs of run 43722599272 too, a run that took 54 minutes end to end (`run_duration_ms` 3,219,000). A zero from that API is not evidence of a refused job; `runner_id: 0` and the missing steps were the real signal.
 | C-6 | an abandoned second backend, if still deployed | 🟠 unchanged, and **downgraded 2026-10-06**: it writes to Firestore, which nothing in the shipping code reads (13 mentions across `lib/` and `hq-dashboard-next/src/`, all comments, no imports). Cleanup with a billing and data-at-rest tail, not a live hole. `gcloud functions list --project rainbow-97f1e` settles it | **The blocker narrowed on 2026-10-11, from three things to one.** The row above and C-6's own section say no Google CLI is installed and that the environment's network policy denies the endpoint. Both are now out of date: `gcloud` 570.0.0 is in the audit container, and `https://cloudfunctions.googleapis.com/v2/projects/rainbow-97f1e/locations/-/functions` answers **`401 UNAUTHENTICATED`** — Google refusing a request that arrived, not a policy refusing to carry it. The only missing input is a credential with read access to the project; a VIEWER role answers the question. `scripts/is_the_old_backend_deployed.sh` does the rest.
 | T-18 | **Citizen sign-in has no SMS provider.** `signInWithOtp` is refused outright unless the Supabase project has one, so every citizen sign-in fails. | 🔴 open — a blocker, not a checklist item. `docs/PRODUCTION_DEPLOYMENT.md` §2b |
 | T-19 | **One staff account exists**, so dispatch has nobody to send. The nine unacknowledged incidents on the live board are an empty roster, not a broken pipeline. | 🔴 open |
@@ -4232,6 +4237,11 @@ mechanism. That is a piece of work with real decisions in it (how many times do
 you re-send an SMS about an emergency, and to whom does it escalate when the
 agency's own channel is down), not a line of code, so it is named here rather
 than guessed at.
+
+**Closed since, by T-89** (`supabase/migrations/20261027000000_agency_handovers_retry.sql`).
+Failed handovers are now drained the way `notification_outbox` is, with the same backoff
+(`attempts * 2` minutes, capped at 60). See *T-89. The index said "(retry jobs)" since
+July, and `sent_at` was a lie*. (Noted 2026-11-16: this subsection still read as open.)
 
 `scripts/agency_delivery_behaviour_test.sql` proves it on a real PostgreSQL:
 all ten columns present, a leg that records its own reason, a skipped channel
@@ -7257,12 +7267,37 @@ launch would still settle the original cause, and the lines to look for are
   goes nowhere — including the start-up failures above, which is why this was
   only ever visible as a blank page and not as an alert. Worth wiring up or
   removing; leaving it looks like error reporting and is not.
+  **✅ Wired up 2026-11-16** (`lib/core/startup/error_reporting.dart`). Reporting
+  starts when `SENTRY_DSN` is set in `.env` and stays off, saying so in the log,
+  when it is blank. `.env` is now read before Supabase starts, so a Supabase
+  failure is reported too. Reports carry the error, stack trace and versions
+  only: no breadcrumbs, user, IP or screenshot. And `main.dart`'s
+  `FlutterError` and `PlatformDispatcher` handlers no longer report
+  themselves, because Sentry wraps them and would send each error twice.
 * **`android/app/build.gradle.kts` sets `isMinifyEnabled = true`, and
   `proguard-rules.pro` keeps a hand-maintained list of six plugins.** The ones
   that instantiate classes by name are the ones that need rules, and
   `workmanager` (WorkManager resolves `Worker` subclasses reflectively),
   `just_audio` (ExoPlayer) and `sentry_flutter` are not in the list. That is a
   release-only failure class with no gate on it.
+  **Measured 2026-11-16: nothing is stripped or renamed that Android or
+  WorkManager looks up by name.** The libraries' own consumer rules cover what
+  the hand-kept list does not. A release build with Flutter 3.38.4 ran R8 to
+  completion; it stopped at signing only because no keystore was present.
+  `scripts/inspect_release_r8_names.py` read its merged manifest and
+  `mapping.txt`:
+  - All 47 manifest components kept their names, among them
+    flutter_foreground_task's `ForegroundService` and `RebootReceiver`, which
+    Guardian depends on. The one missing entry, Play services'
+    `ModuleDependencies`, is declared disabled and has no class by design.
+  - All six WorkManager workers kept theirs: workmanager's `BackgroundWorker`,
+    three OneSignal workers, and two of androidx.work's own.
+
+  The tool was proven to catch a renamed worker, a removed service and a
+  renamed receiver. Run it after any release build. It is not a CI gate,
+  because CI builds no APK. What it cannot see is reflection outside the
+  manifest and WorkManager (ExoPlayer's optional extensions, for instance);
+  that is for the phone tests.
 
 ## A gate that was red for a reason it was not about, and said something it had not checked
 

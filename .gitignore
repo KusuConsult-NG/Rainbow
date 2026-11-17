@@ -62,6 +62,8 @@ scratch/
 # Except Guardian's speech-model vocabulary, which the app cannot run without.
 # The *.txt rule above kept it out of the first commit of the models.
 !assets/guardian/tokens.txt
+# And the Hausa training pipeline's pinned dependencies.
+!training/hausa/requirements.txt
 .firebase/
 
 # ── Added during the E2E audit ────────────────────────────────────────────────
@@ -89,3 +91,6 @@ users.json
 # regenerates them in about two minutes. 28 MB of committed screenshots is a
 # mistake this repository has already made once.
 local_e2e_screenshots/
+
+# Python bytecode (training/ scripts).
+__pycache__/

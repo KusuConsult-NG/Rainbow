@@ -72,6 +72,7 @@ class FakeAlertService implements AlertService {
     String? geoSiecWard,
     String? geoPu,
     String syncStatus = 'COMPLETED',
+    bool lookUpLocation = true,
   }) async {
     submittedAlertTypes.add(type);
     debugPrint('[TEST_DEBUG] submitAlert called for $type count=${submittedAlertTypes.length}');

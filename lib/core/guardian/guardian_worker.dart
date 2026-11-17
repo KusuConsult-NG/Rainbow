@@ -27,22 +27,43 @@ class GuardianWorker {
   /// The worker stopped by itself (its models failed to load or it crashed).
   void Function(Object error)? onFailed;
 
+  /// Hausa listening stopped (its model would not load, or failed later);
+  /// English goes on. Set as soon as it happens, even before a listener is.
+  String? hausaLost;
+
+  /// Called when [hausaLost] is set.
+  void Function(String reason)? onHausaLost;
+
   bool _closed = false;
 
-  /// Starts a worker with the models in [modelDir]. Fails if they cannot be
-  /// loaded, so a broken install is reported instead of listening to nothing.
-  static Future<GuardianWorker> spawn(String modelDir) async {
+  /// The Hausa model folder this worker loaded, if any.
+  String? hausaDir;
+
+  /// Starts a worker with the models in [modelDir], and the downloaded Hausa
+  /// model in [hausaDir] if given. Fails if they cannot be loaded, so a broken
+  /// install is reported instead of listening to nothing.
+  static Future<GuardianWorker> spawn(String modelDir, {String? hausaDir}) async {
     final fromWorker = ReceivePort();
     final isolate = await Isolate.spawn(
       _main,
-      [fromWorker.sendPort, modelDir],
+      [fromWorker.sendPort, modelDir, hausaDir],
       debugName: 'guardian-worker',
       errorsAreFatal: true,
     );
     final ready = Completer<SendPort>();
     late final GuardianWorker worker;
+    String? lostBeforeReady;
     fromWorker.listen((Object? m) {
-      if (m is SendPort) {
+      if (m is List && m.length == 2 && m.first == 'hausa_lost') {
+        final reason = '${m[1]}';
+        if (ready.isCompleted) {
+          worker
+            ..hausaLost = reason
+            ..onHausaLost?.call(reason);
+        } else {
+          lostBeforeReady = reason; // a load failure, reported during start-up
+        }
+      } else if (m is SendPort) {
         ready.complete(m);
       } else if (m is String) {
         worker.onText?.call(m);
@@ -57,7 +78,9 @@ class GuardianWorker {
     });
     try {
       final port = await ready.future.timeout(const Duration(seconds: 30));
-      return worker = GuardianWorker._(isolate, port, fromWorker);
+      return worker = GuardianWorker._(isolate, port, fromWorker)
+        ..hausaDir = hausaDir
+        ..hausaLost = lostBeforeReady;
     } on Object {
       isolate.kill(priority: Isolate.immediate);
       fromWorker.close();
@@ -89,13 +112,16 @@ class GuardianWorker {
   static void _main(List<Object?> args) {
     final toMain = args[0]! as SendPort;
     final modelDir = args[1]! as String;
+    final hausaDir = args[2] as String?;
     final inbox = ReceivePort();
     OfflineTranscriber? t;
     try {
       sherpa.initBindings();
       t = OfflineTranscriber(
         GuardianModelFiles.inDirectory(modelDir),
+        hausaDir: hausaDir,
         onText: toMain.send,
+        onHausaLost: (reason) => toMain.send(['hausa_lost', reason]),
       );
     } on Object catch (e) {
       toMain.send(['error', '$e']);
