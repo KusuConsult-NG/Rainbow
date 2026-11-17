@@ -9,15 +9,45 @@
 // those has a different fix, and guessing between them is how a flake gets
 // "fixed" by a longer timeout.
 //
-// This changes no outcome: the wait still fails exactly as before. It only
-// writes down, at the moment of failure, everything that happened since the
-// navigation started — so the next occurrence explains itself.
+// At the moment of failure it writes down everything that happened since the
+// navigation started, so each occurrence explains itself. It changes one
+// outcome only: the stall those reports pinned down (isBrowserHeldWasm, the
+// browser holding a WebAssembly file it was sent) gets one more reload.
+// Every other failure fails exactly as before.
 
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
 
 const MAX_EVENTS = 400;
+
+/// Whether a stall is the one known browser-side stall, and only that.
+///
+/// 2026-11-17 the report finally caught both ends of it (chain_lifecycle.js,
+/// sign-in ward): the file server received canvaskit.wasm 44 ms after the
+/// reload and sent all of it by 60 ms; the page had run main.dart.js, which
+/// went on to fetch the fonts; the page still answered probes; and its own
+/// fetch of canvaskit.wasm was pending at 120 s, with no resource-timing
+/// entry, so inside the page the response never ended. The browser stopped
+/// reading a file it had been sent. Nothing in the app or the harness's
+/// server does that, and it did not reproduce in 30 local reloads.
+///
+/// So that stall alone earns one more reload. Everything else still fails
+/// at once: a script error, a crash, a page that does not answer, a file the
+/// server never received or never finished sending, or anything pending
+/// that is not WebAssembly.
+function isBrowserHeldWasm({ pending, server, events, dom }) {
+  if (!dom || dom.probeError) return false;
+  if (!pending || pending.length === 0 || !server) return false;
+  if ((events || []).some((e) => /pageerror|crash/.test(e.kind))) return false;
+  return pending.every((p) => {
+    const tail = p.url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
+    if (!tail.endsWith('.wasm')) return false;
+    const seen = server.filter((e) => e.path === tail);
+    return seen.some((e) => e.event === 'sent')
+      && !seen.some((e) => e.event !== 'received' && e.event !== 'sent');
+  });
+}
 
 /// Starts recording what [page] does. Call `mark(label)` just before a
 /// navigation, then `waitForApp(...)` in place of the bare wait.
@@ -167,23 +197,50 @@ function watchPage(page, { serverLog } = {}) {
           : 'never received it'}`);
       }
     }
+    return { browserHeldWasm: isBrowserHeldWasm({ pending: stillPending, server, events, dom }) };
   }
 
-  /// The wait the harness always did, plus a report when it times out. The
-  /// original error is rethrown unchanged.
+  const appUp = (timeoutMs) => page.waitForFunction(
+    () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
+    { timeout: timeoutMs },
+  );
+
+  /// The wait the harness always did, plus a report when it times out.
+  ///
+  /// When the report shows the known browser-side stall (isBrowserHeldWasm),
+  /// the page is reloaded ONCE and waited on again for the same time: the app
+  /// must still start, on its own, from a clean load. A second stall, or any
+  /// other kind of failure, rethrows the original error unchanged. Every
+  /// stall still writes its report and says so in the log.
   async function waitForApp(timeoutMs, outDir) {
     try {
-      await page.waitForFunction(
-        () => !!document.querySelector('flutter-view, flt-glass-pane, canvas'),
-        { timeout: timeoutMs },
-      );
+      await appUp(timeoutMs);
+      return;
     } catch (err) {
+      let diagnosis = null;
       try {
-        await report(outDir, timeoutMs, err);
+        diagnosis = await report(outDir, timeoutMs, err);
       } catch (e) {
         console.log(`      stall report failed: ${e}`);
       }
-      throw err;
+      if (!diagnosis || !diagnosis.browserHeldWasm) throw err;
+
+      const first = label;
+      console.log(`      ${first}: the browser held a WebAssembly file the server had sent`
+        + ' (the known stall) — reloading once');
+      mark(`${first} retry`);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      try {
+        await appUp(timeoutMs);
+      } catch (err2) {
+        try {
+          await report(outDir, timeoutMs, err2);
+        } catch (e) {
+          console.log(`      stall report failed: ${e}`);
+        }
+        throw err;
+      }
+      console.log(`      ${first}: the app started after one reload`);
     }
   }
 
@@ -229,4 +286,4 @@ function loggedStaticServer(webRoot) {
   return { server, serverLog: (since) => served.filter((e) => e.at >= since) };
 }
 
-module.exports = { watchPage, loggedStaticServer };
+module.exports = { watchPage, loggedStaticServer, isBrowserHeldWasm };

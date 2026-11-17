@@ -403,7 +403,8 @@ async function logMark() {
     // category list stopped appearing at all — which looked like nine broken
     // categories and was one dirty starting point.
     // A reload here once never brought the app back (2026-11-14); if it
-    // happens again, stall_report.js writes down why before failing.
+    // happens again, stall_report.js writes down why, and reloads once only
+    // if it is the known browser-side stall (isBrowserHeldWasm).
     watch.mark(`reload ${cat}`);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await watch.waitForApp(60000, OUT);

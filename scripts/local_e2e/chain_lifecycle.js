@@ -262,7 +262,8 @@ const rest = async (q) => (await fetch(`${REST}/${q}`)).json();
     page = await newPage();
     // The reload stall was seen here too (2026-11-16, before the LGA
     // officer's sign-in): the app never appeared after this reload. The wait
-    // below fails exactly as signInMobile's did, but says why first.
+    // below says why; only the known browser-side stall gets one more reload
+    // (see isBrowserHeldWasm in stall_report.js).
     const watch = watchPage(page, { serverLog });
     await page.setGeolocation(HERE);
     await page.goto(origin, { waitUntil: 'domcontentloaded' });

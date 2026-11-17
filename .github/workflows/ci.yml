@@ -1623,6 +1623,12 @@ jobs:
       - run: npm ci
         working-directory: hq-dashboard-next
 
+      # The one stall the harness reloads for, and the failures it must not
+      # (stall_report.js, isBrowserHeldWasm). Seconds, and before the build,
+      # so a retry that has grown too forgiving fails here first.
+      - name: Which stalls earn a second reload
+        run: node --test scripts/local_e2e/stall_report.test.js
+
       # No screen of the mobile app had ever been rendered before this job
       # existed: there is no emulator here, so "it builds and its tests pass"
       # was the whole of the evidence. Flutter's web target builds the same
