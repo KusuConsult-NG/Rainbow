@@ -11977,3 +11977,116 @@ Six mutations caught: the fetch losing its bound, the watchdog armed only in
 the constructor, the failure path no longer consulting the record, either
 sign-out path forgetting to forget, the record no longer scoped to an account,
 and the router no longer holding on `isLoading`.
+
+---
+
+### T-101. T-94 reached the right verdict with a rule that rejects most of Plateau
+
+T-94 deactivated three seeded shelters for sitting outside the LGA their own row
+claims. That verdict is correct — confirmed below against an independent
+dataset. The rule it was reached with is not, and the number it was reported
+with was the wrong measurement.
+
+#### The rule covered 42% of the state
+
+`check_a_shelter_is_where_it_says.py` asked whether a position fell within the
+radius of the nearest ward centroid of the LGA it claimed. Those radii are half
+the distance to the nearest neighbouring centroid, median 3.5km, clamped to
+[800m, 25km] — and discs do not tile a plane.
+
+Sampling 400 points inside each of the 17 ADM2 polygons — real territory, every
+point correctly placed by the app's own rule — the centroid rule rejects
+**57.7% of them**: 78% of Jos North, 70% of Barkin Ladi, 66% of Jos South. A
+correctly sited shelter added to the seed would have failed CI more often than
+it passed. One sampled point 2.21km from `ALI KAZAURE` (r=800m), in the middle
+of Jos, is rejected by it.
+
+So the three it caught were caught by a check that also rejects most of the
+places a real shelter would be. It was right about them the way a stopped clock
+is right: the positions were bad, and the rule could not have told the
+difference.
+
+#### "11km" measured the wrong thing
+
+T-94's heading says the shelter is *11km away, in another LGA*, from
+`11.24 km from the nearest JOS SOUTH ward centroid`. That is a distance to the
+**middle of a ward**, and the median gap between neighbouring centroids
+statewide is 6.84km with the 90th percentile at 11.55km — so 11km is ordinary
+centroid spacing, not displacement.
+
+By boundary, `JOS SOUTH COMMAND HQ` is **under 900m outside Jos South**. It is
+in the wrong LGA, which is the finding, and it is not eleven kilometres adrift,
+which is what the wording implied. `MANGU COMMAND POST` is ~5km outside Mangu;
+`JOS EAST TACTICAL OUTPOST`, which T-94 called "marginal, 635m outside", is in
+Jos North outright — the boundary is harsher on that one than the centroids
+were.
+
+#### Two rules for one question
+
+`lib/core/geo/jurisdiction_resolver.dart` already decides an incident's LGA by
+point-in-polygon against `assets/geo/plateau_boundaries.json`, and resolves the
+*ward* by nearest centroid — the approximation is confined to the question the
+data can answer. The gate used centroids for **both**. So an incident and a
+shelter at the same coordinates were judged by different rules that disagree
+across most of the state.
+
+That is T-90's role spelling, T-95's ward suffix and T-97's four role arrays
+again: one rule written twice, in two places, drifting apart. The ward centroids
+were never the authority on LGA membership — `plateau_wards.json` says so in its
+own `note` field, "a point resolves to the NEAREST ward centroid within its LGA
+polygon, which is an approximation, not a boundary test" — and the gate used
+them as one anyway.
+
+#### What changed
+
+The gate now asks the boundary question with the boundary data, the way the app
+does. Ward centroids are still read, but only to **name** the nearest ward in a
+message; they never decide a verdict. The seed and its three deactivations are
+untouched, because the verdict does not change:
+
+    JOS SOUTH COMMAND HQ       claims JOS SOUTH  -> Jos North
+    JOS EAST TACTICAL OUTPOST  claims JOS EAST   -> Jos North
+    MANGU COMMAND POST         claims MANGU      -> Barkin Ladi
+
+and the other four pass.
+
+#### The guard that matters
+
+The gate asserts that `jurisdiction_resolver.dart` still reads
+`plateau_boundaries.json`. If the app stops deciding an LGA by the boundary,
+this check is enforcing something the product no longer does, and it fails
+saying so rather than passing quietly — the T-100 lesson, a gate checking its
+own premise.
+
+No property test was added over sampled points: sampling points *inside* a
+polygon and then asking the boundary test about them is true by construction. It
+would have passed on the day it was written and told us nothing, which is the
+defect three earlier gates in this report shipped with.
+
+Six mutations caught: a correctly placed shelter moved into the wrong LGA, a
+wrongly placed one dropped from the deactivation list, a correctly placed one
+added to it, the boundary file's coordinates flipped to [lat,lng], the polygon
+set truncated, and the app's resolver no longer reading the boundary asset.
+
+#### Not fixed here
+
+`wardDisagreement()` in `hq-dashboard-next/src/lib/safe-zones.ts` still
+applies the centroid rule. It is wired into `SafeZonesPanel` twice — a live
+warning as a commander types a position, and a flag against each stored row —
+so it raises a false alarm on most of real Jos North, on the screen built so
+command can correct the three bad shelters. **That is the larger half of this
+defect and it is still open.** It is not fixed here because the console reads
+the polygons by `fetch` at runtime (`LiveMap.tsx`) and `wardDisagreement` is
+synchronous and called during render: giving it the boundary test means either
+bundling the 92KB polygon asset as a generated module, the way
+`sync_ward_centroids.py` generates `ward_centroids.ts`, or making the check
+async and restructuring its callers. That is a design decision, and this entry
+would be dishonest if it claimed the rule now exists in one place. It exists in
+two, and the second one is the one a person sees.
+
+13 of the 207 ward centroids are themselves misplaced — 11 inside a different
+LGA's polygon, 2 inside none — because the ward list and the boundary map come
+from different datasets. None of them is one the shelter verdicts rest on
+(`GIRING`, `KADUNU` and `SHERE WEST` all sit inside their own LGA), and the new
+rule does not consult centroids for LGA membership at all, so this check is no
+longer exposed to it. Reconciling the two datasets is a separate job.
