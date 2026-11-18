@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import type { Alert } from './types';
 import { clusterAlerts, filterAlerts, isGuardianAlert, isLiveIncident } from '@/lib/alert-display';
+import { corroborationLine, withCorroboration } from '@/lib/corroboration';
 import { emptyBoardMeaning, emptyBoardWording } from '@/lib/empty-board';
 import { geoKey, geoMatchesKeyed } from '@/lib/geo-key';
 import UssdProvenancePanel from '@/components/UssdProvenancePanel';
@@ -500,6 +501,12 @@ export default function DashboardPage() {
   // it stayed green with the feed refused and the channel down, which on a
   // board whose emptiness reads as "all clear" is the one thing it must not do.
   const [uplink, setUplink] = useState<'CONNECTING' | 'LIVE' | 'DOWN'>('CONNECTING');
+  // How current each live map layer is (lib/layer-freshness.ts): when the last
+  // read succeeded, and the field-unit channel's own state.
+  const [alertsSyncedAt, setAlertsSyncedAt] = useState<number | null>(null);
+  const [telemetryUplink, setTelemetryUplink] = useState<'CONNECTING' | 'LIVE' | 'DOWN'>('CONNECTING');
+  const [telemetrySyncedAt, setTelemetrySyncedAt] = useState<number | null>(null);
+  const [telemetryError, setTelemetryError] = useState<string | null>(null);
   /**
    * Whether the database confirmed it knows who is asking, checked only when
    * the board came back empty. false means an empty board proves nothing.
@@ -812,6 +819,7 @@ export default function DashboardPage() {
         return;
       }
       setFeedError(null);
+      setAlertsSyncedAt(Date.now());
 
       setAlertsTotal(count ?? null);
 
@@ -918,9 +926,17 @@ export default function DashboardPage() {
 
     const fetchTelemetryData = async () => {
       const mine = ++latestTelemetryRequest;
-      const { data: telemetryData } = await supabase
+      const { data: telemetryData, error: telemetryReadError } = await supabase
         .from('telemetry').select('*').limit(ALERT_WINDOW);
       if (mine !== latestTelemetryRequest) return;
+      // Said on the map's layer panel: a failed read must not leave the last
+      // positions looking current.
+      if (telemetryReadError) {
+        setTelemetryError(telemetryReadError.message || 'Field unit positions could not be read.');
+        return;
+      }
+      setTelemetryError(null);
+      setTelemetrySyncedAt(Date.now());
       if (!telemetryData || telemetryData.length === 0) return;
 
       // Enrich with profile names in one batch query
@@ -1013,7 +1029,14 @@ export default function DashboardPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'telemetry' }, () => {
         debouncedFetchTelemetry();
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setTelemetryUplink('LIVE');
+          debouncedFetchTelemetry();
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          setTelemetryUplink('DOWN');
+        }
+      });
 
     return () => {
       if (alertDebounceTimer) clearTimeout(alertDebounceTimer);
@@ -1166,7 +1189,9 @@ export default function DashboardPage() {
   // Clustering and filtering moved to src/lib/alert-display.ts so they can be
   // tested: they decide what reaches an operator's screen, and were previously
   // buried in this component with no coverage at all.
-  const displayAlerts = clusterAlerts(alerts, enableClustering);
+  // Every card then carries its corroboration: how many INDEPENDENT sources
+  // stand behind it (lib/corroboration.ts), scored from the raw reports.
+  const displayAlerts = withCorroboration(clusterAlerts(alerts, enableClustering), alerts);
 
   // Derived during render rather than held in state: these are a pure function
   // of the alerts already loaded, and a second copy in state would be one more
@@ -1864,6 +1889,10 @@ export default function DashboardPage() {
                     : undefined
                 }
                 theme={theme}
+                feeds={{
+                  incidents: { kind: 'live', name: 'Incidents', connection: uplink, syncedAt: alertsSyncedAt, error: feedError },
+                  units: { kind: 'live', name: 'Field units', connection: telemetryUplink, syncedAt: telemetrySyncedAt, error: telemetryError },
+                }}
               />
               {/*
                 zIndex, or Leaflet paints over this.
@@ -2787,6 +2816,13 @@ function MetricCard({ label, value, color }: { label: string, value: string | nu
 }
 
 
+/** How each corroboration level reads on a card: quiet, amber, green. */
+const CORROBORATION_COLOUR: Record<'UNCONFIRMED' | 'CORROBORATED' | 'STRONG', string> = {
+  UNCONFIRMED: '#757575',
+  CORROBORATED: '#7E6112',
+  STRONG: '#0F6C32',
+};
+
 function AlertCard({ alert, agents, usersMap, dispatcher, onViewDossier, onDispatch, onEscalate, onResolve, onHqOverride, openDispatch, onDispatchOpened }: { 
   alert: Alert; 
   agents: any[];
@@ -3085,6 +3121,31 @@ Respond ONLY with a JSON object with this exact shape:
           </span>
           <span style={{ fontSize: 9, fontWeight: 700, color: '#F6ECD2', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4 }}>
             TERMII CPaaS SMS GATEWAY
+          </span>
+        </div>
+      )}
+
+      {alert.corroboration && (
+        <div
+          data-testid="corroboration"
+          data-level={alert.corroboration.level}
+          title="Independent sources: one person counts once however many times they report. Keypad reports nobody has confirmed are shown but not counted."
+          style={{
+            border: `1px solid ${CORROBORATION_COLOUR[alert.corroboration.level]}`,
+            padding: '6px 12px',
+            borderRadius: 10,
+            marginBottom: 14,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            flexWrap: 'wrap',
+          }}
+        >
+          <span style={{ fontSize: 9, fontWeight: 900, letterSpacing: 1, color: '#fff', background: CORROBORATION_COLOUR[alert.corroboration.level], padding: '2px 8px', borderRadius: 4 }}>
+            {alert.corroboration.level}
+          </span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)' }}>
+            {corroborationLine(alert.corroboration)}
           </span>
         </div>
       )}

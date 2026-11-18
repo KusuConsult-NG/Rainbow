@@ -44,6 +44,7 @@
 
 import type { Alert } from '@/app/dashboard/types';
 import { BRAND } from './brand';
+import { corroborationLine } from './corroboration';
 
 // ── Escaping ────────────────────────────────────────────────────────────────
 
@@ -478,6 +479,16 @@ export function incidentDetailRows(
       value: `${formatStamp(alert.acknowledged_at)} by ${
         alert.acknowledged_by ? resolveAssignee({ ...alert, assigned_to: alert.acknowledged_by }, usersMap) : 'unrecorded'
       }`,
+    });
+  }
+
+  // How many INDEPENDENT sources stand behind it (lib/corroboration.ts). Set
+  // on every card the console draws; absent only for a row nobody scored.
+  if (alert.corroboration) {
+    rows.push({
+      label: 'SOURCES',
+      value: `${alert.corroboration.level} · ${corroborationLine(alert.corroboration)}`,
+      tone: alert.corroboration.level === 'UNCONFIRMED' ? 'muted' : 'normal',
     });
   }
 

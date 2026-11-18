@@ -1,3 +1,5 @@
+import type { Corroboration } from '@/lib/corroboration';
+
 /**
  * The alert shape the console works with.
  *
@@ -24,6 +26,11 @@ export interface Alert {
   member_ids?: string[];
   /** Set by clusterAlerts: how many reports this card stands for. */
   witness_count?: number;
+  /** Set by withCorroboration (lib/corroboration.ts): independent sources behind this card. */
+  corroboration?: Corroboration;
+  /** USSD provenance (migration 20261011000000); see lib/ussd-provenance.ts. */
+  reporter_msisdn?: string | null;
+  ussd_confirmed_at?: string | null;
   local_id?: string;
   type?: string;
   sub_type?: string;
