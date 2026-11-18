@@ -235,7 +235,7 @@ const DRAWER = [
       description: 'Tier control sweep subject.',
       severity: 'CRITICAL',
       geo_lga: 'JOS NORTH',
-      geo_ward: 'NARAGUTA',
+      geo_ward: "NARAGUTA 'A'",
       latitude: HERE.latitude,
       longitude: HERE.longitude,
     }),
