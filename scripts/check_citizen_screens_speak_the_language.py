@@ -97,6 +97,7 @@ CITIZEN = [
     'lib/features/citizen/safe_zone_screen.dart',
     'lib/features/citizen/dispatcher_chat_screen.dart',
     'lib/features/settings/settings_screen.dart',
+    'lib/features/settings/volume_sos_lock_screen_tile.dart',
     'lib/features/settings/uninstall_request_screen.dart',
     'lib/shared/widgets/voice_note_player.dart',
 ]

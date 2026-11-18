@@ -1,9 +1,11 @@
 package com.RainbowEwer.RainbowEwer
 
+import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PictureInPictureParams
 import android.content.Context
+import android.content.Intent
 import android.media.AudioManager
 import android.telephony.SmsManager
 import android.telephony.TelephonyManager
@@ -31,6 +33,34 @@ class MainActivity : FlutterFragmentActivity() {
         // Enforce modern non-deprecated Edge-to-Edge window inset handling for Android 15+
         WindowCompat.setDecorFitsSystemWindows(window, false)
         createNotificationChannel()
+        stayHiddenForVolumeSos(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        stayHiddenForVolumeSos(intent)
+    }
+
+    // Started by VolumeSosBridge only to carry a Volume Down x3 SOS. Locked,
+    // the activity is already behind the lock screen. Unlocked, it would come
+    // to the front over whatever the person was doing, in view of whoever is
+    // watching, so it goes straight back. The engine keeps running and Dart
+    // sends the SOS (takePending).
+    private fun stayHiddenForVolumeSos(intent: Intent?) {
+        if (intent?.getBooleanExtra(VolumeSosBridge.EXTRA_VOLUME_SOS, false) != true) return
+        intent.removeExtra(VolumeSosBridge.EXTRA_VOLUME_SOS)
+        val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        if (!keyguard.isKeyguardLocked) moveTaskToBack(true)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        VolumeSosBridge.appInForeground = true
+    }
+
+    override fun onPause() {
+        VolumeSosBridge.appInForeground = false
+        super.onPause()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -38,6 +68,25 @@ class MainActivity : FlutterFragmentActivity() {
 
         meshRadio?.dispose()
         meshRadio = MeshBleRadio(this, flutterEngine.dartExecutor.binaryMessenger)
+
+        // VOLUME DOWN x3 WITH THE PHONE LOCKED. See VolumeSosBridge.kt.
+        val volumeSos = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VolumeSosBridge.CHANNEL)
+        volumeSos.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "takePending" -> result.success(VolumeSosBridge.takePending())
+                "isServiceEnabled" -> result.success(VolumeSosBridge.serviceEnabled(this))
+                "openAccessibilitySettings" -> {
+                    try {
+                        VolumeSosBridge.openSettings(this)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("SETTINGS_UNAVAILABLE", e.message, null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+        VolumeSosBridge.channel = volumeSos
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_CHANNEL).setMethodCallHandler { call, result ->
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -213,6 +262,7 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        VolumeSosBridge.channel = null
         meshRadio?.dispose()
         meshRadio = null
         super.cleanUpFlutterEngine(flutterEngine)

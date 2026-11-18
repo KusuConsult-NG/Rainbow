@@ -135,26 +135,6 @@ class Translations {
       AppLanguage.hausa: 'Danna rage sauti sau 3 don SOS a boye',
       AppLanguage.pidgin: 'Press volume down 3 times to send silent SOS',
     },
-    'volume_sos_desc': {
-      AppLanguage.english:
-          'Press Volume Down three times within 3 seconds to send a silent SOS '
-          'without touching the screen. Works only while Plateau Eye is open on '
-          'screen, not when the phone is locked or the app is in the background. '
-          'Off by default, because turning the volume down quickly can send one '
-          'by accident.',
-      AppLanguage.hausa:
-          'Danna maballin rage sauti sau uku cikin dakika 3 don tura SOS a boye '
-          'ba tare da taba allo ba. Yana aiki ne kawai idan Plateau Eye na bude '
-          'a kan allo, ba idan wayar a kulle take ba ko manhajar na baya. A '
-          'kashe yake da farko, domin rage sauti da sauri na iya tura shi bisa '
-          'kuskure.',
-      AppLanguage.pidgin:
-          'Press volume down three times inside 3 seconds to send silent SOS '
-          'without touching the screen. E dey work only when Plateau Eye dey '
-          'open for screen, no be when phone lock or the app dey background. '
-          'E dey off first, because if you press volume down quick-quick e fit '
-          'send one by mistake.',
-    },
     'sos_tap_three': {
       AppLanguage.english: 'TAP 3 TIMES',
       AppLanguage.hausa: 'DANNA SAU 3',
@@ -2462,6 +2442,67 @@ class Translations {
       AppLanguage.english: 'SUBMIT UNINSTALL REQUEST',
       AppLanguage.hausa: 'AIKA BUƘATAR CIREWA',
       AppLanguage.pidgin: 'SEND REQUEST TO REMOVE',
+    },
+    // settings: volume SOS with the phone locked (2026-11-18)
+    'volume_sos_desc': {
+      AppLanguage.english:
+          'Press Volume Down three times within 3 seconds to send a silent SOS '
+          'without touching the screen. Works while Plateau Eye is open on '
+          'screen. On Android it can also work with the phone locked: set that '
+          'up below. Off by default, because turning the volume down quickly '
+          'can send one by accident.',
+      AppLanguage.hausa:
+          'Danna maballin rage sauti sau uku cikin dakika 3 don tura SOS a boye '
+          'ba tare da taba allo ba. Yana aiki idan Plateau Eye na bude a kan '
+          'allo. A wayar Android zai iya aiki ko da wayar a kulle take: saita '
+          'hakan a kasa. A kashe yake da farko, domin rage sauti da sauri na '
+          'iya tura shi bisa kuskure.',
+      AppLanguage.pidgin:
+          'Press volume down three times inside 3 seconds to send silent SOS '
+          'without touching the screen. E dey work when Plateau Eye dey open '
+          'for screen. For Android phone e fit work even when phone lock: set '
+          'am up below. E dey off first, because if you press volume down '
+          'quick-quick e fit send one by mistake.',
+    },
+    'vsos_lock_on': {
+      AppLanguage.english: 'Works with the phone locked too.',
+      AppLanguage.hausa: 'Yana aiki ko da wayar a kulle take.',
+      AppLanguage.pidgin: 'E dey work even when phone lock.',
+    },
+    'vsos_lock_off': {
+      AppLanguage.english: 'Only works while the app is open. To use it with the phone locked, turn on Plateau Eye in Android’s Accessibility settings.',
+      AppLanguage.hausa: 'Yana aiki ne kawai idan manhajar a bude take. Don amfani da shi idan wayar a kulle take, kunna Plateau Eye a saitunan Accessibility na Android.',
+      AppLanguage.pidgin: 'E dey work only when the app dey open. To use am when phone lock, on Plateau Eye for Android Accessibility settings.',
+    },
+    'vsos_lock_setup': {
+      AppLanguage.english: 'SET UP FOR A LOCKED PHONE',
+      AppLanguage.hausa: 'SAITA DOMIN WAYA A KULLE',
+      AppLanguage.pidgin: 'SET AM FOR LOCKED PHONE',
+    },
+    'vsos_lock_check_again': {
+      AppLanguage.english: 'CHECK AGAIN',
+      AppLanguage.hausa: 'SAKE DUBAWA',
+      AppLanguage.pidgin: 'CHECK AGAIN',
+    },
+    'vsos_disclosure_title': {
+      AppLanguage.english: 'Volume Down SOS with the phone locked',
+      AppLanguage.hausa: 'SOS ta rage sauti idan waya a kulle take',
+      AppLanguage.pidgin: 'Volume down SOS when phone lock',
+    },
+    'vsos_disclosure_body': {
+      AppLanguage.english: 'To hear Volume Down while the phone is locked or the app is closed, Plateau Eye uses an Android accessibility service.\n\nIt only notices the Volume Down button. It does not read your screen, what you type, or anything in other apps, and it sends nothing anywhere except the SOS itself. The volume still changes as normal, so nobody watching can tell.\n\nOn the next screen, choose "Plateau Eye: Volume Down SOS" and switch it on. If Android says the setting is restricted, open Plateau Eye in App info, tap the ⋮ menu, choose "Allow restricted settings", and try again.',
+      AppLanguage.hausa: 'Domin jin maballin rage sauti idan wayar a kulle take ko manhajar a rufe, Plateau Eye na amfani da sabis na Accessibility na Android.\n\nMaballin rage sauti kawai yake lura da shi. Ba ya karanta allonka, abin da kake rubutawa, ko komai a wasu manhajoji, kuma ba ya aika komai sai SOS kanta. Sauti zai ci gaba da raguwa kamar yadda aka saba, don haka mai kallo ba zai gane ba.\n\nA shafi na gaba, zaɓi "Plateau Eye: Volume Down SOS" ka kunna shi. Idan Android ta ce an taƙaita saitin, buɗe Plateau Eye a App info, danna menu ⋮, zaɓi "Allow restricted settings", sannan ka sake gwadawa.',
+      AppLanguage.pidgin: 'To hear volume down when phone lock or the app close, Plateau Eye dey use Android accessibility service.\n\nE only dey notice the volume down button. E no dey read your screen, wetin you type, or anything for other apps, and e no dey send anything except the SOS itself. The volume still go reduce normal, so person wey dey look no go know.\n\nFor the next screen, choose "Plateau Eye: Volume Down SOS" and on am. If Android talk say the setting dey restricted, open Plateau Eye for App info, press the ⋮ menu, choose "Allow restricted settings", then try again.',
+    },
+    'vsos_disclosure_open': {
+      AppLanguage.english: 'OPEN SETTINGS',
+      AppLanguage.hausa: 'BUƊE SAITUNA',
+      AppLanguage.pidgin: 'OPEN SETTINGS',
+    },
+    'vsos_disclosure_cancel': {
+      AppLanguage.english: 'NOT NOW',
+      AppLanguage.hausa: 'BA YANZU BA',
+      AppLanguage.pidgin: 'NO BE NOW',
     },
     // ---- END OF DRAFT TRANSLATIONS AWAITING A NATIVE SPEAKER ----
   };
