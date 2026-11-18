@@ -46,7 +46,48 @@ export interface StaticLayer {
   failed?: boolean;
 }
 
-export type Layer = LiveLayer | DerivedLayer | StaticLayer;
+/**
+ * A layer fetched on a schedule from outside (NASA FIRMS), from the runs the
+ * fetcher records in `intel_ingest_runs`.
+ */
+export interface PolledLayer {
+  kind: 'polled';
+  name: string;
+  /** The newest run, good or bad, or null if none was ever recorded. */
+  lastRunAt: number | null;
+  /** The newest SUCCESSFUL run. */
+  lastOkAt: number | null;
+  /** Why the newest run failed, if it did. */
+  lastError?: string | null;
+  /** How often the fetch is scheduled to run. */
+  everyMs: number;
+  /** A note on how far behind the source itself runs, e.g. FIRMS' ~3 h. */
+  lag?: string;
+  /** Our own read of the table failed. */
+  readError?: string | null;
+}
+
+export type Layer = LiveLayer | DerivedLayer | StaticLayer | PolledLayer;
+
+/** A polled layer with no good run for this many schedules reads as DOWN. */
+export const POLLED_MISSED_RUNS = 3;
+
+function polled(l: PolledLayer, now: number): Freshness {
+  const lag = l.lag ? ` · ${l.lag}` : '';
+  if (l.readError) return { state: 'DOWN', text: 'could not be read' };
+  if (l.lastRunAt === null) return { state: 'DOWN', text: 'no fetch recorded: is the scheduler set up?' };
+  const good = l.lastOkAt === null ? null : ago(now - l.lastOkAt);
+  if (l.lastError) {
+    return {
+      state: 'DOWN',
+      text: `last fetch failed (${l.lastError.slice(0, 60)})${good ? ` · last good ${good}` : ''}`,
+    };
+  }
+  if (l.lastOkAt === null || now - l.lastOkAt > POLLED_MISSED_RUNS * l.everyMs) {
+    return { state: 'DOWN', text: good ? `no good fetch since ${good}` : 'no good fetch yet' };
+  }
+  return { state: 'LIVE', text: `fetched ${good}${lag}` };
+}
 
 export interface Freshness {
   state: FreshnessState;
@@ -91,6 +132,8 @@ export function freshness(layer: Layer, now: number): Freshness {
       const f = live(layer.from, now);
       return { state: f.state, text: `from ${layer.from.name.toLowerCase()} · ${f.text}` };
     }
+    case 'polled':
+      return polled(layer, now);
     case 'static':
       return layer.failed
         ? { state: 'DOWN', text: `did not load · ${layer.source}` }

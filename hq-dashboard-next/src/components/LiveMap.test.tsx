@@ -847,4 +847,62 @@ describe('LiveMap', () => {
       });
     });
   });
+
+  describe('fires from space', () => {
+    const fire = (id: string, daynight: 'D' | 'N') => ({
+      id,
+      latitude: 9.62,
+      longitude: 10.47,
+      observed_at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+      confidence: 'nominal' as const,
+      daynight,
+      frp_mw: 18,
+      satellite: 'N20',
+      geo_lga: 'WASE',
+      geo_ward: 'BASHAR',
+    });
+
+    it('draws each detection in its own pane, under the incidents', async () => {
+      const LiveMap = await load();
+      const { container } = render(
+        <LiveMap alerts={[]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" fires={[fire('f1', 'N'), fire('f2', 'D')]} />,
+      );
+      await waitFor(() => expect(container.querySelectorAll('.leaflet-fire-pane path').length).toBe(2));
+      const pane = container.querySelector('.leaflet-fire-pane') as HTMLElement;
+      expect(Number(pane.style.zIndex)).toBeLessThan(400);
+      expect(Number(pane.style.zIndex)).toBeGreaterThan(350); // above the ward grid
+      expect(container.querySelector('[data-testid="fire-count"]')?.textContent).toContain('2 fires seen from space in 48 h (1 at night)');
+    });
+
+    it('says in the popup that most detections are farm burning', async () => {
+      const LiveMap = await load();
+      const { container } = render(
+        <LiveMap alerts={[]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" fires={[fire('f1', 'N')]} />,
+      );
+      const dot = await waitFor(() => {
+        const p = container.querySelector('.leaflet-fire-pane path');
+        expect(p).not.toBeNull();
+        return p as Element;
+      });
+      dot.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const popup = await waitFor(() => container.querySelector('.leaflet-popup-content') as HTMLElement);
+      expect(popup.textContent).toContain('FIRE SEEN FROM SPACE · NIGHT');
+      expect(popup.textContent).toContain('BASHAR · WASE');
+      expect(popup.textContent).toContain('Most detections are farm burning');
+    });
+
+    it('reads the fire layer as DOWN when no fetch was ever recorded', async () => {
+      const LiveMap = await load();
+      const { container } = render(
+        <LiveMap alerts={[]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" />,
+      );
+      await waitFor(() => {
+        const row = [...container.querySelectorAll('[data-testid="layer-freshness"] [data-state]')].find((r) =>
+          r.textContent?.startsWith('Fires from space'),
+        );
+        expect(row?.getAttribute('data-state')).toBe('DOWN');
+        expect(row?.textContent).toContain('is the scheduler set up?');
+      });
+    });
+  });
 });

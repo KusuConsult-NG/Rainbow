@@ -1899,6 +1899,114 @@ printf '%s\n' "$OA_OUT" | grep -q "ALL ONE ACCOUNT ASSERTIONS PASSED" || {
   printf '%s\n' "$OA_OUT"
   echo "✗ the one-account probe did not reach its verdict"; exit 1; }
 
+# ── Fires seen from space ───────────────────────────────────────────────────
+#
+# NASA FIRMS detections, written only by the server and read by staff. Applied
+# twice, then exercised: one pixel cannot be recorded twice, a citizen cannot
+# read the layer, and no signed-in account can plant, change or remove a fire.
+echo "▶ Applying 20261119000000_fires_from_space.sql"
+psql_run "-f $PGROOT/20261119000000_fires_from_space.sql" >/dev/null
+psql_run "-f $PGROOT/20261119000000_fires_from_space.sql" >/dev/null
+
+cat > "$PGROOT/zz_fires_probe.sql" <<'PROBE'
+BEGIN;
+SET client_min_messages TO NOTICE;
+DO $probe$
+DECLARE
+  staff UUID := gen_random_uuid();
+  citizen UUID := gen_random_uuid();
+  seen INTEGER;
+  dup_refused BOOLEAN := false;
+  bad_refused BOOLEAN := false;
+  insert_refused BOOLEAN := false;
+  delete_refused BOOLEAN := false;
+  n_deleted INTEGER := 0;
+BEGIN
+  -- The server's write (this session is the superuser, as the service role is).
+  INSERT INTO public.fire_detections
+    (source, satellite, latitude, longitude, observed_at, confidence, frp_mw, daynight, geo_lga, geo_ward)
+  VALUES ('VIIRS_NOAA20_NRT', 'N20', 9.6243, 10.4787, '2026-11-11 00:22+00', 'nominal', 28.3, 'N', 'WASE', 'BASHAR');
+
+  BEGIN
+    INSERT INTO public.fire_detections
+      (source, satellite, latitude, longitude, observed_at, confidence, daynight)
+    VALUES ('VIIRS_NOAA20_NRT', 'N20', 9.6243, 10.4787, '2026-11-11 00:22+00', 'nominal', 'N');
+  EXCEPTION WHEN unique_violation THEN dup_refused := true;
+  END;
+  IF NOT dup_refused THEN
+    RAISE EXCEPTION 'FAIL: the same pixel from the same pass was recorded twice, doubling the evidence';
+  END IF;
+  RAISE NOTICE 'PASS: one satellite, one moment, one pixel is one row';
+
+  BEGIN
+    INSERT INTO public.fire_detections
+      (source, satellite, latitude, longitude, observed_at, confidence, daynight)
+    VALUES ('VIIRS_NOAA20_NRT', 'N20', 9.7, 10.5, now(), 'certain', 'N');
+  EXCEPTION WHEN check_violation THEN bad_refused := true;
+  END;
+  IF NOT bad_refused THEN
+    RAISE EXCEPTION 'FAIL: a confidence FIRMS never issues was accepted';
+  END IF;
+  RAISE NOTICE 'PASS: confidence is one of low, nominal, high';
+
+  INSERT INTO auth.users (id, email) VALUES (staff, 'fires-staff@probe.test'), (citizen, 'fires-citizen@probe.test');
+  UPDATE public.profiles SET role = 'RESPONDER', is_active = true WHERE id = staff;
+  UPDATE public.profiles SET role = 'CITIZEN' WHERE id = citizen;
+
+  -- Staff read it.
+  PERFORM set_config('request.jwt.claim.sub', staff::text, true);
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', staff::text, 'role', 'authenticated')::text, true);
+  SET LOCAL ROLE authenticated;
+  SELECT count(*) INTO seen FROM public.fire_detections;
+  BEGIN
+    INSERT INTO public.fire_detections
+      (source, satellite, latitude, longitude, observed_at, confidence, daynight)
+    VALUES ('VIIRS_NOAA20_NRT', 'N20', 9.8, 9.0, now(), 'high', 'N');
+  EXCEPTION WHEN insufficient_privilege THEN insert_refused := true;
+  END;
+  BEGIN
+    DELETE FROM public.fire_detections;
+    GET DIAGNOSTICS n_deleted = ROW_COUNT;
+  EXCEPTION WHEN insufficient_privilege THEN delete_refused := true;
+  END;
+  RESET ROLE;
+  IF seen <> 1 THEN
+    RAISE EXCEPTION 'FAIL: staff see % fire detections, expected the 1 recorded', seen;
+  END IF;
+  RAISE NOTICE 'PASS: staff read the fire layer';
+  IF NOT insert_refused THEN
+    RAISE EXCEPTION 'FAIL: a signed-in account planted a fire detection';
+  END IF;
+  IF NOT delete_refused OR n_deleted <> 0 THEN
+    RAISE EXCEPTION 'FAIL: a signed-in account could delete from the fire layer (% removed)', n_deleted;
+  END IF;
+  RAISE NOTICE 'PASS: no signed-in account can plant or remove a fire';
+
+  -- A citizen does not.
+  PERFORM set_config('request.jwt.claim.sub', citizen::text, true);
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', citizen::text, 'role', 'authenticated')::text, true);
+  SET LOCAL ROLE authenticated;
+  SELECT count(*) INTO seen FROM public.fire_detections;
+  RESET ROLE;
+  IF seen <> 0 THEN
+    RAISE EXCEPTION 'FAIL: a citizen reads % fire detection(s)', seen;
+  END IF;
+  RAISE NOTICE 'PASS: a citizen does not read the fire layer';
+  RAISE NOTICE 'ALL FIRE ASSERTIONS PASSED';
+END $probe$;
+ROLLBACK;
+PROBE
+chown postgres:postgres "$PGROOT/zz_fires_probe.sql"
+FIRE_OUT=$(psql_run "-f $PGROOT/zz_fires_probe.sql" 2>&1) && FIRE_RC=0 || FIRE_RC=$?
+printf '%s\n' "$FIRE_OUT" | grep -E "PASS:|FAIL:" | sed 's/^.*NOTICE:  /  /' || true
+if [ "$FIRE_RC" -ne 0 ] || printf '%s\n' "$FIRE_OUT" | grep -q "FAIL:"; then
+  printf '%s\n' "$FIRE_OUT"
+  echo "✗ fire layer assertions failed"; exit 1
+fi
+printf '%s\n' "$FIRE_OUT" | grep -q "ALL FIRE ASSERTIONS PASSED" || {
+  printf '%s\n' "$FIRE_OUT"
+  echo "✗ the fire probe did not reach its verdict"; exit 1; }
+
 echo "▶ Asserting no policy in schema public reaches anon or public, by name"
 PR_OUT=$(psql_run "-f $PGROOT/policy_roles_behaviour_test.sql" 2>&1) && PR_RC=0 || PR_RC=$?
 echo "$PR_OUT" | grep -E "PASS|FAIL|ERROR" || true

@@ -509,6 +509,17 @@ const incident_ai_reports = [];
  */
 const ussd_sessions = [];
 
+/**
+ * NASA FIRMS fire detections and the fetcher's run log (intelligence layer,
+ * phase 2), written only by POST /api/intel/fires. Declared and empty: the
+ * console reads the last 48 hours and these fixtures are dated September, so a
+ * seeded detection would be outside the window. Empty also exercises the
+ * honest case: with no run recorded, the LAYERS panel must say the fire layer
+ * is down and ask whether the scheduler is set up.
+ */
+const fire_detections = [];
+const intel_ingest_runs = [];
+
 module.exports = {
   DOMAIN,
   PASSWORD,
@@ -546,5 +557,7 @@ module.exports = {
     sim_channel_events,
     incident_ai_reports,
     ussd_sessions,
+    fire_detections,
+    intel_ingest_runs,
   },
 };
