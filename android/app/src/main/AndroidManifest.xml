@@ -164,6 +164,24 @@
             android:foregroundServiceType="location"
             android:exported="false"
             tools:replace="android:exported" />
+
+        <!-- Volume Down x3 with the phone locked (VolumeSosAccessibilityService.kt).
+             The person switches it on in Android's Accessibility settings after
+             the app explains it. Key events only; it cannot read the screen.
+             Only the system holds BIND_ACCESSIBILITY_SERVICE, so nothing else
+             can bind it. -->
+        <service
+            android:name=".VolumeSosAccessibilityService"
+            android:label="@string/volume_sos_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/volume_sos_accessibility" />
+        </service>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

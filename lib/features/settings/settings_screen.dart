@@ -14,6 +14,7 @@ import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/reentry_lock_provider.dart';
 import 'package:rainbow_app/services/mesh_service.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
+import 'package:rainbow_app/features/settings/volume_sos_lock_screen_tile.dart';
 
 /// One emergency contact as text.
 ///
@@ -281,6 +282,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             onChanged: (v) => ref.read(volumeSosEnabledProvider.notifier).set(v),
           ),
+          // With the phone locked (Android): the accessibility service.
+          const VolumeSosLockScreenTile(),
           const SizedBox(height: 16),
 
           // 3. Emergency Contacts

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shown by Android in Settings > Accessibility for the Volume Down x3 service. -->
+<resources>
+    <string name="volume_sos_service_label">Plateau Eye: Volume Down SOS</string>
+    <string name="volume_sos_service_summary">Press Volume Down 3 times to send a silent SOS, even with the phone locked.</string>
+    <string name="volume_sos_service_description">Lets Plateau Eye send a silent SOS when you press Volume Down three times quickly, even when the phone is locked or the app is closed. It only notices the Volume Down button. It does not read your screen, what you type, or anything in other apps. The volume still changes as normal. Switch Volume Down x3 on in the app\'s Settings too.</string>
+</resources>

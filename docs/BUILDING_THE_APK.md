@@ -123,6 +123,36 @@ startup error screen behaves differently — a release build strips `assert`,
 which is why a crash at launch paints a blank grey rectangle there and a
 readable message in debug. Reproduce handset problems in **release**.
 
+## Volume Down ×3 with the phone locked: an accessibility service
+
+The app declares `VolumeSosAccessibilityService`, which lets Volume Down ×3
+send a silent SOS while the phone is locked or the app is closed. It does
+nothing until the person switches it on in Android's Accessibility settings,
+which the app's Settings screen walks them through after explaining it.
+
+**Before publishing on Google Play.** Play restricts the Accessibility API for
+apps that are not disability tools. In Play Console, *App content → Accessibility
+API*, declare the use: "Detects three presses of Volume Down so a person in
+danger can send a silent SOS without unlocking the phone. Reads key events
+only; does not read screen content." The in-app explanation (the dialog
+before *OPEN SETTINGS*) is the prominent disclosure Play asks for. Google may
+still refuse it. If it does, the rest of the app is unaffected, and Volume
+Down ×3 still works with the app open.
+
+**Installed outside Play (an APK, or a device manager).** On Android 13 and
+later, Android blocks switching on an accessibility service from an app it did
+not install from a store, until the person allows it: *App info → ⋮ → Allow
+restricted settings*. The in-app explanation says so.
+
+**What to check on a phone** (the code was built here, not run on a device):
+- Locked, screen on: three presses send one silent SOS; the screen stays locked.
+- Locked, screen off: the same. Whether presses reach the service with the
+  screen fully off depends on the phone; record what each test phone does.
+- App swiped away, phone unlocked in another app: one SOS, and Plateau Eye
+  does not come to the front.
+- App open on screen: one SOS, not two (the app counts these itself).
+- Switch Volume Down ×3 off in the app: three presses send nothing.
+
 ## What this document is not
 
 Nobody has run these commands end to end in CI. There is no Android SDK on
