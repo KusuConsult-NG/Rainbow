@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/navigation_provider.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 import 'package:rainbow_app/shared/widgets/build_stamp.dart';
 
 /// Documentation for this public member.
@@ -25,11 +26,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   late Animation<double> _fadeIn;
 
   int _statusIndex = 0;
-  final List<String> _statusMessages = [
-    'INITIALIZING ENCRYPTED PROTOCOL',
-    'ESTABLISHING SECURE CHANNEL...',
-    'VERIFYING SENTINEL GUARD v4.2...',
-    'ALL SYSTEMS OPERATIONAL',
+  // Translation keys, read in the chosen language at build time.
+  final List<String> _statusMessages = const [
+    'splash_status_init',
+    'splash_status_channel',
+    'splash_status_guard',
+    'splash_status_ready',
   ];
 
   @override
@@ -81,6 +83,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
+    final lang = ref.watch(languageProvider);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: FadeTransition(
@@ -172,7 +175,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                             AnimatedSwitcher(
                               duration: const Duration(milliseconds: 300),
                               child: Text(
-                                _statusMessages[_statusIndex],
+                                Translations.get(_statusMessages[_statusIndex], lang),
                                 key: ValueKey(_statusIndex),
                                 style: GoogleFonts.inter(
                                   color:
@@ -222,7 +225,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                             ),
                             const SizedBox(width: 10),
                             Text(
-                              'ENCRYPTION: AES-256',
+                              Translations.get('splash_encryption', lang),
                               style: GoogleFonts.inter(
                                 color: AppColors.primary.withValues(alpha: 0.8),
                                 fontWeight: FontWeight.w800,

@@ -8,6 +8,7 @@ import 'package:rainbow_app/core/auth/phone_number.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/services/auth_service.dart';
 import 'package:rainbow_app/shared/widgets/build_stamp.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 
 /// Documentation for this public member.
 
@@ -21,6 +22,9 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen>
     with SingleTickerProviderStateMixin {
+  /// This screen's text in the chosen language.
+  String _t(String key) => Translations.get(key, ref.read(languageProvider));
+
   final _inputController = TextEditingController();
   final _otpController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -136,7 +140,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         _sentTo = auth.pendingPhoneForDisplay;
       });
     } else {
-      _showTacticalError(auth.lastAuthError ?? 'THE CODE COULD NOT BE SENT.');
+      _showTacticalError(auth.lastAuthError ?? _t('login_code_not_sent'));
     }
   }
 
@@ -149,7 +153,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (mounted && !success) {
       // Deliberately does not say which of the two was wrong. Saying "no such
       // badge" would turn this screen into a roster of who works here.
-      _showTacticalError(error ?? 'BADGE OR PASSWORD NOT RECOGNISED');
+      _showTacticalError(error ?? _t('login_badge_not_recognised'));
     }
   }
 
@@ -164,7 +168,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (mounted) {
       setState(() => _loading = false);
       if (!success) {
-        _showTacticalError(error ?? 'VERIFICATION FAILED');
+        _showTacticalError(error ?? _t('login_verification_failed'));
       }
     }
   }
@@ -184,6 +188,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
   @override
   Widget build(BuildContext context) {
+    // Redraw when the language changes; _t reads it.
+    ref.watch(languageProvider);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -200,10 +206,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                 // ── Unified Input Section ────────────────────────
                 Text(
                   _otpSent
-                      ? 'IDENTITY VERIFICATION'
+                      ? _t('login_identity_verification')
                       : _needPassword
-                          ? 'STAFF PASSWORD'
-                          : 'SECURE IDENTIFIER',
+                          ? _t('login_staff_password')
+                          : _t('login_secure_identifier'),
                   style: GoogleFonts.outfit(
                     color: AppColors.textDim,
                     fontWeight: FontWeight.w800,
@@ -217,7 +223,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                 if (_otpSent && _sentTo != null) ...[
                   const SizedBox(height: 6),
                   Text(
-                    'CODE SENT TO $_sentTo',
+                    '${_t('login_code_sent_to')} $_sentTo',
                     key: const ValueKey('otp_sent_to'),
                     style: GoogleFonts.outfit(
                       color: AppColors.textSecondary,
@@ -254,7 +260,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                       _passwordController.clear();
                     }),
                     child: Text(
-                      'BACK TO IDENTIFIER',
+                      _t('login_back_to_identifier'),
                       style: GoogleFonts.outfit(
                         color: AppColors.textSecondary,
                         fontWeight: FontWeight.w700,
@@ -322,7 +328,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       ),
       cursorColor: AppColors.primary,
       decoration: InputDecoration(
-        hintText: 'PHONE OR ACCESS CODE',
+        hintText: _t('login_phone_or_code'),
         hintStyle:
             GoogleFonts.outfit(color: AppColors.textDim, letterSpacing: 1),
         prefixIcon: const Icon(Icons.vpn_key_rounded, color: AppColors.primary),
@@ -362,7 +368,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       ),
       cursorColor: AppColors.primary,
       decoration: InputDecoration(
-        hintText: 'PASSWORD FOR ${_staffIdentifier?.toUpperCase() ?? 'BADGE'}',
+        hintText: '${_t('login_password_for')} ${_staffIdentifier?.toUpperCase() ?? _t('login_badge')}',
         hintStyle: GoogleFonts.outfit(color: AppColors.textDim, fontSize: 12),
         filled: true,
         fillColor: AppColors.surfaceContainer,
@@ -436,10 +442,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
               )
             : Text(
                 _otpSent
-                    ? 'VERIFY OTP'
+                    ? _t('login_verify_otp')
                     : _needPassword
-                        ? 'SIGN IN'
-                        : 'AUTHORIZE ACCESS',
+                        ? _t('login_sign_in')
+                        : _t('login_authorize'),
                 style: GoogleFonts.outfit(
                   fontWeight: FontWeight.w900,
                   fontSize: 16,

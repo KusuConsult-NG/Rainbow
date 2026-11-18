@@ -116,20 +116,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final hasPermission = await LocationService().requestPermission(force: true);
     if (!hasPermission) {
       if (mounted) {
+        final lang = ref.read(languageProvider);
         unawaited(showDialog<void>(
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
             backgroundColor: AppColors.background,
             title: Text(
-              'LOCATION REQUIRED',
+              Translations.get('home_location_required', lang),
               style: GoogleFonts.outfit(
                 color: AppColors.emergency,
                 fontWeight: FontWeight.w900,
               ),
             ),
             content: Text(
-              'Plateau Eye requires active location permissions to route emergency responders to your position. Please enable location in device settings.',
+              Translations.get('home_location_required_body', lang),
               style: GoogleFonts.outfit(
                 color: AppColors.textSecondary,
               ),
@@ -138,7 +139,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
                 child: Text(
-                  'OK',
+                  Translations.get('common_ok', lang),
                   style: GoogleFonts.outfit(
                     color: AppColors.primary,
                     fontWeight: FontWeight.bold,
@@ -151,7 +152,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   await openAppSettings();
                 },
                 child: Text(
-                  'SETTINGS',
+                  Translations.get('home_open_settings', lang),
                   style: GoogleFonts.outfit(
                     color: AppColors.textSecondary,
                   ),
@@ -196,7 +197,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         appBar: AppBar(
           leading: Builder(
             builder: (context) => IconButton(
-                                    tooltip: 'Open the menu',
+                                    tooltip: Translations.get('home_open_menu', lang),
               icon:
                   const Icon(Icons.menu_rounded, color: AppColors.onPrimary),
               onPressed: () {
@@ -296,7 +297,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
             IconButton(
-              tooltip: 'Notifications',
+              tooltip: Translations.get('home_notifications', lang),
               icon: const Icon(
                 Icons.notifications_none_rounded,
                 color: AppColors.onPrimary,

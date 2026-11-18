@@ -1715,6 +1715,755 @@ class Translations {
       AppLanguage.hausa: 'Ba a nada komai ba tukuna.',
       AppLanguage.pidgin: 'Nothing don record yet.',
     },
+
+    // ---- DRAFT TRANSLATIONS, AWAITING A NATIVE SPEAKER (2026-11-17) ----
+    //
+    // The citizen screens that still spoke English whatever language was
+    // chosen (scripts/check_citizen_screens_speak_the_language.py). The
+    // English is unchanged. The Hausa and Pidgin are drafts that have NOT yet
+    // been checked by a speaker; the emergency PIN keys (pin_*) matter most,
+    // because a misread word there can make someone use the wrong PIN under
+    // threat. Everything between these two markers is what the review covers:
+    // python3 scripts/export_translation_review.py writes it out as a sheet.
+    // Move a key above the markers once a speaker has checked it.
+    // splash
+    'splash_status_init': {
+      AppLanguage.english: 'INITIALIZING ENCRYPTED PROTOCOL',
+      AppLanguage.hausa: 'ANA FARA TSARIN SIRRI',
+      AppLanguage.pidgin: 'WE DEY START SECURE SYSTEM',
+    },
+    'splash_status_channel': {
+      AppLanguage.english: 'ESTABLISHING SECURE CHANNEL...',
+      AppLanguage.hausa: 'ANA HAƊA HANYAR SADARWA MAI TSARO...',
+      AppLanguage.pidgin: 'WE DEY CONNECT SECURE LINE...',
+    },
+    'splash_status_guard': {
+      AppLanguage.english: 'VERIFYING SENTINEL GUARD v4.2...',
+      AppLanguage.hausa: 'ANA TABBATAR DA SENTINEL GUARD v4.2...',
+      AppLanguage.pidgin: 'WE DEY CHECK SENTINEL GUARD v4.2...',
+    },
+    'splash_status_ready': {
+      AppLanguage.english: 'ALL SYSTEMS OPERATIONAL',
+      AppLanguage.hausa: 'KOMAI YANA AIKI',
+      AppLanguage.pidgin: 'EVERYTHING DEY WORK',
+    },
+    'splash_encryption': {
+      AppLanguage.english: 'ENCRYPTION: AES-256',
+      AppLanguage.hausa: 'ƁOYEWA: AES-256',
+      AppLanguage.pidgin: 'ENCRYPTION: AES-256',
+    },
+    // home
+    'home_location_required': {
+      AppLanguage.english: 'LOCATION REQUIRED',
+      AppLanguage.hausa: 'ANA BUƘATAR WURINKA',
+      AppLanguage.pidgin: 'WE NEED YOUR LOCATION',
+    },
+    'home_location_required_body': {
+      AppLanguage.english: 'Plateau Eye requires active location permissions to route emergency responders to your position. Please enable location in device settings.',
+      AppLanguage.hausa: 'Plateau Eye na buƙatar izinin sanin wurinka domin ta tura masu kai ɗauki zuwa inda kake. Don Allah ka kunna wuri (location) a saitunan wayarka.',
+      AppLanguage.pidgin: 'Plateau Eye need your location so e fit send helpers come where you dey. Abeg on location for your phone settings.',
+    },
+    'common_ok': {
+      AppLanguage.english: 'OK',
+      AppLanguage.hausa: 'TO',
+      AppLanguage.pidgin: 'OK',
+    },
+    'home_open_settings': {
+      AppLanguage.english: 'SETTINGS',
+      AppLanguage.hausa: 'SAITUNA',
+      AppLanguage.pidgin: 'SETTINGS',
+    },
+    'home_open_menu': {
+      AppLanguage.english: 'Open the menu',
+      AppLanguage.hausa: 'Buɗe menu',
+      AppLanguage.pidgin: 'Open the menu',
+    },
+    'home_notifications': {
+      AppLanguage.english: 'Notifications',
+      AppLanguage.hausa: 'Sanarwa',
+      AppLanguage.pidgin: 'Notifications',
+    },
+    // voice note player
+    'vnp_label': {
+      AppLanguage.english: 'VOICE NOTE FROM THE REPORTER',
+      AppLanguage.hausa: 'SAƘON MURYA DAGA MAI RAHOTO',
+      AppLanguage.pidgin: 'VOICE NOTE FROM THE PERSON WEY REPORT',
+    },
+    'vnp_failed': {
+      AppLanguage.english: 'This voice note did not play on this phone.',
+      AppLanguage.hausa: 'Wannan saƙon murya bai kunna a wannan wayar ba.',
+      AppLanguage.pidgin: 'This voice note no gree play for this phone.',
+    },
+    'vnp_try_again': {
+      AppLanguage.english: 'Press play to try again.',
+      AppLanguage.hausa: 'Danna kunna don sake gwadawa.',
+      AppLanguage.pidgin: 'Press play make you try again.',
+    },
+    'vnp_pause': {
+      AppLanguage.english: 'Pause the voice note',
+      AppLanguage.hausa: 'Dakatar da saƙon murya',
+      AppLanguage.pidgin: 'Pause the voice note',
+    },
+    'vnp_play': {
+      AppLanguage.english: 'Play the voice note',
+      AppLanguage.hausa: 'Kunna saƙon murya',
+      AppLanguage.pidgin: 'Play the voice note',
+    },
+    // login
+    'login_code_not_sent': {
+      AppLanguage.english: 'THE CODE COULD NOT BE SENT.',
+      AppLanguage.hausa: 'BA A IYA AIKA LAMBAR BA.',
+      AppLanguage.pidgin: 'THE CODE NO GREE SEND.',
+    },
+    'login_badge_not_recognised': {
+      AppLanguage.english: 'BADGE OR PASSWORD NOT RECOGNISED',
+      AppLanguage.hausa: 'BA A GANE BAJI KO KALMAR SIRRI BA',
+      AppLanguage.pidgin: 'WE NO KNOW THAT BADGE OR PASSWORD',
+    },
+    'login_verification_failed': {
+      AppLanguage.english: 'VERIFICATION FAILED',
+      AppLanguage.hausa: 'TABBATARWA TA GAZA',
+      AppLanguage.pidgin: 'CHECKING NO WORK',
+    },
+    'login_identity_verification': {
+      AppLanguage.english: 'IDENTITY VERIFICATION',
+      AppLanguage.hausa: 'TABBATAR DA KAI',
+      AppLanguage.pidgin: 'CONFIRM NA YOU',
+    },
+    'login_staff_password': {
+      AppLanguage.english: 'STAFF PASSWORD',
+      AppLanguage.hausa: 'KALMAR SIRRIN MA’AIKACI',
+      AppLanguage.pidgin: 'STAFF PASSWORD',
+    },
+    'login_secure_identifier': {
+      AppLanguage.english: 'SECURE IDENTIFIER',
+      AppLanguage.hausa: 'SHAIDARKA',
+      AppLanguage.pidgin: 'YOUR ID',
+    },
+    'login_code_sent_to': {
+      AppLanguage.english: 'CODE SENT TO',
+      AppLanguage.hausa: 'AN AIKA LAMBAR ZUWA',
+      AppLanguage.pidgin: 'WE DON SEND CODE GO',
+    },
+    'login_back_to_identifier': {
+      AppLanguage.english: 'BACK TO IDENTIFIER',
+      AppLanguage.hausa: 'KOMA WAJEN SHAIDA',
+      AppLanguage.pidgin: 'GO BACK TO ID',
+    },
+    'login_phone_or_code': {
+      AppLanguage.english: 'PHONE OR ACCESS CODE',
+      AppLanguage.hausa: 'LAMBAR WAYA KO LAMBAR SHIGA',
+      AppLanguage.pidgin: 'PHONE NUMBER OR ACCESS CODE',
+    },
+    'login_password_for': {
+      AppLanguage.english: 'PASSWORD FOR',
+      AppLanguage.hausa: 'KALMAR SIRRI NA',
+      AppLanguage.pidgin: 'PASSWORD FOR',
+    },
+    'login_badge': {
+      AppLanguage.english: 'BADGE',
+      AppLanguage.hausa: 'BAJI',
+      AppLanguage.pidgin: 'BADGE',
+    },
+    'login_verify_otp': {
+      AppLanguage.english: 'VERIFY OTP',
+      AppLanguage.hausa: 'TABBATAR DA LAMBA',
+      AppLanguage.pidgin: 'CHECK THE CODE',
+    },
+    'login_sign_in': {
+      AppLanguage.english: 'SIGN IN',
+      AppLanguage.hausa: 'SHIGA',
+      AppLanguage.pidgin: 'SIGN IN',
+    },
+    'login_authorize': {
+      AppLanguage.english: 'AUTHORIZE ACCESS',
+      AppLanguage.hausa: 'BA DA IZININ SHIGA',
+      AppLanguage.pidgin: 'ALLOW ME ENTER',
+    },
+    // setup: permissions
+    'onb_perm_title': {
+      AppLanguage.english: 'TACTICAL CLEARANCE',
+      AppLanguage.hausa: 'IZININ AIKI',
+      AppLanguage.pidgin: 'PERMISSION TO WORK',
+    },
+    'onb_perm_subtitle': {
+      AppLanguage.english: 'Establish operational permissions to enable field telemetry.',
+      AppLanguage.hausa: 'Ba da izinin da manhaja ke buƙata domin ta yi aiki a filin.',
+      AppLanguage.pidgin: 'Give the app the permission wey e need make e fit work.',
+    },
+    'onb_perm_location': {
+      AppLanguage.english: 'GEOSPATIAL',
+      AppLanguage.hausa: 'WURI',
+      AppLanguage.pidgin: 'LOCATION',
+    },
+    'onb_perm_location_desc': {
+      AppLanguage.english: 'Real-time location beacon',
+      AppLanguage.hausa: 'Nuna wurinka a lokacin gaggawa',
+      AppLanguage.pidgin: 'Show where you dey for emergency',
+    },
+    'onb_perm_sms': {
+      AppLanguage.english: 'COMMS LINK',
+      AppLanguage.hausa: 'SAƘON SMS',
+      AppLanguage.pidgin: 'SMS',
+    },
+    'onb_perm_sms_desc': {
+      AppLanguage.english: 'Offline SMS redundancy',
+      AppLanguage.hausa: 'Aika rahoto ta SMS idan babu intanet',
+      AppLanguage.pidgin: 'Send report by SMS when network no dey',
+    },
+    'onb_perm_mic': {
+      AppLanguage.english: 'FIELD AUDIO',
+      AppLanguage.hausa: 'MURYA',
+      AppLanguage.pidgin: 'VOICE',
+    },
+    'onb_perm_mic_desc': {
+      AppLanguage.english: 'Active evidence recording',
+      AppLanguage.hausa: 'Naɗar shaida yayin gaggawa',
+      AppLanguage.pidgin: 'Record evidence for emergency',
+    },
+    'onb_perm_background': {
+      AppLanguage.english: 'PERSISTENCE',
+      AppLanguage.hausa: 'AIKI A BAYA',
+      AppLanguage.pidgin: 'WORK FOR BACKGROUND',
+    },
+    'onb_perm_background_desc': {
+      AppLanguage.english: 'Background session lock',
+      AppLanguage.hausa: 'Kulle manhaja idan ba ka amfani da ita',
+      AppLanguage.pidgin: 'Lock the app when you no dey use am',
+    },
+    'onb_perm_level': {
+      AppLanguage.english: 'CLEARANCE LEVEL: STANDARD',
+      AppLanguage.hausa: 'MATAKIN IZINI: NA YAU DA KULLUM',
+      AppLanguage.pidgin: 'PERMISSION LEVEL: NORMAL',
+    },
+    'onb_perm_location_blocked': {
+      AppLanguage.english: 'Your phone has stopped asking about location, so it can only be switched on in settings. Without it an alert cannot say where you are, and nobody can be sent to you.',
+      AppLanguage.hausa: 'Wayarka ta daina tambaya game da wuri, don haka sai a saituna kaɗai za a iya kunna shi. Ba tare da shi ba, saƙon gaggawa ba zai faɗi inda kake ba, kuma ba za a iya tura kowa zuwa gare ka ba.',
+      AppLanguage.pidgin: 'Your phone don stop to ask about location, so na only for settings you fit on am. If e no dey, your alert no go talk where you dey, and nobody fit come meet you.',
+    },
+    'onb_perm_location_refused': {
+      AppLanguage.english: 'Location is how a responder finds you. Without it your alert says that something happened but not where, and nobody can be sent. Please allow it to continue.',
+      AppLanguage.hausa: 'Ta wurin ne mai kai ɗauki zai same ka. Ba tare da shi ba, saƙonka zai faɗi cewa wani abu ya faru amma ba inda ya faru ba, kuma ba za a iya tura kowa ba. Don Allah ka ba da izini domin ci gaba.',
+      AppLanguage.pidgin: 'Na location helpers dey use find you. If e no dey, your alert go talk say something happen but e no go talk where, and nobody fit come. Abeg allow am make you continue.',
+    },
+    'onb_perm_privacy': {
+      AppLanguage.english: 'You stay anonymous. No personal data is collected — your phone number is your only identity in this app, and it is there so responders can reach you.',
+      AppLanguage.hausa: 'Ba za a san ko kai wane ne ba. Ba a tattara bayanan sirrinka ba — lambar wayarka ce kaɗai shaidarka a wannan manhaja, kuma tana nan ne domin masu kai ɗauki su iya kiranka.',
+      AppLanguage.pidgin: 'Nobody go know who you be. We no dey collect your personal data — na only your phone number be your ID for this app, and e dey there so helpers fit call you.',
+    },
+    'onb_perm_authorizing': {
+      AppLanguage.english: 'AUTHORIZING...',
+      AppLanguage.hausa: 'ANA BA DA IZINI...',
+      AppLanguage.pidgin: 'E DEY ALLOW...',
+    },
+    'onb_perm_open_settings': {
+      AppLanguage.english: 'OPEN SETTINGS',
+      AppLanguage.hausa: 'BUƊE SAITUNA',
+      AppLanguage.pidgin: 'OPEN SETTINGS',
+    },
+    'onb_perm_allow_location': {
+      AppLanguage.english: 'ALLOW LOCATION',
+      AppLanguage.hausa: 'BA DA IZININ WURI',
+      AppLanguage.pidgin: 'ALLOW LOCATION',
+    },
+    'onb_perm_grant': {
+      AppLanguage.english: 'GRANT CLEARANCE',
+      AppLanguage.hausa: 'BA DA IZINI',
+      AppLanguage.pidgin: 'ALLOW AM',
+    },
+    'onb_header': {
+      AppLanguage.english: 'INITIALIZATION',
+      AppLanguage.hausa: 'SHIRYAWA',
+      AppLanguage.pidgin: 'SETUP',
+    },
+    'onb_step_of': {
+      AppLanguage.english: 'STEP {step} / {total}',
+      AppLanguage.hausa: 'MATAKI NA {step} / {total}',
+      AppLanguage.pidgin: 'STEP {step} / {total}',
+    },
+    'onb_back': {
+      AppLanguage.english: 'Go back to the previous setup step',
+      AppLanguage.hausa: 'Koma matakin da ya gabata',
+      AppLanguage.pidgin: 'Go back to the step wey pass',
+    },
+    // setup: emergency contacts
+    'onb_contacts_title': {
+      AppLanguage.english: 'EMERGENCY CONTACTS',
+      AppLanguage.hausa: 'LAMBOBIN GAGGAWA',
+      AppLanguage.pidgin: 'EMERGENCY CONTACTS',
+    },
+    'onb_contacts_subtitle': {
+      AppLanguage.english: 'Add trusted contacts to be notified during SOS emergencies',
+      AppLanguage.hausa: 'Ƙara mutanen da ka amince da su domin a sanar da su lokacin gaggawa (SOS)',
+      AppLanguage.pidgin: 'Add people wey you trust make dem hear when you get SOS emergency',
+    },
+    'onb_contacts_name': {
+      AppLanguage.english: 'Contact Name',
+      AppLanguage.hausa: 'Sunan mutumin',
+      AppLanguage.pidgin: 'Name of the person',
+    },
+    'onb_contacts_phone': {
+      AppLanguage.english: 'Contact Phone Number',
+      AppLanguage.hausa: 'Lambar wayar mutumin',
+      AppLanguage.pidgin: 'Phone number of the person',
+    },
+    'onb_contacts_not_saved': {
+      AppLanguage.english: 'YOUR CONTACT DID NOT SAVE. CHECK YOUR CONNECTION AND TRY AGAIN.',
+      AppLanguage.hausa: 'BA A AJIYE LAMBAR BA. DUBA INTANET ƊINKA KA SAKE GWADAWA.',
+      AppLanguage.pidgin: 'YOUR CONTACT NO SAVE. CHECK YOUR NETWORK AND TRY AGAIN.',
+    },
+    'onb_contacts_save': {
+      AppLanguage.english: 'SAVE & CONTINUE',
+      AppLanguage.hausa: 'AJIYE KA CI GABA',
+      AppLanguage.pidgin: 'SAVE AND CONTINUE',
+    },
+    // voice report
+    'vr_title': {
+      AppLanguage.english: 'AI Voice Report',
+      AppLanguage.hausa: 'Rahoto da Murya',
+      AppLanguage.pidgin: 'Voice Report',
+    },
+    'vr_recorder_failed': {
+      AppLanguage.english: 'Error starting recorder:',
+      AppLanguage.hausa: 'Naɗar murya bai fara ba:',
+      AppLanguage.pidgin: 'Recorder no gree start:',
+    },
+    'vr_send_failed': {
+      AppLanguage.english: 'Triage request failed. Please try again.',
+      AppLanguage.hausa: 'Ba a iya aika rahoton ba. Don Allah ka sake gwadawa.',
+      AppLanguage.pidgin: 'The report no gree send. Abeg try again.',
+    },
+    'vr_failed': {
+      AppLanguage.english: 'Triage failed:',
+      AppLanguage.hausa: 'Rahoton ya gaza:',
+      AppLanguage.pidgin: 'The report fail:',
+    },
+    'vr_stop_and_send': {
+      AppLanguage.english: 'Stop recording and send this voice report',
+      AppLanguage.hausa: 'Dakatar da naɗi ka aika wannan rahoton murya',
+      AppLanguage.pidgin: 'Stop to record and send this voice report',
+    },
+    'vr_start': {
+      AppLanguage.english: 'Start recording a voice report',
+      AppLanguage.hausa: 'Fara naɗar rahoton murya',
+      AppLanguage.pidgin: 'Start to record voice report',
+    },
+    // incident history
+    'hist_title': {
+      AppLanguage.english: 'TACTICAL INCIDENT LOGS',
+      AppLanguage.hausa: 'TARIHIN RAHOTANNI',
+      AppLanguage.pidgin: 'YOUR REPORTS',
+    },
+    'hist_subtitle': {
+      AppLanguage.english: 'HISTORICAL ARCHIVE',
+      AppLanguage.hausa: 'RAHOTANNIN DA SUKA GABATA',
+      AppLanguage.pidgin: 'REPORTS WEY DON PASS',
+    },
+    'hist_load_failed': {
+      AppLanguage.english: 'Error loading historical archives',
+      AppLanguage.hausa: 'Ba a iya buɗe rahotannin da suka gabata ba',
+      AppLanguage.pidgin: 'We no fit load your old reports',
+    },
+    'hist_empty': {
+      AppLanguage.english: 'NO ARCHIVED INCIDENTS RECORDED',
+      AppLanguage.hausa: 'BABU RAHOTON DA AKA AJIYE',
+      AppLanguage.pidgin: 'NO OLD REPORT DEY',
+    },
+    'hist_incident': {
+      AppLanguage.english: 'INCIDENT',
+      AppLanguage.hausa: 'LAMARI',
+      AppLanguage.pidgin: 'INCIDENT',
+    },
+    'hist_no_details': {
+      AppLanguage.english: 'No details provided',
+      AppLanguage.hausa: 'Ba a ba da cikakken bayani ba',
+      AppLanguage.pidgin: 'Dem no give details',
+    },
+    'hist_details': {
+      AppLanguage.english: 'INCIDENT DETAILS',
+      AppLanguage.hausa: 'BAYANIN LAMARIN',
+      AppLanguage.pidgin: 'INCIDENT DETAILS',
+    },
+    'hist_type': {
+      AppLanguage.english: 'Type:',
+      AppLanguage.hausa: 'Nau’i:',
+      AppLanguage.pidgin: 'Type:',
+    },
+    'hist_severity': {
+      AppLanguage.english: 'Severity:',
+      AppLanguage.hausa: 'Tsanani:',
+      AppLanguage.pidgin: 'How serious:',
+    },
+    'hist_status': {
+      AppLanguage.english: 'Status:',
+      AppLanguage.hausa: 'Matsayi:',
+      AppLanguage.pidgin: 'Status:',
+    },
+    'hist_date': {
+      AppLanguage.english: 'Date:',
+      AppLanguage.hausa: 'Kwanan wata:',
+      AppLanguage.pidgin: 'Date:',
+    },
+    'hist_unknown': {
+      AppLanguage.english: 'Unknown',
+      AppLanguage.hausa: 'Ba a sani ba',
+      AppLanguage.pidgin: 'We no know',
+    },
+    'hist_media': {
+      AppLanguage.english: 'Media:',
+      AppLanguage.hausa: 'Hotuna da bidiyo:',
+      AppLanguage.pidgin: 'Pictures and video:',
+    },
+    'hist_dispatcher_chat': {
+      AppLanguage.english: 'DISPATCHER CHAT',
+      AppLanguage.hausa: 'MAGANA DA MAI TURAWA',
+      AppLanguage.pidgin: 'CHAT WITH DISPATCHER',
+    },
+    // emergency PIN (REVIEW FIRST)
+    'pin_title': {
+      AppLanguage.english: 'EMERGENCY PIN',
+      AppLanguage.hausa: 'LAMBAR SIRRIN GAGGAWA',
+      AppLanguage.pidgin: 'EMERGENCY PIN',
+    },
+    'pin_step_of': {
+      AppLanguage.english: 'Step {step} of {total}',
+      AppLanguage.hausa: 'Mataki na {step} cikin {total}',
+      AppLanguage.pidgin: 'Step {step} of {total}',
+    },
+    'pin_choose_safe': {
+      AppLanguage.english: 'Choose your SAFE PIN',
+      AppLanguage.hausa: 'Zaɓi lambar sirrinka ta TSARO (SAFE PIN)',
+      AppLanguage.pidgin: 'Choose your SAFE PIN',
+    },
+    'pin_confirm_safe': {
+      AppLanguage.english: 'Confirm your SAFE PIN',
+      AppLanguage.hausa: 'Tabbatar da lambar sirrinka ta TSARO (SAFE PIN)',
+      AppLanguage.pidgin: 'Confirm your SAFE PIN',
+    },
+    'pin_choose_duress': {
+      AppLanguage.english: 'Choose your DURESS PIN',
+      AppLanguage.hausa: 'Zaɓi lambar sirrinka ta TILASTAWA (DURESS PIN)',
+      AppLanguage.pidgin: 'Choose your DURESS PIN',
+    },
+    'pin_confirm_duress': {
+      AppLanguage.english: 'Confirm your DURESS PIN',
+      AppLanguage.hausa: 'Tabbatar da lambar sirrinka ta TILASTAWA (DURESS PIN)',
+      AppLanguage.pidgin: 'Confirm your DURESS PIN',
+    },
+    'pin_safe_hint': {
+      AppLanguage.english: 'Enter this to cancel an SOS normally. 4–8 digits.',
+      AppLanguage.hausa: 'Shigar da wannan domin soke SOS kamar yadda aka saba. Lambobi 4 zuwa 8.',
+      AppLanguage.pidgin: 'Put this one when you wan cancel SOS normally. 4 to 8 numbers.',
+    },
+    'pin_same_again': {
+      AppLanguage.english: 'Enter the same PIN again.',
+      AppLanguage.hausa: 'Sake shigar da lambar sirrin nan.',
+      AppLanguage.pidgin: 'Put the same PIN again.',
+    },
+    'pin_duress_hint': {
+      AppLanguage.english: 'Enter this if you are forced to cancel. The screen will look normal, but HQ will be told you are in danger. Must differ from your safe PIN.',
+      AppLanguage.hausa: 'Shigar da wannan idan an tilasta maka ka soke. Allon zai yi kamar komai lafiya, amma za a sanar da HQ cewa kana cikin haɗari. Dole ya bambanta da lambar sirrinka ta tsaro.',
+      AppLanguage.pidgin: 'Put this one if person force you to cancel. The screen go look normal, but HQ go know say you dey danger. E must different from your safe PIN.',
+    },
+    'pin_err_length': {
+      AppLanguage.english: 'Use 4 to 8 digits.',
+      AppLanguage.hausa: 'Yi amfani da lambobi 4 zuwa 8.',
+      AppLanguage.pidgin: 'Use 4 to 8 numbers.',
+    },
+    'pin_err_mismatch': {
+      AppLanguage.english: 'The PINs do not match. Try again.',
+      AppLanguage.hausa: 'Lambobin sirrin ba su yi daidai ba. Sake gwadawa.',
+      AppLanguage.pidgin: 'The two PIN no match. Try again.',
+    },
+    'pin_err_same': {
+      AppLanguage.english: 'The duress PIN must be different from the safe PIN.',
+      AppLanguage.hausa: 'Dole lambar sirrin tilastawa ta bambanta da lambar sirrin tsaro.',
+      AppLanguage.pidgin: 'The duress PIN must different from the safe PIN.',
+    },
+    'pin_saved': {
+      AppLanguage.english: 'Emergency PINs saved.',
+      AppLanguage.hausa: 'An ajiye lambobin sirrin gaggawa.',
+      AppLanguage.pidgin: 'Emergency PINs don save.',
+    },
+    'pin_save_failed': {
+      AppLanguage.english: 'Could not save PINs — check your connection and try again.',
+      AppLanguage.hausa: 'Ba a iya ajiye lambobin sirrin ba — duba intanet ɗinka ka sake gwadawa.',
+      AppLanguage.pidgin: 'PINs no gree save — check your network and try again.',
+    },
+    'pin_save': {
+      AppLanguage.english: 'SAVE PINS',
+      AppLanguage.hausa: 'AJIYE LAMBOBIN',
+      AppLanguage.pidgin: 'SAVE PINS',
+    },
+    'pin_continue': {
+      AppLanguage.english: 'CONTINUE',
+      AppLanguage.hausa: 'CI GABA',
+      AppLanguage.pidgin: 'CONTINUE',
+    },
+    // dispatcher chat
+    'chat_not_sent': {
+      AppLanguage.english: 'MESSAGE NOT SENT — check your connection and retry',
+      AppLanguage.hausa: 'BA A AIKA SAƘON BA — duba intanet ɗinka ka sake gwadawa',
+      AppLanguage.pidgin: 'MESSAGE NO SEND — check your network and try again',
+    },
+    'chat_retry': {
+      AppLanguage.english: 'RETRY',
+      AppLanguage.hausa: 'SAKE GWADAWA',
+      AppLanguage.pidgin: 'TRY AGAIN',
+    },
+    'chat_load_failed': {
+      AppLanguage.english: 'Error loading channel messages',
+      AppLanguage.hausa: 'Ba a iya buɗe saƙonnin ba',
+      AppLanguage.pidgin: 'We no fit load the messages',
+    },
+    'chat_empty': {
+      AppLanguage.english: 'NO SECURE MESSAGES RECORDED',
+      AppLanguage.hausa: 'BABU SAƘO TUKUNA',
+      AppLanguage.pidgin: 'NO MESSAGE YET',
+    },
+    'chat_dispatcher': {
+      AppLanguage.english: 'Dispatcher',
+      AppLanguage.hausa: 'Mai turawa',
+      AppLanguage.pidgin: 'Dispatcher',
+    },
+    'chat_you': {
+      AppLanguage.english: 'YOU',
+      AppLanguage.hausa: 'KAI',
+      AppLanguage.pidgin: 'YOU',
+    },
+    'chat_stop_dictating': {
+      AppLanguage.english: 'Stop dictating',
+      AppLanguage.hausa: 'Daina faɗa',
+      AppLanguage.pidgin: 'Stop to talk',
+    },
+    'chat_dictate': {
+      AppLanguage.english: 'Dictate a message',
+      AppLanguage.hausa: 'Faɗi saƙo da baki',
+      AppLanguage.pidgin: 'Talk your message',
+    },
+    'chat_hint': {
+      AppLanguage.english: 'Type secure message...',
+      AppLanguage.hausa: 'Rubuta saƙo...',
+      AppLanguage.pidgin: 'Type your message...',
+    },
+    'chat_send': {
+      AppLanguage.english: 'Send',
+      AppLanguage.hausa: 'Aika',
+      AppLanguage.pidgin: 'Send',
+    },
+    // settings
+    'set_bt_unavailable': {
+      AppLanguage.english: 'Bluetooth relay is on, but Bluetooth is off or not allowed. Turn on Bluetooth and allow it for Plateau Eye.',
+      AppLanguage.hausa: 'An kunna isar da saƙo ta Bluetooth, amma Bluetooth a kashe yake ko ba a ba da izini ba. Kunna Bluetooth ka ba Plateau Eye izini.',
+      AppLanguage.pidgin: 'Bluetooth relay don on, but Bluetooth off or e no get permission. On Bluetooth and allow am for Plateau Eye.',
+    },
+    'set_edit_name_title': {
+      AppLanguage.english: 'Edit Name',
+      AppLanguage.hausa: 'Gyara Suna',
+      AppLanguage.pidgin: 'Change Name',
+    },
+    'set_full_name': {
+      AppLanguage.english: 'Full Name',
+      AppLanguage.hausa: 'Cikakken Suna',
+      AppLanguage.pidgin: 'Full Name',
+    },
+    'set_cancel': {
+      AppLanguage.english: 'Cancel',
+      AppLanguage.hausa: 'Soke',
+      AppLanguage.pidgin: 'Cancel',
+    },
+    'set_save': {
+      AppLanguage.english: 'Save',
+      AppLanguage.hausa: 'Ajiye',
+      AppLanguage.pidgin: 'Save',
+    },
+    'set_add_contact_title': {
+      AppLanguage.english: 'Add Emergency Contact',
+      AppLanguage.hausa: 'Ƙara Lambar Gaggawa',
+      AppLanguage.pidgin: 'Add Emergency Contact',
+    },
+    'set_phone_number': {
+      AppLanguage.english: 'Phone Number',
+      AppLanguage.hausa: 'Lambar Waya',
+      AppLanguage.pidgin: 'Phone Number',
+    },
+    'set_add': {
+      AppLanguage.english: 'Add',
+      AppLanguage.hausa: 'Ƙara',
+      AppLanguage.pidgin: 'Add',
+    },
+    'set_default_name': {
+      AppLanguage.english: 'Citizen User',
+      AppLanguage.hausa: 'Ɗan Ƙasa',
+      AppLanguage.pidgin: 'Citizen',
+    },
+    'set_title': {
+      AppLanguage.english: 'TACTICAL SYSTEM SETTINGS',
+      AppLanguage.hausa: 'SAITUNA',
+      AppLanguage.pidgin: 'SETTINGS',
+    },
+    'set_subtitle': {
+      AppLanguage.english: 'PREFERENCES & SECURITY',
+      AppLanguage.hausa: 'ZAƁI DA TSARO',
+      AppLanguage.pidgin: 'WETIN YOU LIKE AND SECURITY',
+    },
+    'set_phone_user': {
+      AppLanguage.english: 'Phone User:',
+      AppLanguage.hausa: 'Mai waya:',
+      AppLanguage.pidgin: 'Phone user:',
+    },
+    'set_unknown': {
+      AppLanguage.english: 'Unknown',
+      AppLanguage.hausa: 'Ba a sani ba',
+      AppLanguage.pidgin: 'We no know',
+    },
+    'set_edit_name': {
+      AppLanguage.english: 'Edit your name',
+      AppLanguage.hausa: 'Gyara sunanka',
+      AppLanguage.pidgin: 'Change your name',
+    },
+    'set_push': {
+      AppLanguage.english: 'Push Notifications',
+      AppLanguage.hausa: 'Sanarwa',
+      AppLanguage.pidgin: 'Notifications',
+    },
+    'set_push_desc': {
+      AppLanguage.english: 'Receive emergency alerts',
+      AppLanguage.hausa: 'Karɓi saƙonnin gaggawa',
+      AppLanguage.pidgin: 'Receive emergency alerts',
+    },
+    'set_relay': {
+      AppLanguage.english: 'Relay emergency alerts',
+      AppLanguage.hausa: 'Isar da saƙonnin gaggawa',
+      AppLanguage.pidgin: 'Pass emergency alerts',
+    },
+    'set_relay_desc': {
+      AppLanguage.english: 'When there is no network, pass sealed SOS alerts between nearby phones over Bluetooth until one reaches HQ. Phones that carry an alert cannot read it.',
+      AppLanguage.hausa: 'Idan babu sabis, a isar da saƙonnin SOS da aka rufe tsakanin wayoyin da ke kusa ta Bluetooth har sai ɗaya ya kai HQ. Wayoyin da ke ɗauke da saƙon ba za su iya karanta shi ba.',
+      AppLanguage.pidgin: 'When network no dey, pass closed SOS alerts from one phone to another wey dey near through Bluetooth until one reach HQ. The phones wey carry the alert no fit read am.',
+    },
+    'set_contacts': {
+      AppLanguage.english: 'Emergency Contacts',
+      AppLanguage.hausa: 'Lambobin Gaggawa',
+      AppLanguage.pidgin: 'Emergency Contacts',
+    },
+    'set_add_contact': {
+      AppLanguage.english: 'Add an emergency contact',
+      AppLanguage.hausa: 'Ƙara lambar gaggawa',
+      AppLanguage.pidgin: 'Add emergency contact',
+    },
+    'set_no_contacts': {
+      AppLanguage.english: 'No emergency contacts added.',
+      AppLanguage.hausa: 'Ba a ƙara lambar gaggawa ba.',
+      AppLanguage.pidgin: 'You never add emergency contact.',
+    },
+    'set_remove_contact': {
+      AppLanguage.english: 'Remove this emergency contact',
+      AppLanguage.hausa: 'Cire wannan lambar gaggawa',
+      AppLanguage.pidgin: 'Remove this emergency contact',
+    },
+    'set_pin': {
+      AppLanguage.english: 'Emergency PIN',
+      AppLanguage.hausa: 'Lambar Sirrin Gaggawa',
+      AppLanguage.pidgin: 'Emergency PIN',
+    },
+    'set_pin_desc': {
+      AppLanguage.english: 'Set or change your safe and duress PINs',
+      AppLanguage.hausa: 'Saita ko canza lambobin sirrinka na tsaro da na tilastawa',
+      AppLanguage.pidgin: 'Set or change your safe PIN and duress PIN',
+    },
+    'set_lock': {
+      AppLanguage.english: 'Lock This Phone',
+      AppLanguage.hausa: 'Kulle Wannan Manhaja',
+      AppLanguage.pidgin: 'Lock This App',
+    },
+    'set_lock_desc': {
+      AppLanguage.english: 'Ask for a code before this app can be used again. The emergency button keeps working.',
+      AppLanguage.hausa: 'A nemi lamba kafin a sake amfani da manhajar. Maɓallin gaggawa zai ci gaba da aiki.',
+      AppLanguage.pidgin: 'Ask for code before person fit use this app again. The emergency button go still work.',
+    },
+    'set_removal': {
+      AppLanguage.english: 'App Removal Authorization',
+      AppLanguage.hausa: 'Izinin Cire Manhaja',
+      AppLanguage.pidgin: 'Permission to Remove App',
+    },
+    'set_sign_out': {
+      AppLanguage.english: 'Sign Out Tactical Session',
+      AppLanguage.hausa: 'Fita',
+      AppLanguage.pidgin: 'Sign Out',
+    },
+    // app removal request
+    'uninst_submitted': {
+      AppLanguage.english: 'Uninstall request submitted to HQ Command for authorization.',
+      AppLanguage.hausa: 'An aika buƙatar cire manhaja ga HQ domin amincewa.',
+      AppLanguage.pidgin: 'We don send your request to remove the app to HQ make dem approve am.',
+    },
+    'uninst_not_sent': {
+      AppLanguage.english: 'Request NOT sent. Check your connection and submit again.',
+      AppLanguage.hausa: 'BA A AIKA buƙatar ba. Duba intanet ɗinka ka sake aikawa.',
+      AppLanguage.pidgin: 'Request NO SEND. Check your network and send again.',
+    },
+    'uninst_title': {
+      AppLanguage.english: 'APP REMOVAL AUTHORIZATION',
+      AppLanguage.hausa: 'IZININ CIRE MANHAJA',
+      AppLanguage.pidgin: 'PERMISSION TO REMOVE APP',
+    },
+    'uninst_subtitle': {
+      AppLanguage.english: 'TACTICAL SECURITY POLICY',
+      AppLanguage.hausa: 'DOKAR TSARO',
+      AppLanguage.pidgin: 'SECURITY RULE',
+    },
+    'uninst_category': {
+      AppLanguage.english: 'REMOVAL CATEGORY',
+      AppLanguage.hausa: 'DALILIN CIREWA',
+      AppLanguage.pidgin: 'WHY YOU WAN REMOVE AM',
+    },
+    'uninst_transfer': {
+      AppLanguage.english: 'Transfer to Another Unit',
+      AppLanguage.hausa: 'Canjin wurin aiki zuwa wata runduna',
+      AppLanguage.pidgin: 'Transfer to another unit',
+    },
+    'uninst_retirement': {
+      AppLanguage.english: 'Retirement / End of Service',
+      AppLanguage.hausa: 'Ritaya / Ƙarshen aiki',
+      AppLanguage.pidgin: 'Retirement / End of service',
+    },
+    'uninst_phone_change': {
+      AppLanguage.english: 'Device Replacement',
+      AppLanguage.hausa: 'Canjin waya',
+      AppLanguage.pidgin: 'Change of phone',
+    },
+    'uninst_misconduct': {
+      AppLanguage.english: 'Disciplinary Removal',
+      AppLanguage.hausa: 'Cirewa saboda ladabtarwa',
+      AppLanguage.pidgin: 'Removal because of discipline',
+    },
+    'uninst_other': {
+      AppLanguage.english: 'Other (specify in remarks)',
+      AppLanguage.hausa: 'Wani dalili (bayyana a ƙasa)',
+      AppLanguage.pidgin: 'Other reason (write am below)',
+    },
+    'uninst_reason': {
+      AppLanguage.english: 'REMOVAL REASON & JUSTIFICATION',
+      AppLanguage.hausa: 'BAYANIN DALILIN CIREWA',
+      AppLanguage.pidgin: 'EXPLAIN WHY YOU WAN REMOVE AM',
+    },
+    'uninst_reason_hint': {
+      AppLanguage.english: 'Enter operational justification...',
+      AppLanguage.hausa: 'Rubuta dalilin...',
+      AppLanguage.pidgin: 'Write the reason...',
+    },
+    'uninst_sending': {
+      AppLanguage.english: 'TRANSMITTING...',
+      AppLanguage.hausa: 'ANA AIKAWA...',
+      AppLanguage.pidgin: 'E DEY SEND...',
+    },
+    'uninst_submit': {
+      AppLanguage.english: 'SUBMIT UNINSTALL REQUEST',
+      AppLanguage.hausa: 'AIKA BUƘATAR CIREWA',
+      AppLanguage.pidgin: 'SEND REQUEST TO REMOVE',
+    },
+    // ---- END OF DRAFT TRANSLATIONS AWAITING A NATIVE SPEAKER ----
   };
 
   /// The string for [key] in [lang].

@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 
 /// The reporter's voice, played inside the app.
 ///
@@ -23,12 +25,12 @@ import 'package:rainbow_app/core/theme/app_colors.dart';
 /// loading, playing, paused, and — the one that matters — failed, with the
 /// reason. A play button that does nothing and says nothing is how a responder
 /// concludes a reporter sent silence.
-class VoiceNotePlayer extends StatefulWidget {
+class VoiceNotePlayer extends ConsumerStatefulWidget {
   /// Creates a player for one voice note.
   const VoiceNotePlayer({
     required this.url,
     this.seconds,
-    this.label = 'VOICE NOTE FROM THE REPORTER',
+    this.label,
     this.player,
     super.key,
   });
@@ -40,17 +42,18 @@ class VoiceNotePlayer extends StatefulWidget {
   /// somebody on a weak connection knows what they are about to pull.
   final int? seconds;
 
-  /// What this recording is, in the card's own words.
-  final String label;
+  /// What this recording is, in the card's own words, already in the
+  /// reader's language. Null reads as "voice note from the reporter".
+  final String? label;
 
   /// A seam for tests: the real one needs a platform channel.
   final AudioPlayer? player;
 
   @override
-  State<VoiceNotePlayer> createState() => _VoiceNotePlayerState();
+  ConsumerState<VoiceNotePlayer> createState() => _VoiceNotePlayerState();
 }
 
-class _VoiceNotePlayerState extends State<VoiceNotePlayer> {
+class _VoiceNotePlayerState extends ConsumerState<VoiceNotePlayer> {
   late final AudioPlayer _player = widget.player ?? AudioPlayer();
   StreamSubscription<PlayerState>? _states;
   bool _loading = false;
@@ -106,7 +109,7 @@ class _VoiceNotePlayerState extends State<VoiceNotePlayer> {
       // SAID, not swallowed. This is the screen where a responder finds out
       // what the person reporting actually told them.
       setState(() {
-        _failure = 'This voice note did not play on this phone.';
+        _failure = Translations.get('vnp_failed', ref.read(languageProvider));
         _ready = false;
       });
       debugPrint('[VOICE_NOTE_PLAYER] $e');
@@ -117,6 +120,8 @@ class _VoiceNotePlayerState extends State<VoiceNotePlayer> {
 
   @override
   Widget build(BuildContext context) {
+    final lang = ref.watch(languageProvider);
+    final label = widget.label ?? Translations.get('vnp_label', lang);
     final playing = _player.playing;
     final position = _ready ? _player.position : null;
     final duration = _player.duration;
@@ -128,7 +133,7 @@ class _VoiceNotePlayerState extends State<VoiceNotePlayer> {
 
     return Semantics(
       container: true,
-      label: widget.label,
+      label: label,
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
@@ -151,7 +156,7 @@ class _VoiceNotePlayerState extends State<VoiceNotePlayer> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    widget.label,
+                    label,
                     style: GoogleFonts.outfit(
                       fontSize: 10,
                       fontWeight: FontWeight.w900,
@@ -178,8 +183,8 @@ class _VoiceNotePlayerState extends State<VoiceNotePlayer> {
                 Semantics(
                   button: true,
                   label: playing
-                      ? 'Pause the voice note'
-                      : 'Play the voice note',
+                      ? Translations.get('vnp_pause', lang)
+                      : Translations.get('vnp_play', lang),
                   excludeSemantics: true,
                   onTap: _toggle,
                   child: InkWell(
@@ -227,7 +232,7 @@ class _VoiceNotePlayerState extends State<VoiceNotePlayer> {
             if (_failure != null) ...[
               const SizedBox(height: 8),
               Text(
-                '$_failure Press play to try again.',
+                '$_failure ${Translations.get('vnp_try_again', lang)}',
                 style: GoogleFonts.inter(
                   fontSize: 11,
                   color: AppColors.danger,

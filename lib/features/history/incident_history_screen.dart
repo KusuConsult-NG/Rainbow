@@ -7,6 +7,7 @@ import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/shared/widgets/rainbow_app_bar.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 
 class IncidentHistoryScreen extends ConsumerWidget {
   const IncidentHistoryScreen({super.key});
@@ -52,12 +53,14 @@ class IncidentHistoryScreen extends ConsumerWidget {
     final authState = ref.watch(authProvider);
     final user = authState.user;
     final auth = authState;
+    final lang = ref.watch(languageProvider);
+    String t(String key) => Translations.get(key, lang);
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const RainbowAppBar(
-        title: 'TACTICAL INCIDENT LOGS',
-        subtitle: 'HISTORICAL ARCHIVE',
+      appBar: RainbowAppBar(
+        title: t('hist_title'),
+        subtitle: t('hist_subtitle'),
       ),
       body: FutureBuilder<List<Map<String, dynamic>>>(
         future: _fetchAlerts(user?.id, auth.role == UserRole.responder),
@@ -68,7 +71,7 @@ class IncidentHistoryScreen extends ConsumerWidget {
           if (snapshot.hasError) {
             return Center(
               child: Text(
-                'Error loading historical archives',
+                t('hist_load_failed'),
                 style: GoogleFonts.outfit(color: AppColors.danger),
               ),
             );
@@ -78,7 +81,7 @@ class IncidentHistoryScreen extends ConsumerWidget {
           if (alerts.isEmpty) {
             return Center(
               child: Text(
-                'NO ARCHIVED INCIDENTS RECORDED',
+                t('hist_empty'),
                 style: GoogleFonts.outfit(
                   color: AppColors.textDim,
                   fontSize: 12,
@@ -93,10 +96,10 @@ class IncidentHistoryScreen extends ConsumerWidget {
             itemCount: alerts.length,
             itemBuilder: (context, index) {
               final item = alerts[index];
-              final type = item['type'] as String? ?? 'INCIDENT';
+              final type = item['type'] as String? ?? t('hist_incident');
               final severity = item['severity'] as String? ?? 'MEDIUM';
               final status = item['status'] as String? ?? 'PENDING';
-              final desc = item['description'] as String? ?? 'No details provided';
+              final desc = item['description'] as String? ?? t('hist_no_details');
 
               final createdAt = DateTime.tryParse(item['created_at'] as String? ?? '') ?? DateTime.now();
               final dateStr = '${createdAt.day.toString().padLeft(2, '0')} ${['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][createdAt.month]} ${createdAt.year} ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}';
@@ -112,18 +115,18 @@ class IncidentHistoryScreen extends ConsumerWidget {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('INCIDENT DETAILS', style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold, fontSize: 16)),
+                          Text(t('hist_details'), style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold, fontSize: 16)),
                           const SizedBox(height: 16),
-                          Text('Type: $type', style: GoogleFonts.inter(color: AppColors.textDim)),
-                          Text('Severity: $severity', style: GoogleFonts.inter(color: AppColors.textDim)),
-                          Text('Status: $status', style: GoogleFonts.inter(color: AppColors.textDim)),
-                          Text('Date: ${item['created_at'] ?? 'Unknown'}', style: GoogleFonts.inter(color: AppColors.textDim)),
+                          Text('${t('hist_type')} $type', style: GoogleFonts.inter(color: AppColors.textDim)),
+                          Text('${t('hist_severity')} $severity', style: GoogleFonts.inter(color: AppColors.textDim)),
+                          Text('${t('hist_status')} $status', style: GoogleFonts.inter(color: AppColors.textDim)),
+                          Text('${t('hist_date')} ${item['created_at'] ?? t('hist_unknown')}', style: GoogleFonts.inter(color: AppColors.textDim)),
                           const SizedBox(height: 16),
                           Text(desc, style: GoogleFonts.inter(color: AppColors.onBackground)),
                           const SizedBox(height: 24),
                           if (item['media_urls'] != null && (item['media_urls'] as List).isNotEmpty)
                             ...[
-                              Text('Media:', style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold)),
+                              Text(t('hist_media'), style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold)),
                               const SizedBox(height: 8),
                               SizedBox(
                                 height: 80,
@@ -145,7 +148,7 @@ class IncidentHistoryScreen extends ConsumerWidget {
                                 unawaited(context.push('/dispatcher-chat', extra: item['id']));
                               },
                               icon: const Icon(Icons.chat),
-                              label: const Text('DISPATCHER CHAT'),
+                              label: Text(t('hist_dispatcher_chat')),
                               style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
                             ),
                           ),

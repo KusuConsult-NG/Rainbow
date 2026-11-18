@@ -20,7 +20,8 @@ class VoiceReportDialog extends ConsumerStatefulWidget {
     return showGeneralDialog(
       context: context,
       barrierDismissible: true,
-      barrierLabel: 'AI Voice Report',
+      barrierLabel: Translations.get(
+        'vr_title', ProviderScope.containerOf(context).read(languageProvider)),
       barrierColor: Colors.black54,
       transitionDuration: const Duration(milliseconds: 300),
       pageBuilder: (context, anim1, anim2) {
@@ -173,7 +174,7 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
       if (!mounted) return;
       setState(() {
         _isListening = false;
-        _errorMessage = 'Error starting recorder: $e';
+        _errorMessage = '${Translations.get('vr_recorder_failed', ref.read(languageProvider))} $e';
       });
     }
   }
@@ -289,14 +290,14 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
       } else {
         setState(() {
           _isTriaging = false;
-          _errorMessage = 'Triage request failed. Please try again.';
+          _errorMessage = Translations.get('vr_send_failed', lang);
         });
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isTriaging = false;
-        _errorMessage = 'Triage failed: $e';
+        _errorMessage = '${Translations.get('vr_failed', ref.read(languageProvider))} $e';
       });
     }
   }
@@ -415,8 +416,8 @@ class _VoiceReportDialogState extends ConsumerState<VoiceReportDialog>
                     Semantics(
                       button: true,
                       label: _isListening
-                          ? 'Stop recording and send this voice report'
-                          : 'Start recording a voice report',
+                          ? Translations.get('vr_stop_and_send', lang)
+                          : Translations.get('vr_start', lang),
                       excludeSemantics: true,
                       onTap: _isListening ? _stopListeningFlow : _startListeningFlow,
                       child: GestureDetector(

@@ -229,7 +229,11 @@ else:
     proved.append('the PIN route sits outside the navigation shell')
 
 # ── 8. the step count ───────────────────────────────────────────────────────
-step = re.search(r"'STEP \$step / (\d+)'", perms)
+# The indicator is translated (onb_step_of: 'STEP {step} / {total}'), so the
+# total is the number substituted for {total}. The literal form is still
+# accepted, so a screen that goes back to it is checked the same way.
+step = (re.search(r"replaceFirst\('\{total\}', '(\d+)'\)", perms)
+        or re.search(r"'STEP \$step / (\d+)'", perms))
 if step is None:
     faults.append('the permissions screen shows no step indicator')
 elif step.group(1) != '2':

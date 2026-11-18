@@ -10,6 +10,7 @@ import 'package:rainbow_app/core/supabase/supabase_config.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/features/settings/settings_screen.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
+import 'package:rainbow_app/shared/localization/translations.dart';
 
 class OnboardingContactsScreen extends ConsumerStatefulWidget {
   const OnboardingContactsScreen({super.key});
@@ -21,6 +22,9 @@ class OnboardingContactsScreen extends ConsumerStatefulWidget {
 
 class _OnboardingContactsScreenState
     extends ConsumerState<OnboardingContactsScreen> {
+  /// This screen's text in the chosen language.
+  String _t(String key) => Translations.get(key, ref.read(languageProvider));
+
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
 
@@ -33,6 +37,8 @@ class _OnboardingContactsScreenState
 
   @override
   Widget build(BuildContext context) {
+    // Redraw when the language changes; _t reads it.
+    ref.watch(languageProvider);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -42,7 +48,7 @@ class _OnboardingContactsScreenState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'EMERGENCY CONTACTS',
+                _t('onb_contacts_title'),
                 style: GoogleFonts.outfit(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
@@ -51,7 +57,7 @@ class _OnboardingContactsScreenState
               ),
               const SizedBox(height: 8),
               Text(
-                'Add trusted contacts to be notified during SOS emergencies',
+                _t('onb_contacts_subtitle'),
                 style: GoogleFonts.inter(color: AppColors.textDim, fontSize: 13),
               ),
               const SizedBox(height: 24),
@@ -59,7 +65,7 @@ class _OnboardingContactsScreenState
                 controller: _nameCtrl,
                 style: GoogleFonts.inter(color: AppColors.onBackground),
                 decoration: InputDecoration(
-                  labelText: 'Contact Name',
+                  labelText: _t('onb_contacts_name'),
                   labelStyle: GoogleFonts.inter(color: AppColors.textDim),
                   filled: true,
                   fillColor: AppColors.surfaceContainer,
@@ -73,7 +79,7 @@ class _OnboardingContactsScreenState
                 controller: _phoneCtrl,
                 style: GoogleFonts.inter(color: AppColors.onBackground),
                 decoration: InputDecoration(
-                  labelText: 'Contact Phone Number',
+                  labelText: _t('onb_contacts_phone'),
                   labelStyle: GoogleFonts.inter(color: AppColors.textDim),
                   filled: true,
                   fillColor: AppColors.surfaceContainer,
@@ -118,10 +124,9 @@ class _OnboardingContactsScreenState
                           debugPrint('[ONBOARD_CONTACTS_ERR] $e');
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
+                              SnackBar(
                                 content: Text(
-                                  'YOUR CONTACT DID NOT SAVE. CHECK YOUR '
-                                  'CONNECTION AND TRY AGAIN.',
+                                  _t('onb_contacts_not_saved'),
                                 ),
                                 backgroundColor: AppColors.danger,
                               ),
@@ -152,7 +157,7 @@ class _OnboardingContactsScreenState
                   ),
                   child: Text(
                     // It proceeds to the emergency PIN step, not the map.
-                    'SAVE & CONTINUE',
+                    _t('onb_contacts_save'),
                     style: GoogleFonts.outfit(
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
