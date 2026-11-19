@@ -11977,3 +11977,139 @@ Six mutations caught: the fetch losing its bound, the watchdog armed only in
 the constructor, the failure path no longer consulting the record, either
 sign-out path forgetting to forget, the record no longer scoped to an account,
 and the router no longer holding on `isLoading`.
+
+---
+
+### T-101. T-94 reached the right verdict with a rule that rejects most of Plateau
+
+T-94 deactivated three seeded shelters for sitting outside the LGA their own row
+claims. That verdict is correct — confirmed below against an independent
+dataset. The rule it was reached with is not, and the number it was reported
+with was the wrong measurement.
+
+#### The rule covered 42% of the state
+
+`check_a_shelter_is_where_it_says.py` asked whether a position fell within the
+radius of the nearest ward centroid of the LGA it claimed. Those radii are half
+the distance to the nearest neighbouring centroid, median 3.5km, clamped to
+[800m, 25km] — and discs do not tile a plane.
+
+Sampling 400 points inside each of the 17 ADM2 polygons — real territory, every
+point correctly placed by the app's own rule — the centroid rule rejects
+**57.7% of them**: 78% of Jos North, 70% of Barkin Ladi, 66% of Jos South. A
+correctly sited shelter added to the seed would have failed CI more often than
+it passed. One sampled point 2.21km from `ALI KAZAURE` (r=800m), in the middle
+of Jos, is rejected by it.
+
+So the three it caught were caught by a check that also rejects most of the
+places a real shelter would be. It was right about them the way a stopped clock
+is right: the positions were bad, and the rule could not have told the
+difference.
+
+#### "11km" measured the wrong thing
+
+T-94's heading says the shelter is *11km away, in another LGA*, from
+`11.24 km from the nearest JOS SOUTH ward centroid`. That is a distance to the
+**middle of a ward**, and the median gap between neighbouring centroids
+statewide is 6.84km with the 90th percentile at 11.55km — so 11km is ordinary
+centroid spacing, not displacement.
+
+By boundary, `JOS SOUTH COMMAND HQ` is **under 900m outside Jos South**. It is
+in the wrong LGA, which is the finding, and it is not eleven kilometres adrift,
+which is what the wording implied. `MANGU COMMAND POST` is ~5km outside Mangu;
+`JOS EAST TACTICAL OUTPOST`, which T-94 called "marginal, 635m outside", is in
+Jos North outright — the boundary is harsher on that one than the centroids
+were.
+
+#### Two rules for one question
+
+`lib/core/geo/jurisdiction_resolver.dart` already decides an incident's LGA by
+point-in-polygon against `assets/geo/plateau_boundaries.json`, and resolves the
+*ward* by nearest centroid — the approximation is confined to the question the
+data can answer. The gate used centroids for **both**. So an incident and a
+shelter at the same coordinates were judged by different rules that disagree
+across most of the state.
+
+That is T-90's role spelling, T-95's ward suffix and T-97's four role arrays
+again: one rule written twice, in two places, drifting apart. The ward centroids
+were never the authority on LGA membership — `plateau_wards.json` says so in its
+own `note` field, "a point resolves to the NEAREST ward centroid within its LGA
+polygon, which is an approximation, not a boundary test" — and the gate used
+them as one anyway.
+
+#### What changed
+
+The gate now asks the boundary question with the boundary data, the way the app
+does. Ward centroids are still read, but only to **name** the nearest ward in a
+message; they never decide a verdict. The seed and its three deactivations are
+untouched, because the verdict does not change:
+
+    JOS SOUTH COMMAND HQ       claims JOS SOUTH  -> Jos North
+    JOS EAST TACTICAL OUTPOST  claims JOS EAST   -> Jos North
+    MANGU COMMAND POST         claims MANGU      -> Barkin Ladi
+
+and the other four pass.
+
+#### The guard that matters
+
+The gate asserts that `jurisdiction_resolver.dart` still reads
+`plateau_boundaries.json`. If the app stops deciding an LGA by the boundary,
+this check is enforcing something the product no longer does, and it fails
+saying so rather than passing quietly — the T-100 lesson, a gate checking its
+own premise.
+
+No property test was added over sampled points: sampling points *inside* a
+polygon and then asking the boundary test about them is true by construction. It
+would have passed on the day it was written and told us nothing, which is the
+defect three earlier gates in this report shipped with.
+
+Six mutations caught: a correctly placed shelter moved into the wrong LGA, a
+wrongly placed one dropped from the deactivation list, a correctly placed one
+added to it, the boundary file's coordinates flipped to [lat,lng], the polygon
+set truncated, and the app's resolver no longer reading the boundary asset.
+
+#### The console, which is the half a person sees
+
+`wardDisagreement()` in `hq-dashboard-next/src/lib/safe-zones.ts` had the same
+defect and it mattered more: it is wired into `SafeZonesPanel` twice — a live
+warning as a commander types a position, and a flag against every stored row. So
+on the screen built so command could correct the three bad shelters, it warned
+them off correct positions 78% of the time in Jos North.
+
+It could not ask the boundary question because the console had no polygons at
+build time; `LiveMap` fetches `/plateau_boundaries.json` at runtime, which is
+fine for drawing and no use to a function that must answer during render. So
+`scripts/sync_lga_boundaries.py` now generates
+`hq-dashboard-next/src/lib/lga_boundaries.ts` from the app's asset, the way
+`sync_ward_centroids.py` generates `ward_centroids.ts`, with its own CI parity
+step.
+
+Vertices are rounded to 5 decimal places — about 1.1m, against a source that is
+nowhere near metre-accurate — which takes 83KB of coordinates to 41KB, 13KB
+gzipped in the client bundle. Rounding a boundary can move a point across it, so
+the generator does not take that on trust: all 207 ward centroids and all seven
+stored shelters are resolved against both the raw asset and the rounded output,
+and any disagreement fails the build. Precision is a size decision and is not
+allowed to become a correctness one.
+
+`nearestLgaTo()` is deleted. It answered "which LGA is this?" from centroids,
+and leaving it beside the boundary version is how this defect comes back.
+
+**The hole branch had no test and nothing caught that.** Plateau's 17 polygons
+have no interior rings, so a test over the real asset runs that branch zero
+times — deleting hole handling entirely passed the whole suite. The Dart
+resolver honours holes, so dropping it would have made the console and the app
+disagree the day the boundary file gained one. `lgaContainingIn()` takes a
+boundary list so the branch can be exercised against a shape that has one. This
+is the fourth time in this report that a check was found reading a subset of its
+subject, and the first time it was my own new code, found by mutating it rather
+than by reasoning about it.
+
+#### Not fixed here
+
+13 of the 207 ward centroids are themselves misplaced — 11 inside a different
+LGA's polygon, 2 inside none — because the ward list and the boundary map come
+from different datasets. None of them is one the shelter verdicts rest on
+(`GIRING`, `KADUNU` and `SHERE WEST` all sit inside their own LGA), and the new
+rule does not consult centroids for LGA membership at all, so this check is no
+longer exposed to it. Reconciling the two datasets is a separate job.
