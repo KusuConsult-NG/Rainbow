@@ -194,6 +194,18 @@ jobs:
       - name: Assert the console's ward centroids match the app's
         run: python3 scripts/sync_ward_centroids.py --check
 
+      # The console decides whether a shelter is in the LGA it claims, as a
+      # commander types it. It used to answer that with ward centroids, which
+      # rejects 57.7% of real Plateau — so the screen built to correct three bad
+      # shelters warned against correct positions more often than not (T-101).
+      # It now asks the boundary question with the boundary polygons, the same
+      # ones jurisdiction_resolver.dart resolves an incident by. Drift means the
+      # console and the app disagree about where a place is. The generator also
+      # proves its rounding moves no ward centroid or stored shelter across a
+      # boundary, so this step fails on that too.
+      - name: Assert the console's LGA boundaries match the app's
+        run: python3 scripts/sync_lga_boundaries.py --check
+
       # Three call sites sent the SAME OneSignal credential under two different
       # schemes — Basic twice, Key once — so at least one had never
       # authenticated, and the one most likely to be broken reported

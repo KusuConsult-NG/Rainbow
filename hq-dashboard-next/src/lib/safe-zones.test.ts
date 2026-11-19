@@ -4,7 +4,6 @@ vi.mock('./supabase', () => ({ supabase: {} }));
 
 import {
   knownLgas,
-  nearestLgaTo,
   nearestWardIn,
   wardDisagreement,
 } from './safe-zones';
@@ -21,15 +20,18 @@ import {
  */
 describe('wardDisagreement', () => {
   it.each([
-    ['JOS SOUTH COMMAND HQ', 9.8965, 8.8583, 'JOS SOUTH'],
-    ['MANGU COMMAND POST', 9.7167, 9.05, 'MANGU'],
-    ['JOS EAST TACTICAL OUTPOST', 9.95, 8.96, 'JOS EAST'],
-  ])('rejects %s, which is outside every ward of the LGA it claims', (
-    _name, lat, lng, lga,
+    ['JOS SOUTH COMMAND HQ', 9.8965, 8.8583, 'JOS SOUTH', 'Jos North'],
+    ['MANGU COMMAND POST', 9.7167, 9.05, 'MANGU', 'Barkin Ladi'],
+    ['JOS EAST TACTICAL OUTPOST', 9.95, 8.96, 'JOS EAST', 'Jos North'],
+  ])('rejects %s, which is inside a different LGA', (
+    _name, lat, lng, lga, actually,
   ) => {
     const problem = wardDisagreement(lat as number, lng as number, lga as string);
     expect(problem?.kind).toBe('outside-lga');
-    expect(problem?.message).toMatch(/outside it/);
+    // Naming where it REALLY is, is the whole value of the warning: it tells an
+    // operator they picked the wrong LGA rather than mistyped a digit.
+    expect(problem?.message).toContain(actually as string);
+    expect(problem?.message).toContain(lga as string);
   });
 
   it.each([
@@ -68,6 +70,41 @@ describe('wardDisagreement', () => {
   it('passes a non-finite coordinate to the form to complain about', () => {
     expect(wardDisagreement(Number.NaN, 8.8921, 'JOS NORTH')).toBeNull();
   });
+
+  /**
+   * The regression this module was rewritten for.
+   *
+   * 9.9543, 8.8971 is 5.83km inside Jos North — not a marginal position — and
+   * 2.21km from the nearest Jos North ward centroid, ALI KAZAURE, whose radius
+   * is 800m. The old centroid rule therefore called it "1.4km outside JOS
+   * NORTH" and said so to whoever was typing it in.
+   *
+   * It is not one awkward point. Sampling 400 positions inside each of the 17
+   * LGA polygons, the centroid rule rejects 57.7% of them — 78% of Jos North.
+   * A commander correcting a shelter was warned off correct positions more
+   * often than not, on the screen built for exactly that. See T-101.
+   */
+  it('accepts a correct position that the old centroid rule rejected', () => {
+    expect(wardDisagreement(9.9543, 8.8971, 'JOS NORTH')).toBeNull();
+  });
+
+  /**
+   * Inside the state, inside no polygon.
+   *
+   * 9.742695, 9.946832 is the surveyed centroid of KANAM/DUGUB — a real ward of
+   * a real LGA — and it falls inside no LGA boundary, because the ward list and
+   * the ADM2 map come from different datasets. KANKE/NEMEL is the same. So this
+   * is not a hypothetical sliver; it is where two of the 207 wards actually sit.
+   *
+   * It must warn and not block: refusing would make it impossible to enter a
+   * shelter in a place the boundary data has a hole over.
+   */
+  it('warns rather than blocks when a position is in no LGA at all', () => {
+    const problem = wardDisagreement(9.742695, 9.946832, 'KANAM');
+    expect(problem).not.toBeNull();
+    expect(problem?.kind).toBe('outside-lga');
+    expect(problem?.message).toMatch(/not inside any LGA boundary/);
+  });
 });
 
 describe('the surveyed geography it reads', () => {
@@ -76,14 +113,6 @@ describe('the surveyed geography it reads', () => {
     expect(lgas).toHaveLength(17);
     expect(lgas).toContain('JOS SOUTH');
     expect(lgas).toContain("QUA'AN PAN");
-  });
-
-  // The message for a wrong LGA names where the position actually is, which is
-  // the whole value of it: "it looks like JOS NORTH" is what tells an operator
-  // they picked the wrong LGA rather than mistyped a digit.
-  it('names the LGA a position actually falls in', () => {
-    expect(nearestLgaTo(9.8965, 8.8583)).toBe('JOS NORTH');
-    expect(nearestLgaTo(9.7167, 9.05)).toBe('BARKIN LADI');
   });
 
   it('pre-fills the nearest ward within the chosen LGA', () => {

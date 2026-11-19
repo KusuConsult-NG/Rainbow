@@ -17,27 +17,65 @@ looks like from outside.
 `verified_at`, so the row has to say whether anybody stood there. That is the
 honesty requirement, and it is not the same as being right.
 
-This is the correctness one, and it is answerable. The repository already holds
-207 SURVEYED ward centroids with an honest radius each
-(`hq-dashboard-next/src/lib/ward_centroids.ts`, generated from the app's own
-ward asset and kept in parity by its own CI step). Measured against the LGA each
-shelter row claims, three of the seven were outside every ward of it:
+## The rule this check used to apply, and why it was replaced
 
-    JOS SOUTH COMMAND HQ       11.24 km from JOS SOUTH/GIRING (r=1.7km)
-    MANGU COMMAND POST          9.69 km from MANGU/KADUNU     (r=4.2km)
-    JOS EAST TACTICAL OUTPOST   4.59 km from JOS EAST/SHERE WEST (r=4.0km)
+T-94 asked whether a shelter is inside the LGA it claims, and answered it with
+the 207 surveyed ward centroids: a position passed if it fell within the radius
+of the nearest centroid of that LGA. It reached the right verdict on all seven
+seeded rows — but the rule itself does not work.
 
-A citizen in Jos South, fleeing, was given turn directions to a point eleven
-kilometres away in Jos North, labelled as the Jos South command HQ.
+Those radii are half the distance to the nearest neighbouring centroid, median
+3.5km, and discs do not tile a plane. Sampling 400 points inside each of the 17
+LGA polygons — real territory, every point correctly placed by the app's own
+rule — the centroid rule rejects **57.7% of them**: 78% of Jos North, 70% of
+Barkin Ladi, 66% of Jos South. A correctly sited shelter added to the seed would
+have failed this check more often than it passed.
+
+It also made the fault sound larger than it is. "11.24km from the nearest JOS
+SOUTH ward centroid" is a distance to the middle of a ward, and the median gap
+between neighbouring centroids statewide is 6.84km — so 11km is ordinary
+spacing, not displacement. `JOS SOUTH COMMAND HQ` is under 900m outside Jos
+South's boundary. It is in the wrong LGA, which is the finding; it is not eleven
+kilometres adrift, which is what the old wording implied.
+
+## The rule now
+
+`assets/geo/plateau_boundaries.json` holds the 17 real ADM2 polygons, and
+point-in-polygon against them is a boundary test with no approximation in it.
+That is already how `lib/core/geo/jurisdiction_resolver.dart` decides an
+incident's LGA, so a shelter and an incident are now judged by one rule instead
+of two that disagree across most of the state.
+
+`wardDisagreement()` in `hq-dashboard-next/src/lib/safe-zones.ts` asks it the
+same way, so a commander typing a position into `SafeZonesPanel` is judged by
+the rule that judges the seed and the rule that judges an incident. It got the
+polygons through `scripts/sync_lga_boundaries.py`, which generates
+`lga_boundaries.ts` the way `sync_ward_centroids.py` generates
+`ward_centroids.ts`, with its own CI parity step.
+
+All three sites are asserted below, so this check fails rather than drifts.
+
+Ward centroids are still read, but only to NAME the nearest ward in the output,
+never to decide pass or fail. Naming a ward from a centroid is an approximation
+the app makes too, and it is fine for a message; it was never fit to carry a
+verdict.
+
+The three seeded rows T-94 deactivated fail the boundary test as well, each in a
+different LGA from the one it claims:
+
+    JOS SOUTH COMMAND HQ       claims JOS SOUTH  -> Jos North
+    JOS EAST TACTICAL OUTPOST  claims JOS EAST   -> Jos North
+    MANGU COMMAND POST         claims MANGU      -> Barkin Ladi
+
+and the other four pass. The verdict is unchanged; the reasoning behind it is
+now sound.
 
 ## What this checks
 
-Every shelter this repository stores falls within a surveyed ward of the LGA its
-row names — or is explicitly deactivated, so the citizen app never routes to it.
-The radius used is that ward centroid's own, which is half the distance to its
-nearest neighbour in the same LGA, clamped to [800m, 25km]: a ward in Jos North
-is a few streets and one in Wase is a large piece of countryside, and a single
-tolerance would flatter the first and lie about the second.
+Every shelter this repository stores sits inside the LGA polygon its row names —
+or is explicitly deactivated, so the citizen app never routes to it. Both
+directions are enforced: a position that is right must not be hidden, and a
+position that is wrong must not be shown.
 
 This cannot check what `publish_safe_zone()` stores at runtime — only what is in
 the repository. That is what `verified_by` is for: the database cannot know
@@ -54,6 +92,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SEED = REPO / 'supabase/migrations/20261030000000_a_shelter_says_who_stood_there.sql'
 CENTROIDS = REPO / 'hq-dashboard-next/src/lib/ward_centroids.ts'
+BOUNDARIES = REPO / 'assets/geo/plateau_boundaries.json'
+RESOLVER = REPO / 'lib/core/geo/jurisdiction_resolver.dart'
+CONSOLE_RULE = REPO / 'hq-dashboard-next/src/lib/safe-zones.ts'
 
 # ('NAME', 'description', lat, lon, 'TYPE', 'LGA', NULL)
 ROW = re.compile(
@@ -66,6 +107,16 @@ HIDDEN = re.compile(
 faults: list[str] = []
 
 
+def key(name: str) -> str:
+    """LGA names across the three assets differ only in case and punctuation.
+
+    "Qua'an Pan" in the boundary file is "QUA'AN PAN" in the ward data and
+    "QUAAN PAN" if somebody types it. Parity between the assets is asserted
+    below, so this cannot quietly paper over a genuinely different name.
+    """
+    return name.upper().replace("'", '').replace('-', ' ').replace('  ', ' ').strip()
+
+
 def haversine_km(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float:
     r = 6371.0088
     p1, p2 = math.radians(a_lat), math.radians(b_lat)
@@ -73,6 +124,37 @@ def haversine_km(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> floa
     h = (math.sin(dp / 2) ** 2
          + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2)
     return 2 * r * math.asin(math.sqrt(h))
+
+
+def parts(feature: dict) -> list[tuple[list, list]]:
+    """[(outer_ring, [hole, ...]), ...] for Polygon and MultiPolygon alike."""
+    geom = feature['geometry']
+    polys = ([geom['coordinates']] if geom['type'] == 'Polygon'
+             else geom['coordinates'])
+    return [(p[0], p[1:]) for p in polys]
+
+
+def in_ring(lng: float, lat: float, ring: list) -> bool:
+    """Even-odd point-in-polygon, as `jurisdiction_resolver.dart` does it."""
+    hit = False
+    n = len(ring)
+    for i in range(n):
+        x1, y1 = ring[i][0], ring[i][1]
+        x2, y2 = ring[(i + 1) % n][0], ring[(i + 1) % n][1]
+        if (y1 > lat) != (y2 > lat):
+            if lng < (x2 - x1) * (lat - y1) / (y2 - y1) + x1:
+                hit = not hit
+    return hit
+
+
+def lga_containing(lat: float, lng: float, features: list) -> str | None:
+    """The LGA whose polygon contains this point, holes honoured."""
+    for f in features:
+        for outer, holes in parts(f):
+            if in_ring(lng, lat, outer) and not any(
+                    in_ring(lng, lat, h) for h in holes):
+                return f['properties']['lga']
+    return None
 
 
 def load_centroids() -> list[dict]:
@@ -86,15 +168,74 @@ def load_centroids() -> list[dict]:
     return json.loads(body[:body.rindex(']') + 1])
 
 
-for path in (SEED, CENTROIDS):
+for path in (SEED, CENTROIDS, BOUNDARIES, RESOLVER, CONSOLE_RULE):
     if not path.is_file():
         raise SystemExit(f'✗ {path.relative_to(REPO)} is missing')
 
+features = json.load(BOUNDARIES.open(encoding='utf-8'))['features']
 centroids = load_centroids()
+
+# ── Guards, so this cannot pass by reading nothing ──────────────────────────
 if len(centroids) < 100:
     raise SystemExit(
-        f'✗ only {len(centroids)} ward centroids read; this check compares '
-        f'against surveyed geography and a short list would pass everything.')
+        f'✗ only {len(centroids)} ward centroids read; this check names wards '
+        f'from them and a short list would mislabel every shelter.')
+if len(features) < 17:
+    raise SystemExit(
+        f'✗ only {len(features)} LGA polygons read from '
+        f'{BOUNDARIES.relative_to(REPO)}; Plateau has 17, and a short list '
+        f'would put real shelters outside every boundary.')
+
+# The boundary file is GeoJSON, so vertices are [lng, lat]. Plateau spans
+# 8.3-10.4 N and 8.5-10.6 E — the ranges overlap, so a flipped file would not
+# look obviously wrong, it would just move every shelter. The ward centroids
+# are the independent witness: nearly all of them must land inside some
+# polygon. They do (205 of 207; the 13 that do not are ward-data drift, not a
+# coordinate-order fault). If somebody flips the order or replaces the polygons
+# with bounding boxes, this collapses.
+landed = sum(1 for c in centroids
+             if lga_containing(c['lat'], c['lng'], features) is not None)
+if landed < 0.9 * len(centroids):
+    raise SystemExit(
+        f'✗ only {landed} of {len(centroids)} surveyed ward centroids fall '
+        f'inside any LGA polygon. Either {BOUNDARIES.relative_to(REPO)} has '
+        f'its coordinates the wrong way round ([lat,lng] instead of GeoJSON '
+        f'[lng,lat]), or the polygons are no longer the real boundaries. '
+        f'Every verdict below would be meaningless.')
+
+# The two assets must name the same 17 places, or `key()` is hiding a rename.
+poly_lgas = {key(f['properties']['lga']) for f in features}
+ward_lgas = {key(c['lga']) for c in centroids}
+if poly_lgas != ward_lgas:
+    raise SystemExit(
+        f'✗ the LGA names in {BOUNDARIES.relative_to(REPO)} and '
+        f'{CENTROIDS.relative_to(REPO)} disagree.\n'
+        f'   only in boundaries: {sorted(poly_lgas - ward_lgas)}\n'
+        f'   only in ward data : {sorted(ward_lgas - poly_lgas)}')
+
+# One rule, not two. If the app stops deciding an incident's LGA by the
+# boundary, a shelter and an incident are judged differently again — which is
+# the defect this rewrite exists to close.
+resolver = RESOLVER.read_text(encoding='utf-8')
+if 'plateau_boundaries.json' not in resolver:
+    raise SystemExit(
+        f'✗ {RESOLVER.relative_to(REPO)} no longer reads '
+        f'plateau_boundaries.json. This check judges a shelter by the LGA '
+        f'boundary because that is how the app judges an incident. If the app '
+        f'has changed rule, the two have diverged and this check is enforcing '
+        f'something the product no longer does.')
+
+# ...and the console, which is where a commander actually enters a position.
+# A revert there is the one that reaches a person, so it is named here rather
+# than left to the TypeScript tests alone.
+console = CONSOLE_RULE.read_text(encoding='utf-8')
+if 'lgaContaining' not in console or './lga-boundaries' not in console:
+    raise SystemExit(
+        f'✗ {CONSOLE_RULE.relative_to(REPO)} no longer resolves an LGA through '
+        f'lga-boundaries. `wardDisagreement()` warns a commander as they type a '
+        f'shelter position; if it has gone back to ward centroids it rejects '
+        f'57.7% of real Plateau and 78% of Jos North, on the screen built to '
+        f'correct the three bad shelters. See E2E_AUDIT_REPORT.md T-101.')
 
 seed = SEED.read_text(encoding='utf-8')
 insert = seed[seed.index('INSERT INTO public.safe_zones'):]
@@ -111,38 +252,47 @@ hidden = {name for name, _, _ in HIDDEN.findall(deactivation)}
 
 by_lga: dict[str, list[dict]] = {}
 for c in centroids:
-    by_lga.setdefault(c['lga'].upper(), []).append(c)
+    by_lga.setdefault(key(c['lga']), []).append(c)
 
-checked = 0
+
+def nearest_ward(lat: float, lng: float, lga: str) -> str:
+    """Only ever used to name a place in a message, never to decide."""
+    wards = by_lga.get(key(lga), [])
+    if not wards:
+        return '?'
+    near = min(wards, key=lambda w: haversine_km(lat, lng, w['lat'], w['lng']))
+    return near['ward']
+
+
+rows, checked = [], 0
 for name, lat_s, lon_s, lga in shelters:
     lat, lon = float(lat_s), float(lon_s)
-    wards = by_lga.get(lga.upper())
-    if not wards:
+    if key(lga) not in poly_lgas:
         faults.append(
             f'{name} claims LGA {lga!r}, which is not one of the '
-            f'{len(by_lga)} LGAs in the surveyed ward data. Either the name is '
-            f'wrong or the geography is, and the citizen app scopes shelters '
-            f'by this field.')
+            f'{len(poly_lgas)} LGAs of Plateau. Either the name is wrong or '
+            f'the geography is, and the citizen app scopes shelters by this '
+            f'field.')
         continue
     checked += 1
-    near = min(wards, key=lambda w: haversine_km(lat, lon, w['lat'], w['lng']))
-    km = haversine_km(lat, lon, near['lat'], near['lng'])
-    inside = km * 1000 <= near['radiusM']
-    if inside and name in hidden:
+    actual = lga_containing(lat, lon, features)
+    agrees = actual is not None and key(actual) == key(lga)
+    rows.append((name, lga, actual, agrees))
+
+    if agrees and name in hidden:
         faults.append(
-            f'{name} is inside {lga}/{near["ward"]} '
-            f'({km:.2f} km, r={near["radiusM"] / 1000:.1f} km) and is still in '
-            f'the deactivation list. A shelter that is where it says it is '
-            f'should be shown; hiding it leaves a citizen with one fewer place '
-            f'to run to for no reason.')
-    elif not inside and name not in hidden:
+            f'{name} is inside {lga} — the boundary agrees with its own row — '
+            f'and is still in the deactivation list. A shelter that is where '
+            f'it says it is should be shown; hiding it leaves a citizen with '
+            f'one fewer place to run to for no reason.')
+    elif not agrees and name not in hidden:
+        where = (f'is in {actual}' if actual
+                 else 'is outside every LGA of Plateau')
         faults.append(
-            f'{name} is {km:.2f} km from the nearest surveyed ward of the LGA '
-            f'it claims ({lga}/{near["ward"]}, r={near["radiusM"] / 1000:.1f} '
-            f'km) — {km * 1000 - near["radiusM"]:.0f} m outside it. The citizen '
-            f'screen routes a fleeing person to the nearest shelter, so this '
-            f'sends them somewhere its own row says it is not. Either correct '
-            f'the position or add it to the deactivation list with a reason.')
+            f'{name} claims {lga} but {where}. The citizen screen routes a '
+            f'fleeing person to the nearest shelter, so this sends them to a '
+            f'place its own row says it is not. Either correct the position '
+            f'or add it to the deactivation list with a reason.')
 
 for name in sorted(hidden):
     if name not in {s[0] for s in shelters}:
@@ -157,17 +307,16 @@ if faults:
     print('See E2E_AUDIT_REPORT.md T-94.')
     sys.exit(1)
 
-print(f'OK: {checked} stored shelter(s) checked against {len(centroids)} '
-      f'surveyed ward centroids.')
-print(f'  * {checked - len(hidden)} inside a surveyed ward of the LGA they claim')
-print(f'  * {len(hidden)} outside one, and deactivated so no citizen is routed '
-      f'to them')
-for name, lat_s, lon_s, lga in shelters:
-    wards = by_lga.get(lga.upper(), [])
-    if not wards:
-        continue
-    near = min(wards, key=lambda w: haversine_km(
-        float(lat_s), float(lon_s), w['lat'], w['lng']))
-    km = haversine_km(float(lat_s), float(lon_s), near['lat'], near['lng'])
+print(f'OK: {checked} stored shelter(s) checked against {len(features)} LGA '
+      f'boundary polygons.')
+print(f'  * {checked - len(hidden)} inside the LGA they claim')
+print(f'  * {len(hidden)} in a different one, and deactivated so no citizen is '
+      f'routed to them')
+for name, lga, actual, agrees in rows:
     mark = 'hidden ' if name in hidden else 'shown  '
-    print(f'  {mark} {name:28} {km:5.2f} km from {lga}/{near["ward"]}')
+    ward = nearest_ward(
+        *[float(s) for s in next((la, lo) for n, la, lo, _ in shelters
+                                 if n == name)], lga)
+    seen = actual or 'OUTSIDE PLATEAU'
+    note = f'{lga}/{ward}' if agrees else f'claims {lga}, is in {seen}'
+    print(f'  {mark} {name:28} {note}')
