@@ -16,8 +16,10 @@ class Jurisdiction {
   /// Always null from coordinates. See [JurisdictionResolver] for why.
   final String? pu;
 
-  /// How this was arrived at: 'GPS', 'PROFILE', 'MANUAL' or 'UNRESOLVED'.
-  /// Carried so a reader can tell a measured jurisdiction from an assumed one.
+  /// How this was arrived at: 'GPS', 'GPS_WARD_REGISTER', 'PROFILE', 'MANUAL'
+  /// or 'UNRESOLVED'. Carried so a reader can tell a measured jurisdiction
+  /// from an assumed one — and, for 'GPS_WARD_REGISTER', one the two
+  /// geography datasets had to be reconciled for. See [JurisdictionResolver].
   final String source;
 
   bool get isResolved => lga != null;
@@ -50,6 +52,42 @@ class Jurisdiction {
 ///   wrong near a boundary between two wards of very different size. That
 ///   error is stated rather than hidden, and `source` records it.
 ///
+/// * **A seam between two polygons — the ward register answers.** The ADM2
+///   polygons and the ward centroids are independently published datasets and
+///   they do not quite agree. 1.5% of inhabited Plateau falls inside NO LGA
+///   polygon while sitting between two or more of them: a hairline gap where
+///   neighbouring boundaries fail to meet. Two real ward centroids land in
+///   one, KANAM/DUGUB and KANKE/NEMEL. An incident there used to resolve to
+///   nothing at all — no LGA, no ward, no tier — which is the failure this
+///   class exists to end, arriving by a different route.
+///
+///   The ward register is authoritative for which LGA a ward belongs to; the
+///   polygons are authoritative for which LGA a point is in. So when no
+///   polygon owns the point and the point is inside the state's extent, the
+///   nearest ward centroid's REGISTERED lga is used, and the jurisdiction's
+///   `source` says 'GPS_WARD_REGISTER' so it is never mistaken for a boundary
+///   hit. Outside the extent nothing is returned, because the nearest Plateau
+///   ward to a point in Kaduna is not an answer.
+///
+///   The extent is a rectangle, so it holds some ground that is not Plateau:
+///   the corners, and a fringe along the border. A report from just outside
+///   the state therefore now resolves to the nearest Plateau LGA where it used
+///   to resolve to nothing. That is deliberate. This is Plateau's emergency
+///   service: sending a near-border report to the nearest Plateau command is a
+///   better failure than sending it nowhere, and 'GPS_WARD_REGISTER' tells HQ
+///   the boundary did not actually place it. Measured over sampled ground
+///   within 8km of a ward centroid, 1.5% is interior seam and 3.9% is that
+///   fringe.
+///
+/// * **No radius bound on the ward.** An earlier design bounded the ward by
+///   its centroid's radius — half the distance to its nearest neighbour — and
+///   returned no ward beyond it. That was wrong. Wards TILE an LGA, so the
+///   nearest centroid IS the Voronoi assignment and a ward's real extent runs
+///   past that radius in every direction but one. Measured over 5,100 sampled
+///   points inside their own LGA, the bound would have blanked the ward for
+///   57.4% of them, discarding correct answers. The radius is for DRAWING an
+///   area; it was never a membership test.
+///
 /// * **Polling unit — never.** No open dataset gives polling-unit
 ///   coordinates. INEC's hierarchy lists every unit with a name and a code
 ///   and no position; the geocoded sets that exist are per-state research
@@ -70,6 +108,15 @@ class JurisdictionResolver {
 
   /// lga name -> [(ward, lat, lng)]
   final Map<String, List<_WardPoint>> _wards = {};
+
+  /// The state's extent, DERIVED from the loaded polygons rather than written
+  /// down. It decides whether a point that no polygon owns is in a seam
+  /// between LGAs or simply somewhere else, and a literal here would be one
+  /// more number nobody measured.
+  double _minLat = double.infinity;
+  double _maxLat = double.negativeInfinity;
+  double _minLng = double.infinity;
+  double _maxLng = double.negativeInfinity;
 
   bool _loaded = false;
 
@@ -94,6 +141,7 @@ class JurisdictionResolver {
                     ))
                 .toList(),
           )));
+    _computeExtent();
     _loaded = true;
   }
 
@@ -137,7 +185,25 @@ class JurisdictionResolver {
           );
     }
 
+    _computeExtent();
     _loaded = true;
+  }
+
+  void _computeExtent() {
+    _minLat = double.infinity;
+    _maxLat = double.negativeInfinity;
+    _minLng = double.infinity;
+    _maxLng = double.negativeInfinity;
+    for (final rings in _polygons.values) {
+      for (final ring in rings) {
+        for (final p in ring) {
+          if (p[1] < _minLat) _minLat = p[1];
+          if (p[1] > _maxLat) _maxLat = p[1];
+          if (p[0] < _minLng) _minLng = p[0];
+          if (p[0] > _maxLng) _maxLng = p[0];
+        }
+      }
+    }
   }
 
   static List<List<double>> _ring(List<dynamic> raw) => raw
@@ -164,9 +230,30 @@ class JurisdictionResolver {
         break;
       }
     }
-    if (lga == null) return Jurisdiction.unresolved;
+    if (lga != null) {
+      return Jurisdiction(
+        lga: lga,
+        ward: _nearestWard(lga, lat, lng),
+        source: 'GPS',
+      );
+    }
 
-    return Jurisdiction(lga: lga, ward: _nearestWard(lga, lat, lng), source: 'GPS');
+    // No polygon owns this point. That is either a seam between two LGAs whose
+    // boundaries fail to meet — 1.5% of inhabited Plateau, where an incident
+    // used to resolve to nothing — or somewhere that is not Plateau at all.
+    // The extent tells them apart, and the ward register answers the first.
+    final beyondExtent =
+        lat < _minLat || lat > _maxLat || lng < _minLng || lng > _maxLng;
+    if (beyondExtent) {
+      return Jurisdiction.unresolved;
+    }
+    final seam = _nearestWardAnywhere(lat, lng);
+    if (seam == null) return Jurisdiction.unresolved;
+    return Jurisdiction(
+      lga: seam.lga,
+      ward: seam.point.ward,
+      source: 'GPS_WARD_REGISTER',
+    );
   }
 
   /// Even-odd point-in-polygon. A point inside a hole of a multi-ring polygon
@@ -205,6 +292,36 @@ class JurisdictionResolver {
     }
     return best;
   }
+
+  /// The nearest ward centroid across EVERY LGA, with the LGA the ward
+  /// register files it under.
+  ///
+  /// Only ever consulted when no polygon owns the point. Searching all wards
+  /// inside a polygon would be wrong: near any LGA border the nearest centroid
+  /// is often across the line, which is ordinary Voronoi behaviour and not a
+  /// reason to overrule a boundary the polygon is sure about.
+  _NearestWard? _nearestWardAnywhere(double lat, double lng) {
+    _NearestWard? best;
+    var bestDist = double.infinity;
+    for (final entry in _wards.entries) {
+      for (final w in entry.value) {
+        final dx = (w.lng - lng) * math.cos(lat * math.pi / 180);
+        final dy = w.lat - lat;
+        final d = dx * dx + dy * dy;
+        if (d < bestDist) {
+          bestDist = d;
+          best = _NearestWard(entry.key, w);
+        }
+      }
+    }
+    return best;
+  }
+}
+
+class _NearestWard {
+  const _NearestWard(this.lga, this.point);
+  final String lga;
+  final _WardPoint point;
 }
 
 class _WardPoint {
