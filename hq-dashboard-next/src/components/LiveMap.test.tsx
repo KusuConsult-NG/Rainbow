@@ -761,4 +761,90 @@ describe('LiveMap', () => {
     );
     expect(() => unmount()).not.toThrow();
   });
+
+  describe('the statewide ward grid', () => {
+    const wase = () =>
+      ({ ...alert('w-1', 0, 0), lat: undefined, lng: undefined, geo_lga: 'WASE', geo_ward: 'BASHAR' }) as unknown as Alert;
+
+    it('draws an incident in Wase, which the old Jos-only squares could not', async () => {
+      const LiveMap = await load();
+      const { container } = render(
+        <LiveMap alerts={[wase()]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" />,
+      );
+      await waitFor(() =>
+        expect(container.querySelectorAll('.leaflet-wardGrid-pane path').length).toBe(1),
+      );
+      expect(container.querySelector('[data-testid="ward-grid-legend"]')?.textContent).toContain(
+        '1 ward with open incidents',
+      );
+    });
+
+    it('sits in its own pane, beneath the incident shapes', async () => {
+      // A ward's circle and an approximate incident's circle share a centre
+      // and a radius; the incident's must be the one a click reaches.
+      const LiveMap = await load();
+      const { container } = render(
+        <LiveMap alerts={[wase()]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" />,
+      );
+      const pane = await waitFor(() => {
+        const p = container.querySelector('.leaflet-wardGrid-pane') as HTMLElement | null;
+        expect(p).not.toBeNull();
+        return p!;
+      });
+      expect(Number(pane.style.zIndex)).toBeLessThan(400); // Leaflet's overlay pane
+      expect(container.querySelectorAll('.leaflet-overlay-pane path').length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('the LAYERS panel', () => {
+    it('says a feed that dropped is DOWN, and the ward grid with it', async () => {
+      const LiveMap = await load();
+      const { container } = render(
+        <LiveMap
+          alerts={[]}
+          agents={[]}
+          onResolve={noop}
+          onEscalate={noop}
+          theme="dark"
+          feeds={{
+            incidents: { kind: 'live', name: 'Incidents', connection: 'DOWN', syncedAt: Date.now() - 600_000 },
+            units: { kind: 'live', name: 'Field units', connection: 'LIVE', syncedAt: Date.now() },
+          }}
+        />,
+      );
+      const panel = await waitFor(() => {
+        const p = container.querySelector('[data-testid="layer-freshness"]');
+        expect(p).not.toBeNull();
+        return p!;
+      });
+      const rows = [...panel.querySelectorAll('[data-state]')].map((r) => [r.textContent, r.getAttribute('data-state')]);
+      expect(rows).toContainEqual(['Incidentslive link lost · showing data from 10 min ago', 'DOWN']);
+      expect(rows).toContainEqual(['Ward gridfrom incidents · live link lost · showing data from 10 min ago', 'DOWN']);
+      expect(rows).toContainEqual(['Field unitslive · last read just now', 'LIVE']);
+    });
+
+    it('never calls a feed live when it was not told', async () => {
+      const LiveMap = await load();
+      const { container } = render(
+        <LiveMap alerts={[]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" />,
+      );
+      const panel = await waitFor(() => container.querySelector('[data-testid="layer-freshness"]')!);
+      const states = [...panel.querySelectorAll('[data-state]')].map((r) => r.getAttribute('data-state'));
+      expect(states).not.toContain('LIVE');
+    });
+
+    it('says the boundary overlay did not load, rather than naming its source', async () => {
+      // fetch is offline in these tests, so the boundaries never arrive.
+      const LiveMap = await load();
+      const { container } = render(
+        <LiveMap alerts={[]} agents={[]} onResolve={noop} onEscalate={noop} theme="dark" />,
+      );
+      await waitFor(() => {
+        const row = [...container.querySelectorAll('[data-testid="layer-freshness"] [data-state]')].find((r) =>
+          r.textContent?.startsWith('LGA boundaries'),
+        );
+        expect(row?.getAttribute('data-state')).toBe('DOWN');
+      });
+    });
+  });
 });

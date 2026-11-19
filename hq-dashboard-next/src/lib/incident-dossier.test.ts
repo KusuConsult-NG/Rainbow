@@ -317,6 +317,22 @@ describe('incidentDetailRows', () => {
   const valueOf = (rows: ReturnType<typeof rowsFor>, label: string) =>
     rows.find((r) => r.label === label)?.value;
 
+  it('says how many independent sources stand behind the incident', () => {
+    const rows = rowsFor({
+      corroboration: { level: 'STRONG', sources: 3, unconfirmedSources: 0, reports: 5, channels: ['APP', 'GUARDIAN'] },
+    });
+    expect(valueOf(rows, 'SOURCES')).toBe(
+      'STRONG · 3 independent sources · 2 channels (APP, GUARDIAN) · 5 reports',
+    );
+  });
+
+  it('reads a single source as unconfirmed, quietly, not as a warning', () => {
+    const rows = rowsFor({
+      corroboration: { level: 'UNCONFIRMED', sources: 1, unconfirmedSources: 0, reports: 1, channels: ['APP'] },
+    });
+    expect(rows.find((r) => r.label === 'SOURCES')?.tone).toBe('muted');
+  });
+
   it('leads with how long the incident has been waiting, unclaimed', () => {
     const rows = rowsFor({ acknowledged_at: null });
     expect(rows[0].label).toBe('RAISED');

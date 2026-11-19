@@ -602,10 +602,10 @@ async function semanticsText(page) {
       // WHICH ADVISORY REACHED THIS PERSON.
       //
       // `SystemAlertListener` wraps every screen, so an advisory addressed to this
-      // role is on the landing screen. Two are seeded: one scoped to NARAGUTA
+      // role is on the landing screen. Two are seeded: one scoped to NARAGUTA 'A'
       // ward, and one legacy row carrying its audience in `target_type` and
-      // addressed to AGENTS. Every fixture person is in NARAGUTA except the ARMY
-      // liaison, who is in PANYAM — so the pair tells the roles apart, and the
+      // addressed to AGENTS. Every fixture person is in NARAGUTA 'A' except the ARMY
+      // liaison, who is in MANGU HALLE — so the pair tells the roles apart, and the
       // assertions below are the only end-to-end check of T-29 outside the widget
       // tests.
       advisoryReport[role] = {
@@ -727,7 +727,7 @@ async function semanticsText(page) {
   // answered them from their own posting.
   //
   // Both fixtures are needed to see it. a005 is handed to the ARMY and sits in
-  // MANGU/PANYAM/PU-11, which is exactly where the Army liaison is posted, so
+  // MANGU/MANGU HALLE/PU-11, which is exactly where the Army liaison is posted, so
   // the old filter admitted it by coincidence. a006 is handed to the POLICE and
   // is in BOKKOS while the Police liaison is posted to JOS NORTH, so only a
   // filter that reads the column can deliver it — and the four incidents handed
@@ -881,8 +881,8 @@ async function semanticsText(page) {
   // calls `broadcastReaches()` now, the same function the HUD uses, and this is
   // the only check of that outside the widget tests.
   //
-  // The seeded advisory is scoped to NARAGUTA, where every fixture person works
-  // except the ARMY liaison, who is in PANYAM. Under the old filter the row —
+  // The seeded advisory is scoped to NARAGUTA 'A', where every fixture person works
+  // except the ARMY liaison, who is in MANGU HALLE. Under the old filter the row —
   // which carries no `target_type` at all, because no writer has ever written
   // one — defaulted to 'ALL' and would have reached the Army too, so this fails
   // on the old code and passes on the new.
@@ -893,15 +893,15 @@ async function semanticsText(page) {
     missedWard.length === 0,
     missedWard.length
       ? `did not reach: ${missedWard.join(', ')}`
-      : `${inWard.length} role(s) in NARAGUTA all saw it`,
+      : `${inWard.length} role(s) in NARAGUTA 'A' all saw it`,
   );
   check(
     'and does not reach the liaison posted to another ward',
     advisoryReport.army ? advisoryReport.army.ward === false : false,
     advisoryReport.army
       ? (advisoryReport.army.ward
-          ? 'the ARMY liaison in PANYAM was shown a NARAGUTA advisory'
-          : 'the ARMY liaison in PANYAM was not shown it')
+          ? "the ARMY liaison in MANGU HALLE was shown a NARAGUTA 'A' advisory"
+          : 'the ARMY liaison in MANGU HALLE was not shown it')
       : 'the ARMY liaison never signed in, so this proves nothing',
   );
 
@@ -911,7 +911,7 @@ async function semanticsText(page) {
   // `broadcastAudience()` falls back to it. That is the one legacy path that is
   // real — the place half of the legacy pair was never written by anything — and
   // it had no end-to-end coverage. The ARMY liaison is a responder outside
-  // NARAGUTA, so the ward advisory does not reach them and this one does, which
+  // NARAGUTA 'A', so the ward advisory does not reach them and this one does, which
   // is what makes the two distinguishable in a one-banner-at-a-time surface.
   check(
     'a legacy advisory addressed by target_type still reaches its audience',

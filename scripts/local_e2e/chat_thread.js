@@ -225,7 +225,7 @@ const HQ_SAYS = 'Acknowledged. Holding the ward team until you confirm.';
       assigned_tier: 'UNIT',
       status: 'DISPATCHED',
       geo_lga: 'JOS NORTH',
-      geo_ward: 'NARAGUTA',
+      geo_ward: "NARAGUTA 'A'",
       latitude: HERE.latitude,
       longitude: HERE.longitude,
     }),

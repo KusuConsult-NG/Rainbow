@@ -1,6 +1,6 @@
 'use client';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 /**
  * The alert shape comes from the ONE place that defines it.
@@ -18,6 +18,9 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
  * rather than a silent `undefined`.
  */
 import type { Alert } from '@/app/dashboard/types';
+import { escapeHtml } from '@/lib/incident-dossier';
+import { freshness, type FreshnessState, type Layer, type LiveLayer } from '@/lib/layer-freshness';
+import { wardGrid, type WardHeat } from '@/lib/ward-grid';
 import {
   incidentPopupHtml,
   isUnacknowledged,
@@ -105,7 +108,48 @@ interface Props {
    */
   incidentTrack?: { lat: number; lng: number }[];
   theme?: 'light' | 'dark';
+  /**
+   * How current the live feeds are, for the LAYERS panel
+   * (lib/layer-freshness.ts). Absent: the panel says the feeds are unknown
+   * rather than calling them live.
+   */
+  feeds?: { incidents: LiveLayer; units: LiveLayer };
 }
+
+/** The ward grid's own map pane, beneath incident shapes. */
+const WARD_GRID_PANE = 'wardGridPane';
+
+/** Where the static layers come from (assets/geo/plateau_wards.json attribution). */
+const BOUNDARY_SOURCE = 'geoBoundaries gbOpen NGA ADM2 (CC BY 4.0)';
+const WARD_SOURCE = 'ward centroids: temikeezy/nigeria-geojson-data (MIT)';
+
+const FRESHNESS_COLOUR: Record<FreshnessState, string> = {
+  LIVE: '#0F6C32',
+  CONNECTING: '#B99123',
+  DOWN: '#B3261E',
+  STATIC: '#757575',
+};
+
+const UNKNOWN_FEED = (name: string): LiveLayer => ({
+  kind: 'live',
+  name,
+  connection: 'CONNECTING',
+  syncedAt: null,
+});
+
+
+/** Ward grid colours: distinct per level (Elevated and Moderate used to share one). */
+const WARD_HEAT_COLOUR: Record<WardHeat, string> = {
+  CRITICAL: '#B3261E',
+  ELEVATED: '#B99123',
+  MODERATE: '#7E6112',
+};
+const WARD_HEAT_OPACITY: Record<WardHeat, number> = { CRITICAL: 0.4, ELEVATED: 0.28, MODERATE: 0.15 };
+const WARD_HEAT_LABEL: Record<WardHeat, string> = {
+  CRITICAL: 'Critical (4+ open incidents)',
+  ELEVATED: 'Elevated (2 to 3)',
+  MODERATE: 'Moderate (1)',
+};
 
 export default function LiveMap({
   alerts,
@@ -116,6 +160,7 @@ export default function LiveMap({
   onOpenDossier,
   incidentTrack,
   theme = 'light',
+  feeds,
 }: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -134,6 +179,8 @@ export default function LiveMap({
     () => false,
   );
   const [showRiskGrid, setShowRiskGrid] = useState(true);
+  // The LGA boundary overlay is fetched at load; the LAYERS panel says if it never came.
+  const [boundariesFailed, setBoundariesFailed] = useState(false);
   const riskGridLayersRef = useRef<any[]>([]);
   const [leafletLoaded, setLeafletLoaded] = useState(false);
   // The analytics HUD is a secondary overlay. At phone width it competes with
@@ -249,6 +296,13 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
       zoomControl: false,
     });
 
+    // The ward grid gets its own pane UNDER the overlay pane (400). A ward's
+    // circle has the same centre and radius as an approximate incident in that
+    // ward, and the grid redraws whenever alerts change: in the overlay pane it
+    // could land on top, and a click meant for the incident's "NO GPS, do not
+    // dispatch" dossier would open the grid's summary instead.
+    map.createPane(WARD_GRID_PANE).style.zIndex = '350';
+
     Leaflet.control.zoom({ position: 'bottomright' }).addTo(map);
 
     const tileLayer = Leaflet.tileLayer(TILE_URL, {
@@ -320,6 +374,7 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
         // from every tab change is how a real one gets ignored.
         if (boundaries.signal.aborted) return;
         console.error('Failed to load boundaries:', err);
+        setBoundariesFailed(true);
       });
 
     mapInstanceRef.current = { map, L: Leaflet };
@@ -372,6 +427,30 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
     };
   }, [leafletLoaded]);
 
+  // Open incidents per ward, statewide; drawn on the map and summed in the legend.
+  const grid = useMemo(() => wardGrid(alerts), [alerts]);
+
+  // THE LAYERS PANEL: how current each layer is (lib/layer-freshness.ts).
+  // `now` ticks so "last read 3 min ago" keeps counting while nothing changes.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(t);
+  }, []);
+  const incidentsFeed = feeds?.incidents ?? UNKNOWN_FEED('Incidents');
+  const layers: Layer[] = [
+    incidentsFeed,
+    { kind: 'derived', name: 'Ward grid', from: incidentsFeed },
+    feeds?.units ?? UNKNOWN_FEED('Field units'),
+    { kind: 'static', name: 'LGA boundaries', source: BOUNDARY_SOURCE, failed: boundariesFailed },
+    { kind: 'static', name: 'Wards', source: WARD_SOURCE },
+    {
+      kind: 'static',
+      name: 'Base map',
+      source: process.env.NEXT_PUBLIC_MAP_TILE_URL ? 'configured tile server' : 'OpenStreetMap tiles (ODbL)',
+    },
+  ];
+
   useEffect(() => {
     if (!mapReady || !mapInstanceRef.current) return;
     const { map, L } = mapInstanceRef.current;
@@ -382,65 +461,37 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
 
     if (!showRiskGrid) return;
 
-    // Jos and Plateau core coordinate bounding box grid (step ~0.04 degrees)
-    const minLat = 9.78;
-    const maxLat = 10.06;
-    const minLng = 8.78;
-    const maxLng = 9.06;
-    const step = 0.04;
-
+    // THE STATEWIDE WARD GRID (lib/ward-grid.ts). It replaced 0.04-degree
+    // squares drawn only over Jos, which an incident in Wase or Bokkos fell
+    // outside of. A cell is a ward, drawn as its centroid's circle.
     const layers: any[] = [];
-    for (let lat = minLat; lat < maxLat; lat += step) {
-      for (let lng = minLng; lng < maxLng; lng += step) {
-        const cellAlerts = alerts.filter(a =>
-          a.lat && a.lng &&
-          a.lat >= lat && a.lat < lat + step &&
-          a.lng >= lng && a.lng < lng + step &&
-          a.status !== 'RESOLVED'
-        );
-
-        if (cellAlerts.length === 0) continue;
-
-        let color = '#7E6112'; // Moderate
-        let riskLabel = 'MODERATE RISK CELL';
-        let opacity = 0.15;
-        if (cellAlerts.length >= 4) {
-          color = '#B3261E'; // Critical
-          riskLabel = 'CRITICAL HOTSPOT CELL';
-          opacity = 0.4;
-        } else if (cellAlerts.length >= 2) {
-          color = '#7E6112'; // Elevated
-          riskLabel = 'ELEVATED RISK CELL';
-          opacity = 0.28;
-        }
-
-        const bounds: [[number, number], [number, number]] = [[lat, lng], [lat + step, lng + step]];
-        const rect = L.rectangle(bounds, {
-          color: color,
-          weight: 1.5,
-          opacity: 0.6,
-          fillColor: color,
-          fillOpacity: opacity
-        });
-
-        rect.bindPopup(`
-          <div style="font-family:var(--font-inter),sans-serif;padding:6px;min-width:165px;color:black;">
-            <strong style="color:${color};font-size:11px;letter-spacing:1px;">${riskLabel}</strong>
-            <hr style="border:0;border-top:1px solid #eee;margin:6px 0;"/>
-            <div style="font-size:10px;color:#555;">
-              <b>Incident Count:</b> ${cellAlerts.length}<br/>
-              <b>Types:</b> ${cellAlerts.map(a => a.type || 'Distress').join(', ')}<br/>
-              <b>Trend:</b> Spatial Hazard Hotspot
-            </div>
+    for (const cell of grid.cells) {
+      const colour = WARD_HEAT_COLOUR[cell.heat];
+      const circle = L.circle([cell.ward.lat, cell.ward.lng], {
+        pane: WARD_GRID_PANE,
+        radius: cell.ward.radiusM,
+        color: colour,
+        weight: 1.5,
+        opacity: 0.7,
+        fillColor: colour,
+        fillOpacity: WARD_HEAT_OPACITY[cell.heat],
+      });
+      circle.bindPopup(`
+        <div style="font-family:var(--font-inter),sans-serif;padding:6px;min-width:180px;color:black;">
+          <strong style="color:${colour};font-size:11px;letter-spacing:1px;">${escapeHtml(cell.ward.ward)} · ${escapeHtml(cell.ward.lga)}</strong>
+          <hr style="border:0;border-top:1px solid #eee;margin:6px 0;"/>
+          <div style="font-size:10px;color:#555;line-height:1.6">
+            <b>Open incidents:</b> ${cell.open} (${cell.heat})<br/>
+            <b>Corroborated:</b> ${cell.corroborated} of ${cell.open} · best ${cell.strongest}<br/>
+            <b>Types:</b> ${cell.types.map(escapeHtml).join(', ')}
           </div>
-        `);
-
-        rect.addTo(map);
-        layers.push(rect);
-      }
+        </div>
+      `);
+      circle.addTo(map);
+      layers.push(circle);
     }
     riskGridLayersRef.current = layers;
-  }, [alerts, showRiskGrid, mapReady]);
+  }, [grid, showRiskGrid, mapReady]);
 
   useEffect(() => {
     if (!mapInstanceRef.current) return;
@@ -1060,7 +1111,7 @@ function drawApproximateArea(
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
           <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '1.5px', color: theme === 'dark' ? '#F7F7F7' : '#1A1A1A' }}>
-            FORECASTING HUD
+            WARD GRID
           </span>
           <button
             onClick={() => setShowRiskGrid(!showRiskGrid)}
@@ -1081,24 +1132,36 @@ function drawApproximateArea(
         </div>
 
         {showRiskGrid && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ fontSize: '9px', color: theme === 'dark' ? '#757575' : '#616161', marginBottom: '4px' }}>
-              SPATIAL-TEMPORAL RISK DENSITY:
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }} data-testid="ward-grid-legend">
+            <div style={{ fontSize: '9px', color: theme === 'dark' ? '#9E9E9E' : '#616161', marginBottom: '4px' }}>
+              OPEN INCIDENTS PER WARD · ALL 207 WARDS · NOW, NOT A FORECAST
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', background: '#B3261E', borderRadius: '3px', opacity: 0.8 }} />
-              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>Critical Hotspot (4+ alerts)</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', background: '#7E6112', borderRadius: '3px', opacity: 0.8 }} />
-              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>Elevated Risk (2-3 alerts)</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', background: '#7E6112', borderRadius: '3px', opacity: 0.8 }} />
-              <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>Moderate Risk (1 alert)</span>
+            {(['CRITICAL', 'ELEVATED', 'MODERATE'] as WardHeat[]).map((heat) => (
+              <div key={heat} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ width: '12px', height: '12px', background: WARD_HEAT_COLOUR[heat], borderRadius: '50%', opacity: 0.85 }} />
+                <span style={{ fontSize: '10px', color: theme === 'dark' ? '#E0E0E0' : '#212121', fontWeight: 600 }}>{WARD_HEAT_LABEL[heat]}</span>
+              </div>
+            ))}
+            <div style={{ fontSize: '9px', color: theme === 'dark' ? '#BDBDBD' : '#616161', marginTop: '4px' }}>
+              {grid.cells.length} ward{grid.cells.length === 1 ? '' : 's'} with open incidents
+              {grid.unplaced > 0 && ` · ${grid.unplaced} open incident${grid.unplaced === 1 ? '' : 's'} with no known ward (on the board, not on the grid)`}
             </div>
           </div>
         )}
+
+        <div data-testid="layer-freshness" style={{ marginTop: '12px', borderTop: theme === 'dark' ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <span style={{ fontSize: '9px', fontWeight: 900, letterSpacing: '1.5px', color: theme === 'dark' ? '#9E9E9E' : '#616161' }}>LAYERS</span>
+          {layers.map((layer) => {
+            const f = freshness(layer, now);
+            return (
+              <div key={layer.name} data-state={f.state} style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: FRESHNESS_COLOUR[f.state], flex: '0 0 8px', alignSelf: 'center' }} />
+                <span style={{ fontSize: '10px', fontWeight: 700, color: theme === 'dark' ? '#E0E0E0' : '#212121', whiteSpace: 'nowrap' }}>{layer.name}</span>
+                <span style={{ fontSize: '9px', color: f.state === 'DOWN' ? FRESHNESS_COLOUR.DOWN : (theme === 'dark' ? '#BDBDBD' : '#616161') }}>{f.text}</span>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
