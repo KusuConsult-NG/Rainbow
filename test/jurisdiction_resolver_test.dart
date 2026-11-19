@@ -88,6 +88,59 @@ void main() {
     });
   });
 
+  // The two geography datasets do not quite agree. 1.5% of inhabited Plateau
+  // sits inside NO LGA polygon while lying between two or more of them — a
+  // hairline seam where neighbouring boundaries fail to meet. Two real ward
+  // centroids land in one, KANAM/DUGUB and KANKE/NEMEL, and an incident there
+  // used to resolve to nothing at all: no LGA, no ward, no tier. That is the
+  // failure this class exists to end, arriving by a different route.
+  //
+  // The synthetic LGAs above are two squares with a gap between them, so the
+  // gap is a seam: inside the extent, inside neither polygon.
+  group('a seam between two polygons', () {
+    test('resolves through the ward register rather than to nothing', () {
+      final j = r.resolve(9.7, 9.04); // between the two squares
+      expect(j.isResolved, isTrue);
+      expect(j.lga, 'MANGU');          // the register's LGA for PANYAM
+      expect(j.ward, 'PANYAM');
+    });
+
+    test('says it came from the register, not from a boundary', () {
+      // A reader must be able to tell a reconciled answer from a measured one.
+      expect(r.resolve(9.7, 9.04).source, 'GPS_WARD_REGISTER');
+      expect(r.resolve(10.05, 8.9).source, 'GPS');
+    });
+
+    test('does not fire for a point a polygon already owns', () {
+      // Inside MANGU, but nearer a JOS NORTH ward in raw distance. The polygon
+      // is sure about this point, so the register is never consulted.
+      final j = r.resolve(9.59, 9.01);
+      expect(j.source, 'GPS');
+      expect(j.lga, 'MANGU');
+    });
+
+    test('still refuses a point beyond the state extent', () {
+      // Outside every polygon AND outside their bounding box: not a seam,
+      // somewhere else. The nearest Plateau ward is not an answer here.
+      final j = r.resolve(10.6, 8.9); // north of the extent
+      expect(j.isResolved, isFalse);
+      expect(j.source, 'UNRESOLVED');
+    });
+  });
+
+  // An earlier design bounded the ward by its centroid's radius and returned
+  // no ward past it. Wards TILE an LGA, so nearest-centroid IS the Voronoi
+  // assignment and the real extent runs past that radius in every direction
+  // but one: over 5,100 sampled points the bound blanked 57.4% of correct
+  // answers. If it ever comes back, this fails.
+  test('names a ward anywhere inside the LGA, however far from a centroid', () {
+    for (final p in [[9.92, 8.82], [10.08, 8.98], [9.41, 9.19], [9.59, 9.01]]) {
+      final j = r.resolve(p[0], p[1]);
+      expect(j.lga, isNotNull, reason: 'no LGA at ${p[0]}, ${p[1]}');
+      expect(j.ward, isNotNull, reason: 'ward blanked at ${p[0]}, ${p[1]}');
+    }
+  });
+
   // No open dataset gives polling units a position, so returning one would be
   // a guess presented as a measurement — and a unit sent to the wrong village.
   test('a polling unit is never invented from coordinates', () {
