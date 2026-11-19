@@ -1,8 +1,165 @@
 {
-  "attribution": "Ward centroids: temikeezy/nigeria-geojson-data (MIT). LGA polygons: geoBoundaries gbOpen NGA ADM2 (CC BY 4.0).",
+  "attribution": "Ward centroids: temikeezy/nigeria-geojson-data (MIT), with 11 corrected from GRID3 NGA Operational Wards v4.0 (CC BY-SA) — see `corrections`. LGA polygons: geoBoundaries gbOpen NGA ADM2 (CC BY 4.0).",
   "note": "Centroids, not polygons. A point resolves to the NEAREST ward centroid within its LGA polygon, which is an approximation, not a boundary test.",
+  "corrections_note": "Eleven published centroids fell outside the LGA their own row claims. GRID3 NGA Operational Wards v4.0 — an independent dataset, never consulted when either of this repo’s geography assets was chosen — agreed with the LGA polygons against the published point on all of them, and files each of these wards under the LGA the row claims. So the LGA label was right and the coordinate was wrong. Each replacement is the area-weighted centroid of the GRID3 polygon(s) carrying that ward’s name inside that LGA, and was accepted only after it resolved INTO the claimed LGA. Nothing here is a coordinate anybody invented. KANKE/NEMEL and MIKANG/GARKAWA CENTRAL are left as published: GRID3 has no ward of either name in those LGAs, so there is nothing to derive a position from, and a guess is not an improvement.",
   "state": "Plateau",
   "count": 207,
+  "corrections": [
+    {
+      "lga": "BOKKOS",
+      "ward": "MANGUNA",
+      "was": {
+        "lat": 9.276173,
+        "lng": 8.747677
+      },
+      "now": {
+        "lat": 9.312401,
+        "lng": 8.813604
+      },
+      "moved_km": 8.28,
+      "grid3_polygons_used": 1
+    },
+    {
+      "lga": "JOS EAST",
+      "ward": "FOBUR    'B'",
+      "was": {
+        "lat": 9.882609,
+        "lng": 8.986177
+      },
+      "now": {
+        "lat": 9.872198,
+        "lng": 9.023103
+      },
+      "moved_km": 4.21,
+      "grid3_polygons_used": 5
+    },
+    {
+      "lga": "JOS NORTH",
+      "ward": "JENTA ADAMU",
+      "was": {
+        "lat": 9.868835,
+        "lng": 8.896283
+      },
+      "now": {
+        "lat": 9.91947,
+        "lng": 8.879289
+      },
+      "moved_km": 5.93,
+      "grid3_polygons_used": 2
+    },
+    {
+      "lga": "JOS NORTH",
+      "ward": "TUDUN WADA - KABONG",
+      "was": {
+        "lat": 9.876711,
+        "lng": 8.829182
+      },
+      "now": {
+        "lat": 9.915457,
+        "lng": 8.84093
+      },
+      "moved_km": 4.5,
+      "grid3_polygons_used": 2
+    },
+    {
+      "lga": "JOS SOUTH",
+      "ward": "VWANG",
+      "was": {
+        "lat": 9.689631,
+        "lng": 8.686663
+      },
+      "now": {
+        "lat": 9.706551,
+        "lng": 8.746231
+      },
+      "moved_km": 6.79,
+      "grid3_polygons_used": 1
+    },
+    {
+      "lga": "KANAM",
+      "ward": "DUGUB",
+      "was": {
+        "lat": 9.742695,
+        "lng": 9.946832
+      },
+      "now": {
+        "lat": 9.703984,
+        "lng": 10.040242
+      },
+      "moved_km": 11.11,
+      "grid3_polygons_used": 1
+    },
+    {
+      "lga": "KANKE",
+      "ward": "AMPANG-EAST",
+      "was": {
+        "lat": 9.347647,
+        "lng": 9.506155
+      },
+      "now": {
+        "lat": 9.352048,
+        "lng": 9.624494
+      },
+      "moved_km": 12.99,
+      "grid3_polygons_used": 2
+    },
+    {
+      "lga": "LANGTANG NORTH",
+      "ward": "MBAN/ZAMKO",
+      "was": {
+        "lat": 8.994209,
+        "lng": 9.798639
+      },
+      "now": {
+        "lat": 9.018728,
+        "lng": 9.843001
+      },
+      "moved_km": 5.58,
+      "grid3_polygons_used": 2
+    },
+    {
+      "lga": "LANGTANG NORTH",
+      "ward": "PISHE/YASHI",
+      "was": {
+        "lat": 9.218204,
+        "lng": 9.898732
+      },
+      "now": {
+        "lat": 9.091058,
+        "lng": 9.899977
+      },
+      "moved_km": 14.14,
+      "grid3_polygons_used": 1
+    },
+    {
+      "lga": "MIKANG",
+      "ward": "KOENOEM 'A'",
+      "was": {
+        "lat": 9.02371,
+        "lng": 9.370868
+      },
+      "now": {
+        "lat": 9.040871,
+        "lng": 9.418181
+      },
+      "moved_km": 5.54,
+      "grid3_polygons_used": 2
+    },
+    {
+      "lga": "WASE",
+      "ward": "KUMBONG",
+      "was": {
+        "lat": 9.067434,
+        "lng": 9.889815
+      },
+      "now": {
+        "lat": 8.945995,
+        "lng": 9.939312
+      },
+      "moved_km": 14.56,
+      "grid3_polygons_used": 1
+    }
+  ],
   "wards": [
     {
       "lga": "BARKIN LADI",
@@ -205,8 +362,8 @@
     {
       "lga": "BOKKOS",
       "ward": "MANGUNA",
-      "lat": 9.276173,
-      "lng": 8.747677
+      "lat": 9.312401,
+      "lng": 8.813604
     },
     {
       "lga": "BOKKOS",
@@ -259,8 +416,8 @@
     {
       "lga": "JOS EAST",
       "ward": "FOBUR    'B'",
-      "lat": 9.882609,
-      "lng": 8.986177
+      "lat": 9.872198,
+      "lng": 9.023103
     },
     {
       "lga": "JOS EAST",
@@ -343,8 +500,8 @@
     {
       "lga": "JOS NORTH",
       "ward": "JENTA ADAMU",
-      "lat": 9.868835,
-      "lng": 8.896283
+      "lat": 9.91947,
+      "lng": 8.879289
     },
     {
       "lga": "JOS NORTH",
@@ -385,8 +542,8 @@
     {
       "lga": "JOS NORTH",
       "ward": "TUDUN WADA - KABONG",
-      "lat": 9.876711,
-      "lng": 8.829182
+      "lat": 9.915457,
+      "lng": 8.84093
     },
     {
       "lga": "JOS NORTH",
@@ -451,8 +608,8 @@
     {
       "lga": "JOS SOUTH",
       "ward": "VWANG",
-      "lat": 9.689631,
-      "lng": 8.686663
+      "lat": 9.706551,
+      "lng": 8.746231
     },
     {
       "lga": "JOS SOUTH",
@@ -481,8 +638,8 @@
     {
       "lga": "KANAM",
       "ward": "DUGUB",
-      "lat": 9.742695,
-      "lng": 9.946832
+      "lat": 9.703984,
+      "lng": 10.040242
     },
     {
       "lga": "KANAM",
@@ -553,8 +710,8 @@
     {
       "lga": "KANKE",
       "ward": "AMPANG-EAST",
-      "lat": 9.347647,
-      "lng": 9.506155
+      "lat": 9.352048,
+      "lng": 9.624494
     },
     {
       "lga": "KANKE",
@@ -655,8 +812,8 @@
     {
       "lga": "LANGTANG NORTH",
       "ward": "MBAN/ZAMKO",
-      "lat": 8.994209,
-      "lng": 9.798639
+      "lat": 9.018728,
+      "lng": 9.843001
     },
     {
       "lga": "LANGTANG NORTH",
@@ -679,8 +836,8 @@
     {
       "lga": "LANGTANG NORTH",
       "ward": "PISHE/YASHI",
-      "lat": 9.218204,
-      "lng": 9.898732
+      "lat": 9.091058,
+      "lng": 9.899977
     },
     {
       "lga": "LANGTANG NORTH",
@@ -877,8 +1034,8 @@
     {
       "lga": "MIKANG",
       "ward": "KOENOEM 'A'",
-      "lat": 9.02371,
-      "lng": 9.370868
+      "lat": 9.040871,
+      "lng": 9.418181
     },
     {
       "lga": "MIKANG",
@@ -1201,8 +1358,8 @@
     {
       "lga": "WASE",
       "ward": "KUMBONG",
-      "lat": 9.067434,
-      "lng": 9.889815
+      "lat": 8.945995,
+      "lng": 9.939312
     },
     {
       "lga": "WASE",
