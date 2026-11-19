@@ -12068,21 +12068,44 @@ wrongly placed one dropped from the deactivation list, a correctly placed one
 added to it, the boundary file's coordinates flipped to [lat,lng], the polygon
 set truncated, and the app's resolver no longer reading the boundary asset.
 
-#### Not fixed here
+#### The console, which is the half a person sees
 
-`wardDisagreement()` in `hq-dashboard-next/src/lib/safe-zones.ts` still
-applies the centroid rule. It is wired into `SafeZonesPanel` twice — a live
-warning as a commander types a position, and a flag against each stored row —
-so it raises a false alarm on most of real Jos North, on the screen built so
-command can correct the three bad shelters. **That is the larger half of this
-defect and it is still open.** It is not fixed here because the console reads
-the polygons by `fetch` at runtime (`LiveMap.tsx`) and `wardDisagreement` is
-synchronous and called during render: giving it the boundary test means either
-bundling the 92KB polygon asset as a generated module, the way
-`sync_ward_centroids.py` generates `ward_centroids.ts`, or making the check
-async and restructuring its callers. That is a design decision, and this entry
-would be dishonest if it claimed the rule now exists in one place. It exists in
-two, and the second one is the one a person sees.
+`wardDisagreement()` in `hq-dashboard-next/src/lib/safe-zones.ts` had the same
+defect and it mattered more: it is wired into `SafeZonesPanel` twice — a live
+warning as a commander types a position, and a flag against every stored row. So
+on the screen built so command could correct the three bad shelters, it warned
+them off correct positions 78% of the time in Jos North.
+
+It could not ask the boundary question because the console had no polygons at
+build time; `LiveMap` fetches `/plateau_boundaries.json` at runtime, which is
+fine for drawing and no use to a function that must answer during render. So
+`scripts/sync_lga_boundaries.py` now generates
+`hq-dashboard-next/src/lib/lga_boundaries.ts` from the app's asset, the way
+`sync_ward_centroids.py` generates `ward_centroids.ts`, with its own CI parity
+step.
+
+Vertices are rounded to 5 decimal places — about 1.1m, against a source that is
+nowhere near metre-accurate — which takes 83KB of coordinates to 41KB, 13KB
+gzipped in the client bundle. Rounding a boundary can move a point across it, so
+the generator does not take that on trust: all 207 ward centroids and all seven
+stored shelters are resolved against both the raw asset and the rounded output,
+and any disagreement fails the build. Precision is a size decision and is not
+allowed to become a correctness one.
+
+`nearestLgaTo()` is deleted. It answered "which LGA is this?" from centroids,
+and leaving it beside the boundary version is how this defect comes back.
+
+**The hole branch had no test and nothing caught that.** Plateau's 17 polygons
+have no interior rings, so a test over the real asset runs that branch zero
+times — deleting hole handling entirely passed the whole suite. The Dart
+resolver honours holes, so dropping it would have made the console and the app
+disagree the day the boundary file gained one. `lgaContainingIn()` takes a
+boundary list so the branch can be exercised against a shape that has one. This
+is the fourth time in this report that a check was found reading a subset of its
+subject, and the first time it was my own new code, found by mutating it rather
+than by reasoning about it.
+
+#### Not fixed here
 
 13 of the 207 ward centroids are themselves misplaced — 11 inside a different
 LGA's polygon, 2 inside none — because the ward list and the boundary map come

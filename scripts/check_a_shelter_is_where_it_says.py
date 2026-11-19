@@ -46,15 +46,14 @@ That is already how `lib/core/geo/jurisdiction_resolver.dart` decides an
 incident's LGA, so a shelter and an incident are now judged by one rule instead
 of two that disagree across most of the state.
 
-**Still on the old rule:** `wardDisagreement()` in
-`hq-dashboard-next/src/lib/safe-zones.ts`, which warns a commander as they type
-a position into `SafeZonesPanel` and flags stored rows in the list. It applies
-the centroid test this check just stopped applying, so it raises a false warning
-on most of real Jos North — on the very screen built for command to CORRECT the
-three bad shelters. That is a user-facing fault and the larger half of this
-defect; it is not fixed here because the console has no synchronous access to
-the polygons (`LiveMap` fetches `/plateau_boundaries.json` at runtime) and
-giving it one is a design decision, not a rewrite of a rule.
+`wardDisagreement()` in `hq-dashboard-next/src/lib/safe-zones.ts` asks it the
+same way, so a commander typing a position into `SafeZonesPanel` is judged by
+the rule that judges the seed and the rule that judges an incident. It got the
+polygons through `scripts/sync_lga_boundaries.py`, which generates
+`lga_boundaries.ts` the way `sync_ward_centroids.py` generates
+`ward_centroids.ts`, with its own CI parity step.
+
+All three sites are asserted below, so this check fails rather than drifts.
 
 Ward centroids are still read, but only to NAME the nearest ward in the output,
 never to decide pass or fail. Naming a ward from a centroid is an approximation
@@ -95,6 +94,7 @@ SEED = REPO / 'supabase/migrations/20261030000000_a_shelter_says_who_stood_there
 CENTROIDS = REPO / 'hq-dashboard-next/src/lib/ward_centroids.ts'
 BOUNDARIES = REPO / 'assets/geo/plateau_boundaries.json'
 RESOLVER = REPO / 'lib/core/geo/jurisdiction_resolver.dart'
+CONSOLE_RULE = REPO / 'hq-dashboard-next/src/lib/safe-zones.ts'
 
 # ('NAME', 'description', lat, lon, 'TYPE', 'LGA', NULL)
 ROW = re.compile(
@@ -168,7 +168,7 @@ def load_centroids() -> list[dict]:
     return json.loads(body[:body.rindex(']') + 1])
 
 
-for path in (SEED, CENTROIDS, BOUNDARIES, RESOLVER):
+for path in (SEED, CENTROIDS, BOUNDARIES, RESOLVER, CONSOLE_RULE):
     if not path.is_file():
         raise SystemExit(f'✗ {path.relative_to(REPO)} is missing')
 
@@ -224,6 +224,18 @@ if 'plateau_boundaries.json' not in resolver:
         f'boundary because that is how the app judges an incident. If the app '
         f'has changed rule, the two have diverged and this check is enforcing '
         f'something the product no longer does.')
+
+# ...and the console, which is where a commander actually enters a position.
+# A revert there is the one that reaches a person, so it is named here rather
+# than left to the TypeScript tests alone.
+console = CONSOLE_RULE.read_text(encoding='utf-8')
+if 'lgaContaining' not in console or './lga-boundaries' not in console:
+    raise SystemExit(
+        f'✗ {CONSOLE_RULE.relative_to(REPO)} no longer resolves an LGA through '
+        f'lga-boundaries. `wardDisagreement()` warns a commander as they type a '
+        f'shelter position; if it has gone back to ward centroids it rejects '
+        f'57.7% of real Plateau and 78% of Jos North, on the screen built to '
+        f'correct the three bad shelters. See E2E_AUDIT_REPORT.md T-101.')
 
 seed = SEED.read_text(encoding='utf-8')
 insert = seed[seed.index('INSERT INTO public.safe_zones'):]

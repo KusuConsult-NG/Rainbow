@@ -1,4 +1,5 @@
 import { wardCentroids } from './ward_centroids';
+import { boundaryLgaNames, lgaContaining, lgaKey } from './lga-boundaries';
 import { metresBetween } from './incident-locate';
 import { supabase } from './supabase';
 
@@ -22,18 +23,18 @@ import { supabase } from './supabase';
  *     is checked and the actor is recorded in one place whatever calls them. A
  *     direct table write would skip both.
  *   * `wardDisagreement()` measures a position against the LGA it claims BEFORE
- *     it is stored, using the same 207 surveyed ward centroids and the same
- *     per-ward radius that `check_a_shelter_is_where_it_says.py` uses on the
- *     seed. The check that found the three bad rows now runs where the data is
- *     entered.
+ *     it is stored, by point-in-polygon against the real boundary — the same
+ *     test `check_a_shelter_is_where_it_says.py` applies to the seed and the
+ *     same one `jurisdiction_resolver.dart` applies to an incident. The check
+ *     that found the three bad rows now runs where the data is entered.
  *
- * It is a WARNING and not a refusal. A shelter can legitimately sit just over a
- * ward boundary, the centroids are points rather than polygons, and an operator
- * standing at the building knows more than this does. What it must not do is
- * let somebody store a position eleven kilometres into the next LGA without
- * being told.
+ * It is a WARNING and not a refusal. The ADM2 dataset leaves slivers between
+ * neighbours — two of the 207 surveyed ward centroids fall inside no LGA at
+ * all — a building can stand on a boundary, and an operator at the door knows
+ * more than this does. What it must not do is let somebody store a position in
+ * the next LGA without being told.
  *
- * See E2E_AUDIT_REPORT.md T-93, T-94, T-98.
+ * See E2E_AUDIT_REPORT.md T-93, T-94, T-98, T-101.
  */
 
 export interface SafeZone {
@@ -77,11 +78,16 @@ export function knownLgas(): string[] {
  * Why this position does not look like the place it claims to be, or null.
  *
  * The same question `check_a_shelter_is_where_it_says.py` asks of the seeded
- * rows, asked of a row somebody is about to add. The radius is that ward
- * centroid's own — half the distance to its nearest neighbour in the same LGA,
- * clamped to [800m, 25km] — because a ward in Jos North is a few streets and
- * one in Wase is a large piece of countryside, and a single tolerance would
- * flatter the first and lie about the second.
+ * rows, asked of a row somebody is about to add — and asked the way the app
+ * decides an incident's LGA: point-in-polygon against the real boundary.
+ *
+ * It used to measure to the nearest ward centroid of the claimed LGA and
+ * compare against that centroid's radius. Those radii are half the distance to
+ * the nearest neighbouring centroid and discs do not tile a plane, so the rule
+ * rejected 57.7% of real Plateau and 78% of Jos North: a commander entering a
+ * correct position was told it was in the wrong LGA more often than not, on
+ * the screen built so they could fix the three that genuinely were. See
+ * E2E_AUDIT_REPORT.md T-101.
  */
 export function wardDisagreement(
   lat: number,
@@ -108,49 +114,42 @@ export function wardDisagreement(
     };
   }
 
-  const want = (lga ?? '').trim().toUpperCase();
-  if (!want) return null;      // no LGA claimed, nothing to disagree with
-  const wards = wardCentroids.filter((w) => w.lga.toUpperCase() === want);
-  if (wards.length === 0) {
+  const claimed = (lga ?? '').trim();
+  if (!claimed) return null;      // no LGA claimed, nothing to disagree with
+  const key = lgaKey(claimed);
+  const names = boundaryLgaNames();
+  if (!names.some((n) => lgaKey(n) === key)) {
     return {
       kind: 'no-such-lga',
       message:
-        `${want} is not one of the ${knownLgas().length} LGAs in the ` +
-        'surveyed ward data, so the citizen app cannot scope a shelter to it.',
+        `${claimed.toUpperCase()} is not one of the ${names.length} LGAs of ` +
+        'Plateau, so the citizen app cannot scope a shelter to it.',
     };
   }
 
-  let nearest = wards[0];
-  let best = Infinity;
-  for (const w of wards) {
-    const d = metresBetween({ lat, lng }, { lat: w.lat, lng: w.lng });
-    if (d < best) { best = d; nearest = w; }
+  const actual = lgaContaining(lat, lng);
+  if (actual === null) {
+    // Inside the state's extent but inside no polygon. The ADM2 dataset leaves
+    // gaps between neighbours — two surveyed ward centroids land in one — so
+    // this is worth saying and not worth refusing.
+    return {
+      kind: 'outside-lga',
+      message:
+        'That position is inside Plateau but not inside any LGA boundary. ' +
+        'The boundary data leaves slivers between neighbours, so this may be ' +
+        'one of them — worth checking before a citizen is routed here.',
+    };
   }
-  if (best <= nearest.radiusM) return null;
+  if (lgaKey(actual) === key) return null;
 
-  const over = Math.round(best - nearest.radiusM);
-  const elsewhere = nearestLgaTo(lat, lng);
+  const ward = nearestWardIn(lat, lng, actual);
   return {
     kind: 'outside-lga',
     message:
-      `That position is ${(best / 1000).toFixed(2)}km from the nearest ` +
-      `surveyed ward of ${want} (${nearest.ward}), which is ` +
-      `${over >= 1000 ? `${(over / 1000).toFixed(1)}km` : `${over}m`} ` +
-      `outside it` +
-      (elsewhere && elsewhere !== want ? ` — it looks like ${elsewhere}.` : '.') +
-      ' A citizen in this LGA would be sent there.',
+      `That position is in ${actual}${ward ? ` (nearest ward ${ward})` : ''}, ` +
+      `not ${claimed.toUpperCase()}. A citizen in ${claimed.toUpperCase()} ` +
+      'would be sent across the boundary to it.',
   };
-}
-
-/** The LGA whose nearest ward centroid this position is closest to. */
-export function nearestLgaTo(lat: number, lng: number): string | null {
-  let best = Infinity;
-  let lga: string | null = null;
-  for (const w of wardCentroids) {
-    const d = metresBetween({ lat, lng }, { lat: w.lat, lng: w.lng });
-    if (d < best) { best = d; lga = w.lga; }
-  }
-  return lga;
 }
 
 /** The ward of `lga` this position falls nearest to, for pre-filling. */
