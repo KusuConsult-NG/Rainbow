@@ -12113,3 +12113,99 @@ from different datasets. None of them is one the shelter verdicts rest on
 (`GIRING`, `KADUNU` and `SHERE WEST` all sit inside their own LGA), and the new
 rule does not consult centroids for LGA membership at all, so this check is no
 longer exposed to it. Reconciling the two datasets is a separate job.
+
+---
+
+### T-102. Thirteen wards were unreachable where they actually sit
+
+T-101 found that 13 of the 207 published ward centroids fall outside the LGA
+their own row claims — 11 inside a different LGA's polygon, 2 inside none — and
+concluded it could not be settled from this repository. It can, with a third
+dataset.
+
+#### What it cost
+
+`jurisdiction_resolver.dart` resolves an incident's LGA by polygon, then its
+ward from the centroids registered to that LGA. A ward whose centroid sits
+across the line is therefore absent from the candidate list **wherever it
+actually is**, and the resolver names some other ward instead:
+
+    JOS NORTH/JENTA ADAMU    ->  filed as Jos South/GIRING           10.1 km away
+    BOKKOS/MANGUNA           ->  filed as Barkin Ladi/KURRA FALLS    12.3 km away
+    KANKE/AMPANG-EAST        ->  filed as Pankshin/PANKSHIN CHIGWONG 12.1 km away
+    KANAM/DUGUB              ->  no LGA at all
+    KANKE/NEMEL              ->  no LGA at all
+
+Wrong LGA means the wrong commander, and a ward commander posted to JENTA ADAMU
+never sees an incident in JENTA ADAMU. Same family as T-90's role spelling and
+T-95's ward suffix: geography that does not match a posting, so the board is
+empty with the rows right there.
+
+#### INEC publishes the list, not the boundaries
+
+The user's instruction was to use INEC's. INEC publishes the ward **register** —
+names and codes, no geometry; OCHA mirrors it as a spreadsheet. Three candidate
+boundary sources were checked:
+
+| source | result |
+|---|---|
+| OCHA COD-AB `nga_admin3` | ward polygons for Borno, Adamawa and Yobe only. No Plateau |
+| eHealth Africa operational wards (INEC-cross-checked) | GeoServer returns `no available server` |
+| **GRID3 NGA Operational Wards v4.0** | 9,335 wards, all 37 states, updated 2026-10-16 |
+
+#### GRID3 adjudicated, and it was not close
+
+GRID3 was published independently and consulted only after both of this repo's
+geography assets were already chosen, so it can say which of the two is the
+outlier. Against all 207 centroids:
+
+    all three agree                                          194
+    GRID3 backs the ward register (our polygons are wrong)     0
+    GRID3 backs our ADM2 polygons (the register is wrong)     13
+
+Thirteen out of thirteen. And GRID3 files each of those wards under **exactly
+the LGA the register claims** — so the LGA label was right all along and the
+COORDINATE was wrong. That distinction is what made a fix possible: the ward
+belongs where the row says, the published point simply is not there.
+
+#### Eleven corrected, nothing invented
+
+Each replacement is the area-weighted centroid of the GRID3 polygon(s) carrying
+that ward's name inside the LGA the row claims, accepted only after it resolved
+INTO that LGA — the test the old point failed. They moved between 4.2 km and
+14.6 km. `assets/geo/plateau_wards.json` records every one under `corrections`
+with the point it replaced, so the file says which coordinates are upstream's
+and which are this repository's.
+
+**KANKE/NEMEL and MIKANG/GARKAWA CENTRAL are left as published.** GRID3 has no
+ward of either name in those LGAs, so there is nothing to derive a position
+from, and a guess is not an improvement. They are named in the gate with that
+reason.
+
+#### GRID3 is not the ward list, and is not used as one
+
+GRID3's "operational wards" are not INEC's electoral wards: 325 against 207 for
+Plateau, and only 134 of the names match. Swapping them in would break the
+correspondence between an incident's ward and a ward commander's posting, which
+is the whole chain. So they adjudicate only, and only where a ward's name and
+its LGA both agree.
+
+#### The gate
+
+`check_a_ward_centroid_is_in_its_own_lga.py` asserts every centroid is inside
+the LGA its row claims; that every recorded correction is still TRUE — the point
+it replaced still outside, the point that replaced it still inside; and that the
+two exemptions are still needed, failing if a later import fixes one so a stale
+exemption cannot hide the next ward that breaks. That last is T-100's lesson
+again: a check that tests its own premise.
+
+Five mutations caught: a corrected ward moved back to its published point, a
+corrected ward moved elsewhere leaving the record stale, the `corrections` block
+deleted, a sound ward added to the exemption list, and a new ward drifting
+outside its LGA unrecorded.
+
+#### Still open
+
+205 of 207 now resolve correctly. The two that do not need an authoritative
+ward-boundary source — INEC's own GIS, or the State's. Nothing short of that
+places them honestly.

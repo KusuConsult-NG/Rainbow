@@ -244,7 +244,7 @@ export const wardCentroids: WardCentroid[] = [
     "ward": "DAFFO",
     "lat": 9.241844,
     "lng": 8.841387,
-    "radiusM": 4701
+    "radiusM": 4208
   },
   {
     "lga": "BOKKOS",
@@ -265,14 +265,14 @@ export const wardCentroids: WardCentroid[] = [
     "ward": "MANGOR",
     "lat": 9.33117,
     "lng": 8.873109,
-    "radiusM": 3554
+    "radiusM": 3427
   },
   {
     "lga": "BOKKOS",
     "ward": "MANGUNA",
-    "lat": 9.276173,
-    "lng": 8.747677,
-    "radiusM": 4722
+    "lat": 9.312401,
+    "lng": 8.813604,
+    "radiusM": 3427
   },
   {
     "lga": "BOKKOS",
@@ -333,16 +333,16 @@ export const wardCentroids: WardCentroid[] = [
   {
     "lga": "JOS EAST",
     "ward": "FOBUR    'B'",
-    "lat": 9.882609,
-    "lng": 8.986177,
-    "radiusM": 3669
+    "lat": 9.872198,
+    "lng": 9.023103,
+    "radiusM": 1887
   },
   {
     "lga": "JOS EAST",
     "ward": "FOBUR 'A'",
     "lat": 9.889411,
     "lng": 9.052811,
-    "radiusM": 3669
+    "radiusM": 1887
   },
   {
     "lga": "JOS EAST",
@@ -431,9 +431,9 @@ export const wardCentroids: WardCentroid[] = [
   {
     "lga": "JOS NORTH",
     "ward": "JENTA ADAMU",
-    "lat": 9.868835,
-    "lng": 8.896283,
-    "radiusM": 2261
+    "lat": 9.91947,
+    "lng": 8.879289,
+    "radiusM": 800
   },
   {
     "lga": "JOS NORTH",
@@ -447,7 +447,7 @@ export const wardCentroids: WardCentroid[] = [
     "ward": "JOS JARAWA",
     "lat": 9.88959,
     "lng": 8.931791,
-    "radiusM": 2261
+    "radiusM": 2396
   },
   {
     "lga": "JOS NORTH",
@@ -480,9 +480,9 @@ export const wardCentroids: WardCentroid[] = [
   {
     "lga": "JOS NORTH",
     "ward": "TUDUN WADA - KABONG",
-    "lat": 9.876711,
-    "lng": 8.829182,
-    "radiusM": 3701
+    "lat": 9.915457,
+    "lng": 8.84093,
+    "radiusM": 2112
   },
   {
     "lga": "JOS NORTH",
@@ -517,7 +517,7 @@ export const wardCentroids: WardCentroid[] = [
     "ward": "GYEL 'A'",
     "lat": 9.729781,
     "lng": 8.756922,
-    "radiusM": 2877
+    "radiusM": 1418
   },
   {
     "lga": "JOS SOUTH",
@@ -538,7 +538,7 @@ export const wardCentroids: WardCentroid[] = [
     "ward": "KURU 'B'",
     "lat": 9.680181,
     "lng": 8.771936,
-    "radiusM": 2364
+    "radiusM": 2033
   },
   {
     "lga": "JOS SOUTH",
@@ -557,9 +557,9 @@ export const wardCentroids: WardCentroid[] = [
   {
     "lga": "JOS SOUTH",
     "ward": "VWANG",
-    "lat": 9.689631,
-    "lng": 8.686663,
-    "radiusM": 3957
+    "lat": 9.706551,
+    "lng": 8.746231,
+    "radiusM": 1418
   },
   {
     "lga": "JOS SOUTH",
@@ -592,9 +592,9 @@ export const wardCentroids: WardCentroid[] = [
   {
     "lga": "KANAM",
     "ward": "DUGUB",
-    "lat": 9.742695,
-    "lng": 9.946832,
-    "radiusM": 10007
+    "lat": 9.703984,
+    "lng": 10.040242,
+    "radiusM": 8745
   },
   {
     "lga": "KANAM",
@@ -676,9 +676,9 @@ export const wardCentroids: WardCentroid[] = [
   {
     "lga": "KANKE",
     "ward": "AMPANG-EAST",
-    "lat": 9.347647,
-    "lng": 9.506155,
-    "radiusM": 3836
+    "lat": 9.352048,
+    "lng": 9.624494,
+    "radiusM": 2273
   },
   {
     "lga": "KANKE",
@@ -699,7 +699,7 @@ export const wardCentroids: WardCentroid[] = [
     "ward": "AMPER SERI",
     "lat": 9.292557,
     "lng": 9.645396,
-    "radiusM": 5176
+    "radiusM": 3500
   },
   {
     "lga": "KANKE",
@@ -720,7 +720,7 @@ export const wardCentroids: WardCentroid[] = [
     "ward": "KABWIR PADA",
     "lat": 9.392935,
     "lng": 9.624998,
-    "radiusM": 5202
+    "radiusM": 2273
   },
   {
     "lga": "KANKE",
@@ -795,16 +795,16 @@ export const wardCentroids: WardCentroid[] = [
   {
     "lga": "LANGTANG NORTH",
     "ward": "MBAN/ZAMKO",
-    "lat": 8.994209,
-    "lng": 9.798639,
-    "radiusM": 4993
+    "lat": 9.018728,
+    "lng": 9.843001,
+    "radiusM": 5094
   },
   {
     "lga": "LANGTANG NORTH",
     "ward": "NYER",
     "lat": 8.857498,
     "lng": 9.7899,
-    "radiusM": 7615
+    "radiusM": 9426
   },
   {
     "lga": "LANGTANG NORTH",
@@ -818,14 +818,14 @@ export const wardCentroids: WardCentroid[] = [
     "ward": "PIL GANI",
     "lat": 9.216222,
     "lng": 9.881089,
-    "radiusM": 974
+    "radiusM": 2753
   },
   {
     "lga": "LANGTANG NORTH",
     "ward": "PISHE/YASHI",
-    "lat": 9.218204,
-    "lng": 9.898732,
-    "radiusM": 974
+    "lat": 9.091058,
+    "lng": 9.899977,
+    "radiusM": 3858
   },
   {
     "lga": "LANGTANG NORTH",
@@ -1054,16 +1054,16 @@ export const wardCentroids: WardCentroid[] = [
   {
     "lga": "MIKANG",
     "ward": "KOENOEM 'A'",
-    "lat": 9.02371,
-    "lng": 9.370868,
-    "radiusM": 4685
+    "lat": 9.040871,
+    "lng": 9.418181,
+    "radiusM": 1921
   },
   {
     "lga": "MIKANG",
     "ward": "KOENOEM 'B'",
     "lat": 9.050229,
     "lng": 9.451873,
-    "radiusM": 3512
+    "radiusM": 1921
   },
   {
     "lga": "MIKANG",
@@ -1432,16 +1432,16 @@ export const wardCentroids: WardCentroid[] = [
   {
     "lga": "WASE",
     "ward": "KUMBONG",
-    "lat": 9.067434,
-    "lng": 9.889815,
-    "radiusM": 3562
+    "lat": 8.945995,
+    "lng": 9.939312,
+    "radiusM": 4991
   },
   {
     "lga": "WASE",
     "ward": "KUMBUR",
     "lat": 8.858808,
     "lng": 9.917641,
-    "radiusM": 11699
+    "radiusM": 4991
   },
   {
     "lga": "WASE",

@@ -908,6 +908,15 @@ jobs:
       - name: Assert a ward name resolves, and an indexed function is rebuilt
         run: python3 scripts/check_a_ward_name_resolves.py
 
+      # 13 of the 207 published ward centroids fell outside the LGA their own
+      # row claimed, so those wards were absent from the candidate list wherever
+      # they actually sit: an incident in JENTA ADAMU (Jos North) was filed as
+      # Jos South/GIRING, 10km away and under the wrong commander. GRID3 v4.0
+      # adjudicated, 11 were corrected from it and recorded, and 2 have no
+      # source to derive a position from. T-102.
+      - name: Assert a ward centroid is inside the LGA its row claims
+        run: python3 scripts/check_a_ward_centroid_is_in_its_own_lga.py
+
       - name: Assert the geography inventory matches the ward asset
         run: python3 scripts/sync_geography_inventory.py --check
 
