@@ -132,6 +132,13 @@ FEATURES: dict[str, tuple[int, str, str]] = {
         2, 'the USSD callback is unauthenticated',
         'it removes the one thing this channel trusts — that the CARRIER '
         'asserted the number — so a stranger could file as anyone'),
+    'FIRMS_MAP_KEY': (
+        2, 'fires seen from space are never fetched',
+        'the LAYERS panel says the fire layer is down; no fire ever backs up an '
+        'incident\'s corroboration score; nothing else changes'),
+    'INTEL_INGEST_SECRET': (
+        2, 'POST /api/intel/fires refuses every request, so no scheduler can run it',
+        'the fire layer reads "no fetch recorded: is the scheduler set up?"'),
     'USSD_REPLY_FORMAT': (
         3, 'nothing — AT_TEXT is the default and is correct',
         'set it to JSON only if your gateway requires it'),

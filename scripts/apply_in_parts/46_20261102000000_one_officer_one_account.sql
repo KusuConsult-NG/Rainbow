@@ -296,5 +296,3 @@ END $$;
 -- is_active = false, and the constraint must not be the reason a merge is
 -- impossible. It also means re-running this file after the merges succeeds.
 
-
-

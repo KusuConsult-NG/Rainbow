@@ -319,7 +319,7 @@ describe('incidentDetailRows', () => {
 
   it('says how many independent sources stand behind the incident', () => {
     const rows = rowsFor({
-      corroboration: { level: 'STRONG', sources: 3, unconfirmedSources: 0, reports: 5, channels: ['APP', 'GUARDIAN'] },
+      corroboration: { level: 'STRONG', sources: 3, unconfirmedSources: 0, reports: 5, channels: ['APP', 'GUARDIAN'], fireDetections: 0 },
     });
     expect(valueOf(rows, 'SOURCES')).toBe(
       'STRONG · 3 independent sources · 2 channels (APP, GUARDIAN) · 5 reports',
@@ -328,7 +328,7 @@ describe('incidentDetailRows', () => {
 
   it('reads a single source as unconfirmed, quietly, not as a warning', () => {
     const rows = rowsFor({
-      corroboration: { level: 'UNCONFIRMED', sources: 1, unconfirmedSources: 0, reports: 1, channels: ['APP'] },
+      corroboration: { level: 'UNCONFIRMED', sources: 1, unconfirmedSources: 0, reports: 1, channels: ['APP'], fireDetections: 0 },
     });
     expect(rows.find((r) => r.label === 'SOURCES')?.tone).toBe('muted');
   });

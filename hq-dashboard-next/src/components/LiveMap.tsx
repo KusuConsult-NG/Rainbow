@@ -19,7 +19,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
  */
 import type { Alert } from '@/app/dashboard/types';
 import { escapeHtml } from '@/lib/incident-dossier';
-import { freshness, type FreshnessState, type Layer, type LiveLayer } from '@/lib/layer-freshness';
+import type { FireRow } from '@/lib/fire-corroboration';
+import { ago, freshness, type FreshnessState, type Layer, type LiveLayer, type PolledLayer } from '@/lib/layer-freshness';
 import { wardGrid, type WardHeat } from '@/lib/ward-grid';
 import {
   incidentPopupHtml,
@@ -113,8 +114,16 @@ interface Props {
    * (lib/layer-freshness.ts). Absent: the panel says the feeds are unknown
    * rather than calling them live.
    */
-  feeds?: { incidents: LiveLayer; units: LiveLayer };
+  feeds?: { incidents: LiveLayer; units: LiveLayer; fires?: PolledLayer };
+  /**
+   * NASA FIRMS fire detections from the last 48 h (phase 2). Evidence, not
+   * alarms: most are farm burning, and the popup says so.
+   */
+  fires?: FireRow[];
 }
+
+/** Fires get their own pane: above the ward grid, below incidents (400). */
+const FIRE_PANE = 'firePane';
 
 /** The ward grid's own map pane, beneath incident shapes. */
 const WARD_GRID_PANE = 'wardGridPane';
@@ -128,6 +137,14 @@ const FRESHNESS_COLOUR: Record<FreshnessState, string> = {
   CONNECTING: '#B99123',
   DOWN: '#B3261E',
   STATIC: '#757575',
+};
+
+const UNKNOWN_FIRES: PolledLayer = {
+  kind: 'polled',
+  name: 'Fires from space',
+  lastRunAt: null,
+  lastOkAt: null,
+  everyMs: 30 * 60_000,
 };
 
 const UNKNOWN_FEED = (name: string): LiveLayer => ({
@@ -161,6 +178,7 @@ export default function LiveMap({
   incidentTrack,
   theme = 'light',
   feeds,
+  fires = [],
 }: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -302,6 +320,9 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
     // could land on top, and a click meant for the incident's "NO GPS, do not
     // dispatch" dossier would open the grid's summary instead.
     map.createPane(WARD_GRID_PANE).style.zIndex = '350';
+    // Fires above the grid, still under incidents: an incident is what a
+    // dispatcher clicks, and a fire beside it must not take that click.
+    map.createPane(FIRE_PANE).style.zIndex = '380';
 
     Leaflet.control.zoom({ position: 'bottomright' }).addTo(map);
 
@@ -442,6 +463,7 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
     incidentsFeed,
     { kind: 'derived', name: 'Ward grid', from: incidentsFeed },
     feeds?.units ?? UNKNOWN_FEED('Field units'),
+    feeds?.fires ?? UNKNOWN_FIRES,
     { kind: 'static', name: 'LGA boundaries', source: BOUNDARY_SOURCE, failed: boundariesFailed },
     { kind: 'static', name: 'Wards', source: WARD_SOURCE },
     {
@@ -492,6 +514,44 @@ const plateauBounds: [[number, number], [number, number]] = [[8.30, 8.30], [10.5
     }
     riskGridLayersRef.current = layers;
   }, [grid, showRiskGrid, mapReady]);
+
+  // FIRES FROM SPACE (phase 2). Night detections are drawn stronger: a village
+  // burned at night is the case the layer exists for, and farm burning is
+  // mostly by day.
+  const fireLayersRef = useRef<any[]>([]);
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current) return;
+    const { map, L } = mapInstanceRef.current;
+    fireLayersRef.current.forEach((layer) => layer.remove());
+    fireLayersRef.current = [];
+    const nowMs = Date.now();
+    for (const f of fires) {
+      const night = f.daynight === 'N';
+      const colour = night ? '#B3261E' : '#B99123';
+      const dot = L.circleMarker([f.latitude, f.longitude], {
+        pane: FIRE_PANE,
+        radius: night ? 5 : 3.5,
+        color: colour,
+        weight: 1,
+        fillColor: colour,
+        fillOpacity: night ? 0.85 : 0.5,
+      });
+      dot.bindPopup(`
+        <div style="font-family:var(--font-inter),sans-serif;padding:6px;min-width:190px;color:black;">
+          <strong style="color:${colour};font-size:11px;letter-spacing:1px;">FIRE SEEN FROM SPACE · ${night ? 'NIGHT' : 'DAY'}</strong>
+          <hr style="border:0;border-top:1px solid #eee;margin:6px 0;"/>
+          <div style="font-size:10px;color:#555;line-height:1.6">
+            <b>Seen:</b> ${escapeHtml(ago(nowMs - Date.parse(f.observed_at)))} (${escapeHtml(f.observed_at.slice(0, 16).replace('T', ' '))} UTC)<br/>
+            <b>Satellite:</b> ${escapeHtml(f.satellite)} · confidence ${escapeHtml(f.confidence)}${f.frp_mw !== null ? ` · ${escapeHtml(f.frp_mw)} MW` : ''}<br/>
+            <b>Where:</b> ${escapeHtml(f.geo_ward ?? 'no ward')} · ${escapeHtml(f.geo_lga ?? 'no LGA')}<br/>
+            <i>Most detections are farm burning. A fire is evidence beside an incident, not an alarm on its own.</i>
+          </div>
+        </div>
+      `);
+      dot.addTo(map);
+      fireLayersRef.current.push(dot);
+    }
+  }, [fires, mapReady]);
 
   useEffect(() => {
     if (!mapInstanceRef.current) return;
@@ -1145,6 +1205,9 @@ function drawApproximateArea(
             <div style={{ fontSize: '9px', color: theme === 'dark' ? '#BDBDBD' : '#616161', marginTop: '4px' }}>
               {grid.cells.length} ward{grid.cells.length === 1 ? '' : 's'} with open incidents
               {grid.unplaced > 0 && ` · ${grid.unplaced} open incident${grid.unplaced === 1 ? '' : 's'} with no known ward (on the board, not on the grid)`}
+            </div>
+            <div data-testid="fire-count" style={{ fontSize: '9px', color: theme === 'dark' ? '#BDBDBD' : '#616161' }}>
+              {fires.length} fire{fires.length === 1 ? '' : 's'} seen from space in 48 h ({fires.filter((f) => f.daynight === 'N').length} at night) · most are farm burning
             </div>
           </div>
         )}
