@@ -12209,3 +12209,48 @@ outside its LGA unrecorded.
 205 of 207 now resolve correctly. The two that do not need an authoritative
 ward-boundary source — INEC's own GIS, or the State's. Nothing short of that
 places them honestly.
+
+---
+
+### T-103. One of the two was a spelling, not a missing ward
+
+T-102 left two wards outside their own LGA because GRID3 had no ward of either
+name in the LGA the row claimed. For one of them that was true. For the other it
+was my matcher being too strict.
+
+GRID3's Kanke carries a ward called **Namel**. This register calls it
+**NEMEL**. The match ran on normalised names and name components, so one vowel
+was enough to miss it.
+
+#### Not matched on the vowel
+
+A one-letter name match is weak evidence on its own, so it was tested both ways:
+
+    from our NEMEL point, nearest GRID3 Kanke ward : Namel        6.38 km
+                                                     Dawaki      11.95 km
+    from GRID3 Namel, nearest ward in our Kanke    : NEMEL        6.38 km
+                                                     DAWAKI       7.85 km
+
+They are each other's nearest, in the same LGA, with 5.58 km of margin one way
+and 1.48 km the other. The runner-up in the tighter direction, DAWAKI, already
+has its own exact GRID3 match, so it was never competing for the
+identification. The derived centroid resolves into Kanke, which is the test the
+published point failed — it resolved into no LGA at all.
+
+206 of 207 ward centroids now sit inside the LGA their row claims.
+
+#### MIKANG/GARKAWA CENTRAL needs INEC or PLASIEC
+
+This one is not a spelling. GRID3 carries **no ward named Garkawa anywhere in
+Plateau** — not in Mikang, and not in Shendam where the polygons place this
+point. The COD-AB admin capitals file has no Garkawa either. This register has
+three Mikang wards named GARKAWA CENTRAL, GARKAWA NORTH and GARKAWA NORTH EAST;
+GRID3's Mikang has eighteen wards and none of them is any of those.
+
+So there is nothing left to derive a position from, and the remaining sources
+are the bodies that hold the register itself: INEC, or the Plateau State
+Independent Electoral Commission. Neither publishes ward geometry openly, so
+this is a request to make, not a dataset to fetch.
+
+The gate names it with that reason, and fails if a later import places it — so
+the exemption cannot outlive its cause.

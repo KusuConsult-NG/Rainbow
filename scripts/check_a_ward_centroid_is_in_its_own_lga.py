@@ -56,11 +56,11 @@ REPO = Path(__file__).resolve().parent.parent
 WARDS = REPO / 'assets/geo/plateau_wards.json'
 BOUNDS = REPO / 'assets/geo/plateau_boundaries.json'
 
-# No GRID3 ward of either name exists in the LGA the row claims, so there is
-# nothing to derive a position from. A guess is not an improvement, so these
-# two keep their published coordinate and are known to be wrong.
+# GRID3 carries no ward named Garkawa anywhere in Plateau — not in Mikang,
+# not in Shendam where the polygons place this point — so there is nothing to
+# derive a position from. A guess is not an improvement, so this one keeps its
+# published coordinate and is known to be wrong. It needs INEC or PLASIEC.
 UNRESOLVED = {
-    ('KANKE', 'NEMEL'),
     ('MIKANG', 'GARKAWA CENTRAL'),
 }
 
