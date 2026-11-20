@@ -706,7 +706,7 @@ export const wardCentroids: WardCentroid[] = [
     "ward": "DAWAKI",
     "lat": 9.481603,
     "lng": 9.59467,
-    "radiusM": 5202
+    "radiusM": 3927
   },
   {
     "lga": "KANKE",
@@ -739,9 +739,9 @@ export const wardCentroids: WardCentroid[] = [
   {
     "lga": "KANKE",
     "ward": "NEMEL",
-    "lat": 9.476583,
-    "lng": 9.471614,
-    "radiusM": 6753
+    "lat": 9.458824,
+    "lng": 9.526883,
+    "radiusM": 3927
   },
   {
     "lga": "LANGTANG NORTH",

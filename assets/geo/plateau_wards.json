@@ -1,7 +1,7 @@
 {
   "attribution": "Ward centroids: temikeezy/nigeria-geojson-data (MIT), with 11 corrected from GRID3 NGA Operational Wards v4.0 (CC BY-SA) — see `corrections`. LGA polygons: geoBoundaries gbOpen NGA ADM2 (CC BY 4.0).",
   "note": "Centroids, not polygons. A point resolves to the NEAREST ward centroid within its LGA polygon, which is an approximation, not a boundary test.",
-  "corrections_note": "Eleven published centroids fell outside the LGA their own row claims. GRID3 NGA Operational Wards v4.0 — an independent dataset, never consulted when either of this repo’s geography assets was chosen — agreed with the LGA polygons against the published point on all of them, and files each of these wards under the LGA the row claims. So the LGA label was right and the coordinate was wrong. Each replacement is the area-weighted centroid of the GRID3 polygon(s) carrying that ward’s name inside that LGA, and was accepted only after it resolved INTO the claimed LGA. Nothing here is a coordinate anybody invented. KANKE/NEMEL and MIKANG/GARKAWA CENTRAL are left as published: GRID3 has no ward of either name in those LGAs, so there is nothing to derive a position from, and a guess is not an improvement.",
+  "corrections_note": "Eleven published centroids fell outside the LGA their own row claims. GRID3 NGA Operational Wards v4.0 — an independent dataset, never consulted when either of this repo’s geography assets was chosen — agreed with the LGA polygons against the published point on all of them, and files each of these wards under the LGA the row claims. So the LGA label was right and the coordinate was wrong. Each replacement is the area-weighted centroid of the GRID3 polygon(s) carrying that ward’s name inside that LGA, and was accepted only after it resolved INTO the claimed LGA. Nothing here is a coordinate anybody invented. MIKANG/GARKAWA CENTRAL is left as published: GRID3 carries no ward named Garkawa anywhere in Plateau — not in Mikang, not in Shendam where the polygons place this point — so there is nothing to derive a position from, and a guess is not an improvement. It needs INEC or PLASIEC.",
   "state": "Plateau",
   "count": 207,
   "corrections": [
@@ -102,6 +102,22 @@
       },
       "moved_km": 12.99,
       "grid3_polygons_used": 2
+    },
+    {
+      "lga": "KANKE",
+      "ward": "NEMEL",
+      "was": {
+        "lat": 9.476583,
+        "lng": 9.471614
+      },
+      "now": {
+        "lat": 9.458824,
+        "lng": 9.526883
+      },
+      "moved_km": 6.38,
+      "grid3_polygons_used": 1,
+      "grid3_ward": "Namel",
+      "match_note": "GRID3 spells it \"Namel\" and this register spells it \"NEMEL\". Matched on more than the vowel: same LGA, and the two are each other’s nearest, 6.38 km apart, against 11.95 km to the next GRID3 Kanke ward and 7.85 km to the next ward here — and that runner-up, DAWAKI, already has its own exact GRID3 match, so it is not competing for the identification."
     },
     {
       "lga": "LANGTANG NORTH",
@@ -764,8 +780,8 @@
     {
       "lga": "KANKE",
       "ward": "NEMEL",
-      "lat": 9.476583,
-      "lng": 9.471614
+      "lat": 9.458824,
+      "lng": 9.526883
     },
     {
       "lga": "LANGTANG NORTH",
