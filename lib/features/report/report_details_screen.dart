@@ -8,13 +8,17 @@ import 'package:collection/collection.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:rainbow_app/core/config/map_tiles.dart';
 import 'package:rainbow_app/core/constants/alert_categories.dart';
 import 'package:rainbow_app/core/constants/tactical_mapping.dart';
+import 'package:rainbow_app/core/geo/jurisdiction_resolver.dart';
 import 'package:rainbow_app/core/router/app_router.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/models/alert_model.dart';
@@ -77,8 +81,31 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   final Map<String, String> _responseAnswers = {};
   bool _shareLocation = true;
   bool _manualOverride = false;
+  bool _showMapPicker = false;
+  LatLng? _pickedLatLng;
+  String? _pickedJurisdictionLabel;
   bool _anonymous = false;
   bool _submitting = false;
+
+  Future<void> _onMapPinSelected(LatLng point) async {
+    setState(() {
+      _pickedLatLng = point;
+      _shareLocation = true;
+    });
+    try {
+      await JurisdictionResolver.instance.ensureLoaded();
+      final resolved =
+          JurisdictionResolver.instance.resolve(point.latitude, point.longitude);
+      if (mounted) {
+        final lang = ref.read(languageProvider);
+        setState(() {
+          _pickedJurisdictionLabel = resolved.isResolved
+              ? '${resolved.lga ?? ''}${resolved.ward != null ? ' · ${resolved.ward}' : ''}'
+              : Translations.get('rpt_outside_plateau', lang);
+        });
+      }
+    } on Object catch (_) {}
+  }
 
   TacticalJurisdiction? _selectedLga;
   TacticalWard? _selectedWard;
@@ -319,8 +346,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       // jurisdiction still attached. A citizen whose GPS is off must still be
       // able to report. This line was what stopped them.
       final userLoc = ref.read(userLocationStreamProvider).valueOrNull;
-      final lat = userLoc?.latitude;
-      final lng = userLoc?.longitude;
+      final lat = _pickedLatLng?.latitude ?? userLoc?.latitude;
+      final lng = _pickedLatLng?.longitude ?? userLoc?.longitude;
 
       final priority = switch (widget.categoryInfo.priority) {
         'CRITICAL' => AlertPriority.critical,
@@ -793,7 +820,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                Translations.get('rpt_active_beacon', lang),
+                                _pickedLatLng != null
+                                    ? Translations.get('rpt_pinned_location', lang)
+                                    : Translations.get('rpt_active_beacon', lang),
                                 style: GoogleFonts.outfit(
                                   fontWeight: FontWeight.w900,
                                   fontSize: 14,
@@ -802,12 +831,46 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                                 ),
                               ),
                               Text(
-                                '${pos.latitude.toStringAsFixed(6)} N | ${pos.longitude.toStringAsFixed(6)} E',
+                                _pickedLatLng != null
+                                    ? '${_pickedLatLng!.latitude.toStringAsFixed(6)} N | ${_pickedLatLng!.longitude.toStringAsFixed(6)} E'
+                                    : '${pos.latitude.toStringAsFixed(6)} N | ${pos.longitude.toStringAsFixed(6)} E',
                                 style: GoogleFonts.outfit(
                                   fontSize: 11,
                                   color: AppColors.textSecondary,
                                   letterSpacing: 1,
                                 ),
+                              ),
+                              Builder(
+                                builder: (_) {
+                                  if (_pickedLatLng != null &&
+                                      _pickedJurisdictionLabel != null) {
+                                    return Text(
+                                      _pickedJurisdictionLabel!,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 10,
+                                        color: AppColors.primary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    );
+                                  }
+                                  final ageSec = DateTime.now()
+                                      .difference(pos.timestamp)
+                                      .inSeconds;
+                                  final isStale = ageSec > 120;
+                                  final tag = isStale
+                                      ? '${Translations.get('trk_stale_tag', lang)} (${(ageSec / 60).floor()}m)'
+                                      : Translations.get('trk_live_tag', lang);
+                                  return Text(
+                                    '±${pos.accuracy.round()}m · $tag',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 10,
+                                      color: isStale
+                                          ? AppColors.warning
+                                          : AppColors.success,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  );
+                                },
                               ),
                             ],
                           );
@@ -841,6 +904,141 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 12),
+
+          // Interactive Map Pin Picker
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const ValueKey('report_map_picker_toggle'),
+                  onPressed: () =>
+                      setState(() => _showMapPicker = !_showMapPicker),
+                  icon: Icon(
+                    _showMapPicker
+                        ? Icons.expand_less_rounded
+                        : Icons.add_location_alt_rounded,
+                    size: 16,
+                    color: AppColors.primary,
+                  ),
+                  label: Text(
+                    _showMapPicker
+                        ? Translations.get('rpt_hide_map_picker', lang)
+                        : Translations.get('rpt_pick_on_map', lang),
+                    style: GoogleFonts.outfit(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.primary,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(
+                      color: AppColors.primary.withValues(alpha: 0.4),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              if (_pickedLatLng != null) ...[
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () => setState(() {
+                    _pickedLatLng = null;
+                    _pickedJurisdictionLabel = null;
+                  }),
+                  child: Text(
+                    Translations.get('rpt_use_live_gps', lang),
+                    style: GoogleFonts.outfit(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (_showMapPicker) ...[
+            const SizedBox(height: 12),
+            Builder(
+              builder: (_) {
+                final livePos = locAsync.valueOrNull;
+                final initialZoom =
+                    (_pickedLatLng != null || livePos != null) ? 15.0 : 8.5;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      Translations.get('rpt_map_tap_hint', lang),
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        color: AppColors.textDim,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 220,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: Semantics(
+                          container: true,
+                          label: Translations.get('rpt_map_tap_hint', lang),
+                          excludeSemantics: true,
+                          child: FlutterMap(
+                            options: MapOptions(
+                              initialCenter: _pickedLatLng ??
+                                  (livePos != null ? LatLng(livePos.latitude, livePos.longitude) : const LatLng(9.2182, 9.5179)),
+                              initialZoom: initialZoom,
+                              onTap: (_, point) =>
+                                  unawaited(_onMapPinSelected(point)),
+                            ),
+                            children: [
+                              TileLayer(
+                                urlTemplate: mapTileUrl,
+                                userAgentPackageName: 'com.rainbow.app',
+                              ),
+                              MarkerLayer(
+                                markers: [
+                                  if (livePos != null)
+                                    Marker(
+                                      point: LatLng(
+                                        livePos.latitude,
+                                        livePos.longitude,
+                                      ),
+                                      width: 24,
+                                      height: 24,
+                                      child: const Icon(
+                                        Icons.my_location_rounded,
+                                        color: AppColors.primary,
+                                        size: 20,
+                                      ),
+                                    ),
+                                  if (_pickedLatLng != null)
+                                    Marker(
+                                      point: _pickedLatLng!,
+                                      width: 36,
+                                      height: 36,
+                                      child: const Icon(
+                                        Icons.location_on_rounded,
+                                        color: AppColors.danger,
+                                        size: 34,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
           const SizedBox(height: 24),
 
           // Manual Override

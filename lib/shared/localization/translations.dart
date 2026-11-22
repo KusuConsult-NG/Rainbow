@@ -2504,6 +2504,49 @@ class Translations {
       AppLanguage.hausa: 'BA YANZU BA',
       AppLanguage.pidgin: 'NO BE NOW',
     },
+    'rpt_outside_plateau': {
+      AppLanguage.english: 'Outside Plateau boundary polygons',
+      AppLanguage.hausa: 'A wajen iyakar Jihar Filato',
+      AppLanguage.pidgin: 'Outside Plateau State boundary',
+    },
+    'rpt_pinned_location': {
+      AppLanguage.english: 'PINNED INCIDENT LOCATION',
+      AppLanguage.hausa: 'WURIN DA AKA ZABA A TASWIRA',
+      AppLanguage.pidgin: 'PINNED INCIDENT LOCATION',
+    },
+    'rpt_hide_map_picker': {
+      AppLanguage.english: 'HIDE MAP PIN PICKER',
+      AppLanguage.hausa: 'BOYE TASWIRAR ZABAR WURI',
+      AppLanguage.pidgin: 'HIDE MAP PIN PICKER',
+    },
+    'rpt_pick_on_map': {
+      AppLanguage.english: 'PICK / ADJUST ON MAP',
+      AppLanguage.hausa: 'ZABI WURI A KAN TASWIRA',
+      AppLanguage.pidgin: 'PICK / ADJUST FOR MAP',
+    },
+    'rpt_use_live_gps': {
+      AppLanguage.english: 'USE LIVE GPS',
+      AppLanguage.hausa: 'YI AMFANI DA GPS KAI TSAYE',
+      AppLanguage.pidgin: 'USE LIVE GPS',
+    },
+    'rpt_map_tap_hint': {
+      AppLanguage.english:
+          'Tap anywhere on the map to pin exact incident coordinates.',
+      AppLanguage.hausa:
+          'Danna ko ina a kan taswirar don nuna ainihin inda abin ya faru.',
+      AppLanguage.pidgin:
+          'Tap anywhere for the map to pin the exact place wey e happen.',
+    },
+    'trk_stale_tag': {
+      AppLanguage.english: 'STALE',
+      AppLanguage.hausa: 'TSOHON BAYANI',
+      AppLanguage.pidgin: 'OLD SIGNAL',
+    },
+    'trk_live_tag': {
+      AppLanguage.english: 'LIVE',
+      AppLanguage.hausa: 'Yanzu',
+      AppLanguage.pidgin: 'LIVE',
+    },
     // ---- END OF DRAFT TRANSLATIONS AWAITING A NATIVE SPEAKER ----
   };
 
