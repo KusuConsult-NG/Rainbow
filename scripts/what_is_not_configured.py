@@ -57,6 +57,20 @@ FEATURES: dict[str, tuple[int, str, str]] = {
     'MAP_TILE_URL': (
         2, 'the app map has no tiles',
         'the map renders as empty space with markers floating on it'),
+    # The live stream to HQ. STUN discovers an address; it cannot carry
+    # media, and a Nigerian handset on mobile data is behind carrier-grade NAT
+    # which is commonly symmetric. Without a relay there is no route, so this
+    # is not an optimisation: it is the difference between the feature working
+    # and never connecting once. lib/core/config/live_stream.dart.
+    'TURN_URL': (
+        2, 'the live stream to HQ cannot connect from a phone on mobile data',
+        'the button sits on "CONNECTING TO HQ — NOT LIVE YET" and never changes'),
+    'TURN_USERNAME': (
+        2, 'the TURN relay refuses the handset',
+        'the live stream never connects, the same as having no relay'),
+    'TURN_CREDENTIAL': (
+        2, 'the TURN relay refuses the handset',
+        'the live stream never connects, the same as having no relay'),
     'HQ_API_BASE_URL': (
         2, 'the app cannot reach the console API',
         'mesh ingest and SMS fallback have nowhere to post'),
