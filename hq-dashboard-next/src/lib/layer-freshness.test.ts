@@ -2,7 +2,7 @@
 // must never read as live, however calm the map looks.
 import { describe, expect, it } from 'vitest';
 
-import { ago, freshness, type LiveLayer } from './layer-freshness';
+import { ago, freshness, type LiveLayer, type PolledLayer } from './layer-freshness';
 
 const NOW = Date.parse('2026-11-18T22:00:00Z');
 const incidents = (over: Partial<LiveLayer> = {}): LiveLayer => ({
@@ -71,5 +71,47 @@ describe('ago', () => {
     expect(ago(12 * 60_000)).toBe('12 min ago');
     expect(ago(3 * 3_600_000)).toBe('3 h ago');
     expect(ago(-5_000)).toBe('just now');
+  });
+});
+
+describe('a polled layer (fires from FIRMS)', () => {
+  const fires = (over: Partial<PolledLayer> = {}): PolledLayer => ({
+    kind: 'polled',
+    name: 'Fires from space',
+    lastRunAt: NOW - 10 * 60_000,
+    lastOkAt: NOW - 10 * 60_000,
+    lastError: null,
+    everyMs: 30 * 60_000,
+    lag: 'satellite data runs about 3 h behind',
+    ...over,
+  });
+
+  it('is LIVE after a recent good fetch, and says the source itself lags', () => {
+    expect(freshness(fires(), NOW)).toEqual({
+      state: 'LIVE',
+      text: 'fetched 10 min ago · satellite data runs about 3 h behind',
+    });
+  });
+
+  it('is DOWN when the newest fetch failed, and says why and when it last worked', () => {
+    const f = freshness(fires({ lastRunAt: NOW - 60_000, lastError: 'VIIRS_SNPP_NRT: HTTP 500' }), NOW);
+    expect(f.state).toBe('DOWN');
+    expect(f.text).toBe('last fetch failed (VIIRS_SNPP_NRT: HTTP 500) · last good 10 min ago');
+  });
+
+  it('is DOWN when three scheduled runs have passed with no good one', () => {
+    const f = freshness(fires({ lastRunAt: NOW - 100 * 60_000, lastOkAt: NOW - 100 * 60_000 }), NOW);
+    expect(f).toEqual({ state: 'DOWN', text: 'no good fetch since 2 h ago' });
+  });
+
+  it('is DOWN, and asks about the scheduler, when no fetch was ever recorded', () => {
+    expect(freshness(fires({ lastRunAt: null, lastOkAt: null }), NOW)).toEqual({
+      state: 'DOWN',
+      text: 'no fetch recorded: is the scheduler set up?',
+    });
+  });
+
+  it('is DOWN when the console could not read it', () => {
+    expect(freshness(fires({ readError: 'permission denied' }), NOW).state).toBe('DOWN');
   });
 });

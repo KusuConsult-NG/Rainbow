@@ -35,6 +35,8 @@ import {
 import type { Alert } from './types';
 import { clusterAlerts, filterAlerts, isGuardianAlert, isLiveIncident } from '@/lib/alert-display';
 import { corroborationLine, withCorroboration } from '@/lib/corroboration';
+import type { FireRow } from '@/lib/fire-corroboration';
+import type { PolledLayer } from '@/lib/layer-freshness';
 import { emptyBoardMeaning, emptyBoardWording } from '@/lib/empty-board';
 import { geoKey, geoMatchesKeyed } from '@/lib/geo-key';
 import UssdProvenancePanel from '@/components/UssdProvenancePanel';
@@ -507,6 +509,10 @@ export default function DashboardPage() {
   const [telemetryUplink, setTelemetryUplink] = useState<'CONNECTING' | 'LIVE' | 'DOWN'>('CONNECTING');
   const [telemetrySyncedAt, setTelemetrySyncedAt] = useState<number | null>(null);
   const [telemetryError, setTelemetryError] = useState<string | null>(null);
+  // Fires seen from space (NASA FIRMS, phase 2): the last 48 h of detections
+  // and what the fetcher last recorded about itself.
+  const [fires, setFires] = useState<FireRow[]>([]);
+  const [firesFeed, setFiresFeed] = useState<PolledLayer>(FIRES_UNREAD);
   /**
    * Whether the database confirmed it knows who is asking, checked only when
    * the board came back empty. false means an empty board proves nothing.
@@ -1046,6 +1052,51 @@ export default function DashboardPage() {
     };
   }, [user]);
 
+  // FIRES FROM SPACE. Not a realtime table: the fetcher writes every 30 min,
+  // so reading every 5 is plenty. The runs table, not the newest detection,
+  // says how fresh the layer is: a quiet night and a dead fetcher both have
+  // no new fires, and only the runs tell them apart.
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    const load = async () => {
+      const since = new Date(Date.now() - FIRE_WINDOW_MS).toISOString();
+      const [det, runs] = await Promise.all([
+        supabase
+          .from('fire_detections')
+          .select('id, latitude, longitude, observed_at, confidence, daynight, frp_mw, satellite, geo_lga, geo_ward')
+          .gte('observed_at', since)
+          .order('observed_at', { ascending: false })
+          .limit(3000),
+        supabase
+          .from('intel_ingest_runs')
+          .select('ran_at, ok, error')
+          .eq('feed', 'FIRMS')
+          .order('ran_at', { ascending: false })
+          .limit(50),
+      ]);
+      if (!alive) return;
+      const readError = det.error?.message || runs.error?.message || null;
+      if (!det.error) setFires((det.data ?? []) as FireRow[]);
+      const rows = (runs.data ?? []) as { ran_at: string; ok: boolean; error: string | null }[];
+      const newest = rows[0];
+      const lastGood = rows.find((r) => r.ok);
+      setFiresFeed({
+        ...FIRES_UNREAD,
+        readError,
+        lastRunAt: newest ? Date.parse(newest.ran_at) : null,
+        lastOkAt: lastGood ? Date.parse(lastGood.ran_at) : null,
+        lastError: newest && !newest.ok ? newest.error || 'failed' : null,
+      });
+    };
+    load();
+    const t = setInterval(load, 5 * 60_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [user]);
+
   // Load all users to map telemetry to sector profiles
   useEffect(() => {
     if (!user) return;
@@ -1191,7 +1242,7 @@ export default function DashboardPage() {
   // buried in this component with no coverage at all.
   // Every card then carries its corroboration: how many INDEPENDENT sources
   // stand behind it (lib/corroboration.ts), scored from the raw reports.
-  const displayAlerts = withCorroboration(clusterAlerts(alerts, enableClustering), alerts);
+  const displayAlerts = withCorroboration(clusterAlerts(alerts, enableClustering), alerts, fires);
 
   // Derived during render rather than held in state: these are a pure function
   // of the alerts already loaded, and a second copy in state would be one more
@@ -1892,7 +1943,9 @@ export default function DashboardPage() {
                 feeds={{
                   incidents: { kind: 'live', name: 'Incidents', connection: uplink, syncedAt: alertsSyncedAt, error: feedError },
                   units: { kind: 'live', name: 'Field units', connection: telemetryUplink, syncedAt: telemetrySyncedAt, error: telemetryError },
+                  fires: firesFeed,
                 }}
+                fires={fires}
               />
               {/*
                 zIndex, or Leaflet paints over this.
@@ -2815,6 +2868,20 @@ function MetricCard({ label, value, color }: { label: string, value: string | nu
   );
 }
 
+
+/** How far back the console reads fires from space. */
+const FIRE_WINDOW_MS = 48 * 3_600_000;
+
+/** The fire layer before its first read: no runs known, so it cannot say LIVE. */
+const FIRES_UNREAD: PolledLayer = {
+  kind: 'polled',
+  name: 'Fires from space',
+  lastRunAt: null,
+  lastOkAt: null,
+  lastError: null,
+  everyMs: 30 * 60_000,
+  lag: 'satellite data runs about 3 h behind',
+};
 
 /** How each corroboration level reads on a card: quiet, amber, green. */
 const CORROBORATION_COLOUR: Record<'UNCONFIRMED' | 'CORROBORATED' | 'STRONG', string> = {

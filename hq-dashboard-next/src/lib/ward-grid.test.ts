@@ -20,7 +20,7 @@ const card = (lga: string, ward: string, over: Partial<Alert> = {}): Alert =>
   }) as Alert;
 
 const level = (l: Corroboration['level']): Corroboration =>
-  ({ level: l, sources: 1, unconfirmedSources: 0, reports: 1, channels: ['APP'] });
+  ({ level: l, sources: 1, unconfirmedSources: 0, reports: 1, channels: ['APP'], fireDetections: 0 });
 
 describe('wardGrid', () => {
   it('covers the whole state: all 207 wards, not just Jos', () => {

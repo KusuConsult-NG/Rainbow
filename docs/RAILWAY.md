@@ -100,6 +100,8 @@ ONESIGNAL_APP_ID        push
 ONESIGNAL_REST_API_KEY  push
 RAINBOW_WEBHOOK_SECRET  outbound agency webhooks
 NOTIFY_DRAIN_SECRET     the escalation notification worker (see below)
+FIRMS_MAP_KEY           NASA fire detections, intelligence layer (see below)
+INTEL_INGEST_SECRET     the scheduler calling the fire fetch (see below)
 ```
 
 ### The citizen OTP hook (Supabase, not Railway)
@@ -181,6 +183,45 @@ select id, kind, attempts, last_error, next_attempt_at
 -- success.
 select * from escalation_automation_status();
 ```
+
+### The fire fetch (intelligence layer, phase 2)
+
+`POST /api/intel/fires` asks NASA FIRMS for the last day of VIIRS fire
+detections over Plateau, from all three satellites (Suomi NPP, NOAA-20,
+NOAA-21), keeps the ones inside the LGA polygons and writes them to
+`fire_detections`. Near an open incident, a detection counts as one more
+independent source on that incident's corroboration score.
+
+It needs two variables on the console service:
+
+- `FIRMS_MAP_KEY`: NASA's free key. Request one at
+  <https://firms.modaps.eosdis.nasa.gov/api/map_key/> with an email address.
+  FIRMS allows 5,000 requests per 10 minutes per key; each run makes three.
+- `INTEL_INGEST_SECRET`: a shared secret you generate (`openssl rand -hex 32`),
+  set on BOTH the console service and the cron service.
+
+Add a second Railway **cron service**, scheduled `*/30 * * * *`:
+
+```
+curl -fsS -X POST https://<your-console-host>/api/intel/fires \
+  -H "x-intel-secret: $INTEL_INGEST_SECRET"
+```
+
+Each run asks for a whole day, so a missed run or two loses nothing; a
+detection already recorded is skipped. Every run, good or bad, writes a row in
+`intel_ingest_runs`, and that is what the console's LAYERS panel reads to say
+how fresh the fire layer is. To check it:
+
+```sql
+-- The last runs, newest first. ok = false says which satellite failed and why.
+select ran_at, ok, seen, added, error
+  from intel_ingest_runs where feed = 'FIRMS'
+ order by ran_at desc limit 10;
+```
+
+Most detections are dry-season farm burning: about 2,000 in one November week
+over a box around Plateau, 409 of them at night. A detection on its own raises
+nothing.
 
 ### What Railway does not give us, that App Hosting did
 

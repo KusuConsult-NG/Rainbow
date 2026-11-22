@@ -21,15 +21,17 @@
  *   UNCONFIRMED, never hidden and never downgraded in severity: one real
  *   person in danger is one source.
  *
- * Only Rainbow's own channels in phase 1. Phase 2 adds open sensors (a NASA
- * FIRMS fire detection near the incident counts as a source of its own).
+ * Phase 2 adds the first open sensor: NASA FIRMS fires near the incident, under
+ * the rules in lib/fire-corroboration.ts, count as ONE more source, on the
+ * SATELLITE channel. The satellite is the one source no attacker controls.
  */
 
 import type { Alert } from '@/app/dashboard/types';
 import { isGuardianAlert } from './alert-display';
+import { firesBacking, type FireRow } from './fire-corroboration';
 import { arrivedByKeypad, awaitingConfirmation, type ProvenanceAlert } from './ussd-provenance';
 
-export type SourceChannel = 'APP' | 'GUARDIAN' | 'SMS' | 'MESH' | 'USSD';
+export type SourceChannel = 'APP' | 'GUARDIAN' | 'SMS' | 'MESH' | 'USSD' | 'SATELLITE';
 
 export type CorroborationLevel = 'UNCONFIRMED' | 'CORROBORATED' | 'STRONG';
 
@@ -43,6 +45,8 @@ export interface Corroboration {
   reports: number;
   /** The channels the counted sources used, in a fixed order. */
   channels: SourceChannel[];
+  /** NASA FIRMS detections backing it (counted as one source together). */
+  fireDetections: number;
 }
 
 /** Two independent sources corroborate. */
@@ -51,7 +55,7 @@ export const CORROBORATED_AT = 2;
 export const STRONG_SOURCES = 3;
 export const STRONG_CHANNELS = 2;
 
-const CHANNEL_ORDER: SourceChannel[] = ['APP', 'GUARDIAN', 'SMS', 'MESH', 'USSD'];
+const CHANNEL_ORDER: SourceChannel[] = ['APP', 'GUARDIAN', 'SMS', 'MESH', 'USSD', 'SATELLITE'];
 
 type Row = Pick<Alert, 'id' | 'reported_by' | 'description' | 'arrived_via'> & ProvenanceAlert;
 
@@ -78,8 +82,12 @@ export function sourceOf(alert: Row): string {
   return alert.reported_by ? `user:${alert.reported_by}` : `report:${alert.id}`;
 }
 
-/** The corroboration of the incident these reports describe. */
-export function corroborate(reports: Row[]): Corroboration {
+/**
+ * The corroboration of the incident these reports describe. `fireDetections`
+ * is how many FIRMS detections back it (fire-corroboration.ts); any number
+ * above zero is one source, the satellite.
+ */
+export function corroborate(reports: Row[], fireDetections = 0): Corroboration {
   const counted = new Map<string, Set<SourceChannel>>();
   const waiting = new Set<string>();
 
@@ -97,6 +105,8 @@ export function corroborate(reports: Row[]): Corroboration {
   // unconfirmed reports add nothing.
   for (const s of counted.keys()) waiting.delete(s);
 
+  if (fireDetections > 0) counted.set('satellite:FIRMS', new Set<SourceChannel>(['SATELLITE']));
+
   const used = new Set<SourceChannel>();
   counted.forEach((cs) => cs.forEach((c) => used.add(c)));
   const channels = CHANNEL_ORDER.filter((c) => used.has(c));
@@ -112,6 +122,7 @@ export function corroborate(reports: Row[]): Corroboration {
     unconfirmedSources: waiting.size,
     reports: reports.length,
     channels,
+    fireDetections,
   };
 }
 
@@ -126,8 +137,11 @@ export function corroborationLine(c: Corroboration): string {
   if (c.unconfirmedSources > 0) {
     parts.push(`+${c.unconfirmedSources} unconfirmed keypad`);
   }
-  if (c.reports > c.sources + c.unconfirmedSources) {
+  if (c.reports > c.sources - (c.fireDetections > 0 ? 1 : 0) + c.unconfirmedSources) {
     parts.push(`${c.reports} reports`);
+  }
+  if (c.fireDetections > 0) {
+    parts.push(`${c.fireDetections} fire detection${c.fireDetections === 1 ? '' : 's'} from space`);
   }
   return parts.join(' · ');
 }
@@ -139,12 +153,13 @@ export function corroborationLine(c: Corroboration): string {
  * Done after clustering, not inside it, so the clustering rule and the
  * corroboration rule stay separate and separately tested.
  */
-export function withCorroboration(cards: Alert[], raw: Alert[]): Alert[] {
+export function withCorroboration(cards: Alert[], raw: Alert[], fires: FireRow[] = []): Alert[] {
   const byId = new Map(raw.map((r) => [r.id, r]));
   return cards.map((card) => {
     const members = (card.member_ids ?? [card.id])
       .map((id) => byId.get(id))
       .filter((r): r is Alert => r !== undefined);
-    return { ...card, corroboration: corroborate(members.length ? members : [card]) };
+    const reports = members.length ? members : [card];
+    return { ...card, corroboration: corroborate(reports, firesBacking(reports, fires).length) };
   });
 }
