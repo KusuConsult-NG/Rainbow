@@ -45,6 +45,15 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
   bool _showMap = false;
   bool _isCapturingEvidence = false;
 
+  /// True once the platform has refused location for good
+  /// (LocationPermission.deniedForever). Asking again does nothing then; the
+  /// app's own settings page is the only way through, so the card says so.
+  bool _locationBlocked = false;
+
+  /// While a permission request is on screen, so the button cannot be pressed
+  /// twice into two dialogs.
+  bool _askingForLocation = false;
+
   /// Photographs taken before the SOS had an incident to attach them to.
   /// See pending_evidence.dart for why holding them is the whole point.
   final PendingEvidence _pending = PendingEvidence();
@@ -374,7 +383,8 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
                     padding: const EdgeInsets.all(24),
                     child: Column(
                       children: [
-                        _buildStatusCard(),
+                        _buildStatusCard(locAsync),
+                        _buildNoLocationCard(locAsync),
                         const SizedBox(height: 24),
                         Expanded(child: _buildTacticalMap(locAsync)),
                         const SizedBox(height: 24),
@@ -539,9 +549,118 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
     );
   }
 
-  Widget _buildStatusCard() {
+  /// Asks for location from the emergency screen itself.
+  ///
+  /// `requestPermission()` returns false WITHOUT asking when the onboarding
+  /// disclosure was never accepted — which is how a phone ends up here with no
+  /// fix and no prompt. Here the person has pressed a button that says TURN ON
+  /// LOCATION, so `force` is right: they have asked.
+  Future<void> _askForLocation() async {
+    setState(() => _askingForLocation = true);
+    try {
+      if (_locationBlocked) {
+        await Geolocator.openAppSettings();
+        return;
+      }
+      final granted = await ref
+          .read(locationServiceProvider)
+          .requestPermission(force: true);
+      if (!granted) {
+        final permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.deniedForever) {
+          if (mounted) setState(() => _locationBlocked = true);
+        } else if (!await Geolocator.isLocationServiceEnabled()) {
+          // Location is off for the whole phone, not just for us.
+          await Geolocator.openLocationSettings();
+        }
+      }
+      // Nothing to re-subscribe: the stream looks again by itself every few
+      // seconds (LocationService.permissionRetryDelay), so a permission
+      // granted here reaches this screen without restarting anything.
+    } catch (e) {
+      debugPrint('[EME] Asking for location failed: $e');
+    } finally {
+      if (mounted) setState(() => _askingForLocation = false);
+    }
+  }
+
+  /// The warning that belongs on a screen with no position to send.
+  ///
+  /// Shown for as long as the phone has no fix, whatever status HQ has set:
+  /// once a squad is moving, "dispatched to your location" is HQ's claim to
+  /// make, but the person should still know their phone is contributing
+  /// nothing to it. Hidden while the fix is still being looked for — the map
+  /// and the readout already say that, and nothing has been claimed yet.
+  Widget _buildNoLocationCard(AsyncValue<Position?> locAsync) {
+    final knownAbsent =
+        (locAsync.hasValue && locAsync.value == null) || locAsync.hasError;
+    if (!knownAbsent) return const SizedBox.shrink();
+    return Container(
+      key: const ValueKey('emergency_no_location_warning'),
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.warning.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.location_off_rounded,
+                  color: AppColors.warning, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _t('eme_no_fix_title'),
+                  style: GoogleFonts.outfit(
+                    color: AppColors.warning,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _t(_locationBlocked ? 'eme_no_fix_blocked' : 'eme_no_fix_body'),
+            style: GoogleFonts.inter(
+              color: AppColors.onBackground,
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              key: const ValueKey('emergency_turn_on_location'),
+              onPressed: _askingForLocation ? null : _askForLocation,
+              icon: const Icon(Icons.my_location_rounded, size: 16),
+              label: Text(_t(_locationBlocked
+                  ? 'eme_no_fix_open_settings'
+                  : 'eme_no_fix_action')),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusCard(AsyncValue<Position?> locAsync) {
     final emergency = ref.watch(emergencyProvider);
     final alertId = emergency.alertId;
+    // Whether this phone actually has a position to send. The banner used to
+    // be driven by the alert's status alone, so it read LOCATION BROADCASTING
+    // over a row of dashes. Nothing here promises a location we have not got.
+    // While the fix is still being looked for there is no value yet, which is
+    // also not a location, so the honest text is the same.
+    final hasFix = locAsync.valueOrNull != null;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -559,15 +678,19 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
           // "Command HQ notified", whether or not anything had been sent —
           // including when the alert had only been queued on the phone.
           var statusTitle = _t('eme_sending');
-          var statusText = _t('eme_sending_desc');
+          var statusText =
+              _t(hasFix ? 'eme_sending_desc' : 'eme_sending_desc_no_fix');
           var titleColor = AppColors.onBackground;
           if (alertId == null && emergency.sendFinished) {
             statusTitle = _t('eme_not_confirmed');
-            statusText = _t('eme_not_confirmed_desc');
+            statusText = _t(hasFix
+                ? 'eme_not_confirmed_desc'
+                : 'eme_not_confirmed_desc_no_fix');
             titleColor = AppColors.warning;
           } else if (alertId != null) {
             statusTitle = _t('eme_received');
-            statusText = _t('eme_broadcasting_triaging');
+            statusText =
+                _t(hasFix ? 'eme_broadcasting_triaging' : 'eme_triaging_no_fix');
             titleColor = AppColors.primary;
           }
 
@@ -591,9 +714,10 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
               statusText = _t('eme_secured_desc');
               titleColor = AppColors.success;
             } else {
-              statusTitle = _t('eme_broadcasting');
-              statusText = _t('eme_broadcasting_triaging');
-              titleColor = AppColors.primary;
+              statusTitle = _t(hasFix ? 'eme_broadcasting' : 'eme_active_no_fix');
+              statusText =
+                  _t(hasFix ? 'eme_broadcasting_triaging' : 'eme_triaging_no_fix');
+              titleColor = hasFix ? AppColors.primary : AppColors.warning;
             }
           }
 

@@ -88,31 +88,38 @@ describe('placing a detection in Plateau', () => {
     }
   });
 
-  it('records the 13 ward centroids that lie outside their own LGA polygon', () => {
+  it('records the one ward centroid still outside its own LGA polygon', () => {
     // The ward centroids and the LGA polygons come from different datasets
-    // (assets/geo/plateau_wards.json says which), and they disagree here. A
-    // fire is placed the way the app places an incident (jurisdiction_resolver
-    // .dart): polygon for the LGA, then the nearest ward inside it. So a fire
-    // and an incident at the same spot still get the same ward, which is what
-    // corroboration needs. The list is pinned so the disagreement stays
-    // visible, and any change to either dataset shows up here.
+    // (assets/geo/plateau_wards.json says which). A fire is placed the way the
+    // app places an incident (jurisdiction_resolver.dart): polygon for the
+    // LGA, then the nearest ward inside it. So a fire and an incident at the
+    // same spot still get the same ward, which is what corroboration needs.
+    // The list is pinned so any disagreement stays visible, and any change to
+    // either dataset shows up here.
+    //
+    // THIS LIST USED TO HOLD THIRTEEN. Twelve of them were wrong coordinates,
+    // not a real disagreement: the LGA labels were right and the centroids
+    // were in the wrong place, corrected against GRID3's ward boundaries. The
+    // thirteenth, KANKE / NEMEL, was a spelling — GRID3 calls it "Namel", so
+    // our matcher never found the polygon that was on disk all along.
+    //
+    // This test was not updated with them, so it has been failing on main
+    // ever since, asserting twelve faults that had been fixed and reading as
+    // if the data had regressed. The Dart side has its own gate for the same
+    // invariant (scripts/check_a_ward_centroid_is_in_its_own_lga.py); this is
+    // the console's copy and it has to move with it.
+    //
+    // MIKANG / GARKAWA CENTRAL genuinely needs a government source. GRID3
+    // carries no ward named Garkawa anywhere in Plateau, and our register's
+    // three Garkawa wards have no counterpart among GRID3's eighteen Mikang
+    // wards, so there is nothing to correct it against: INEC or PLASIEC has
+    // to say where it is. Until then a fire there is placed in Shendam, which
+    // is where the coordinate actually falls, and this line says so out loud.
     const outside = wardCentroids
       .filter((w) => lgaAt(w.lat, w.lng) !== w.lga.toUpperCase().replace(/\s+/g, ' '))
       .map((w) => `${w.lga} / ${w.ward.replace(/\s+/g, ' ')} -> ${lgaAt(w.lat, w.lng) ?? 'no LGA'}`);
     expect(outside).toEqual([
-      'BOKKOS / MANGUNA -> BARKIN LADI',
-      "JOS EAST / FOBUR 'B' -> JOS NORTH",
-      'JOS NORTH / JENTA ADAMU -> JOS SOUTH',
-      'JOS NORTH / TUDUN WADA - KABONG -> JOS SOUTH',
-      'JOS SOUTH / VWANG -> RIYOM',
-      'KANAM / DUGUB -> no LGA',
-      'KANKE / AMPANG-EAST -> PANKSHIN',
-      'KANKE / NEMEL -> no LGA',
-      'LANGTANG NORTH / MBAN/ZAMKO -> MIKANG',
-      'LANGTANG NORTH / PISHE/YASHI -> KANAM',
       'MIKANG / GARKAWA CENTRAL -> SHENDAM',
-      "MIKANG / KOENOEM 'A' -> SHENDAM",
-      'WASE / KUMBONG -> LANGTANG NORTH',
     ]);
   });
 

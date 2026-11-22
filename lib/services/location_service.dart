@@ -1,4 +1,6 @@
 // ignore_for_file: lines_longer_than_80_chars, Large data or UI definitions exceed limit
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -19,8 +21,13 @@ final userLocationStreamProvider = StreamProvider<Position?>((ref) {
 /// Handles all raw hardware bindings for GPS and network location tracking
 /// via the `geolocator` plugin.
 class LocationService {
-  /// Documentation for this public member.
-  LocationService();
+  /// [retryDelay] overrides how long the location stream waits before looking
+  /// again for a permission it has not got yet. Tests pass a short one;
+  /// nothing else should pass anything.
+  LocationService({Duration Function(int attempt)? retryDelay})
+      : _retryDelay = retryDelay ?? permissionRetryDelay;
+
+  final Duration Function(int attempt) _retryDelay;
 
   /// Requests hardware location permissions from the user.
   Future<bool> requestPermission({bool force = false}) async {
@@ -172,62 +179,162 @@ class LocationService {
     }
   }
 
-  /// Streams the user's location in real time natively from hardware GPS streams.
-  /// Returns a nullable stream — emits null immediately if permissions are denied
-  /// so that consumers never hang on the loading state.
-  Stream<Position?> streamLocation() async* {
+  /// How long the location stream waits before looking again for a permission
+  /// the person may have granted since, by attempt number.
+  ///
+  /// WHY THE STREAM NO LONGER ENDS. It used to `yield null` once at the first
+  /// refusal and `return`. The stream was then shut for the life of the app:
+  /// granting location afterwards — in Android's settings, or from the
+  /// emergency screen's own prompt — changed nothing, and every screen went on
+  /// reading `---` until the app was restarted. On the emergency screen that is
+  /// a person watching empty coordinates while they believe a squad is being
+  /// sent to them. The stream now keeps looking.
+  ///
+  /// Quick at first, so granting permission feels immediate, then slow, so a
+  /// phone with location switched off is not paying for it all day.
+  static Duration permissionRetryDelay(int attempt) =>
+      attempt < 10 ? const Duration(seconds: 3) : const Duration(seconds: 20);
+
+  /// Whether location may be used right now. Asks for nothing and shows no
+  /// dialog, so the stream can keep checking without pestering anybody.
+  Future<bool> hasPermissionNow() async {
     try {
-      final hasPermission = await requestPermission().timeout(
-        const Duration(seconds: 30),
-        onTimeout: () => false,
-      );
-      if (!hasPermission) {
-        debugPrint(
-          '[LOC_TRACE] Hardware GPS permissions denied, yielding null sentinel.',
-        );
-        yield null;
-        return;
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        return false;
       }
-
-      // Fetch and yield initial position immediately
-      try {
-        final initialPosition = await Geolocator.getCurrentPosition(
-          locationSettings: _buildLocationSettings(),
-        ).timeout(const Duration(seconds: 4));
-        yield initialPosition;
-      } catch (e) {
-        debugPrint('[LOC_TRACE] Failed to get initial position for stream: $e');
-        try {
-          final lastKnown = await Geolocator.getLastKnownPosition();
-          if (lastKnown != null) {
-            // Only use cached position if it's less than 30 minutes old
-            final age = DateTime.now().difference(lastKnown.timestamp);
-            if (age.inMinutes < 30) {
-              yield lastKnown;
-            } else {
-              debugPrint('[LOC] Last known position is ${age.inMinutes} minutes old — ignoring stale data');
-            }
-          }
-        } catch (_) {}
-      }
-
-      debugPrint(
-        '[LOC_TRACE] Requesting continuous hardware location stream lock...',
-      );
-
-      final settings = _buildLocationSettings();
-
-      try {
-        final stream = Geolocator.getPositionStream(locationSettings: settings);
-        await for (final pos in stream) {
-          yield pos;
-        }
-      } catch (e) {
-        debugPrint('[LOC_ERR] Stream loop exception: $e');
-      }
+      final permission = await Geolocator.checkPermission();
+      return permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always;
     } catch (e) {
-      debugPrint('[LOC_ERR] Failed to initialize location stream: $e');
-      yield null;
+      debugPrint('[LOC_ERR] hasPermissionNow failed: $e');
+      return false;
     }
+  }
+
+  /// Streams the user's location in real time natively from hardware GPS streams.
+  ///
+  /// Emits null as soon as it knows there is no fix, so no screen hangs on the
+  /// loading state, and then keeps watching — see [permissionRetryDelay]. Only
+  /// the first attempt may prompt; later ones just look ([hasPermissionNow]),
+  /// so nobody is shown the system dialog over and over.
+  ///
+  /// WHY A CONTROLLER AND NOT `async*`. A generator only notices that its
+  /// listener has gone at a `yield`, and this loop deliberately yields nothing
+  /// while it waits (one null per outage, not one every few seconds). Written
+  /// as `async*` the waiting loop was therefore impossible to cancel: it ran
+  /// for the rest of the process, and `subscription.cancel()` never completed.
+  /// A test that cancelled one hung for thirty seconds, which is how this was
+  /// found.
+  Stream<Position?> streamLocation() {
+    var cancelled = false;
+    StreamSubscription<Position>? hardware;
+    late StreamController<Position?> out;
+
+    void emit(Position? value) {
+      if (!cancelled && !out.isClosed) out.add(value);
+    }
+
+    Future<void> run() async {
+      var attempt = 0;
+      var toldNoFix = false;
+
+      while (!cancelled) {
+        bool hasPermission;
+        try {
+          hasPermission = attempt == 0
+              ? await requestPermission().timeout(
+                  const Duration(seconds: 30),
+                  onTimeout: () => false,
+                )
+              : await hasPermissionNow();
+        } catch (e) {
+          debugPrint('[LOC_ERR] Permission check failed: $e');
+          hasPermission = false;
+        }
+        if (cancelled) return;
+
+        if (!hasPermission) {
+          if (!toldNoFix) {
+            debugPrint(
+              '[LOC_TRACE] No location permission yet — emitting the null sentinel and watching for one.',
+            );
+            emit(null);
+            toldNoFix = true;
+          }
+          await Future<void>.delayed(_retryDelay(attempt));
+          attempt++;
+          continue;
+        }
+
+        toldNoFix = false;
+        attempt = 0;
+
+        try {
+          // The first fix, as soon as there is one.
+          try {
+            final initialPosition = await Geolocator.getCurrentPosition(
+              locationSettings: _buildLocationSettings(),
+            ).timeout(const Duration(seconds: 4));
+            emit(initialPosition);
+          } catch (e) {
+            debugPrint('[LOC_TRACE] Failed to get initial position for stream: $e');
+            try {
+              final lastKnown = await Geolocator.getLastKnownPosition();
+              if (lastKnown != null) {
+                // Only use cached position if it's less than 30 minutes old
+                final age = DateTime.now().difference(lastKnown.timestamp);
+                if (age.inMinutes < 30) {
+                  emit(lastKnown);
+                } else {
+                  debugPrint('[LOC] Last known position is ${age.inMinutes} minutes old — ignoring stale data');
+                }
+              }
+            } catch (_) {}
+          }
+          if (cancelled) return;
+
+          debugPrint(
+            '[LOC_TRACE] Requesting continuous hardware location stream lock...',
+          );
+
+          final ended = Completer<void>();
+          hardware = Geolocator.getPositionStream(
+            locationSettings: _buildLocationSettings(),
+          ).listen(
+            emit,
+            onError: (Object e) {
+              debugPrint('[LOC_ERR] Position stream error: $e');
+              if (!ended.isCompleted) ended.complete();
+            },
+            onDone: () {
+              if (!ended.isCompleted) ended.complete();
+            },
+            cancelOnError: true,
+          );
+          await ended.future;
+          await hardware?.cancel();
+          hardware = null;
+          debugPrint('[LOC_TRACE] Position stream ended — looking again.');
+        } catch (e) {
+          debugPrint('[LOC_ERR] Stream loop exception: $e');
+        }
+        if (cancelled) return;
+
+        // The hardware stream ended or threw: location may have been switched
+        // off, or permission revoked. Look again rather than go quiet for good.
+        await Future<void>.delayed(_retryDelay(attempt));
+        attempt++;
+      }
+    }
+
+    out = StreamController<Position?>(
+      onListen: () => unawaited(run()),
+      onCancel: () async {
+        cancelled = true;
+        await hardware?.cancel();
+        hardware = null;
+      },
+    );
+    return out.stream;
   }
 }

@@ -44,6 +44,22 @@ Position _position({
   );
 }
 
+/// Waits for [condition] or fails. Real time: the stream's retry is a real
+/// delay, shortened by the LocationService under test but not removed.
+Future<void> _until(
+  bool Function() condition, {
+  Duration timeout = const Duration(seconds: 5),
+  String what = 'condition',
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail('$what was still not true after $timeout');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -226,6 +242,75 @@ void main() {
 
       expect(first, isNotNull);
       expect(first!.latitude, closeTo(9.8965, 0.000001));
+    });
+
+    // THE BUG THIS PROVES GONE. streamLocation() used to `yield null` once at
+    // the first refusal and `return`. The stream was then closed for the life
+    // of the app: a permission granted afterwards — in Android's settings, or
+    // from the emergency screen's own TURN ON LOCATION button — changed
+    // nothing, and every screen went on reading `---` until the app was
+    // restarted. On the emergency screen that is a person watching empty
+    // coordinates while the banner told them their location was broadcasting.
+    test('keeps looking, so a permission granted later reaches the app',
+        () async {
+      // Location is switched off for the whole phone to begin with.
+      var serviceOn = false;
+      when(() => geo.isLocationServiceEnabled())
+          .thenAnswer((_) async => serviceOn);
+      when(() => geo.checkPermission())
+          .thenAnswer((_) async => LocationPermission.always);
+      when(() => geo.getCurrentPosition(
+            locationSettings: any(named: 'locationSettings'),
+          ),).thenAnswer((_) async => _position());
+      when(() => geo.getPositionStream(
+            locationSettings: any(named: 'locationSettings'),
+          ),).thenAnswer((_) => const Stream<Position>.empty());
+
+      final quick = LocationService(
+        retryDelay: (_) => const Duration(milliseconds: 5),
+      );
+      final seen = <Position?>[];
+      final sub = quick.streamLocation().listen(seen.add);
+      addTearDown(sub.cancel);
+
+      await _until(() => seen.isNotEmpty, what: 'the no-fix sentinel');
+      expect(seen.first, isNull, reason: 'it should say so when it has no fix');
+
+      // The person switches location on. Nothing re-subscribes to the stream.
+      serviceOn = true;
+
+      await _until(() => seen.any((p) => p != null),
+          what: 'a fix after permission was granted');
+      expect(seen.last, isNotNull);
+      expect(seen.last!.latitude, closeTo(9.8965, 0.000001));
+    });
+
+    // The flag that stops the retry loop turning into a null every few
+    // milliseconds. Without it every screen watching this provider would
+    // rebuild on a loop for as long as location stayed off.
+    test('says it has no fix once, not on every look', () async {
+      when(() => geo.isLocationServiceEnabled()).thenAnswer((_) async => false);
+
+      final quick = LocationService(
+        retryDelay: (_) => const Duration(milliseconds: 1),
+      );
+      final seen = <Position?>[];
+      final sub = quick.streamLocation().listen(seen.add);
+      addTearDown(sub.cancel);
+
+      await _until(() => seen.isNotEmpty, what: 'the no-fix sentinel');
+      // Long enough for many retries at a 1 ms delay.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      expect(seen, hasLength(1),
+          reason: 'one null, however many times it looked again');
+    });
+
+    test('the real retry schedule is quick first, then slow', () {
+      expect(LocationService.permissionRetryDelay(0).inSeconds, 3);
+      expect(LocationService.permissionRetryDelay(9).inSeconds, 3);
+      expect(LocationService.permissionRetryDelay(10).inSeconds, 20);
+      expect(LocationService.permissionRetryDelay(500).inSeconds, 20);
     });
   });
 }
