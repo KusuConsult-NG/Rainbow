@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rainbow_app/core/sos/volume_sos.dart';
+import 'package:rainbow_app/features/settings/settings_screen.dart';
 import 'package:rainbow_app/features/settings/volume_sos_lock_screen_tile.dart';
 import 'package:rainbow_app/providers/auth_provider.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
@@ -254,6 +255,78 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
       expect(find.text(en('vsos_lock_on')), findsOneWidget);
+    });
+  });
+
+  group('the Settings switch', () {
+    String en(String k) => Translations.get(k, AppLanguage.english);
+
+    // The switch's description ends "it can also work with the phone locked:
+    // set that up below", and "below" was empty until the switch was on. So
+    // the sentence pointed at nothing, and afterwards the step was a tile to
+    // be noticed and a second button to be pressed. A handset with the switch
+    // on still did nothing when the screen was locked.
+    testWidgets('turning it ON offers the locked-phone step at once',
+        (tester) async {
+      await pump(tester, enabled: false, home: const SettingsScreen());
+
+      await tester.tap(find.byKey(const ValueKey('volume_sos_toggle')));
+      await tester.pumpAndSettle();
+
+      expect(find.text(en('vsos_disclosure_body')), findsOneWidget,
+          reason: 'the disclosure the description promised, without hunting');
+      expect(native.calls, isNot(contains('openAccessibilitySettings')),
+          reason: 'nothing is opened before it has been explained');
+
+      await tester.tap(find.byKey(const ValueKey('volume_sos_open_accessibility')));
+      await tester.pumpAndSettle();
+      expect(native.calls, contains('openAccessibilitySettings'));
+    });
+
+    testWidgets('NOT NOW leaves the switch on and opens nothing',
+        (tester) async {
+      await pump(tester, enabled: false, home: const SettingsScreen());
+      await tester.tap(find.byKey(const ValueKey('volume_sos_toggle')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text(en('vsos_disclosure_cancel')));
+      await tester.pumpAndSettle();
+
+      expect(native.calls, isNot(contains('openAccessibilitySettings')));
+      // In-app Volume Down ×3 still works; only the locked-phone half is
+      // unset, and the tile below is the way back to it.
+      final toggle =
+          tester.widget<SwitchListTile>(find.byKey(const ValueKey('volume_sos_toggle')));
+      expect(toggle.value, isTrue);
+      expect(find.byKey(const ValueKey('volume_sos_set_up_locked')), findsOneWidget);
+    });
+
+    testWidgets('asks nothing when the service is already on', (tester) async {
+      native.serviceOn = true;
+      await pump(tester, enabled: false, home: const SettingsScreen());
+
+      await tester.tap(find.byKey(const ValueKey('volume_sos_toggle')));
+      await tester.pumpAndSettle();
+
+      expect(find.text(en('vsos_disclosure_body')), findsNothing);
+      expect(find.text(en('vsos_lock_on')), findsOneWidget);
+    });
+
+    testWidgets('turning it OFF asks nothing', (tester) async {
+      await pump(tester, home: const SettingsScreen());
+
+      await tester.tap(find.byKey(const ValueKey('volume_sos_toggle')));
+      await tester.pumpAndSettle();
+
+      expect(find.text(en('vsos_disclosure_body')), findsNothing);
+      expect(native.calls, isNot(contains('openAccessibilitySettings')));
+    });
+
+    // Three quick presses of Volume Down is also how a person turns the
+    // volume down. Defaulting this on would send silent alerts from pockets.
+    test('is off until somebody turns it on', () async {
+      SharedPreferences.setMockInitialValues({});
+      expect(VolumeSosSetting().state, isFalse);
     });
   });
 

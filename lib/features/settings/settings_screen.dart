@@ -41,6 +41,28 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  /// Turning Volume Down ×3 on offers the locked-phone step straight away.
+  ///
+  /// The switch's own description ends "On Android it can also work with the
+  /// phone locked: set that up below" — and "below" was empty until the switch
+  /// was on, so the sentence pointed at nothing. Afterwards the only route was
+  /// a tile the person had to notice and a second button they had to press, so
+  /// a handset that had the switch on still did nothing when the screen was
+  /// locked and nobody could see why. The disclosure has NOT NOW on it, and
+  /// the tile stays below as the way back.
+  ///
+  /// Switching it OFF asks nothing: there is no step to offer, and Android's
+  /// accessibility toggle is the person's to leave where they like.
+  Future<void> _setVolumeSos({required bool enabled}) async {
+    await ref.read(volumeSosEnabledProvider.notifier).set(enabled);
+    if (!enabled || !mounted) return;
+    final lockScreen = ref.read(volumeSosLockScreenProvider);
+    if (!lockScreen.supported) return;
+    if (await lockScreen.isServiceEnabled()) return;
+    if (!mounted) return;
+    await showVolumeSosLockScreenSetup(context, ref);
+  }
+
   /// This screen's text in the chosen language.
   String _t(String key) => Translations.get(key, ref.read(languageProvider));
 
@@ -280,7 +302,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             activeThumbColor: AppColors.primary,
             tileColor: AppColors.surfaceContainer,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            onChanged: (v) => ref.read(volumeSosEnabledProvider.notifier).set(v),
+            onChanged: (v) => _setVolumeSos(enabled: v),
           ),
           // With the phone locked (Android): the accessibility service.
           const VolumeSosLockScreenTile(),

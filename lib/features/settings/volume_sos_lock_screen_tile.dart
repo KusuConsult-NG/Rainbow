@@ -17,6 +17,51 @@ import 'package:rainbow_app/core/sos/volume_sos.dart';
 import 'package:rainbow_app/core/theme/app_colors.dart';
 import 'package:rainbow_app/shared/localization/translations.dart';
 
+/// The prominent disclosure, and then Android's Accessibility settings if the
+/// person agrees. Nothing is opened before they have read what the service
+/// does and does not do: that order is what Google Play requires, and the
+/// tests assert it.
+///
+/// Top-level and not a method of the tile because the Settings SWITCH calls it
+/// too. The switch's own description ends "it can also work with the phone
+/// locked: set that up below" — and before this, "below" was empty until the
+/// switch was on, so the sentence pointed at nothing and the second step was
+/// found only by people who went looking for it.
+Future<void> showVolumeSosLockScreenSetup(
+  BuildContext context,
+  WidgetRef ref,
+) async {
+  String t(String key) => Translations.get(key, ref.read(languageProvider));
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: AppColors.surfaceContainer,
+      title: Text(t('vsos_disclosure_title'),
+          style: GoogleFonts.outfit(
+              color: AppColors.onBackground, fontWeight: FontWeight.bold)),
+      content: SingleChildScrollView(
+        child: Text(t('vsos_disclosure_body'),
+            style:
+                GoogleFonts.inter(color: AppColors.textSecondary, fontSize: 13)),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: Text(t('vsos_disclosure_cancel'),
+              style: const TextStyle(color: AppColors.textDim)),
+        ),
+        ElevatedButton(
+          key: const ValueKey('volume_sos_open_accessibility'),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text(t('vsos_disclosure_open')),
+        ),
+      ],
+    ),
+  );
+  if (go != true) return;
+  await ref.read(volumeSosLockScreenProvider).openSettings();
+}
+
 class VolumeSosLockScreenTile extends ConsumerStatefulWidget {
   const VolumeSosLockScreenTile({super.key});
 
@@ -55,33 +100,7 @@ class _VolumeSosLockScreenTileState extends ConsumerState<VolumeSosLockScreenTil
     if (mounted) setState(() => _serviceOn = on);
   }
 
-  Future<void> _setUp() async {
-    final go = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surfaceContainer,
-        title: Text(_t('vsos_disclosure_title'),
-            style: GoogleFonts.outfit(color: AppColors.onBackground, fontWeight: FontWeight.bold)),
-        content: SingleChildScrollView(
-          child: Text(_t('vsos_disclosure_body'),
-              style: GoogleFonts.inter(color: AppColors.textSecondary, fontSize: 13)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(_t('vsos_disclosure_cancel'), style: const TextStyle(color: AppColors.textDim)),
-          ),
-          ElevatedButton(
-            key: const ValueKey('volume_sos_open_accessibility'),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(_t('vsos_disclosure_open')),
-          ),
-        ],
-      ),
-    );
-    if (go != true) return;
-    await ref.read(volumeSosLockScreenProvider).openSettings();
-  }
+  Future<void> _setUp() => showVolumeSosLockScreenSetup(context, ref);
 
   @override
   Widget build(BuildContext context) {
