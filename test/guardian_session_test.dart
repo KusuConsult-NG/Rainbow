@@ -9,6 +9,7 @@ import 'package:rainbow_app/core/guardian/guardian_keep_alive.dart';
 import 'package:rainbow_app/core/guardian/guardian_provider.dart';
 import 'package:rainbow_app/core/guardian/hausa_model.dart';
 import 'package:rainbow_app/core/guardian/hausa_provider.dart';
+import 'package:rainbow_app/features/guardian/guardian_banner.dart';
 import 'package:rainbow_app/features/guardian/guardian_screen.dart';
 import 'package:rainbow_app/providers/emergency_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -483,6 +484,59 @@ void main() {
       await g().start(const Duration(hours: 1));
       expect(ear.lastHausaDir, dir);
       await g().stop();
+    });
+  });
+
+  // THE REASON GUARDIAN WAS REPORTED AS NOT WORKING. Nothing was broken —
+  // every test above this line passes. Guardian is reached from exactly two
+  // places: this banner and a tile well down Settings. The banner rendered
+  // nothing unless a session was already running, so it was a way OUT of
+  // Guardian and never a way in, and a person looking for a voice SOS on the
+  // home screen found AI REPORT (a different feature) and nothing else.
+  group('the home banner', () {
+    Future<void> pumpBanner(WidgetTester t) async {
+      await t.pumpWidget(
+        UncontrolledProviderScope(
+          container: c,
+          child: const MaterialApp(home: Scaffold(body: GuardianBanner())),
+        ),
+      );
+      await t.pump();
+    }
+
+    testWidgets('says Guardian exists when it is off and unseen', (t) async {
+      await pumpBanner(t);
+      expect(find.byKey(const ValueKey('guardian_way_in')), findsOneWidget,
+          reason: 'the home screen has to say the feature is there at all');
+    });
+
+    testWidgets('steps out of the way once the notice has been accepted',
+        (t) async {
+      await c.read(guardianConsentProvider.notifier).accept();
+      await pumpBanner(t);
+      expect(find.byKey(const ValueKey('guardian_way_in')), findsNothing,
+          reason: 'they have read it and decided; an emergency home screen is '
+              'not a place to keep advertising');
+      expect(find.byKey(const ValueKey('guardian_banner')), findsNothing);
+    });
+
+    testWidgets('becomes the listening banner while a session runs', (t) async {
+      await c.read(guardianConsentProvider.notifier).accept();
+      await c.read(guardianProvider.notifier).start(const Duration(hours: 1));
+      // The session's own end-timer outlives the widget tree otherwise, and
+      // the binding fails the test for a pending timer.
+      addTearDown(() => c.read(guardianProvider.notifier).stop());
+      await pumpBanner(t);
+      expect(find.byKey(const ValueKey('guardian_banner')), findsOneWidget);
+      expect(find.byKey(const ValueKey('guardian_way_in')), findsNothing);
+    });
+
+    testWidgets('the way in is still there if the notice was never accepted, '
+        'even after a session has run', (t) async {
+      await c.read(guardianProvider.notifier).start(const Duration(hours: 1));
+      await c.read(guardianProvider.notifier).stop();
+      await pumpBanner(t);
+      expect(find.byKey(const ValueKey('guardian_way_in')), findsOneWidget);
     });
   });
 

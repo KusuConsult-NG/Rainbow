@@ -1740,6 +1740,16 @@ jobs:
           done
           node scripts/local_e2e/mobile_capture.js
           node scripts/local_e2e/mobile_interact.js
+          # A third pass over the SAME build, with geolocation DENIED.
+          #
+          # mobile_interact.js grants it on purpose — "SOS needs a fix.
+          # Without this the permission gate stops the flow before any alert
+          # is created". The consequence was that every automated pass over
+          # the emergency screen had a location, and the one state a person in
+          # danger can actually be in was the one state nothing exercised. A
+          # citizen in Jos pressed SOS on a phone with no fix and read
+          # LOCATION BROADCASTING over a row of dashes.
+          node scripts/local_e2e/mobile_no_location.js
 
       # A third pass, and the only one that is about the SYSTEM rather than a
       # screen: one incident driven the length of the command chain — citizen to
