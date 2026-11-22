@@ -931,6 +931,19 @@ jobs:
       - name: Assert a live stream is not claimed before it connects
         run: python3 scripts/check_a_live_stream_is_not_claimed_early.py
 
+      # A citizen pressed SOS in Jos and read "LOCATION BROADCASTING" above
+      # "LATITUDE ---  LONGITUDE ---", over a blank map, on a phone with no fix
+      # at all. The banner was driven by the alert's STATUS and never looked at
+      # the position, so a PENDING row fell through to that string whatever the
+      # phone knew; three more strings on the screen promised a location
+      # unconditionally, including "Your location is still being recorded".
+      # The alert reached HQ with latitude and longitude null. This is C-5
+      # inverted: no coordinate to invent, so the screen invented the sending
+      # of one. The stream also gave up for good at the first refusal, so
+      # granting location afterwards changed nothing.
+      - name: Assert a location is not claimed without one
+        run: python3 scripts/check_a_location_is_not_claimed_without_one.py
+
       # Staff sign in with a BADGE, and the app turns it into
       # <badge>@operationrainbow.plateau.gov.ng — with the console carrying its
       # own copy of that domain. The domain is the second half of the primary

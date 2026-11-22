@@ -619,6 +619,63 @@ class Translations {
       AppLanguage.hausa: 'An ajiye a wayar nan, za a sake turawa idan an samu sadarwa. Ana ci gaba da daukar wurinka.',
       AppLanguage.pidgin: 'E dey save for this phone and e go send again when network come. We still dey record where you dey.',
     },
+    // ---- No GPS fix: what the emergency screen says instead -----------
+    //
+    // Every string above this comment promises a location: "LOCATION
+    // BROADCASTING", "Sending your alert AND LOCATION to HQ", "Your location
+    // is still being recorded". The screen showed them whether or not the
+    // phone had a fix, because the banner was driven by the alert's status
+    // alone and never looked at the position. A person with location refused
+    // or switched off read LOCATION BROADCASTING over a row of dashes, and had
+    // no way to know HQ had been given nothing to go to.
+    //
+    // These are the same states told truthfully. Hausa and Pidgin want a
+    // native speaker's eye before release.
+    'eme_no_fix_title': {
+      AppLanguage.english: 'NO LOCATION BEING SENT',
+      AppLanguage.hausa: 'BA A TURA WURINKA',
+      AppLanguage.pidgin: 'DEM NO DEY SEE WHERE YOU DEY',
+    },
+    'eme_no_fix_body': {
+      AppLanguage.english: 'HQ has your alert, but not your position. Turn on location, or tell them where you are by call or SMS.',
+      AppLanguage.hausa: 'Cibiyar umarni na da kiran daukin ka, amma ba ta san inda kake ba. Kunna GPS, ko ka gaya musu inda kake da waya ko SMS.',
+      AppLanguage.pidgin: 'HQ get your alert, but dem no know where you dey. On location, or call or SMS dem make you tell dem where you dey.',
+    },
+    'eme_no_fix_action': {
+      AppLanguage.english: 'TURN ON LOCATION',
+      AppLanguage.hausa: 'KUNNA GPS',
+      AppLanguage.pidgin: 'ON LOCATION',
+    },
+    'eme_no_fix_open_settings': {
+      AppLanguage.english: 'OPEN APP SETTINGS',
+      AppLanguage.hausa: 'BUDE SAITUNAN MANHAJA',
+      AppLanguage.pidgin: 'OPEN APP SETTINGS',
+    },
+    'eme_no_fix_blocked': {
+      AppLanguage.english: 'Location is blocked for this app. Allow it in app settings, then come back.',
+      AppLanguage.hausa: 'An hana wannan manhaja amfani da GPS. Ka ba da izini a saitunan manhaja, sannan ka dawo.',
+      AppLanguage.pidgin: 'Location dey block for this app. Allow am for app settings, then come back.',
+    },
+    'eme_sending_desc_no_fix': {
+      AppLanguage.english: 'Sending your alert to HQ. It carries no location.',
+      AppLanguage.hausa: 'Ana tura kiran daukin ka zuwa cibiyar umarni. Ba shi da inda kake.',
+      AppLanguage.pidgin: 'We dey send your alert go HQ. E no carry where you dey.',
+    },
+    'eme_active_no_fix': {
+      AppLanguage.english: 'ALERT ACTIVE · NO LOCATION',
+      AppLanguage.hausa: 'KIRAN DAUKI NA AIKI · BABU WURI',
+      AppLanguage.pidgin: 'ALERT DEY ACTIVE · NO LOCATION',
+    },
+    'eme_triaging_no_fix': {
+      AppLanguage.english: 'Alert transmitted · no location attached · HQ triaging...',
+      AppLanguage.hausa: 'An tura kiran dauki · babu inda kake a ciki · cibiyar umarni na duba shi...',
+      AppLanguage.pidgin: 'Alert done go · but where you dey no dey inside · HQ dey check am...',
+    },
+    'eme_not_confirmed_desc_no_fix': {
+      AppLanguage.english: 'Saved on this phone and retrying when there is a connection. No location has been recorded.',
+      AppLanguage.hausa: 'An ajiye a wayar nan, za a sake turawa idan an samu sadarwa. Ba a dauki inda kake ba.',
+      AppLanguage.pidgin: 'E dey save for this phone and e go send again when network come. We no record where you dey.',
+    },
     'eme_scanning': {
       AppLanguage.english: 'SCANNING FOR SIGNAL...',
       AppLanguage.hausa: 'ANA NEMAN SIGINA...',

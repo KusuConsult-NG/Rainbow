@@ -508,6 +508,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 final scale =
                                     1.0 + (_breathingController.value * 0.04);
                                 return GestureDetector(
+                                  // The bottom bar's SOS no longer reads
+                                  // "SOS ×3", so find.text('SOS') now matches
+                                  // both controls. Tests address this one by
+                                  // key, as they already do the nav one.
+                                  key: const ValueKey('home_sos'),
                                   onTap: _onSosTap,
                                   onLongPress: _holdForFullSos,
                                   child: Stack(

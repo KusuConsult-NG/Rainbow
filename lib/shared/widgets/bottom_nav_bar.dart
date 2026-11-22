@@ -216,8 +216,14 @@ class SosNavButton extends ConsumerWidget {
                 ],
               ),
               const SizedBox(height: 6),
+              // Just SOS. It used to read "SOS ×3", which put a keystroke
+              // recipe in the one place on the screen that has to be read in
+              // a second, and read as a product name rather than a control.
+              // How to use it belongs on the button that teaches it (the big
+              // SOS on the home screen says TAP 3 TIMES) and in the semantics
+              // label above, which is what a screen reader announces.
               Text(
-                'SOS \u00d73',
+                'SOS',
                 style: GoogleFonts.outfit(
                   fontSize: 9,
                   fontWeight: FontWeight.w900,

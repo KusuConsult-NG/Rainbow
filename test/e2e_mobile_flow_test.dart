@@ -202,7 +202,10 @@ void main() {
 
     expect(find.byType(HomeScreen), findsOneWidget);
     expect(find.text('SYSTEM NOMINAL'), findsOneWidget);
-    expect(find.text('SOS'), findsOneWidget);
+    // Two controls now carry the word: the big one on Home and the one in the
+    // bottom bar, which used to read "SOS ×3".
+    expect(find.byKey(const ValueKey('home_sos')), findsOneWidget);
+    expect(find.text('SOS'), findsNWidgets(2));
     expect(find.text('SAFE ZONES'), findsOneWidget);
   });
 
@@ -232,7 +235,7 @@ void main() {
 
     await pumpSettleWithMax(tester);
 
-    final sosFinder = find.text('SOS');
+    final sosFinder = find.byKey(const ValueKey('home_sos'));
     expect(sosFinder, findsOneWidget);
     expect(find.byKey(const ValueKey('nav_sos')), findsOneWidget,
         reason: 'the SOS control is in the bottom bar, not only on Home');
