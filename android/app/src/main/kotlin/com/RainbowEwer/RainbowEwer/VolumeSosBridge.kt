@@ -10,30 +10,6 @@ import android.provider.Settings
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * Three presses of Volume Down inside [windowMs]. The same rule as the app's
- * own detector (lib/core/sos/triple_tap.dart, sosTapWindow): three deliberate
- * presses within three seconds.
- */
-class VolumePressCounter(private val windowMs: Long = 3000, private val needed: Int = 3) {
-    private val presses = ArrayDeque<Long>()
-
-    /** Records a press at [atMs]; true when it completes a set of [needed]. */
-    fun press(atMs: Long): Boolean {
-        while (presses.isNotEmpty() && (atMs - presses.first() > windowMs || presses.first() > atMs)) {
-            presses.removeFirst()
-        }
-        presses.addLast(atMs)
-        if (presses.size >= needed) {
-            presses.clear()
-            return true
-        }
-        return false
-    }
-
-    fun reset() = presses.clear()
-}
-
-/**
  * How a Volume Down ×3 caught by [VolumeSosAccessibilityService] reaches the
  * app's own SOS code, so there is one SOS path and not two: the same
  * EmergencyNotifier.startEmergency(silent: true), with its offline queue, SMS
