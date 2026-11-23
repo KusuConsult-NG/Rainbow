@@ -52,6 +52,11 @@ permanent until the app was restarted, and the screen offered no prompt at all.
    and a control that asks for location from there.
 4. The location stream keeps looking instead of giving up at the first
    refusal, and its Dart test proves it.
+5. A widget test builds the real screen, delivers a PENDING alert row with no
+   fix, and reads what the screen shows — with a control case proving the
+   assertion is capable of failing.
+6. CI drives the built app in a real browser with geolocation REFUSED, which
+   no other pass does.
 """
 from __future__ import annotations
 
@@ -64,6 +69,9 @@ SCREEN = REPO / 'lib/features/emergency/emergency_active_screen.dart'
 SERVICE = REPO / 'lib/services/location_service.dart'
 STRINGS = REPO / 'lib/shared/localization/translations.dart'
 SERVICE_TEST = REPO / 'test/location_service_test.dart'
+SCREEN_TEST = REPO / 'test/emergency_screen_tells_the_truth_about_location_test.dart'
+E2E = REPO / 'scripts/local_e2e/mobile_no_location.js'
+WORKFLOW = REPO / '.github/workflows/ci.yml'
 
 # Each string that promises a location, and the truthful one that must exist
 # for the case where there is none.
@@ -78,7 +86,8 @@ LANGUAGES = ('english', 'hausa', 'pidgin')
 faults: list[str] = []
 proved: list[str] = []
 
-for path in (SCREEN, SERVICE, STRINGS, SERVICE_TEST):
+for path in (SCREEN, SERVICE, STRINGS, SERVICE_TEST, SCREEN_TEST, E2E,
+             WORKFLOW):
     if not path.is_file():
         print(f'FAIL: {path.relative_to(REPO)} is missing.')
         sys.exit(1)
@@ -87,6 +96,8 @@ screen = SCREEN.read_text(encoding='utf-8')
 service = SERVICE.read_text(encoding='utf-8')
 strings = STRINGS.read_text(encoding='utf-8')
 service_test = SERVICE_TEST.read_text(encoding='utf-8')
+screen_test = SCREEN_TEST.read_text(encoding='utf-8')
+workflow = WORKFLOW.read_text(encoding='utf-8')
 
 # 1. The status card must be given the position.
 if not re.search(r'Widget _buildStatusCard\(\s*AsyncValue<Position\?>', screen):
@@ -177,6 +188,52 @@ elif 'keeps looking' not in service_test:
         'test it will be refactored away.')
 else:
     proved.append('the location stream keeps looking, and a test proves it')
+
+# 5. The screen's behaviour must be tested, not just its shape.
+#
+# THIS GATE IS NOT ENOUGH ON ITS OWN, and that is not a guess. The first
+# widget test written for this screen asserted that LOCATION BROADCASTING was
+# absent — and PASSED when the original bug was mutated back in. The branch
+# that prints it only runs when the `alerts` row arrives, the test gave the
+# screen no alert id, so the StreamBuilder got Stream.empty() and the branch
+# never ran at all. The assertion could not fail. Hence `alertRowStreamProvider`:
+# a seam that lets a test deliver a PENDING row and reach the branch.
+if 'alertRowStreamProvider' not in screen:
+    faults.append(
+        'The alert row stream is not behind a provider, so no test can deliver '
+        'a PENDING row and reach the branch that printed LOCATION '
+        'BROADCASTING. A widget test for it would pass whether or not the bug '
+        'was there — one did.')
+elif 'alertRowStreamProvider.overrideWith' not in screen_test:
+    faults.append(
+        'No test overrides alertRowStreamProvider, so nothing drives the '
+        'PENDING branch this gate exists for.')
+elif "hqStatus: 'PENDING'" not in screen_test:
+    faults.append(
+        'No test drives a PENDING alert, which is the exact state the citizen '
+        'in Jos was in when the screen told them their location was '
+        'broadcasting.')
+elif "eme_broadcasting')), findsOneWidget" not in screen_test:
+    faults.append(
+        'Nothing proves the test can SEE the LOCATION BROADCASTING string '
+        'when it is legitimately shown. Without that control, an absence '
+        'assertion is indistinguishable from a finder that never matches.')
+else:
+    proved.append('a widget test drives the real PENDING branch, with a '
+                  'control proving the assertion can fail')
+
+# 6. And the real screen, in a real browser, with the permission really
+#    refused. mobile_interact.js GRANTS geolocation before it touches SOS —
+#    deliberately, and correctly for that pass — so every other automated run
+#    over this screen has had a position. That is why nothing caught this.
+if 'node scripts/local_e2e/mobile_no_location.js' not in workflow:
+    faults.append(
+        'The no-location browser pass is not run by CI. Every other pass over '
+        'this screen grants geolocation, so without this one the state the '
+        'citizen in Jos was actually in is never exercised.')
+else:
+    proved.append('CI drives the real screen in a browser with geolocation '
+                  'refused')
 
 if faults:
     print('FAIL: a location may be claimed on a phone that has not got one.\n')

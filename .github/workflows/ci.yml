@@ -944,6 +944,18 @@ jobs:
       - name: Assert a location is not claimed without one
         run: python3 scripts/check_a_location_is_not_claimed_without_one.py
 
+      # "Three presses in three seconds" is written twice: once in Dart for
+      # presses the app sees, once in Kotlin for presses the accessibility
+      # service sees while the phone is LOCKED. They agreed because one person
+      # wrote both, and nothing kept them agreeing. Drift is silent and only
+      # shows up on a locked phone in an emergency. The preference key is
+      # pinned for the same reason: Dart writes `volume_sos_enabled`, the
+      # service reads `flutter.volume_sos_enabled` out of the Flutter
+      # preferences file, and two spellings of one key means the switch in
+      # Settings quietly does nothing.
+      - name: Assert the two halves of Volume Down x3 use one rule
+        run: python3 scripts/check_the_two_sos_tap_rules_agree.py
+
       # Staff sign in with a BADGE, and the app turns it into
       # <badge>@operationrainbow.plateau.gov.ng — with the console carrying its
       # own copy of that domain. The domain is the second half of the primary
@@ -1663,6 +1675,44 @@ jobs:
       - name: Which stalls earn a second reload
         run: node --test scripts/local_e2e/stall_report.test.js
 
+      # The Kotlin half of Volume Down x3, actually executed.
+      #
+      # This repository has no Android unit tests, no gradle wrapper and no SDK
+      # here, so the rule that decides whether a LOCKED phone raises a silent
+      # SOS was asserted by nothing: it was read and believed.
+      # VolumePressCounter.kt imports nothing, so kotlinc and a JDK are the
+      # whole toolchain — no SDK, no Gradle, no emulator. The JDK comes with
+      # flutter-action, already set up above.
+      #
+      # Pinned by version AND checksum: this downloads a compiler and runs what
+      # it produces, so "whatever is on the release page today" is not good
+      # enough. Cached, so it is one download per cache key rather than per run.
+      - name: Cache the Kotlin compiler
+        id: kotlinc-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/rainbow-kotlinc
+          key: kotlinc-2.0.21-0352c0a4
+      - name: Fetch the Kotlin compiler
+        if: steps.kotlinc-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.cache/rainbow-kotlinc
+          curl -sSL -o /tmp/kotlinc.zip \
+            https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
+          echo "0352c0a45bd22f80f6b26e485cd04da8047baa5de54865281fb9f89a4a7bcf2a  /tmp/kotlinc.zip" \
+            | sha256sum -c -
+          unzip -q -o /tmp/kotlinc.zip -d ~/.cache/rainbow-kotlinc
+      - name: Run the locked-phone tap rule's own tests
+        run: |
+          set -euo pipefail
+          KOTLINC=~/.cache/rainbow-kotlinc/kotlinc/bin/kotlinc
+          "$KOTLINC" \
+            android/app/src/main/kotlin/com/RainbowEwer/RainbowEwer/VolumePressCounter.kt \
+            android/app/src/test/kotlin/com/RainbowEwer/RainbowEwer/VolumePressCounterTest.kt \
+            -include-runtime -d /tmp/volume-press-counter-tests.jar
+          java -jar /tmp/volume-press-counter-tests.jar
+
       # No screen of the mobile app had ever been rendered before this job
       # existed: there is no emulator here, so "it builds and its tests pass"
       # was the whole of the evidence. Flutter's web target builds the same
@@ -1740,6 +1790,16 @@ jobs:
           done
           node scripts/local_e2e/mobile_capture.js
           node scripts/local_e2e/mobile_interact.js
+          # A third pass over the SAME build, with geolocation DENIED.
+          #
+          # mobile_interact.js grants it on purpose — "SOS needs a fix.
+          # Without this the permission gate stops the flow before any alert
+          # is created". The consequence was that every automated pass over
+          # the emergency screen had a location, and the one state a person in
+          # danger can actually be in was the one state nothing exercised. A
+          # citizen in Jos pressed SOS on a phone with no fix and read
+          # LOCATION BROADCASTING over a row of dashes.
+          node scripts/local_e2e/mobile_no_location.js
 
       # A third pass, and the only one that is about the SYSTEM rather than a
       # screen: one incident driven the length of the command chain — citizen to

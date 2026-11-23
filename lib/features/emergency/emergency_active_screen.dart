@@ -24,6 +24,24 @@ import 'package:rainbow_app/shared/widgets/rainbow_map.dart';
 import 'package:rainbow_app/shared/widgets/safety_feedback_dialog.dart';
 
 
+/// How this screen watches the alert row HQ is updating.
+///
+/// Behind a provider so a test can drive the statuses the screen reacts to.
+/// With the query inline, the PENDING branch — the one that printed LOCATION
+/// BROADCASTING over a row of dashes — could not be reached from a widget
+/// test at all: with no alert id the StreamBuilder got Stream.empty() and the
+/// branch never ran. A test asserting that string was absent therefore passed
+/// whether or not the bug was there, and did pass against the original code
+/// when it was mutated back in. A seam, so the assertion means something.
+typedef AlertRowStream = Stream<List<Map<String, dynamic>>> Function(
+    String alertId);
+
+final alertRowStreamProvider = Provider<AlertRowStream>(
+  (ref) => (alertId) => SupabaseConfig.client
+      .from('alerts')
+      .stream(primaryKey: ['id']).eq('id', alertId),
+);
+
 /// Documentation for this public member.
 
 class EmergencyActiveScreen extends ConsumerStatefulWidget {
@@ -667,10 +685,7 @@ class _EmergencyActiveScreenState extends ConsumerState<EmergencyActiveScreen>
       decoration: AppColors.glassSurface,
       child: StreamBuilder<List<Map<String, dynamic>>>(
         stream: alertId != null
-            ? SupabaseConfig.client
-                .from('alerts')
-                .stream(primaryKey: ['id'])
-                .eq('id', alertId)
+            ? ref.watch(alertRowStreamProvider)(alertId)
             : const Stream.empty(),
         builder: (context, snapshot) {
           // Until the server has the alert, say what is actually true.

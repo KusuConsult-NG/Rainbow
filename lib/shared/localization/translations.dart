@@ -1622,6 +1622,15 @@ class Translations {
       AppLanguage.hausa: 'Mai Tsaro yana saurare',
       AppLanguage.pidgin: 'Guardian dey listen',
     },
+    // The one-time signpost on the home screen. Guardian is reached from two
+    // places only: this banner and a tile well down Settings — and the banner
+    // used to appear only once a session was already running, so it was a way
+    // out and never a way in. See guardian_banner.dart.
+    'guardian_home_way_in': {
+      AppLanguage.english: 'Voice SOS: Guardian can listen for a call for help',
+      AppLanguage.hausa: 'SOS ta murya: Guardian na iya sauraron kiran taimako',
+      AppLanguage.pidgin: 'Voice SOS: Guardian fit listen for when you call for help',
+    },
     'guardian_notify_text': {
       AppLanguage.english: 'Listening for distress on this phone. Nothing is recorded or sent unless it sends an SOS.',
       AppLanguage.hausa: 'Yana sauraron alamar hatsari a wannan wayar. Ba a nadar ko aika komai sai idan ya aika SOS.',

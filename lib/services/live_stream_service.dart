@@ -113,10 +113,56 @@ class LiveStreamService {
   /// reads.
   bool get isStreaming => _isStreaming;
 
+  /// How long `connecting` may last before the person is told it did not
+  /// work.
+  ///
+  /// WHY THERE IS A DEADLINE AT ALL. The note at the top of this file says
+  /// `connecting` "may be where this ends up: a stream that never connects
+  /// stays `connecting` until ICE gives up". On a build with no TURN relay —
+  /// which is every build made from this repository's `.env.example` until a
+  /// relay is provisioned — that is the normal outcome on mobile data, and
+  /// ICE can sit there for minutes before it gives up, or not give up at all.
+  ///
+  /// A citizen in Jos pressed BROADCAST LIVE and watched "CONNECTING TO HQ —
+  /// NOT LIVE YET" for the length of the emergency. That is honest and it is
+  /// useless: there is nothing in it to act on. Thirty seconds is longer than
+  /// a working connection needs on a slow network, and short enough that
+  /// somebody can give up on it and press CONTACT HQ DISPATCHER instead.
+  ///
+  /// It does not make the stream fail. It reports a failure that has already
+  /// happened and was not being reported.
+  static const Duration connectDeadline = Duration(seconds: 30);
+
+  /// Overridable so the deadline can be tested without waiting for it.
+  @visibleForTesting
+  static Duration deadline = connectDeadline;
+
+  Timer? _connectDeadline;
+
+  /// Drives the status machine directly, so the deadline above can be tested
+  /// without a camera, a peer connection or a signalling channel.
+  @visibleForTesting
+  void debugSetStatus(LiveStreamStatus next) => _setStatus(next);
+
   void _setStatus(LiveStreamStatus next) {
     if (_status == next) return;
     _status = next;
     debugPrint('[LIVE_STREAM] status -> ${next.name}');
+    _connectDeadline?.cancel();
+    _connectDeadline = null;
+    if (next == LiveStreamStatus.connecting) {
+      // Restarted on every entry into connecting, so a brief `disconnected`
+      // that comes back gets a full window rather than the remains of one.
+      _connectDeadline = Timer(deadline, () {
+        if (_status != LiveStreamStatus.connecting) return;
+        debugPrint(
+          '[LIVE_STREAM] still connecting after ${deadline.inSeconds}s with '
+          '${cfg.hasRelay ? 'a relay' : 'NO TURN relay'} — reporting failed, '
+          'because a person in an emergency cannot act on a spinner.',
+        );
+        _setStatus(LiveStreamStatus.failed);
+      });
+    }
     if (!_statusController.isClosed) _statusController.add(next);
   }
 
