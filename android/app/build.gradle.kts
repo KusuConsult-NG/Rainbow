@@ -1,8 +1,13 @@
 import java.util.Properties
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     id("com.android.application")
-    id("kotlin-android")
+    // NO id("kotlin-android") HERE, deliberately.
+    //
+    // `flutter create` on 3.50 does not apply it: the Kotlin plugin is
+    // declared in settings.gradle.kts with `apply false`, and the Flutter
+    // Gradle Plugin applies it. Applying it here is the legacy pattern, and
+    // under AGP 9 it is what turns the old-DSL deprecation on `android { }`
+    // into a script compilation error.
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
     // The Google Services Gradle plugin was applied here with no Firebase
@@ -78,14 +83,10 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
 }
 
-// Was `kotlinOptions { jvmTarget = "17" }` inside `android { }`. Both that
-// block and the `jvmTarget` string property are deprecated, and under AGP 9
-// the deprecation is a script compilation error rather than a warning.
-kotlin {
-    compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_17)
-    }
-}
+// No Kotlin jvmTarget block. It was `kotlinOptions { jvmTarget = "17" }`
+// inside `android { }`, which AGP 9 rejects. Flutter's own template sets
+// neither: compileOptions above pins Java 17 and the Flutter Gradle Plugin
+// aligns Kotlin's target with it.
 
 flutter {
     source = "../.."
