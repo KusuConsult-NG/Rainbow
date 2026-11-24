@@ -1,7 +1,14 @@
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     id("com.android.application")
-    id("kotlin-android")
+    // NO id("kotlin-android") HERE, deliberately.
+    //
+    // `flutter create` on 3.50 does not apply it: the Kotlin plugin is
+    // declared in settings.gradle.kts with `apply false`, and the Flutter
+    // Gradle Plugin applies it. Applying it here is the legacy pattern, and
+    // under AGP 9 it is what turns the old-DSL deprecation on `android { }`
+    // into a script compilation error.
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
     // The Google Services Gradle plugin was applied here with no Firebase
@@ -24,10 +31,6 @@ android {
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
     }
 
     defaultConfig {
@@ -55,7 +58,18 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            // key.properties is gitignored — it carries the keystore password
+            // — so on any machine but the one that has it, the "release"
+            // config above is assigned but empty and signing fails. Fall back
+            // to the debug key so a clean checkout, and CI, can produce an
+            // installable APK. A debug-signed build will not upgrade a Play
+            // Store install and Android treats it as a separate app, which is
+            // the correct outcome for a build made without the real key.
+            signingConfig = if (rootProject.file("key.properties").exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = true
             isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -68,6 +82,28 @@ dependencies {
     // and fixes D8 nest-mate resolution for Java 17 plugin classes (url_launcher, etc.)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     implementation("androidx.core:core-ktx:1.13.1")
+}
+
+// Kotlin compiles to the same bytecode as Java, said explicitly.
+//
+// This replaces `kotlinOptions { jvmTarget = "17" }` inside `android { }`,
+// which AGP 9 rejects. The first attempt at that removal left NOTHING here,
+// on the belief that the Flutter Gradle Plugin aligns Kotlin's target with
+// `compileOptions`. It does not, and the build said so as soon as it ran on a
+// JDK newer than the Java target:
+//
+//   Inconsistent JVM-target compatibility detected for tasks
+//   'compileReleaseJavaWithJavac' (17) and 'compileReleaseKotlin' (21).
+//
+// Kotlin defaults its target to the JDK it is RUNNING on, while
+// `compileOptions` above pins Java to 17. On the runner's old default JDK 17
+// those two agreed by accident; pinning JDK 21 for AGP 9's lint pulled them
+// apart. Setting it here keeps the app's bytecode exactly where it was and
+// leaves the pair agreeing whatever JDK the build runs on.
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
+    }
 }
 
 flutter {

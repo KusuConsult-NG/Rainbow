@@ -12,10 +12,18 @@ final secureStorageProvider = Provider<SecureStorageService>((ref) {
 /// Documentation for this public member.
 
 class SecureStorageService {
+  // NO `encryptedSharedPreferences: true` HERE.
+  //
+  // It used to be set, and under flutter_secure_storage 10 the parameter is
+  // deprecated and IGNORED: Google deprecated the Jetpack Security library
+  // this app was asking for, and the plugin now uses its own ciphers. What
+  // was written under the old backend is migrated to the new one on first
+  // access (`migrateOnAlgorithmChange`, which defaults to true), so the staff
+  // badge and PIN below survive the upgrade — but only through a 10.x
+  // release. Version 11 REMOVES the old algorithms outright and anything
+  // still on them becomes unreadable, which is why this app goes to 10 and
+  // not straight to 11.
   final _storage = const FlutterSecureStorage(
-    aOptions: AndroidOptions(
-      encryptedSharedPreferences: true,
-    ),
     iOptions: IOSOptions(
       accessibility: KeychainAccessibility.first_unlock,
     ),

@@ -7,7 +7,7 @@ environment:
   sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
-  battery_plus: ^6.1.1
+  battery_plus: ^7.1.2
   collection: ^1.18.0
   connectivity_plus: ^7.1.1
   crypto: any
@@ -17,12 +17,12 @@ dependencies:
   flutter_background_service: ^5.1.0
   flutter_background_service_android: ^6.3.1
   flutter_dotenv: ^6.0.0
-  flutter_foreground_task: ^10.0.0
+  flutter_foreground_task: ^11.0.3
   flutter_map: ^7.0.2
   flutter_riverpod: ^2.5.1
-  flutter_secure_storage: ^9.0.0
+  flutter_secure_storage: ^10.3.1
   flutter_tts: any
-  flutter_webrtc: ^0.12.5
+  flutter_webrtc: ^1.6.3
   freezed_annotation: any
   geolocator: ^14.0.2
   go_router: ^14.6.3
@@ -43,7 +43,7 @@ dependencies:
   local_auth: ^2.2.0
   logger: any
   onesignal_flutter: ^5.3.1
-  package_info_plus: ^9.0.1
+  package_info_plus: ^10.2.2
   path: ^1.9.0
   path_provider: ^2.1.3
   permission_handler: ^12.0.1
@@ -55,10 +55,10 @@ dependencies:
   # Alphabetical order is enforced by `sort_pub_dependencies`, which is an ERROR
   # here, so this went in one line too early and turned the analyze gate red.
   pointycastle: ^4.0.0
-  record: ^6.2.1
+  record: ^7.2.0
   riverpod_annotation: any
-  sentry_flutter: ^8.14.2
-  share_plus: ^12.0.2
+  sentry_flutter: ^10.6.0
+  share_plus: ^13.3.1
   shared_preferences: ^2.2.2
   sherpa_onnx: ^2.0.1
   speech_to_text: any
