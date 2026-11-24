@@ -43,12 +43,17 @@ subprojects {
 // number or a plugin can end up compiled against an older API than the app.
 val pluginCompileSdkFloor = 36
 
+// IN afterEvaluate, NOT plugins.withId. The first attempt used
+// plugins.withId("com.android.library"), which fires when the plugin is
+// APPLIED — before the subproject's own `android { }` block runs. flutter_webrtc
+// then set compileSdk 31 over the top and the build failed with exactly the
+// same error, which is how the ordering showed itself. afterEvaluate runs
+// after the subproject's build script, so this is the last word.
 subprojects {
-    plugins.withId("com.android.library") {
-        extensions.configure<com.android.build.gradle.LibraryExtension>("android") {
-            if ((compileSdk ?: 0) < pluginCompileSdkFloor) {
-                compileSdk = pluginCompileSdkFloor
-            }
+    afterEvaluate {
+        val ext = extensions.findByType(com.android.build.gradle.LibraryExtension::class.java)
+        if (ext != null && (ext.compileSdk ?: 0) < pluginCompileSdkFloor) {
+            ext.compileSdk = pluginCompileSdkFloor
         }
     }
 }
