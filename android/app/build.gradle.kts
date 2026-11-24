@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -26,10 +27,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     defaultConfig {
         applicationId = "com.RainbowEwer.RainbowEwer"
         minSdk = flutter.minSdkVersion
@@ -55,7 +52,18 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            // key.properties is gitignored — it carries the keystore password
+            // — so on any machine but the one that has it, the "release"
+            // config above is assigned but empty and signing fails. Fall back
+            // to the debug key so a clean checkout, and CI, can produce an
+            // installable APK. A debug-signed build will not upgrade a Play
+            // Store install and Android treats it as a separate app, which is
+            // the correct outcome for a build made without the real key.
+            signingConfig = if (rootProject.file("key.properties").exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = true
             isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -68,6 +76,15 @@ dependencies {
     // and fixes D8 nest-mate resolution for Java 17 plugin classes (url_launcher, etc.)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     implementation("androidx.core:core-ktx:1.13.1")
+}
+
+// Was `kotlinOptions { jvmTarget = "17" }` inside `android { }`. Both that
+// block and the `jvmTarget` string property are deprecated, and under AGP 9
+// the deprecation is a script compilation error rather than a warning.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
 }
 
 flutter {
