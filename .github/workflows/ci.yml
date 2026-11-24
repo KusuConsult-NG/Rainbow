@@ -1987,10 +1987,21 @@ jobs:
             || { echo "::error::no Android SDK on this runner"; exit 1; }
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-      # Same .env every other mobile job builds against: no credentials, and
-      # the assertion below checks what actually went into the APK.
+      # The CREDENTIAL-FREE .env, which is not the one the e2e harness uses.
+      #
+      # This step used to run `scripts/local_e2e/provision_env.sh`, which is
+      # what the two browser-driven jobs run — and that script writes
+      # `DEMO_CITIZEN_PASS=staging-only-password` plus a marker line reading
+      # "PROVISIONED FOR THE LOCAL END-TO-END RUN - do not build a release from
+      # this file". `pubspec.yaml` declares `.env` as a Flutter ASSET, so that
+      # password would have gone into the APK verbatim, and the step below
+      # exists to fail when it does. The two steps could never both pass; the
+      # build failed earlier every time, so neither ever ran.
+      #
+      # `.env.example` carries no credential-shaped value, which is what every
+      # job that BUILDS rather than drives the app already uses.
       - name: Provision .env
-        run: ./scripts/local_e2e/provision_env.sh
+        run: cp .env.example .env
 
       - name: Build the APK
         run: |
@@ -2033,7 +2044,11 @@ jobs:
             echo "::error::the APK ships a credential — .env extracts from the APK with unzip (H-3)"
             exit 1
           fi
-          echo "OK: nothing credential-shaped inside the APK."
+          if grep -q 'PROVISIONED FOR THE LOCAL END-TO-END RUN' "$BUNDLED"; then
+            echo "::error::this APK was built from the e2e harness's .env, which carries a demo password — build a release from .env.example"
+            exit 1
+          fi
+          echo "OK: nothing credential-shaped inside the APK, and it was not built from the harness's .env."
 
       # So a human can install the thing this job just proved builds.
       - uses: actions/upload-artifact@v4
