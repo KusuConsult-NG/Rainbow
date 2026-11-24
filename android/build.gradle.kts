@@ -43,18 +43,42 @@ subprojects {
 // number or a plugin can end up compiled against an older API than the app.
 val pluginCompileSdkFloor = 36
 
-// IN afterEvaluate, NOT plugins.withId. The first attempt used
-// plugins.withId("com.android.library"), which fires when the plugin is
-// APPLIED — before the subproject's own `android { }` block runs. flutter_webrtc
-// then set compileSdk 31 over the top and the build failed with exactly the
-// same error, which is how the ordering showed itself. afterEvaluate runs
-// after the subproject's build script, so this is the last word.
+// Raising the floor has to happen AFTER each subproject's own build script
+// and has to cope with some of them already being evaluated. Two attempts got
+// this wrong, each caught by the APK job:
+//
+//   1. plugins.withId("com.android.library") fires when the plugin is
+//      APPLIED, before the subproject's `android { }` block runs, so
+//      flutter_webrtc set compileSdk 31 straight over the top. Same error
+//      again, byte for byte, which is how the ordering showed itself.
+//   2. A plain afterEvaluate then threw outright:
+//
+//          Cannot run Project.afterEvaluate(Action) when the project is
+//          already evaluated.
+//
+//      because `subprojects { project.evaluationDependsOn(":app") }` above
+//      forces :app to be evaluated while the other subprojects configure. By
+//      the time this block reaches :app it is finished, and registering a
+//      callback on a finished project is an error. Moving this block earlier
+//      in the file does not help: :app is evaluated by the OTHER subprojects,
+//      not by position here.
+//
+// So: apply immediately where the project is already evaluated, and defer
+// only where it is not. :app is an application, not a library, so
+// findByType(LibraryExtension) is null there and this is a no-op for it.
+fun raisePluginCompileSdk(target: Project, floor: Int) {
+    val ext = target.extensions
+        .findByType(com.android.build.gradle.LibraryExtension::class.java)
+    if (ext != null && (ext.compileSdk ?: 0) < floor) {
+        ext.compileSdk = floor
+    }
+}
+
 subprojects {
-    afterEvaluate {
-        val ext = extensions.findByType(com.android.build.gradle.LibraryExtension::class.java)
-        if (ext != null && (ext.compileSdk ?: 0) < pluginCompileSdkFloor) {
-            ext.compileSdk = pluginCompileSdkFloor
-        }
+    if (state.executed) {
+        raisePluginCompileSdk(this, pluginCompileSdkFloor)
+    } else {
+        afterEvaluate { raisePluginCompileSdk(this, pluginCompileSdkFloor) }
     }
 }
 
