@@ -1096,6 +1096,17 @@ jobs:
       - name: Assert every gate in scripts/ is actually run
         run: python3 scripts/check_every_gate_runs.py
 
+      # The APK job named no JDK, so it got the runner image's default — 17 on
+      # ubuntu-24.04 — and the release build compiled every plugin and then
+      # died in `:image_picker_android:lintVitalAnalyzeRelease` with
+      # `NoSuchMethodError: 'java.lang.Object java.util.List.removeLast()'`.
+      # That method is Java 21; the IntelliJ parser inside AGP 9's lint is
+      # compiled against it. Nothing in this app's code was wrong and no change
+      # to it would have helped. Android Studio hands Gradle its bundled JBR
+      # 21, so the fault existed only where the JDK was left to chance.
+      - name: Assert the APK job pins a JDK new enough for AGP 9 lint
+        run: python3 scripts/check_the_apk_build_pins_its_jdk.py
+
       # A production policy query returned two rows, and the second was known:
       # `telemetry_select_geo_lga_scoped` sat on a live database as the one
       # policy reaching PUBLIC and was repaired on its own. Its twin,
@@ -1935,6 +1946,31 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      # The JDK Gradle runs on, pinned, because the runner's default is 17 and
+      # AGP 9's lint does not run on 17.
+      #
+      # ubuntu-24.04 ships JDK 17 as the default JAVA_HOME. On that JDK the
+      # release build got all the way through compiling every plugin and then
+      # died in `:image_picker_android:lintVitalAnalyzeRelease` with
+      #
+      #   Unexpected failure during lint analysis of ExifDataCopier.java
+      #   Message: 'java.lang.Object java.util.List.removeLast()'
+      #   NoSuchMethodError: JavaDocParser.parseDataItem(JavaDocParser.kt:117)
+      #
+      # `List.removeLast()` arrived with Java 21 (SequencedCollection). The
+      # IntelliJ parser bundled inside AGP 9.3.1's lint is compiled against it,
+      # so lint cannot run on a JDK older than 21 — it is not a problem with
+      # this app's code, and no change to it would have helped. Android Studio
+      # bundles JBR 21 and hands Gradle that, which is why this never showed up
+      # anywhere but here.
+      #
+      # setup-java must come BEFORE flutter-action: flutter resolves the JDK
+      # from JAVA_HOME, and this step is what sets it.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
 
       - uses: subosito/flutter-action@v2
         with:
