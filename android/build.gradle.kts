@@ -19,6 +19,40 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+// Plugins that compile against an Android API older than their own
+// dependencies require.
+//
+//     Dependency 'androidx.annotation:annotation-experimental:1.4.0' requires
+//     libraries and applications that depend on it to compile against version
+//     34 or later.
+//     :flutter_webrtc is currently compiled against android-31.
+//
+// The app compiles against 36 (flutter.compileSdkVersion). flutter_webrtc
+// pins itself to 31, and AGP fails the build rather than let a library be
+// compiled against an API older than its own dependencies demand. Several
+// other plugins are in the same position.
+//
+// Raising the floor for library subprojects is the usual Flutter answer and
+// is safe in the direction it moves: compileSdk only decides which APIs the
+// code may reference while compiling. It does NOT change minSdk, so no device
+// loses support, and it does NOT change targetSdk, so no runtime behaviour
+// changes. The plugin's own source is unchanged.
+//
+// KEEP THIS IN STEP WITH android/app/build.gradle.kts. The app takes its
+// compileSdk from flutter.compileSdkVersion; this floor has to be the same
+// number or a plugin can end up compiled against an older API than the app.
+val pluginCompileSdkFloor = 36
+
+subprojects {
+    plugins.withId("com.android.library") {
+        extensions.configure<com.android.build.gradle.LibraryExtension>("android") {
+            if ((compileSdk ?: 0) < pluginCompileSdkFloor) {
+                compileSdk = pluginCompileSdkFloor
+            }
+        }
+    }
+}
+
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
