@@ -1908,6 +1908,105 @@ jobs:
           path: local_e2e_screenshots/
           retention-days: 14
 
+  # THE ARTEFACT THAT REACHES A HANDSET, BUILT BY SOMETHING OTHER THAN ONE
+  # LAPTOP.
+  #
+  # Nothing in this workflow built the Android app. The consequences were not
+  # hypothetical, and all three were found in one sitting by trying it:
+  #
+  #   * android/gradle.properties pinned org.gradle.java.home to
+  #     "/Applications/Android Studio.app/..." — one developer's macOS, tracked
+  #     in git, so `flutter build apk` died instantly for everybody else.
+  #   * The Gradle wrapper pinned 8.14 while Flutter's stable channel had moved
+  #     to requiring 9.3.1, so the build could not start.
+  #   * AGP 8.9.1 was binary-incompatible with Flutter 3.50's Gradle plugin
+  #     (ApplicationExtension.getDefaultConfig), which no flag gets past.
+  #
+  # Every one of those sat in main unnoticed, because the only machine that
+  # ever built the APK was the one whose path was in the file. For an app whose
+  # whole purpose is working on a phone in an emergency, the thing that reaches
+  # phones was the one thing never built automatically.
+  #
+  # This job is deliberately NOT the screen-by-screen harness: it does not
+  # drive the UI, it only proves the app still compiles into an installable
+  # artefact on a machine nobody has configured by hand.
+  android-apk:
+    name: Mobile app — it still builds into an APK
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # The runner image carries the Android SDK; this accepts the licences
+      # so Gradle may use it, and fails loudly rather than silently skipping
+      # if the SDK is not where it is expected.
+      - name: Accept the Android SDK licences
+        run: |
+          set -euo pipefail
+          test -n "${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}" \
+            || { echo "::error::no Android SDK on this runner"; exit 1; }
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+      # Same .env every other mobile job builds against: no credentials, and
+      # the assertion below checks what actually went into the APK.
+      - name: Provision .env
+        run: ./scripts/local_e2e/provision_env.sh
+
+      - name: Build the APK
+        run: |
+          set -euo pipefail
+          flutter pub get
+          flutter build apk --release \
+            --dart-define=SUPABASE_URL=https://ci.invalid \
+            --dart-define=SUPABASE_ANON_KEY=ci-build-only-not-a-real-credential
+
+      - name: Assert an APK actually came out
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -f "$APK" || { echo "::error::no APK at $APK"; exit 1; }
+          SIZE=$(stat -c%s "$APK")
+          echo "APK: $SIZE bytes"
+          # Guardian's offline speech models alone are ~29 MB, so anything
+          # under 20 MB is not a real build of this app however green the
+          # step above went.
+          [ "$SIZE" -gt 20000000 ] \
+            || { echo "::error::APK is $SIZE bytes — too small to be this app"; exit 1; }
+
+      # H-3, checked where it matters. pubspec.yaml declares `.env` as a
+      # Flutter ASSET: whatever is in it ships inside the APK and comes back
+      # out with `unzip`. The web build is checked for this already, but the
+      # APK is the file that reaches a person, and it had never been looked
+      # inside.
+      - name: Assert the APK carries no credential material
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          mkdir -p /tmp/apk-env
+          unzip -o -j "$APK" 'assets/flutter_assets/.env' -d /tmp/apk-env \
+            || { echo "::error::no .env inside the APK — the asset moved, and this check is now blind"; exit 1; }
+          BUNDLED=/tmp/apk-env/.env
+          echo "--- bundled .env (names only) ---"
+          grep -oE '^[A-Z_]+=' "$BUNDLED" || true
+          if grep -qE '^[A-Z_]*(PASS|PASSWORD|PIN|SECRET|TOKEN)[A-Z_]*=.+' "$BUNDLED"; then
+            grep -nE '^[A-Z_]*(PASS|PASSWORD|PIN|SECRET|TOKEN)[A-Z_]*=' "$BUNDLED"
+            echo "::error::the APK ships a credential — .env extracts from the APK with unzip (H-3)"
+            exit 1
+          fi
+          echo "OK: nothing credential-shaped inside the APK."
+
+      # So a human can install the thing this job just proved builds.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plateau-eye-debug-signed-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
   rls:
     name: Supabase — RLS anon-access probe
     runs-on: ubuntu-24.04
