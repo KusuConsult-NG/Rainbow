@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     id("com.android.application")
     // NO id("kotlin-android") HERE, deliberately.
@@ -83,10 +84,27 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
 }
 
-// No Kotlin jvmTarget block. It was `kotlinOptions { jvmTarget = "17" }`
-// inside `android { }`, which AGP 9 rejects. Flutter's own template sets
-// neither: compileOptions above pins Java 17 and the Flutter Gradle Plugin
-// aligns Kotlin's target with it.
+// Kotlin compiles to the same bytecode as Java, said explicitly.
+//
+// This replaces `kotlinOptions { jvmTarget = "17" }` inside `android { }`,
+// which AGP 9 rejects. The first attempt at that removal left NOTHING here,
+// on the belief that the Flutter Gradle Plugin aligns Kotlin's target with
+// `compileOptions`. It does not, and the build said so as soon as it ran on a
+// JDK newer than the Java target:
+//
+//   Inconsistent JVM-target compatibility detected for tasks
+//   'compileReleaseJavaWithJavac' (17) and 'compileReleaseKotlin' (21).
+//
+// Kotlin defaults its target to the JDK it is RUNNING on, while
+// `compileOptions` above pins Java to 17. On the runner's old default JDK 17
+// those two agreed by accident; pinning JDK 21 for AGP 9's lint pulled them
+// apart. Setting it here keeps the app's bytecode exactly where it was and
+// leaves the pair agreeing whatever JDK the build runs on.
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
+    }
+}
 
 flutter {
     source = "../.."
